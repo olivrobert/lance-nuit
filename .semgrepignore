@@ -1,0 +1,10 @@
+# Build output and vendored code — not authored here.
+dist/
+node_modules/
+.scratch/
+
+# Lockfiles.
+bun.lock
+
+# The dashboard bundle, emitted from src/modules/ui/app/ by `bun run ui:build`.
+src/modules/ui/static/app.js

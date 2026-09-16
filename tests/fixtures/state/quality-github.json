@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260904T214432.702Z-quality-1c0004",
+  "name": "quality",
+  "ticket": "QUALITY",
+  "pipeline": "quality",
+  "pipeline_path": ".lance-nuit/pipelines/quality.ts",
+  "createdAt": "2026-09-04T21:44:32.702Z",
+  "updatedAt": "2026-09-04T21:44:46.668Z",
+  "status": "PASS",
+  "outcome": {
+    "phase": null,
+    "reason": null,
+    "logPath": null,
+    "resumable": false,
+    "at": "2026-09-04T21:44:46.668Z"
+  },
+  "rootRunId": "20260904T214432.702Z-quality-1c0004",
+  "budgetScopeId": "20260904T214432.702Z-quality-1c0004",
+  "steps": [
+    {
+      "id": "phpcsfix",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-04T21:44:32.705Z",
+      "finished_at": "2026-09-04T21:44:33.674Z",
+      "control": {
+        "duration_ms": 963
+      }
+    },
+    {
+      "id": "phpstan",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-04T21:44:33.676Z",
+      "finished_at": "2026-09-04T21:44:34.739Z",
+      "control": {
+        "duration_ms": 1060
+      }
+    },
+    {
+      "id": "tests",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-04T21:44:34.740Z",
+      "finished_at": "2026-09-04T21:44:46.667Z",
+      "control": {
+        "duration_ms": 11922
+      }
+    }
+  ],
+  "total_control": {
+    "duration_ms": 13945
+  },
+  "specPath": ".lance-nuit/work-items"
+}

@@ -1,0 +1,18 @@
+{
+  "baseBranch": "main",
+  "workItem": {
+    "provider": "github",
+    "project": "acme/demo-repo",
+    "todoState": "pipeline:todo",
+    "reviewState": "pipeline:in-review",
+    "baseUrl": "https://github.com/acme/demo-repo/issues"
+  },
+  "specPath": ".lance-nuit/work-items",
+  "planAudit": false,
+  "labels": {
+    "bugTodo": "queue:bug",
+    "featureTodo": "queue:feature",
+    "done": "queue:done",
+    "escalate": "queue:escalate"
+  }
+}

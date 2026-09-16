@@ -1,0 +1,36 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": false,
+    "emitDeclarationOnly": false,
+    "allowImportingTsExtensions": false,
+    "noEmit": false,
+    // The "@lance-nuit/dsl" alias is authoring-only (examples): dist must
+    // not emit unresolvable aliased specifiers.
+    "paths": {},
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts"],
+  // This project replaces the root `exclude` rather than extending it, so the
+  // dashboard front end has to be named again here: it is bundled for a browser
+  // by `scripts/build-ui.mjs` and never emitted to `dist/` as modules. Without
+  // the line, `include` picks up the `index.ts` barrels of `components/`, which
+  // re-export `.tsx` files this project has no `jsx` setting for.
+  "exclude": [
+    "src/modules/ui/app",
+    "**/*.test.ts",
+    // Test doubles imported only by *.test.ts files: they must not ship in dist.
+    "src/modules/work-item/fake.ts",
+    "src/modules/work-item/adapters/jira/test-harness.ts",
+    "src/modules/work-item/adapters/github/test-harness.ts",
+    "src/modules/read-model/test-harness.ts",
+    "tests/**",
+    "examples/**",
+    "scripts/**",
+    "node_modules/**",
+    "dist/**"
+  ]
+}

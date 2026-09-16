@@ -1,0 +1,27 @@
+{
+  "baseBranch": "develop",
+  "worktreeMode": "light",
+  "workItem": {
+    "provider": "jira",
+    "project": "FOOD",
+    "todoState": "Selected for Development",
+    "reviewState": "En attente",
+    "baseUrl": "https://example.atlassian.net/browse"
+  },
+  "specPath": ".lance-nuit/work-items",
+  "usTokenBudget": 150000,
+  "planAudit": false,
+  "labels": {
+    "bugTodo": "auto-fix",
+    "featureTodo": "auto-feature",
+    "done": "auto-fixed",
+    "escalate": "needs-human"
+  },
+  "testSkills": {
+    "unit": "/symfony-unit-test",
+    "functional": "/symfony-functional-test"
+  },
+  "sensitivePaths": [],
+  "mrCompareUrlTemplate": "https://gitlab.example.com/group/app/-/merge_requests/new?merge_request%5Bsource_branch%5D={branch}&merge_request%5Btarget_branch%5D={base}",
+  "appUrl": "https://app.example.localhost"
+}

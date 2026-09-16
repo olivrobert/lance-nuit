@@ -1,0 +1,249 @@
+/* The Files tab (`.folder`, its `.tree` and `.view` columns) and the Document
+ * tab (`.documentView`), both wrapping the same read panel.
+ *
+ * `.md` renders markup the SERVER built — see the security comment in
+ * `FileView.tsx` — never a fragment of the file. With CSS Modules only the
+ * root `.md` selector below is renamed; its descendants (`.md h1`, `.md pre`,
+ * `.md table`…) stay plain element selectors, so they keep matching the HTML
+ * markdown-it produced exactly as they did in the global stylesheet this file
+ * replaces.
+ *
+ * The read panel's header is styled twice, as `.vh` and `.documentVh`: the
+ * reference stylesheet gave it two different looks through two different
+ * ancestors (`.folder .view .vh`, sticky and boxed, versus `.document-content
+ * .vh`, flush and non-sticky) — an ancestor this module does not own, since
+ * the Document tab's wrapper is built by the Sheet component in a later
+ * phase. `FileView` is told which class to use instead of relying on that
+ * ancestor, so both looks are reproduced without depending on markup outside
+ * this directory.
+ */
+
+.folder {
+  display: grid;
+  grid-template-columns: minmax(180px, 230px) minmax(0, 1fr);
+  min-height: 300px;
+  max-height: 62vh;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.tree {
+  min-width: 0;
+  overflow: auto;
+  padding: 8px 6px;
+  border-right: 1px solid var(--line);
+  background: var(--panel-subtle);
+  font-size: 12px;
+}
+
+.tree details {
+  margin: 0;
+}
+
+.tree summary {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 4px 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.tree summary::before {
+  width: 10px;
+  color: var(--mute);
+  content: "▸";
+  font-size: 11px;
+}
+
+.tree details[open] > summary::before {
+  content: "▾";
+}
+
+.n {
+  margin-left: auto;
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.tree ul {
+  margin: 0;
+  padding: 0 0 0 14px;
+  list-style: none;
+}
+
+/* A real `<button>` for keyboard reachability, reset back to the plain row
+   the reference stylesheet drew on an `li.f`. */
+.f {
+  display: flex;
+  width: 100%;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 4px 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.f:hover {
+  background: #eef0ed;
+}
+
+.f.sel {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 650;
+}
+
+.sz {
+  margin-left: auto;
+  color: var(--mute);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.f.hot::after {
+  padding: 0 3px;
+  color: var(--stop);
+  border: 1px solid #dbb76e;
+  border-radius: 3px;
+  content: "gate";
+  font-size: 10px;
+}
+
+.emptyDir {
+  padding: 2px 6px 2px 20px;
+  color: #a5aca7;
+  font-size: 11px;
+}
+
+.view {
+  min-width: 0;
+  overflow: auto;
+  padding: 0 16px 16px;
+}
+
+/* "Choose a file." / "Loading…" / one-line error notices, which the legacy
+   renderer inlined as `style="padding:20px"`. */
+.notice {
+  padding: 20px;
+}
+
+.vh {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 10px;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.vh code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.view img {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.view pre {
+  white-space: pre;
+}
+
+.documentView {
+  padding-top: 4px;
+}
+
+.documentVh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+
+.documentVh code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.documentView img {
+  max-width: 100%;
+}
+
+.md {
+  color: #30353a;
+  font-size: 15.5px;
+  line-height: 1.65;
+}
+.md h1 {
+  margin: 14px 0 8px;
+  font-size: 24px;
+  line-height: 1.25;
+}
+.md h2 {
+  margin: 20px 0 7px;
+  font-size: 19px;
+}
+.md h3 {
+  margin: 16px 0 5px;
+  font-size: 16px;
+}
+.md p {
+  margin: 8px 0;
+}
+.md ul,
+.md ol {
+  margin: 6px 0 10px 22px;
+  padding: 0;
+}
+.md code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #eceeeb;
+  font-size: 12px;
+}
+.md table {
+  margin: 10px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.md th,
+.md td {
+  padding: 6px 9px;
+  text-align: left;
+  border: 1px solid var(--line-strong);
+}
+
+@media (max-width: 620px) {
+  .folder {
+    grid-template-columns: minmax(130px, 38%) minmax(0, 1fr);
+  }
+}

@@ -1,0 +1,4 @@
+[
+  {"rule":"no-circular","from":"src/dsl/dsl-steps.ts","to":"src/dsl/dsl-types.ts","why":"Two halves of one authoring surface: the option shapes describe what the builders accept, and `PipelineEntry` (and the nested pipeline options built on it) is defined by `StepBuilder`. Splitting the pair would move the cycle, not remove it; merging them would make one unreadable file.","reviewedOn":"2026-09-06"},
+  {"rule":"no-circular","from":"src/step/pipeline-orchestration-child.ts","to":"src/step/step-loop.ts","why":"Genuine recursion: a child pipeline runs the same step loop as its parent, and the loop is what executes an orchestration node. The shapes the two exchange already live apart in `pipeline-orchestration-types.ts`; what is left is the call itself.","reviewedOn":"2026-09-06"}
+]

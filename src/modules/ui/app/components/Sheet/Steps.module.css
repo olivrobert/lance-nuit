@@ -1,0 +1,80 @@
+/* The steps of a run, in two forms: the strip of coloured bars that fits in a
+   callout, and the numbered list the Steps tab shows.
+
+   The status classes are named after the values the read model sends, so a
+   status reaches the page as a class name and never as a hand-written mapping. */
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.steps span {
+  width: 24px;
+  height: 7px;
+  border-radius: 3px;
+  background: #d9ddda;
+}
+
+.steps .done {
+  background: #77a88b;
+}
+
+.steps .failed {
+  background: var(--fail);
+}
+
+.steps .running {
+  background: var(--run);
+}
+
+.steps .pending {
+  background: #d9ddda;
+}
+
+.steps .aborted {
+  background: var(--stop);
+}
+
+.steps .skipped {
+  border: 1px solid #cbd0cc;
+  background: transparent;
+}
+
+.stepList {
+  padding: 0;
+  margin: 16px 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.stepList li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  counter-increment: step;
+}
+
+.stepList li::before {
+  content: counter(step, decimal-leading-zero);
+  color: var(--mute);
+  font-size: 11px;
+}
+
+.stepStatus {
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.stepList .failed .stepStatus,
+.stepList .aborted .stepStatus {
+  color: var(--fail);
+}
+
+.stepList .running .stepStatus {
+  color: var(--run);
+}

@@ -1,0 +1,7 @@
+{
+  "_currency": "$",
+  "claude-opus-4-8": { "in": 6, "out": 30, "cacheRead": 0.6, "cacheWrite": 7.5 },
+  "claude-sonnet-4-6": { "in": 3, "out": 15, "cacheRead": 0.3, "cacheWrite": 3.75 },
+  "openai/gpt-5-codex": { "in": 1.25, "out": 10 },
+  "zai-org/glm-4.7": { "in": 0.6 }
+}

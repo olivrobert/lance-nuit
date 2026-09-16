@@ -1,0 +1,13 @@
+{
+  "steps": {
+    "lot:implement-fast": {
+      "effort": "high"
+    },
+    "lot:constraints": {
+      "effort": "high"
+    },
+    "bugfix:constraints": {
+      "effort": "high"
+    }
+  }
+}

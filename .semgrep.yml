@@ -1,0 +1,251 @@
+# Lance-nuit-owned Semgrep Community Edition rules.
+#
+# The rules live in this repository on purpose: scans stay reviewable, run
+# offline, and never depend on a mutable remote registry. Semgrep CE is
+# intrafile only, so these rules make no claim to cross-file, cross-function,
+# or reachability analysis.
+#
+# Severity contract:
+#   ERROR   - fails CI. Reserved for patterns that no file in this repository
+#             matches today, so a hit always means a regression.
+#   WARNING - informational, surfaced by `bun run security:semgrep` but never
+#             blocking. Used where the pattern is legitimate here yet worth a
+#             second look on every change.
+rules:
+  # --------------------------------------------------------------------------
+  # Process execution. The runner spawns agent backends and git; every call
+  # site is argv-based today and must stay that way.
+  # --------------------------------------------------------------------------
+  - id: lance-nuit.node.nonliteral-exec
+    message: >-
+      A non-literal command string reaches child_process exec/execSync, which
+      runs it through a shell. Use spawn/spawnSync with an argv array so
+      arguments cannot be reinterpreted as shell syntax.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: CWE-78
+      confidence: HIGH
+      impact: HIGH
+      technology: [node, bun]
+    patterns:
+      # Scoped to the child_process import so `/re/.exec(s)` and
+      # `pattern.exec(s)` (RegExp.prototype.exec) never match.
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  import { exec } from "node:child_process";
+                  ...
+              - pattern: exec($COMMAND, ...)
+              - pattern-not: exec("...", ...)
+          - patterns:
+              - pattern-inside: |
+                  import { exec } from "child_process";
+                  ...
+              - pattern: exec($COMMAND, ...)
+              - pattern-not: exec("...", ...)
+          - patterns:
+              - pattern-inside: |
+                  import { execSync } from "node:child_process";
+                  ...
+              - pattern: execSync($COMMAND, ...)
+              - pattern-not: execSync("...", ...)
+          - patterns:
+              - pattern-inside: |
+                  import { execSync } from "child_process";
+                  ...
+              - pattern: execSync($COMMAND, ...)
+              - pattern-not: execSync("...", ...)
+          - patterns:
+              - pattern-inside: |
+                  import * as $CP from "node:child_process";
+                  ...
+              - pattern-either:
+                  - pattern: $CP.exec($COMMAND, ...)
+                  - pattern: $CP.execSync($COMMAND, ...)
+              - pattern-not: $CP.exec("...", ...)
+              - pattern-not: $CP.execSync("...", ...)
+
+  - id: lance-nuit.node.spawn-shell-true
+    message: >-
+      spawn/spawnSync called with `shell: true` re-enables shell parsing of the
+      argv array, defeating the reason to use spawn at all. Drop the option, or
+      spawn the interpreter explicitly with the script as a single argument.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: CWE-78
+      confidence: HIGH
+      impact: HIGH
+      technology: [node, bun]
+    patterns:
+      - pattern-either:
+          - pattern: 'spawn(..., { ..., shell: true, ... })'
+          - pattern: 'spawnSync(..., { ..., shell: true, ... })'
+          - pattern: 'execFile(..., { ..., shell: true, ... })'
+          - pattern: 'execFileSync(..., { ..., shell: true, ... })'
+          - pattern: 'Bun.spawn(..., { ..., shell: true, ... })'
+          - pattern: 'Bun.spawnSync(..., { ..., shell: true, ... })'
+
+  - id: lance-nuit.javascript.dynamic-code-execution
+    message: >-
+      Dynamic code execution (eval / new Function / vm.runIn*). Pipeline
+      definitions are loaded as TypeScript modules through tsx; there is no
+      reason to evaluate a string as code.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: CWE-95
+      confidence: HIGH
+      impact: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: new Function(...)
+          - pattern: vm.runInThisContext(...)
+          - pattern: vm.runInNewContext(...)
+          - pattern: vm.runInContext(...)
+
+  # --------------------------------------------------------------------------
+  # Cryptography. Run state, artifacts and DSL declarations are all keyed by
+  # sha256 digests; a weaker digest would silently break integrity checks.
+  # --------------------------------------------------------------------------
+  - id: lance-nuit.crypto.weak-digest
+    message: >-
+      Weak hash algorithm. Run state, artifact refs and DSL declarations are
+      keyed by content digest — use sha256 so two different inputs cannot be
+      made to collide.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: CWE-328
+      confidence: HIGH
+      impact: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: createHash("md5")
+          - pattern: createHash("sha1")
+          - pattern: createHash("md4")
+          - pattern: createHash("ripemd160")
+          - pattern: $C.createHash("md5")
+          - pattern: $C.createHash("sha1")
+          - pattern: createHmac("md5", ...)
+          - pattern: createHmac("sha1", ...)
+
+  - id: lance-nuit.crypto.insecure-randomness
+    message: >-
+      Math.random() is not cryptographically secure and its output is
+      predictable. Use crypto.randomUUID() or crypto.randomBytes() for run ids,
+      lock tokens, nonces and temporary path suffixes.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: CWE-338
+      confidence: MEDIUM
+      impact: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: |
+              const $NAME = <... Math.random() ...>;
+          - pattern: |
+              let $NAME = <... Math.random() ...>;
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|key|nonce|salt|password|credential|session|runid|run_id|lock).*
+
+  # --------------------------------------------------------------------------
+  # Network. Backends and work-item adapters talk to Jira / GitHub over TLS.
+  # --------------------------------------------------------------------------
+  - id: lance-nuit.network.tls-verification-disabled
+    message: >-
+      TLS certificate verification disabled. Any proxy on the path can then
+      read and rewrite the Jira / GitHub traffic, including the API token sent
+      with it.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: CWE-295
+      confidence: HIGH
+      impact: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: |
+              {..., rejectUnauthorized: false, ...}
+          - pattern: |
+              $E["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+          - pattern: |
+              $E.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+          - pattern: |
+              {..., NODE_TLS_REJECT_UNAUTHORIZED: "0", ...}
+
+  # --------------------------------------------------------------------------
+  # Filesystem. Informational: the runner legitimately removes worktrees and
+  # generated type directories, but each new call site deserves a look.
+  # --------------------------------------------------------------------------
+  - id: lance-nuit.fs.nonliteral-recursive-remove
+    message: >-
+      Recursive delete on a computed path. Confirm the path is resolved inside
+      the kit or run directory before removing it, and that a caller cannot
+      steer it upwards with `..`.
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: CWE-22
+      confidence: LOW
+      impact: HIGH
+    paths:
+      exclude:
+        - "*.test.ts"
+        - "tests/"
+        - "**/test-harness*.ts"
+    patterns:
+      - pattern-either:
+          - pattern: 'rmSync($PATH, {..., recursive: true, ...})'
+          - pattern: 'rm($PATH, {..., recursive: true, ...})'
+          - pattern: 'rmdirSync($PATH, {..., recursive: true, ...})'
+      - pattern-not: rmSync("...", ...)
+      - pattern-not: rm("...", ...)
+      - pattern-not: rmdirSync("...", ...)
+
+  # --------------------------------------------------------------------------
+  # Architecture. The dashboard reads runner state through one layer only:
+  # `ui -> read-model -> src/state`, never `ui -> src/state`. The rule is here
+  # rather than in a review checklist because the shortcut is one import away
+  # and invisible once merged. The browser's own store lives under
+  # `src/modules/ui/app/store/`, not `state/`, so it never trips this pattern.
+  # --------------------------------------------------------------------------
+  - id: lance-nuit.architecture.ui-imports-state
+    message: >-
+      The dashboard reached into `src/state` directly. Only
+      `src/modules/read-model/` may import the state layer; `src/modules/ui/`
+      consumes the items and files that module exposes, so a change to the
+      persisted schema stops at the read model instead of reaching the HTTP
+      routes and the browser.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: maintainability
+      confidence: HIGH
+      impact: MEDIUM
+      technology: [node, bun]
+    paths:
+      include:
+        - "src/modules/ui/"
+    patterns:
+      - pattern-either:
+          - pattern: import $NAME from "$PATH"
+          - pattern: import { ... } from "$PATH"
+          - pattern: import * as $NAME from "$PATH"
+          - pattern: import "$PATH"
+          - pattern: import("$PATH")
+          - pattern: require("$PATH")
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: (^|.*/)state(/|$)

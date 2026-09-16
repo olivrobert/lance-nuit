@@ -1,0 +1,52 @@
+/* The action row: one primary button, and everything else behind a native
+   `<details>` menu so a destructive verb is never one stray click away. */
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.actionMenu {
+  position: relative;
+}
+
+/* `list-style: none` plus the WebKit marker rule is what removes the disclosure
+   triangle; the pointer and the weight come from the `details > summary` reset. */
+.actionMenu > summary {
+  min-height: 32px;
+  padding: 6px 0;
+  color: var(--mute);
+  list-style: none;
+  font-size: 13px;
+}
+
+.actionMenu > summary:hover {
+  color: var(--ink);
+}
+
+.actionMenu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.actionMenu .actionOptions {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  min-width: 190px;
+  margin-top: 2px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  box-shadow: 0 5px 16px rgb(0 0 0 / 10%);
+}
+
+.actionMenu .actionOptions button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+}

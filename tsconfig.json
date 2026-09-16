@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "esModuleInterop": true,
+    "target": "es2022",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node", "bun"],
+    "paths": {
+      // Examples import the same alias a generated kit uses, so they stay
+      // copy-pasteable into .lance-nuit/pipelines/. Here it resolves to the
+      // facade whose declarations `lancenuit types install` generates.
+      "@lance-nuit/dsl": ["./src/project/dsl.ts"]
+    }
+  },
+  // The dashboard front end compiles for a browser, not for Node: it has its
+  // own project (`tsconfig.ui.json`) with the DOM library and the JSX
+  // transform. This project declares no `include`, so without this line it
+  // would pick those `.tsx` files up and typecheck them without a DOM.
+  "exclude": ["node_modules", "src/modules/ui/app"]
+}

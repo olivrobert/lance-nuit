@@ -1,0 +1,45 @@
+/* The banner at the top of a tab: why the run stopped, why it failed, or that it
+   is running. One box, three colours, no other variant. */
+
+.callout {
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px solid;
+  border-radius: 6px;
+}
+
+.callout.stop {
+  border-color: #e2c184;
+  background: var(--stop-bg);
+}
+
+.callout.fail {
+  border-color: #e7aca7;
+  background: var(--fail-bg);
+}
+
+.callout.run {
+  border-color: #b6c9e4;
+  background: var(--run-bg);
+}
+
+.callout h3 {
+  margin-bottom: 5px;
+  font-size: 15px;
+}
+
+.callout.stop h3 {
+  color: var(--stop);
+}
+
+.callout.fail h3 {
+  color: var(--fail);
+}
+
+.callout.run h3 {
+  color: var(--run);
+}
+
+.callout p {
+  margin: 4px 0 11px;
+}

@@ -1,0 +1,622 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260902T121037.058Z-feature-bed32f",
+  "name": "feature",
+  "ticket": "DEMO-380",
+  "pipeline": "feature",
+  "pipeline_path": "../../../pipelines/feature.ts",
+  "createdAt": "2026-09-02T12:10:37.058Z",
+  "updatedAt": "2026-09-02T14:13:27.873Z",
+  "status": "PASS",
+  "outcome": {
+    "phase": null,
+    "reason": null,
+    "logPath": null,
+    "resumable": false
+  },
+  "rootRunId": "20260902T121037.058Z-feature-bed32f",
+  "budgetScopeId": "20260902T121037.058Z-feature-bed32f",
+  "pipelineLineage": [
+    {
+      "pipelinePath": "/home/user/.lance-nuit/pipelines/feature.ts",
+      "ticket": "DEMO-380"
+    }
+  ],
+  "steps": [
+    {
+      "id": "ticket",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:10:37.060Z",
+      "finished_at": "2026-09-02T12:10:37.681Z",
+      "control": {
+        "duration_ms": 600
+      }
+    },
+    {
+      "id": "preflight",
+      "status": "done",
+      "retries": 0,
+      "started_at": "2026-09-02T12:10:37.686Z",
+      "finished_at": "2026-09-02T12:10:40.031Z",
+      "control": {
+        "duration_ms": 2255
+      },
+      "orchestration": {
+        "kind": "runPipeline",
+        "children": [
+          {
+            "key": "main",
+            "kind": "main",
+            "pipeline": "preflight",
+            "ticket": "DEMO-380",
+            "status": "done",
+            "accountedCostUsd": 0,
+            "runId": "20260902T121037.693Z-preflight-3c9da5",
+            "accountedDurationMs": 2255,
+            "outcome": {
+              "phase": null,
+              "reason": null,
+              "logPath": null,
+              "resumable": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "preflight-project",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T12:10:40.039Z"
+    },
+    {
+      "id": "acceptance-criteria-present",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 3,
+      "started_at": "2026-09-02T13:05:14.028Z",
+      "finished_at": "2026-09-02T13:05:15.048Z",
+      "control": {
+        "duration_ms": 2993
+      }
+    },
+    {
+      "id": "ticket-file",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 3,
+      "started_at": "2026-09-02T13:05:15.049Z",
+      "finished_at": "2026-09-02T13:05:16.063Z",
+      "control": {
+        "duration_ms": 2608
+      }
+    },
+    {
+      "id": "inputs-dir",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 3,
+      "started_at": "2026-09-02T13:05:16.064Z",
+      "finished_at": "2026-09-02T13:05:16.078Z",
+      "control": {
+        "duration_ms": 22
+      }
+    },
+    {
+      "id": "spec-refresh",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:10:41.987Z",
+      "finished_at": "2026-09-02T12:10:41.988Z",
+      "control": {
+        "duration_ms": 1
+      }
+    },
+    {
+      "id": "triage",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:10:41.989Z",
+      "finished_at": "2026-09-02T12:13:59.197Z",
+      "session": {
+        "provider": "claude",
+        "id": "19a8325e-1f3b-4bba-954c-aa4df8956e60",
+        "resumable": true
+      },
+      "profile": "triage",
+      "control": {
+        "duration_ms": 196359,
+        "total_cost_usd": 1.4128439999999998,
+        "model": "claude-opus-5",
+        "last_turn_context_tokens": 58033,
+        "context_window": 200000
+      },
+      "usage": {
+        "duration_api_ms": 196461,
+        "num_turns": 44,
+        "input_tokens": 64,
+        "output_tokens": 254,
+        "cache_read_tokens": 1139042,
+        "cache_creation_tokens": 54852,
+        "tools_used": ["Read", "Grep", "Glob", "Write"]
+      }
+    },
+    {
+      "id": "spec-fast",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T12:13:59.206Z",
+      "profile": "reviewer"
+    },
+    {
+      "id": "spec",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:13:59.207Z",
+      "finished_at": "2026-09-02T12:16:30.405Z",
+      "session": {
+        "provider": "claude",
+        "id": "ee22285b-af24-4703-bbe8-bf8adb01c2e9",
+        "resumable": true
+      },
+      "profile": "reviewer",
+      "control": {
+        "duration_ms": 150104,
+        "total_cost_usd": 0.987453,
+        "model": "claude-opus-5",
+        "last_turn_context_tokens": 52216,
+        "context_window": 200000
+      },
+      "usage": {
+        "duration_api_ms": 147256,
+        "num_turns": 17,
+        "input_tokens": 32,
+        "output_tokens": 107,
+        "cache_read_tokens": 637956,
+        "cache_creation_tokens": 41664,
+        "tools_used": ["Bash"]
+      }
+    },
+    {
+      "id": "spec-amend",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T12:16:30.407Z",
+      "profile": "reviewer"
+    },
+    {
+      "id": "spec-stamp",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:16:30.407Z",
+      "finished_at": "2026-09-02T12:16:30.411Z",
+      "control": {
+        "duration_ms": 2
+      }
+    },
+    {
+      "id": "escalate-inputs",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T12:16:30.412Z"
+    },
+    {
+      "id": "inputs-gate",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:16:30.413Z",
+      "finished_at": "2026-09-02T12:16:30.414Z",
+      "control": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "id": "escalate-assumptions",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T12:16:30.415Z"
+    },
+    {
+      "id": "assumptions-gate",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:16:30.416Z",
+      "finished_at": "2026-09-02T12:16:30.417Z",
+      "control": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "id": "plan-refresh",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:16:30.425Z",
+      "finished_at": "2026-09-02T12:16:30.428Z",
+      "control": {
+        "duration_ms": 2
+      }
+    },
+    {
+      "id": "plan",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:16:30.429Z",
+      "finished_at": "2026-09-02T12:33:57.401Z",
+      "session": {
+        "provider": "claude",
+        "id": "d7b3c967-2e33-4602-a5a3-a59229da2342",
+        "resumable": true
+      },
+      "profile": "planner",
+      "control": {
+        "duration_ms": 1045753,
+        "total_cost_usd": 6.613853000000003,
+        "model": "claude-opus-5",
+        "last_turn_context_tokens": 59981,
+        "context_window": 200000
+      },
+      "usage": {
+        "duration_api_ms": 1034820,
+        "num_turns": 14,
+        "input_tokens": 160,
+        "output_tokens": 746,
+        "cache_read_tokens": 5343064,
+        "cache_creation_tokens": 253727,
+        "tools_used": ["Bash", "agent(Explore)", "Write", "agent(pipeline-core:plan-writer)", "Read", "Edit"]
+      }
+    },
+    {
+      "id": "lots-partition",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:33:57.402Z",
+      "finished_at": "2026-09-02T12:33:57.404Z",
+      "control": {
+        "duration_ms": 1
+      }
+    },
+    {
+      "id": "plan-audit",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T12:33:57.405Z",
+      "profile": "planner"
+    },
+    {
+      "id": "lots-partition-post-audit",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T12:33:57.406Z"
+    },
+    {
+      "id": "plan-stamp",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:33:57.406Z",
+      "finished_at": "2026-09-02T12:33:57.408Z",
+      "control": {
+        "duration_ms": 1
+      }
+    },
+    {
+      "id": "escalate-plan",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:33:57.408Z",
+      "finished_at": "2026-09-02T12:34:03.184Z",
+      "control": {
+        "duration_ms": 5762
+      }
+    },
+    {
+      "id": "plan-gate",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:47:24.709Z",
+      "finished_at": "2026-09-02T12:47:24.710Z",
+      "control": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "id": "escalate-lots",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T12:47:24.711Z"
+    },
+    {
+      "id": "lots-gate",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:47:24.712Z",
+      "finished_at": "2026-09-02T12:47:24.713Z",
+      "control": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "id": "escalate-reuse",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T12:47:24.713Z"
+    },
+    {
+      "id": "reuse-gate",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:47:24.714Z",
+      "finished_at": "2026-09-02T12:47:24.714Z",
+      "control": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "id": "branch-name",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T12:47:24.715Z",
+      "finished_at": "2026-09-02T12:47:54.252Z",
+      "session": {
+        "provider": "codex",
+        "id": "01a06228-f4b0-7352-8c8e-58286de89360",
+        "resumable": true
+      },
+      "profile": "extractor",
+      "control": {
+        "duration_ms": 29533,
+        "total_cost_usd": 0.00539208,
+        "cost_estimated": true,
+        "model": "gpt-5.6-luna",
+        "provider": "codex"
+      },
+      "usage": {
+        "num_turns": 1,
+        "input_tokens": 70044,
+        "output_tokens": 653,
+        "cache_read_tokens": 52224,
+        "tools_used": ["Bash", "FileChange"],
+        "reasoning_tokens": 56
+      }
+    },
+    {
+      "id": "branch-checkout",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 2,
+      "started_at": "2026-09-02T13:05:16.079Z",
+      "finished_at": "2026-09-02T13:05:16.106Z",
+      "control": {
+        "duration_ms": 137
+      }
+    },
+    {
+      "id": "implement-lots",
+      "status": "done",
+      "retries": 0,
+      "started_at": "2026-09-02T13:05:16.107Z",
+      "finished_at": "2026-09-02T14:08:41.789Z",
+      "control": {
+        "duration_ms": 3312846,
+        "total_cost_usd": 20.516675449999997,
+        "model": "gpt-5.6-luna",
+        "provider": "codex",
+        "cost_estimated": true
+      },
+      "errors": "process killed: timeout (900s)",
+      "orchestration": {
+        "kind": "forEachPipeline",
+        "children": [
+          {
+            "key": "main:0",
+            "kind": "main",
+            "pipeline": "lot",
+            "ticket": "DEMO-380",
+            "lot": {
+              "id": "LOT-01",
+              "title": "Category filter in the filter bar and the resulting list restriction",
+              "risk": 3,
+              "steps": [1, 2, 3],
+              "dependsOn": [],
+              "acceptanceCriteria": ["AC-1", "AC-2", "AC-3", "AC-4", "AC-5", "AC-6"]
+            },
+            "status": "done",
+            "accountedCostUsd": 11.2146916,
+            "runId": "20260902T124754.399Z-lot-ea01ef",
+            "accountedDurationMs": 1929523,
+            "outcome": {
+              "phase": null,
+              "reason": null,
+              "logPath": null,
+              "resumable": false
+            }
+          },
+          {
+            "key": "afterEach:0",
+            "kind": "afterEach",
+            "pipeline": "commit",
+            "ticket": "DEMO-380",
+            "lot": {
+              "id": "LOT-01",
+              "title": "Category filter in the filter bar and the resulting list restriction",
+              "risk": 3,
+              "steps": [1, 2, 3],
+              "dependsOn": [],
+              "acceptanceCriteria": ["AC-1", "AC-2", "AC-3", "AC-4", "AC-5", "AC-6"]
+            },
+            "status": "done",
+            "accountedCostUsd": 0.0057110400000000006,
+            "runId": "20260902T133735.471Z-commit-06858d",
+            "accountedDurationMs": 32263,
+            "outcome": {
+              "phase": null,
+              "reason": null,
+              "logPath": null,
+              "resumable": false
+            }
+          },
+          {
+            "key": "main:1",
+            "kind": "main",
+            "pipeline": "lot",
+            "ticket": "DEMO-380",
+            "lot": {
+              "id": "LOT-02",
+              "title": "Export scope over both row kinds and no regression on the unfiltered case",
+              "risk": 2,
+              "steps": [4, 5, 6],
+              "dependsOn": ["LOT-01"],
+              "acceptanceCriteria": ["AC-7", "AC-8", "AC-9", "AC-10", "AC-11"]
+            },
+            "status": "done",
+            "accountedCostUsd": 9.292222050000001,
+            "runId": "20260902T133807.766Z-lot-543d2a",
+            "accountedDurationMs": 1325601,
+            "outcome": {
+              "phase": null,
+              "reason": null,
+              "logPath": null,
+              "resumable": false
+            }
+          },
+          {
+            "key": "afterEach:1",
+            "kind": "afterEach",
+            "pipeline": "commit",
+            "ticket": "DEMO-380",
+            "lot": {
+              "id": "LOT-02",
+              "title": "Export scope over both row kinds and no regression on the unfiltered case",
+              "risk": 2,
+              "steps": [4, 5, 6],
+              "dependsOn": ["LOT-01"],
+              "acceptanceCriteria": ["AC-7", "AC-8", "AC-9", "AC-10", "AC-11"]
+            },
+            "status": "done",
+            "accountedCostUsd": 0.0040507600000000005,
+            "runId": "20260902T140816.308Z-commit-3c8e89",
+            "accountedDurationMs": 25459,
+            "outcome": {
+              "phase": null,
+              "reason": null,
+              "logPath": null,
+              "resumable": false
+            }
+          }
+        ],
+        "items": ["LOT-01", "LOT-02"]
+      }
+    },
+    {
+      "id": "quality-full",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T14:08:41.795Z"
+    },
+    {
+      "id": "commit-finalize",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T14:08:41.812Z"
+    },
+    {
+      "id": "merge-request",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T14:08:43.147Z",
+      "finished_at": "2026-09-02T14:08:45.185Z",
+      "control": {
+        "duration_ms": 2034
+      }
+    },
+    {
+      "id": "work-item-review",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T14:08:45.186Z",
+      "finished_at": "2026-09-02T14:08:48.895Z",
+      "control": {
+        "duration_ms": 3705
+      }
+    },
+    {
+      "id": "constraints-retrospective",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T14:08:48.905Z",
+      "finished_at": "2026-09-02T14:13:27.872Z",
+      "session": {
+        "provider": "claude",
+        "id": "f7dbcb9d-b951-4226-b996-d4d02d95214d",
+        "resumable": true
+      },
+      "profile": "reviewer",
+      "control": {
+        "duration_ms": 277745,
+        "total_cost_usd": 1.5650344999999999,
+        "model": "claude-opus-5",
+        "last_turn_context_tokens": 61608,
+        "context_window": 200000
+      },
+      "usage": {
+        "duration_api_ms": 271054,
+        "num_turns": 28,
+        "input_tokens": 54,
+        "output_tokens": 213,
+        "cache_read_tokens": 1126659,
+        "cache_creation_tokens": 51056,
+        "tools_used": ["Bash"]
+      }
+    }
+  ],
+  "total_control": {
+    "duration_ms": 5032463,
+    "total_cost_usd": 31.10125203,
+    "last_turn_context_tokens": 61608,
+    "context_window": 200000,
+    "model": "claude-opus-5",
+    "provider": "codex",
+    "cost_estimated": true
+  },
+  "total_usage": {
+    "duration_api_ms": 1649591,
+    "num_turns": 104,
+    "input_tokens": 70354,
+    "output_tokens": 1973,
+    "cache_read_tokens": 8298945,
+    "cache_creation_tokens": 401299,
+    "reasoning_tokens": 56,
+    "tools_used": [
+      "Read",
+      "Grep",
+      "Glob",
+      "Write",
+      "Bash",
+      "agent(Explore)",
+      "agent(pipeline-core:plan-writer)",
+      "Edit",
+      "FileChange"
+    ]
+  },
+  "aborted": false,
+  "specPath": ".lance-nuit/work-items"
+}
