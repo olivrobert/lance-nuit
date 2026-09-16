@@ -1,0 +1,63 @@
+/* The status line: a summary and three counts, never a second alarm panel. */
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 18px;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 13px;
+}
+
+.summary {
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-left: auto;
+  color: var(--mute);
+  font-size: 12px;
+}
+
+/* Named per role rather than one shared class: a generic name would collide,
+   once bundled, with the list header's own count and the step bar. */
+.attention,
+.running,
+.done {
+  white-space: nowrap;
+}
+
+.attention {
+  color: var(--stop);
+}
+
+.running {
+  color: var(--run);
+}
+
+.done {
+  color: var(--ok);
+}
+
+@media (max-width: 620px) {
+  .banner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .counts {
+    gap: 10px;
+    margin-left: 0;
+  }
+}

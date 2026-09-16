@@ -1,0 +1,312 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260902T165929.442Z-lot-2faf43",
+  "name": "lot",
+  "ticket": "DEMO-386",
+  "pipeline": "lot",
+  "pipeline_path": "../../../pipelines/lot.ts",
+  "createdAt": "2026-09-02T16:59:29.443Z",
+  "updatedAt": "2026-09-02T18:30:12.055Z",
+  "status": "PASS",
+  "outcome": {
+    "phase": null,
+    "reason": null,
+    "logPath": null,
+    "resumable": false
+  },
+  "max_cost_usd": 15,
+  "parentRunId": "20260902T164503.133Z-feature-935b20",
+  "parentNodeId": "implement-lots",
+  "rootRunId": "20260902T164503.133Z-feature-935b20",
+  "budgetScopeId": "20260902T164503.133Z-feature-935b20",
+  "lot": {
+    "id": "LOT-01",
+    "title": "Coches RGPD et CGU obligatoires aux inscriptions Acheteur et Fournisseur",
+    "risk": 4,
+    "steps": [1, 2, 3, 4],
+    "dependsOn": [],
+    "acceptanceCriteria": ["AC-1", "AC-2", "AC-3", "AC-4", "AC-5", "AC-6"]
+  },
+  "pipelineLineage": [
+    {
+      "pipelinePath": "/home/user/.lance-nuit/pipelines/feature.ts",
+      "ticket": "DEMO-386"
+    },
+    {
+      "pipelinePath": "/home/user/.lance-nuit/pipelines/lot.ts",
+      "ticket": "DEMO-386"
+    }
+  ],
+  "steps": [
+    {
+      "id": "implement-fast",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T16:59:29.449Z",
+      "finished_at": "2026-09-02T17:13:46.276Z",
+      "session": {
+        "provider": "codex",
+        "id": "01a0630f-b811-70c2-9a83-9b10c7689772",
+        "resumable": true
+      },
+      "profile": "coder",
+      "control": {
+        "duration_ms": 856822,
+        "total_cost_usd": 0.17295636,
+        "cost_estimated": true,
+        "model": "gpt-5.6-luna",
+        "provider": "codex"
+      },
+      "usage": {
+        "num_turns": 1,
+        "input_tokens": 4861827,
+        "output_tokens": 32437,
+        "cache_read_tokens": 4657408,
+        "tools_used": ["Bash", "FileChange"],
+        "reasoning_tokens": 11076
+      }
+    },
+    {
+      "id": "implement",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T17:13:46.278Z",
+      "profile": "coder"
+    },
+    {
+      "id": "quality",
+      "status": "done",
+      "retries": 0,
+      "started_at": "2026-09-02T18:13:02.789Z",
+      "finished_at": "2026-09-02T18:20:27.773Z",
+      "control": {
+        "duration_ms": 488579,
+        "total_cost_usd": 1.4651334999999999,
+        "model": "claude-opus-5"
+      },
+      "errors": "exit code 2",
+      "orchestration": {
+        "kind": "runPipeline",
+        "children": [
+          {
+            "key": "main",
+            "kind": "main",
+            "pipeline": "quality",
+            "ticket": "DEMO-386",
+            "status": "done",
+            "accountedCostUsd": 1.4651334999999999,
+            "runId": "20260902T171346.356Z-quality-4ce18e",
+            "accountedDurationMs": 488579,
+            "outcome": {
+              "phase": null,
+              "reason": null,
+              "logPath": null,
+              "resumable": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "reuse-skill",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T18:20:27.780Z",
+      "finished_at": "2026-09-02T18:20:27.825Z",
+      "control": {
+        "duration_ms": 44
+      }
+    },
+    {
+      "id": "reuse",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T18:20:27.831Z",
+      "finished_at": "2026-09-02T18:22:08.175Z",
+      "session": {
+        "provider": "claude",
+        "id": "5b7b7d7b-5055-4729-b500-9f8f1aa7300c",
+        "resumable": true
+      },
+      "profile": "reviewer",
+      "control": {
+        "duration_ms": 99167,
+        "total_cost_usd": 0.9359430000000001,
+        "model": "claude-opus-5",
+        "last_turn_context_tokens": 54572,
+        "context_window": 200000
+      },
+      "usage": {
+        "duration_api_ms": 97210,
+        "num_turns": 19,
+        "input_tokens": 22,
+        "output_tokens": 32,
+        "cache_read_tokens": 417116,
+        "cache_creation_tokens": 54570,
+        "tools_used": ["Bash"]
+      }
+    },
+    {
+      "id": "tree-fingerprint",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T18:22:08.175Z",
+      "finished_at": "2026-09-02T18:22:08.202Z",
+      "control": {
+        "duration_ms": 26
+      }
+    },
+    {
+      "id": "criteria-fast",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T18:22:08.204Z",
+      "finished_at": "2026-09-02T18:26:56.811Z",
+      "session": {
+        "provider": "codex",
+        "id": "01a0635b-6434-7dc1-b101-35cc4c9b5fb6",
+        "resumable": true
+      },
+      "profile": "reviewer",
+      "control": {
+        "duration_ms": 288596,
+        "total_cost_usd": 0.06207996,
+        "cost_estimated": true,
+        "model": "gpt-5.6-luna",
+        "provider": "codex"
+      },
+      "usage": {
+        "num_turns": 1,
+        "input_tokens": 1224951,
+        "output_tokens": 13002,
+        "cache_read_tokens": 1102848,
+        "tools_used": ["Bash", "FileChange"],
+        "reasoning_tokens": 5601
+      }
+    },
+    {
+      "id": "acceptance-skill",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T18:26:56.812Z",
+      "finished_at": "2026-09-02T18:26:56.854Z",
+      "control": {
+        "duration_ms": 40
+      }
+    },
+    {
+      "id": "ui-checks-agent",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T18:26:56.860Z",
+      "finished_at": "2026-09-02T18:26:56.902Z",
+      "control": {
+        "duration_ms": 41
+      }
+    },
+    {
+      "id": "ui-app-reachable",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T18:26:56.903Z"
+    },
+    {
+      "id": "criteria",
+      "status": "skipped",
+      "retries": 0,
+      "finished_at": "2026-09-02T18:26:56.904Z",
+      "profile": "reviewer"
+    },
+    {
+      "id": "constraints",
+      "status": "done",
+      "retries": 0,
+      "last_attempt": 1,
+      "started_at": "2026-09-02T18:26:56.908Z",
+      "finished_at": "2026-09-02T18:28:48.314Z",
+      "session": {
+        "provider": "claude",
+        "id": "941248d7-bf1e-46bb-ac0b-4230ebd67c1d",
+        "resumable": true
+      },
+      "profile": "reviewer",
+      "control": {
+        "duration_ms": 110213,
+        "total_cost_usd": 0.8502973,
+        "model": "claude-opus-5",
+        "last_turn_context_tokens": 44858,
+        "context_window": 200000
+      },
+      "usage": {
+        "duration_api_ms": 172908,
+        "num_turns": 12,
+        "input_tokens": 22,
+        "output_tokens": 89,
+        "cache_read_tokens": 250463,
+        "cache_creation_tokens": 46516,
+        "tools_used": ["Bash", "agent(quality-constraints:quality-constraints-checker)", "Read"]
+      },
+      "errors": "3 violations MUST (functional-test #4) : statut HTTP lu via getResponse()->isForbidden()/isRedirect() au lieu des assertions assertResponse* dans InscriptionControllerTest.php:199 (Acheteur), ResendCodeControllerTest.php:22 (Acheteur), ResendCodeControllerTest.php:21 (Fournisseur). 0 warning. Rapport : .claude/quality/code/reports/constraints/20260902-182706-constraints.md",
+      "fail_kind": "verdict"
+    },
+    {
+      "id": "quality-after-fix",
+      "status": "done",
+      "retries": 0,
+      "started_at": "2026-09-02T18:28:48.343Z",
+      "finished_at": "2026-09-02T18:30:12.054Z",
+      "control": {
+        "duration_ms": 83692
+      },
+      "orchestration": {
+        "kind": "runPipeline",
+        "children": [
+          {
+            "key": "main",
+            "kind": "main",
+            "pipeline": "quality",
+            "ticket": "DEMO-386",
+            "status": "done",
+            "accountedCostUsd": 0,
+            "runId": "20260902T182848.344Z-quality-aa739c",
+            "accountedDurationMs": 83692,
+            "outcome": {
+              "phase": null,
+              "reason": null,
+              "logPath": null,
+              "resumable": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "total_control": {
+    "duration_ms": 1927220,
+    "total_cost_usd": 3.4864101200000004,
+    "last_turn_context_tokens": 44858,
+    "context_window": 200000,
+    "model": "claude-opus-5",
+    "provider": "codex",
+    "cost_estimated": true
+  },
+  "total_usage": {
+    "duration_api_ms": 270118,
+    "num_turns": 33,
+    "input_tokens": 6086822,
+    "output_tokens": 45560,
+    "cache_read_tokens": 6427835,
+    "cache_creation_tokens": 101086,
+    "reasoning_tokens": 16677,
+    "tools_used": ["Bash", "FileChange", "agent(quality-constraints:quality-constraints-checker)", "Read"]
+  },
+  "aborted": false,
+  "specPath": ".lance-nuit/work-items"
+}

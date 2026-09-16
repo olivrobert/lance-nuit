@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  The dashboard shell. Everything below `#app` is built by `app.js` from the
+  JSON API.
+
+  The page is served to one reader behind an SSH tunnel. The review inbox
+  puts the current decision, failure, or execution ahead of run metadata.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>lancenuit — Review inbox</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

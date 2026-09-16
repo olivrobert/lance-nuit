@@ -1,0 +1,16 @@
+{"ts":"2026-01-01T09:00:00.000Z","type":"run.started","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","pipeline":"parent-pipeline","ticket":null}
+
+{"ts":"2026-01-01T09:00:01.000Z","type":"step.attempt.started","runId":"20260101T09
+"a bare string, not an object"
+[1,2,3]
+{"ts":"2026-01-01T09:00:02.000Z","note":"no type at all"}
+{"ts":"2026-01-01T09:00:03.000Z","type":42}
+{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}
+{"ts":"2026-01-01T09:00:04.000Z","type":"future.event.from.a.later.release","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","payload":{"anything":true}}
+{"ts":"2026-01-01T09:00:05.000Z","type":"step.attempt.started","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","attempt":1,"kind":"step","logPath":"steps/nowhere/attempt-001/output.log"}
+{"ts":"2026-01-01T09:00:06.000Z","type":"step.attempt.started","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"no-number","kind":"step","logPath":"steps/no-number/attempt-001/output.log"}
+{"ts":"2026-01-01T09:00:07.000Z","type":"step.attempt.started","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"string-number","attempt":"1","kind":"step","logPath":"steps/string-number/attempt-001/output.log"}
+{"ts":"2026-01-01T09:00:08.000Z","type":"step.attempt.finished","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"zero","attempt":0,"kind":"step","status":"done","control":{"duration_ms":1},"logPath":"steps/zero/attempt-001/output.log"}
+{"ts":"2026-01-01T09:00:09.000Z","type":"step.attempt.started","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"keep","attempt":1,"kind":"step","sessionId":null,"logPath":"steps/keep/attempt-001/output.log"}
+{"ts":"2026-01-01T09:00:10.000Z","type":"step.attempt.finished","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"keep","attempt":1,"kind":"step","status":"done","control":{"duration_ms":9000},"logPath":"steps/keep/attempt-001/output.log"}
+{"ts":"2026-01-01T09:00:11.000Z","type":"step.attempt.finished","runId":"20260101T090000

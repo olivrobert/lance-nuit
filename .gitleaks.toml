@@ -1,0 +1,45 @@
+title = "Lance-nuit gitleaks configuration"
+
+# The default ruleset is the baseline; entries below only carve out reviewed
+# false positives. Every allowlist states why the match is not a secret, who
+# owns the decision, and when it must be re-reviewed — an undated exception
+# becomes permanent blindness.
+[extend]
+useDefault = true
+
+[[allowlists]]
+# Disposition: synthetic fixture, never a live credential; reviewed 2026-08-26.
+# The Jira adapter redacts provider output before it reaches a diagnostic; the
+# test asserts that redaction by feeding it token-shaped strings. They are
+# invented values with the Atlassian `ATATT` prefix and filler characters.
+# Owner: Lance-nuit maintainers. Re-review by 2027-08-26 or when the adapter's
+# redaction tests move.
+description = "Jira redaction test fixtures (synthetic token shapes)"
+targetRules = ["generic-api-key", "atlassian-api-token"]
+paths = ['''^src/modules/work-item/adapters/jira/diagnostics\.test\.ts$''']
+
+# --------------------------------------------------------------------------
+# Custom rules. The default ruleset has no pattern for the credentials this
+# runner actually handles: agent-backend API keys and Atlassian tokens.
+# --------------------------------------------------------------------------
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key"
+regex = '''\bsk-ant-(?:api|admin)[0-9]{2}-[A-Za-z0-9_\-]{80,}\b'''
+keywords = ["sk-ant-"]
+entropy = 3.5
+
+[[rules]]
+id = "atlassian-api-token"
+description = "Atlassian / Jira API token"
+regex = '''\bATCTT3xFfGF0[A-Za-z0-9_\-=]{40,}\b'''
+keywords = ["ATCTT3xFfGF0"]
+entropy = 3.5
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API key (Codex backend)"
+regex = '''\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{40,}\b'''
+keywords = ["sk-proj-", "sk-svcacct-", "sk-admin-"]
+entropy = 3.5

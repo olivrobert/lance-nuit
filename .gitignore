@@ -1,0 +1,58 @@
+node_modules/
+
+# Local agent and editor configuration
+CLAUDE.local.md
+.agents/
+!.claude/
+.claude/settings.local.json
+.claude/quality/onboard/
+.claude/quality/code/lint-backlog.md
+.codex/
+.mcp.json
+.idea/
+.vscode/
+
+# Local environment and credentials
+.env
+.env.*
+.npmrc
+*.pem
+*.key
+*.p12
+
+# Runtime state
+.lance-nuit/state/
+.lance-nuit/runs/
+.lance-nuit/history/
+.lance-nuit/work-items/
+.lance-nuit/run/
+.lance-nuit/pipeline-history/
+.lance-nuit/logs/
+.lance-nuit/tmp/
+
+# Logs, caches, coverage, and temporary files
+*.log
+logs/
+.cache/
+.bun/
+coverage/
+.vitest/
+tmp/
+temp/
+*.tmp
+*.swp
+.DS_Store
+
+# Package artifacts
+dist/
+*.tgz
+
+# The dashboard front end is bundled from src/modules/ui/app/ by
+# `bun run ui:build`; these two files are its output, never a source.
+src/modules/ui/static/app.js
+src/modules/ui/static/app.css
+src/modules/ui/static/app.js.map
+src/modules/ui/static/app.css.map
+
+# Scratch notes (local only)
+.scratch/

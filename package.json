@@ -1,0 +1,85 @@
+{
+  "name": "lance-nuit",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/olivrobert/lance-nuit#readme",
+  "bugs": "https://github.com/olivrobert/lance-nuit/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Olivier Robert",
+  "description": "A resumable, technology-neutral TypeScript pipeline runner with optional integrations and agent backends.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/olivrobert/lance-nuit.git"
+  },
+  "type": "module",
+  "engines": {
+    "bun": ">=1.3"
+  },
+  "bin": {
+    "lancenuit": "./bin/lancenuit"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "import": "./dist/contracts/index.js"
+    },
+    "./contracts/*": {
+      "types": "./dist/contracts/*.d.ts",
+      "import": "./dist/contracts/*.js"
+    }
+  },
+  "files": [
+    "CONTRIBUTING.md",
+    "dist/**",
+    "bin/lancenuit",
+    "examples/**",
+    "!examples/**/*.test.ts",
+    "docs/**/*.md",
+    "guide/**/*.md"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "test:unit": "bun test",
+    "build": "bun scripts/build.mjs",
+    "ui:build": "bun scripts/build-ui.mjs",
+    "ui:dev": "bun scripts/build-ui.mjs --watch",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.ui.json",
+    "lint": "biome lint . && eslint . && bun run deps:check",
+    "deps:check": "bun scripts/check-deps.mjs",
+    "deps:report": "depcruise --config .dependency-cruiser.cjs --output-type json src",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "language:check": "bun scripts/check-public-language.mjs",
+    "security:secrets": "gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 1",
+    "security:semgrep": "semgrep scan --config .semgrep.yml --metrics off",
+    "security": "bun run security:secrets && bun run security:semgrep",
+    "docs:dsl": "bun scripts/generate-dsl-api.ts",
+    "pack:audit": "bun run build && bun scripts/audit-pack.mjs",
+    "smoke:standalone": "bun run build && bun scripts/smoke-standalone.mjs",
+    "verify:production": "bun run build && bun scripts/verify-production-install.mjs",
+    "prepack": "bun run build"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.11.1",
+    "markdown-it": "^15.0.1",
+    "typescript": "^5.9.3",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.8",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@typescript-eslint/parser": "^8.68.0",
+    "dependency-cruiser": "18.2.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.9.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}

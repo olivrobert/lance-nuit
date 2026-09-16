@@ -1,0 +1,80 @@
+/* The shell: the identity page, the two-column split, and the toast. */
+
+.shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100dvh;
+}
+
+/* The list and the sheet, side by side. The `minmax(0, 1fr)` on both tracks is
+   what lets each of them scroll on its own instead of stretching the grid. */
+.mail {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 22px;
+  z-index: 70;
+  max-width: 520px;
+  padding: 10px 14px;
+  color: #f5f7f5;
+  border-radius: 5px;
+  background: #252b2c;
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+  white-space: pre-wrap;
+}
+
+.whoPage {
+  max-width: 520px;
+  margin: 12vh auto;
+  padding: 28px 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.whoPage h1 {
+  margin-bottom: 6px;
+  font-size: 21px;
+}
+
+.names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.names button {
+  padding: 8px 18px;
+  font-weight: 650;
+}
+
+/* The responsive block of the monolithic stylesheet, split across the modules
+   that own the classes it targeted. `.mail` and `.shell` are this file's; the
+   list, the sheet, the banner, the project bar and the explorer each carry
+   their own share, because a CSS Module cannot reach across a component
+   boundary the way `#app:has(.mail)` and `.mail .list` used to. */
+@media (max-width: 820px) {
+  .mail {
+    grid-template-columns: minmax(220px, 38vw) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  .shell {
+    display: block;
+    height: auto;
+  }
+
+  .mail {
+    display: block;
+    height: auto;
+    min-height: 0;
+  }
+}

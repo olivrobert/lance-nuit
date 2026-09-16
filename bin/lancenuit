@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# High-level runner wrapper with explicit subcommands.
+# More convenient than `bun src/runner.ts ...` for manual use.
+#
+# Usage:
+#   lancenuit <command> [<id>] [options...]
+#   lancenuit help
+
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  SOURCE_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$SOURCE_DIR/$SOURCE"
+done
+RUNNER_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
+# Bun is the runtime: it loads the TypeScript entry point without a transpilation
+# loader, and every process the runner relaunches inherits it through
+# `process.execPath`, so nothing has to be carried down through the environment.
+if command -v bun >/dev/null 2>&1; then
+  RUNNER_BIN="$(command -v bun)"
+else
+  RUNNER_BIN=""
+fi
+
+# A source checkout runs its sources: Bun loads TypeScript directly, and `dist/`
+# there is a git-ignored packaging product that goes stale the moment a source
+# changes. Preferring it silently ran an old runner — and installed old DSL
+# declarations — after every edit. A published package ships `dist/` alone, so
+# it still resolves to the compiled entry point.
+if [[ -f "$RUNNER_DIR/src/runner.ts" ]]; then
+  RUNNER_ENTRY="$RUNNER_DIR/src/runner.ts"
+  BUILTINS_DIR="$RUNNER_DIR/src/builtins"
+else
+  RUNNER_ENTRY="$RUNNER_DIR/dist/runner.js"
+  BUILTINS_DIR="$RUNNER_DIR/dist/builtins"
+fi
+
+if [[ -z "$RUNNER_BIN" ]]; then
+  {
+    echo "bun was not found on PATH. lance-nuit runs on Bun 1.3 or newer."
+    echo "Install it, then open a new shell and try again:"
+    echo "  curl -fsSL https://bun.sh/install | bash   # macOS/Linux"
+    echo "  brew install oven-sh/bun/bun               # Homebrew"
+    echo "  mise use -g bun@1.3                        # version manager"
+    echo "See https://bun.sh for other options."
+  } >&2
+  exit 127
+fi
+
+# Rendered by the runner from its WRAPPER_COMMANDS and FLAGS registries, so a new
+# option never has to be copied into this script by hand.
+usage() {
+  "$RUNNER_BIN" "$RUNNER_ENTRY" --wrapper-help
+}
+
+list_dir_pipelines() {
+  local dir="$1" label="$2"
+  [[ -d "$dir" ]] || return 0
+  shopt -s nullglob
+  local files=("$dir"/*.ts "$dir"/*.js)
+  shopt -u nullglob
+  (( ${#files[@]} )) || return 0
+  declare -A seen=()
+  echo "$label ($dir) :"
+  for f in "${files[@]}"; do
+    # Tests may live beside builtin pipelines, but they are not --pipeline targets.
+    [[ "$f" == *.test.ts || "$f" == *.d.ts ]] && continue
+    name="$(basename "${f%.*}")"
+    [[ -n "${seen[$name]+present}" ]] && continue
+    seen[$name]=1
+    desc="$(grep -m1 '\.desc(' "$f" | sed -E 's/.*\.desc\("([^"]*)"\).*/\1/' || true)"
+    printf "  %-12s %s\n" "$name" "$desc"
+  done
+}
+
+# Display order is also lookup priority: the first root wins when names collide.
+list_pipelines() {
+  list_dir_pipelines ".lance-nuit/pipelines" "Project pipelines"
+  list_dir_pipelines "${PIPELINE_HOME:-$HOME/.lance-nuit}/pipelines" "Shared pipelines"
+  list_dir_pipelines "$BUILTINS_DIR" "Generic builtin pipelines"
+  echo
+  echo "Run by name: lancenuit run <id> --pipeline <name>"
+}
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+
+VERB="$1"; shift
+
+case "$VERB" in
+  version|--version)
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" --version "$@" ;;
+  help|--help|-h)
+    usage; exit 0 ;;
+  list|--list)
+    list_pipelines; exit 0 ;;
+  inspect|logs)
+    if [[ $# -eq 0 ]]; then
+      echo "Command '$VERB' requires a run identifier." >&2
+      exit 1
+    fi
+    TICKET="$1"; shift
+    if [[ "$VERB" == "inspect" ]]; then
+      exec "$RUNNER_BIN" "$RUNNER_ENTRY" "$TICKET" --inspect "$@"
+    fi
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" "$TICKET" --logs "$@"
+    ;;
+  clean)
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" --clean "$@"
+    ;;
+  stats)
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" --stats "$@"
+    ;;
+  ui)
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" --ui "$@"
+    ;;
+  typecheck)
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" --typecheck "$@"
+    ;;
+  types)
+    if [[ $# -lt 1 || "$1" != "install" ]]; then
+      echo "Usage: lancenuit types install [--user]" >&2
+      exit 1
+    fi
+    shift
+    TYPES_ARGS=()
+    TYPES_USER=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --user)
+          if [[ $TYPES_USER -eq 1 ]]; then
+            echo "Option --user may only be specified once." >&2
+            exit 1
+          fi
+          TYPES_USER=1
+          TYPES_ARGS+=(--user)
+          shift
+          ;;
+        *)
+          echo "Unknown argument for 'lancenuit types install': $1" >&2
+          echo "Usage: lancenuit types install [--user]" >&2
+          exit 1
+          ;;
+      esac
+    done
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" --types-install "${TYPES_ARGS[@]}"
+    ;;
+  lint)
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" --lint-pipeline "$@"
+    ;;
+  create)
+    if [[ $# -eq 0 ]]; then
+      echo "Usage: lancenuit create <name> [--template <id>] [--command \"make test\"]" >&2
+      echo "See 'lancenuit help' for the available templates." >&2
+      exit 1
+    fi
+    NAME="$1"; shift
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" "$NAME" --create "$@"
+    ;;
+  approve)
+    if [[ $# -lt 2 ]]; then
+      echo "Usage: lancenuit approve <id> <subject> --pipeline <name>" >&2
+      exit 1
+    fi
+    TICKET="$1"; SUBJECT="$2"; shift 2
+    # The subject is declared by the project pipeline; the standalone package
+    # does not select an opinionated preset implicitly.
+    APPROVE_PIPELINE=""
+    APPROVE_ARGS=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --pipeline|-p)
+          if [[ $# -lt 2 ]]; then
+            echo "Option $1 expects a pipeline name." >&2
+            exit 1
+          fi
+          APPROVE_PIPELINE="$2"; shift 2
+          ;;
+        --pipeline=*) APPROVE_PIPELINE="${1#*=}"; shift ;;
+        *) APPROVE_ARGS+=("$1"); shift ;;
+      esac
+    done
+    if [[ -z "$APPROVE_PIPELINE" ]]; then
+      echo "Approval requires --pipeline <name>." >&2
+      exit 1
+    fi
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" "$TICKET" --pipeline "$APPROVE_PIPELINE" \
+      --approve "$SUBJECT" --approve-only "${APPROVE_ARGS[@]+"${APPROVE_ARGS[@]}"}"
+    ;;
+esac
+
+# Map command to pipeline NAME (`run` uses default; `single` disables dispatch).
+#
+# The runner resolves a name through project, shared, then builtin configuration.
+PIPELINE_NAME=""
+DISABLE_MULTI=0
+case "$VERB" in
+  run)
+    PIPELINE_NAME="default" ;;
+  single)
+    PIPELINE_NAME="default"
+    DISABLE_MULTI=1 ;;
+  *)
+    echo "Unknown command: $VERB" >&2
+    echo "See 'lancenuit help' for the list." >&2
+    exit 1 ;;
+esac
+
+# The ticket is not the first argument: the runner parses it itself, as the first
+# non-option token or as `--ticket <id>`. Taking `$1` blindly ate `-p` as a ticket
+# and blocked ticket-less runs (`lancenuit run -p quality` on the current branch).
+RUN_ARGS=("$@")
+
+# Inject the default pipeline only when the caller has not selected one, so the
+# runner never receives two --pipeline flags.
+PIPELINE_ARGS=(--pipeline "$PIPELINE_NAME")
+for arg in "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"; do
+  case "$arg" in
+    --pipeline|--pipeline=*|-p) PIPELINE_ARGS=() ;;
+  esac
+done
+
+if [[ $DISABLE_MULTI -eq 1 ]]; then
+  exec env RUNNER_DISABLE_DISPATCH=1 "$RUNNER_BIN" "$RUNNER_ENTRY" "${PIPELINE_ARGS[@]+"${PIPELINE_ARGS[@]}"}" "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"
+else
+  exec "$RUNNER_BIN" "$RUNNER_ENTRY" "${PIPELINE_ARGS[@]+"${PIPELINE_ARGS[@]}"}" "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"
+fi

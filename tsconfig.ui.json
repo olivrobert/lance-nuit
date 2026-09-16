@@ -1,0 +1,25 @@
+{
+  // The dashboard front end is the one part of the repository that compiles for
+  // a browser, not for Node: it needs the DOM library and the JSX transform, and
+  // it must NOT inherit the root project's Node-only assumptions. The root
+  // `tsconfig.json` declares no `include`, so it would otherwise pick these
+  // `.tsx` files up without a DOM lib; it excludes this directory instead.
+  //
+  // `moduleResolution: bundler` is what esbuild actually does: extensionless
+  // relative imports, and `react` / `react-dom/client` resolved from
+  // `node_modules` without the `nodenext` ESM ceremony.
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node", "bun"]
+  },
+  "include": ["src/modules/ui/app/**/*.ts", "src/modules/ui/app/**/*.tsx", "src/modules/ui/app/**/*.d.ts"]
+}
