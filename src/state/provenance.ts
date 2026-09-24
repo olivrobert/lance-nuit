@@ -189,8 +189,11 @@ export async function outputFreshness(
   if (Object.values(fingerprints).some((value) => value === null)) return "unknown";
   const record = await readProvenance(ctx, output);
   if (!record) return "adoptable";
+  // A record that does not list a declared input was written from other inputs —
+  // typically by another step producing the same artifact. The output was never
+  // derived from this input, so it cannot be trusted against it: rerun.
   for (const [key, current] of Object.entries(fingerprints)) {
-    if (!(key in record.inputs)) return "adoptable";
+    if (!(key in record.inputs)) return "stale";
     if (record.inputs[key] !== current) return "stale";
   }
   return "fresh";
@@ -223,7 +226,7 @@ export async function stepFreshness(
   };
 }
 
-/** Bind existing outputs that carry no usable record to the inputs present now.
+/** Bind existing outputs that carry no record at all to the inputs present now.
  *  Without adoption, the first run after this feature landed would regenerate the
  *  deliverables of every ticket already waiting for a human decision. */
 export async function adoptOutputs(ctx: PipelineContext, stepId: string, report: StepFreshnessReport): Promise<void> {
