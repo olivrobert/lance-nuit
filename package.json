@@ -76,6 +76,8 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@typescript-eslint/parser": "^8.68.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "dependency-cruiser": "18.2.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.9.1",

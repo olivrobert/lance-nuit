@@ -31,6 +31,10 @@
   --run: #315d9b;
   --run-bg: #edf3fc;
   --stale: #8b5f20;
+  /* One monospace stack for code, logs and the embedded terminal. xterm draws
+     on a canvas and cannot inherit a font, so the terminal screen reads this
+     property by name. */
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 * {
@@ -61,7 +65,7 @@ h4 {
 }
 code,
 pre {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 12px;
 }
 code {

@@ -1,15 +1,23 @@
-// Search, the three queue tabs, and one chip per project — a path that
-// disappeared stays listed, greyed, with its own removal button (spec 4.2).
+// Search, the three queue tabs, one chip per project — a path that
+// disappeared stays listed, greyed, with its own removal button (spec 4.2) —
+// and the "Launch a run" button.
+//
+// The launch button takes its scope from the chips: a selected project locks
+// the dialog to it, "All" makes the dialog ask. It is disabled without an
+// identity, because the server signs the session with the reader's name, and
+// without any reachable project, because there would be nothing to launch in.
 //
 // `addProject` and `removeProject` both go through the store, which already
 // toasts a refusal; this component only owns the `prompt()` that asks for the
 // path, because the store has no business showing a browser dialog.
 
 import type { JSX } from "react";
+import { useState } from "react";
 import type { Queue } from "../api/types.js";
 import { cx } from "../lib/cx.js";
 import { queueCount, waitingCount } from "../lib/derive.js";
 import { useActions, useUiSelector } from "../store/store.js";
+import { LaunchRunDialog } from "./LaunchRunDialog.js";
 import styles from "./ProjectBar.module.css";
 
 const QUEUES: readonly (readonly [Queue, string])[] = [
@@ -26,6 +34,17 @@ export function ProjectBar(): JSX.Element {
   const queue = useUiSelector((state) => state.queue);
   const user = useUiSelector((state) => state.user);
   const actions = useActions();
+  const [launching, setLaunching] = useState(false);
+
+  const launchable = projects.filter((project) => project.found);
+  // A chip whose path disappeared is not a project anyone can launch in: the
+  // dialog then asks, as it does from "All".
+  const locked = filter && launchable.some((project) => project.name === filter) ? filter : null;
+  const launchBlocked = !user
+    ? "Choose who you are first: the session is signed with your name."
+    : launchable.length === 0
+      ? "Add a project first."
+      : null;
 
   const addProject = (): void => {
     const path = prompt("Project path (the folder containing .lance-nuit):", "");
@@ -97,6 +116,20 @@ export function ProjectBar(): JSX.Element {
           {"+ Add project"}
         </button>
       </div>
+      {/* The title sits on a wrapper: a disabled button fires no pointer event,
+          so its own tooltip would never show. */}
+      <span title={launchBlocked ?? `Launch a run in ${locked ?? "a project"}`}>
+        <button
+          type="button"
+          className="primary"
+          disabled={launchBlocked !== null}
+          aria-haspopup="dialog"
+          onClick={() => setLaunching(true)}
+        >
+          Launch a run
+        </button>
+      </span>
+      {launching ? <LaunchRunDialog projects={launchable} locked={locked} onClose={() => setLaunching(false)} /> : null}
       {user ? (
         <span className={styles.who} title="You">
           {user}

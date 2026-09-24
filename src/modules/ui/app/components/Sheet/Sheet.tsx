@@ -39,6 +39,7 @@ import { Reply } from "./Reply.js";
 import styles from "./Sheet.module.css";
 import { SheetTabs } from "./SheetTabs.js";
 import { Steps } from "./Steps.js";
+import { TerminalLink } from "./TerminalLink.js";
 
 /** The one tab on screen. The header owns the action row, so the diagnostic
  *  callout is asked not to draw a second one. */
@@ -126,6 +127,7 @@ export function Sheet(): JSX.Element {
           <ProjectBadge name={item.project.name} />
           <StatusTag item={item} />
           <span className="grow" />
+          <TerminalLink item={item} />
         </div>
         <p className={styles.breadcrumb}>{`${item.ticket} · ${item.pipeline}`}</p>
         <h2>{headlineOf(item)}</h2>
