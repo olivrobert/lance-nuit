@@ -150,130 +150,104 @@ test("setupWorktreeAsync: neither copies nor modifies .env.local", async () => {
   expect(existsSync(join(spec.path, ".env.local"))).toBe(false);
 });
 
-test("setupWorktreeAsync: gitignored ticket work-items copied into the worktree", async () => {
-  const repo = gitRepo();
-  const items = join(repo, ".lance-nuit", "work-items", "PROJ-9");
-  mkdirSync(items, { recursive: true });
-  writeFileSync(join(items, "spec.md"), "# spec\n");
-  const spec = freshSpec(repo);
-  await setupWorktreeAsync(spec, { ...setupOpts(), ticketDir: "PROJ-9", specPath: ".lance-nuit/work-items" });
-  expect(readFileSync(join(spec.path, ".lance-nuit", "work-items", "PROJ-9", "spec.md"), "utf-8")).toBe("# spec\n");
-});
+const itemOpts = () => ({ ...setupOpts(), ticketDir: "PROJ-9", specPath: ".lance-nuit/work-items" });
 
-test("setupWorktreeAsync: runs/ and reports/ shared with the main clone, not copied", async () => {
-  const repo = gitRepo();
-  const items = join(repo, ".lance-nuit", "work-items", "PROJ-9");
-  mkdirSync(join(items, "reports"), { recursive: true });
-  writeFileSync(join(items, "reports", "old-constraints.md"), "# old\n");
-  const spec = freshSpec(repo);
-  await setupWorktreeAsync(spec, { ...setupOpts(), ticketDir: "PROJ-9", specPath: ".lance-nuit/work-items" });
-
-  const itemsWt = join(spec.path, ".lance-nuit", "work-items", "PROJ-9");
-  for (const name of ["runs", "reports"]) {
-    expect(lstatSync(join(itemsWt, name)).isSymbolicLink()).toBe(true);
-  }
-  // Written from the worktree → lands in the main clone, survives its deletion.
-  writeFileSync(join(itemsWt, "reports", "constraints-proposal-2026-09-03.md"), "# proposal\n");
-  const inMain = join(items, "reports", "constraints-proposal-2026-09-03.md");
-  expect(readFileSync(inMain, "utf-8")).toBe("# proposal\n");
-});
-
-test("setupWorktreeAsync: artifacts/ and decisions/ shared with the main clone, not copied", async () => {
-  const repo = gitRepo();
-  const items = join(repo, ".lance-nuit", "work-items", "PROJ-9");
-  mkdirSync(join(items, "artifacts"), { recursive: true });
-  writeFileSync(join(items, "artifacts", "spec.md"), "# spec\n");
-  const spec = freshSpec(repo);
-  await setupWorktreeAsync(spec, { ...setupOpts(), ticketDir: "PROJ-9", specPath: ".lance-nuit/work-items" });
-
-  const itemsWt = join(spec.path, ".lance-nuit", "work-items", "PROJ-9");
-  for (const name of ["artifacts", "decisions"]) {
-    expect(lstatSync(join(itemsWt, name)).isSymbolicLink()).toBe(true);
-  }
-  // The planning artifacts of the main clone are readable from the worktree...
-  expect(readFileSync(join(itemsWt, "artifacts", "spec.md"), "utf-8")).toBe("# spec\n");
-  // ...and the plan + the approval decision written by the run land in the main clone,
-  // so they survive the deletion of the worktree after the merge.
-  writeFileSync(join(itemsWt, "artifacts", "plan.md"), "# plan\n");
-  writeFileSync(join(itemsWt, "decisions", "plan.json"), '{"decision":"approved"}');
-  expect(readFileSync(join(items, "artifacts", "plan.md"), "utf-8")).toBe("# plan\n");
-  expect(readFileSync(join(items, "decisions", "plan.json"), "utf-8")).toBe('{"decision":"approved"}');
-});
-
-test("setupWorktreeAsync: reused worktree with a populated real artifacts/ → kept, warning, never wiped", async () => {
-  const repo = gitRepo();
-  const spec = freshSpec(repo);
-  const opts = { ...setupOpts(), ticketDir: "PROJ-9", specPath: ".lance-nuit/work-items" };
-  await setupWorktreeAsync(spec, opts);
-  // Worktree provisioned before artifacts/ became shared: the planning output is a real
-  // directory inside the worktree, and it is the only copy.
-  const itemsWt = join(spec.path, ".lance-nuit", "work-items", "PROJ-9");
-  rmSync(join(itemsWt, "artifacts"));
-  mkdirSync(join(itemsWt, "artifacts"), { recursive: true });
-  writeFileSync(join(itemsWt, "artifacts", "plan.md"), "# local plan\n");
-
+function captureWarnings<T>(run: () => Promise<T>): Promise<string[]> {
   const warnings: string[] = [];
   const original = log.warn;
   log.warn = (message: string) => {
     warnings.push(message);
   };
-  try {
-    await setupWorktreeAsync(spec, opts);
-  } finally {
-    log.warn = original;
-  }
+  return run()
+    .then(() => warnings)
+    .finally(() => {
+      log.warn = original;
+    });
+}
 
-  expect(lstatSync(join(itemsWt, "artifacts")).isSymbolicLink()).toBe(false);
-  expect(readFileSync(join(itemsWt, "artifacts", "plan.md"), "utf-8")).toBe("# local plan\n");
-  expect(warnings.some((w) => w.includes(join(itemsWt, "artifacts")))).toBe(true);
+test("setupWorktreeAsync: the whole work item is a link to the main clone", async () => {
+  const repo = gitRepo();
+  const items = join(repo, ".lance-nuit", "work-items", "PROJ-9");
+  mkdirSync(join(items, "artifacts"), { recursive: true });
+  writeFileSync(join(items, "artifacts", "spec.md"), "# spec\n");
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, itemOpts());
+
+  const itemsWt = join(spec.path, ".lance-nuit", "work-items", "PROJ-9");
+  expect(lstatSync(itemsWt).isSymbolicLink()).toBe(true);
+  expect(readFileSync(join(itemsWt, "artifacts", "spec.md"), "utf-8")).toBe("# spec\n");
+  // Whatever the run writes — planned dirs or not — lands in the main clone and
+  // survives the worktree's deletion.
+  for (const rel of [
+    "artifacts/plan.md",
+    "decisions/plan.json",
+    "reports/c.md",
+    "US-01/artifacts/spec.md",
+    "notes.md",
+  ]) {
+    mkdirSync(dirname(join(itemsWt, rel)), { recursive: true });
+    writeFileSync(join(itemsWt, rel), rel);
+    expect(readFileSync(join(items, rel), "utf-8")).toBe(rel);
+  }
 });
 
-test("setupWorktreeAsync: brand new ticket → runs/ still linked to the main clone", async () => {
+test("setupWorktreeAsync: brand new ticket → linked to a directory created in the main clone", async () => {
   const repo = gitRepo(); // no work-items dir at all: neither in the main clone nor in the worktree
   const spec = freshSpec(repo);
-  await setupWorktreeAsync(spec, { ...setupOpts(), ticketDir: "PROJ-9", specPath: ".lance-nuit/work-items" });
+  await setupWorktreeAsync(spec, itemOpts());
 
-  const itemsMain = join(repo, ".lance-nuit", "work-items", "PROJ-9");
   const itemsWt = join(spec.path, ".lance-nuit", "work-items", "PROJ-9");
-  for (const name of ["runs", "reports"]) {
-    expect(lstatSync(join(itemsWt, name)).isSymbolicLink()).toBe(true);
-  }
-  // The run state written by the pipeline lands in the main clone, so `inspect`/`logs`
-  // find it from there and it survives the worktree's deletion.
+  expect(lstatSync(itemsWt).isSymbolicLink()).toBe(true);
   mkdirSync(join(itemsWt, "runs", "r1"), { recursive: true });
   writeFileSync(join(itemsWt, "runs", "r1", "run.json"), '{"runId":"r1"}');
-  expect(readFileSync(join(itemsMain, "runs", "r1", "run.json"), "utf-8")).toBe('{"runId":"r1"}');
+  expect(readFileSync(join(repo, ".lance-nuit", "work-items", "PROJ-9", "runs", "r1", "run.json"), "utf-8")).toBe(
+    '{"runId":"r1"}',
+  );
 });
 
-test("setupWorktreeAsync: reused worktree with an empty real runs/ → converted to a link", async () => {
+test("setupWorktreeAsync: a sub-US links its parent work item", async () => {
   const repo = gitRepo();
-  const spec = freshSpec(repo);
-  const opts = { ...setupOpts(), ticketDir: "PROJ-9", specPath: ".lance-nuit/work-items" };
-  await setupWorktreeAsync(spec, opts);
-  // Leftover of a worktree provisioned before runs/ and reports/ were shared: no data at stake.
-  const itemsWt = join(spec.path, ".lance-nuit", "work-items", "PROJ-9");
-  rmSync(join(itemsWt, "runs"));
-  mkdirSync(join(itemsWt, "runs"));
+  const spec = freshSpec(repo, "PROJ-9-01");
+  await setupWorktreeAsync(spec, { ...setupOpts(), ticketDir: "PROJ-9/US-01", specPath: ".lance-nuit/work-items" });
 
-  expect((await setupWorktreeAsync(spec, opts)).reused).toBe(true);
-  expect(lstatSync(join(itemsWt, "runs")).isSymbolicLink()).toBe(true);
-  writeFileSync(join(itemsWt, "runs", "r1.json"), "{}");
-  expect(existsSync(join(repo, ".lance-nuit", "work-items", "PROJ-9", "runs", "r1.json"))).toBe(true);
+  expect(lstatSync(join(spec.path, ".lance-nuit", "work-items", "PROJ-9")).isSymbolicLink()).toBe(true);
+  expect(existsSync(join(repo, ".lance-nuit", "work-items", "PROJ-9"))).toBe(true);
 });
 
-test("setupWorktreeAsync: reused worktree with a populated real runs/ → kept, never silently wiped", async () => {
+test("setupWorktreeAsync: earlier layout (copy + per-directory links) → replaced by a link, main intact", async () => {
+  const repo = gitRepo();
+  const items = join(repo, ".lance-nuit", "work-items", "PROJ-9");
+  mkdirSync(join(items, "runs"), { recursive: true });
+  writeFileSync(join(items, "runs", "r1.json"), "{}");
+  writeFileSync(join(items, "ticket.md"), "# t\n");
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, { ...itemOpts(), ticketDir: undefined });
+  const itemsWt = join(spec.path, ".lance-nuit", "work-items", "PROJ-9");
+  mkdirSync(join(itemsWt, "US-01"), { recursive: true });
+  writeFileSync(join(itemsWt, "ticket.md"), "# t\n"); // copy identical to the main clone
+  symlinkSync(join(items, "runs"), join(itemsWt, "runs"));
+
+  const warnings = await captureWarnings(() => setupWorktreeAsync(spec, itemOpts()));
+
+  expect(warnings).toEqual([]);
+  expect(lstatSync(itemsWt).isSymbolicLink()).toBe(true);
+  expect(readFileSync(join(items, "runs", "r1.json"), "utf-8")).toBe("{}");
+  expect(readFileSync(join(items, "ticket.md"), "utf-8")).toBe("# t\n");
+});
+
+test("setupWorktreeAsync: real work item holding what the main clone lacks → kept, warning, never wiped", async () => {
   const repo = gitRepo();
   const spec = freshSpec(repo);
-  const opts = { ...setupOpts(), ticketDir: "PROJ-9", specPath: ".lance-nuit/work-items" };
-  await setupWorktreeAsync(spec, opts);
+  await setupWorktreeAsync(spec, { ...itemOpts(), ticketDir: undefined });
   const itemsWt = join(spec.path, ".lance-nuit", "work-items", "PROJ-9");
-  rmSync(join(itemsWt, "runs"));
-  mkdirSync(join(itemsWt, "runs", "p", "r1"), { recursive: true });
-  writeFileSync(join(itemsWt, "runs", "p", "r1", "state.json"), '{"runId":"r1"}');
+  mkdirSync(join(itemsWt, "artifacts"), { recursive: true });
+  writeFileSync(join(itemsWt, "artifacts", "plan.md"), "# local plan\n");
 
-  await setupWorktreeAsync(spec, opts);
-  expect(lstatSync(join(itemsWt, "runs")).isSymbolicLink()).toBe(false);
-  expect(readFileSync(join(itemsWt, "runs", "p", "r1", "state.json"), "utf-8")).toBe('{"runId":"r1"}');
+  const warnings = await captureWarnings(() => setupWorktreeAsync(spec, itemOpts()));
+
+  expect(lstatSync(itemsWt).isSymbolicLink()).toBe(false);
+  expect(readFileSync(join(itemsWt, "artifacts", "plan.md"), "utf-8")).toBe("# local plan\n");
+  expect(warnings.some((w) => w.includes(itemsWt))).toBe(true);
 });
 
 test("setupWorktreeAsync: pipeline-history shared with the main clone", async () => {
