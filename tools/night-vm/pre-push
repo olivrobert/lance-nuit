@@ -1,0 +1,29 @@
+#!/bin/sh
+# Night-run guard: never push to a protected branch.
+#
+# `hypnose-rdv` is a private repository on the free plan, so GitHub branch
+# protection is unavailable (403 GitHub Pro). This hook is the local substitute:
+# the night run may only push to the branch it created.
+#
+# Installed in the VM template through core.hooksPath, so it applies to every
+# repository cloned inside the night VM.
+
+protected='main master develop production'
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+	case "$remote_ref" in
+	'') continue ;;
+	esac
+
+	branch=${remote_ref#refs/heads/}
+
+	for candidate in $protected; do
+		if [ "$branch" = "$candidate" ]; then
+			echo "pre-push: refusing to push to protected branch '$branch'." >&2
+			echo "pre-push: the night run must push to its own branch." >&2
+			exit 1
+		fi
+	done
+done
+
+exit 0

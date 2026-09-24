@@ -1,0 +1,17 @@
+[Unit]
+Description=Allow forwarding between the Incus bridges and the outside despite Docker FORWARD DROP
+After=docker.service incus.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# incusbr0 carries the template and general-purpose instances; nuitbr0 carries
+# the run VMs and holds the 'nuit' ACL. Both need the exemption, and a bridge
+# that does not exist yet is simply skipped.
+ExecStart=/bin/sh -c 'for b in incusbr0 nuitbr0; do for d in -i -o; do /usr/sbin/iptables -C DOCKER-USER $d $b -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I DOCKER-USER $d $b -j ACCEPT; done; done'
+ExecStop=/bin/sh -c 'for b in incusbr0 nuitbr0; do for d in -i -o; do /usr/sbin/iptables -D DOCKER-USER $d $b -j ACCEPT 2>/dev/null || true; done; done'
+
+[Install]
+WantedBy=multi-user.target

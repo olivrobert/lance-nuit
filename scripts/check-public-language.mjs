@@ -5,7 +5,15 @@ import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const publicRoots = ["README.md", "bin", "docs", "guide", "examples", "src/engine/backends/claude-code/prompts"];
+const publicRoots = [
+  "README.md",
+  "bin",
+  "docs",
+  "guide",
+  "examples",
+  "tools",
+  "src/engine/backends/claude-code/prompts",
+];
 const accentedFrench = /[àâäçéèêëîïôöùûüÿœ]/i;
 // Unaccented French tokens that cannot be mistaken for English. Accent
 // detection above catches the rest; this list only closes the gap left by words
