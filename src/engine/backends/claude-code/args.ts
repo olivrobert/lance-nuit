@@ -1,7 +1,7 @@
 import { promptTemplate } from "./prompt.js";
 import type { ArtifactScope, JsonSchema } from "../../../contracts/index.js";
 import { capabilityAxes, isForked } from "../../../env/capability-frontmatter.js";
-import { artifactScopeInstruction } from "../artifact-scope.js";
+import { artifactScopeDirsOutside, artifactScopeInstruction } from "../artifact-scope.js";
 import { JSON_VERDICT_INSTRUCTION, verdictInstruction, verdictSchema } from "../verdict-instruction.js";
 import type { ClaudeOptions } from "./types.js";
 
@@ -67,6 +67,8 @@ export function buildClaudeArgs(prompt: string, options: ClaudeArgsOptions = {})
     "--add-dir",
     options.cwd ?? process.cwd(),
   );
+  for (const dir of artifactScopeDirsOutside(options.cwd ?? process.cwd(), options.artifactScope))
+    args.push("--add-dir", dir);
   if (needsVerdict && schemaMode) args.push("--json-schema", JSON.stringify(verdictSchema(options.outputFields)));
   const co = options.claudeOptions;
   if (co?.system_prompt) args.push("--system-prompt", co.system_prompt);

@@ -1,4 +1,5 @@
-import { dirname, join } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { AgentBackendRegistry } from "../contracts/backends.js";
 import type { WorkItemGateway } from "../contracts/work-items.js";
 import { loadPipelineConfig, type PipelineConfig } from "../env/config.js";
@@ -53,9 +54,22 @@ function lotSegment(lotId?: string): string | undefined {
   return safe || undefined;
 }
 
+/** `path` with every symlink resolved, including when its last segments do not exist
+ *  yet (a sub-US created by the run). In a worktree the work item is a link to the
+ *  main clone: agents get the real path, because their file search does not follow
+ *  links — through the link, a populated work item reads as empty. */
+function realPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    const parent = dirname(path);
+    return parent === path ? path : join(realPath(parent), basename(path));
+  }
+}
+
 function pathsFor(cwd: string, config: PipelineConfig, ticketDir?: string, lotId?: string): PipelinePaths {
   const root = join(cwd, config.specPath);
-  const workItemDir = ticketDir ? join(root, ticketDir) : undefined;
+  const workItemDir = ticketDir ? realPath(join(root, ticketDir)) : undefined;
   const artifactsDir = workItemDir ? join(workItemDir, "artifacts") : undefined;
   const decisionsDir = workItemDir ? join(workItemDir, "decisions") : undefined;
   // Reports from a batch sub-run are isolated under `reports/<LOT-ID>/`,
