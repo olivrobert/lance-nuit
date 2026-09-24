@@ -373,12 +373,13 @@ The rules:
   of the attempt and recorded on success, after the outputs are verified, in one
   provenance record per produced artifact.
 - **Freshness of an output** at admission time: absent is `missing`; a pure input
-  absent is `unknown` (a safe bias); no record, or a declared input with no
-  recorded fingerprint, is `adoptable`; a fingerprint that differs is `stale`;
-  otherwise `fresh`.
+  absent is `unknown` (a safe bias); no record at all is `adoptable`; a
+  fingerprint that differs, or a declared input the record does not list, is
+  `stale`; otherwise `fresh`. A record written by another step producing the same
+  artifact from other inputs is therefore `stale` for this step, which runs.
 - **Decision.** The step runs when an output is `missing`, `unknown`, or `stale`.
   Otherwise it is skipped with `outputs up to date with declared inputs`.
-- **Adoption.** An output that exists without a usable record adopts the inputs
+- **Adoption.** An output that exists without any record adopts the inputs
   present now and is skipped. Without this, the feature would regenerate the
   deliverables of every work item already waiting for a human decision.
 - **Order.** `when` first, freshness second. When `when` refuses while an output

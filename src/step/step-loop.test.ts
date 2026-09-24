@@ -1164,6 +1164,20 @@ test("resume: a done step whose declared input changed is replayed", async () =>
   expect(calls.ids).toEqual(["spec"]);
 });
 
+test("a step revising an output another step produced is not adopted on its extra input", async () => {
+  const planArtifact = textArtifact("plan.md");
+  const planAudit = textArtifact("plan-audit.json");
+  const { ctx } = artifactContext({ "spec.md": "s", "plan.md": "p", "plan-audit.json": "{}" });
+  await writeProvenance(ctx, planArtifact, "plan", { "artifacts/spec.md": sha256Text("s") });
+  const revise = bashStep("plan-revise", "cmd", { sources: [planArtifact, planAudit], outputs: [planArtifact] });
+  const run = makeRun([revise]);
+
+  const { deps, calls } = fakeDeps();
+  await executeRunSteps(run, "PROJ-1", undefined, { resuming: false }, deps, ctx);
+
+  expect(calls.ids).toEqual(["plan-revise"]);
+});
+
 test("resume: a step skipped by its own admission is re-admitted, an excluded one is not", async () => {
   const { ctx } = artifactContext({ "ticket.md": "one" });
   const admitted = derivedStep({ status: "skipped" });

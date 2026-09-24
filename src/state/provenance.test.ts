@@ -127,14 +127,31 @@ test("outputFreshness: reports the five admission states", async () => {
   expect(await outputFreshness(ctx, spec, await fingerprintInputs(ctx, [ticket]))).toBe("stale");
 });
 
-test("outputFreshness: an input declared after the record was written is adoptable", async () => {
+test("outputFreshness: an input the record does not list is stale", async () => {
   const { ctx, store } = fixture();
   store.values.set("ticket.md", "one");
   store.values.set("spec.md", "s");
   store.values.set("plan.md", "p");
   await writeProvenance(ctx, plan, "plan", await fingerprintInputs(ctx, [ticket]));
 
-  expect(await outputFreshness(ctx, plan, await fingerprintInputs(ctx, [ticket, spec]))).toBe("adoptable");
+  expect(await outputFreshness(ctx, plan, await fingerprintInputs(ctx, [ticket, spec]))).toBe("stale");
+});
+
+test("stepFreshness: a step revising an output another step produced runs on its extra input", async () => {
+  const { ctx, store } = fixture();
+  const planAudit = textArtifact("plan-audit.json");
+  store.values.set("spec.md", "s");
+  store.values.set("plan.md", "p");
+  store.values.set("plan-audit.json", "{}");
+  // `plan` wrote plan.md from spec.md; `plan-audit.json` was never an input of it.
+  await writeProvenance(ctx, plan, "plan", await fingerprintInputs(ctx, [spec]));
+  const planRevise = { sources: [plan, planAudit], outputs: [plan] };
+
+  expect(pureInputsOf(planRevise).map((entry) => entry.name)).toEqual(["plan-audit.json"]);
+  const report = await stepFreshness(ctx, planRevise);
+  expect(report.states).toEqual({ "plan.md": "stale" });
+  expect(report.mustRun).toBe(true);
+  expect(report.adoptable).toEqual([]);
 });
 
 test("stepFreshness: pure inputs exclude what the step revises in place", async () => {
