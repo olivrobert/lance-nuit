@@ -15,6 +15,7 @@ import {
   shellQuote,
   type StartRunDeps,
   startRun,
+  ticketForProject,
 } from "./terminals.js";
 import { FakeAttach, FakeTmuxServer } from "./test-harness.js";
 
@@ -120,11 +121,26 @@ test("start: the session runs the shell in the project, then the command is type
   expect(listed).toEqual([started.ok ? started.terminal : (undefined as never)]);
 });
 
+test("project key: a ticket of another project is refused, the key's case is the tracker's", () => {
+  expect(ticketForProject({ key: "PROJ" }, "proj-12")).toBe("PROJ-12");
+  expect(ticketForProject({ key: "PROJ" }, "PROJ-12")).toBe("PROJ-12");
+  expect(ticketForProject({ key: "PROJ" }, "FOOD-12")).toBeUndefined();
+  expect(ticketForProject({ key: "PROJ" }, "PROJECT-12")).toBeUndefined();
+  expect(ticketForProject({}, "anything-1")).toBe("anything-1");
+});
+
+test("start: a ticket typed in lowercase starts the run on the tracker's spelling", async () => {
+  const server = new FakeTmuxServer();
+  const result = await startRun(request(project(), { ticket: "proj-7" }), deps(server));
+  expect(result.ok && result.terminal.ticket).toBe("PROJ-7");
+});
+
 test("start: refusals come before any session exists", async () => {
   const entry = project();
   const cases: Array<[Record<string, unknown>, Partial<StartRunDeps>, number]> = [
     [{ ticket: "../x" }, {}, 400],
     [{ ticket: "PROJ" }, {}, 400],
+    [{ ticket: "FOOD-1" }, {}, 400],
     [{ pipeline: "Nope/x" }, {}, 400],
     [{ pipeline: "deploy" }, {}, 400],
     [{}, { paneCommand: () => ({ ok: false, status: 503, reason: "claude CLI not found" }) }, 503],

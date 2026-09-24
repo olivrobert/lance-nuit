@@ -182,6 +182,21 @@ export type StartRunResult =
   | { ok: false; status: number; reason: string; terminal?: TerminalInfo };
 
 /**
+ * The ticket as the project's tracker spells it, or `undefined` when it names
+ * another project. A provider validates the shape of a reference, not whose it
+ * is, so a `FOOD-1` typed while on a `PACASEC` project would otherwise start a
+ * run in the wrong repository. The key is matched case-insensitively and
+ * rewritten as declared (`food-12` becomes `FOOD-12`); a project that declares
+ * no key accepts any reference its provider accepts.
+ */
+export function ticketForProject(project: Pick<ProjectEntry, "key">, ticket: string): string | undefined {
+  if (!project.key) return ticket;
+  const prefix = `${project.key}-`;
+  if (ticket.slice(0, prefix.length).toUpperCase() !== prefix.toUpperCase()) return undefined;
+  return prefix + ticket.slice(prefix.length);
+}
+
+/**
  * Start an interactive run: create the session, record who and what on it, and
  * type the command.
  *
@@ -194,7 +209,10 @@ export type StartRunResult =
 export async function startRun(request: StartRunRequest, deps: StartRunDeps): Promise<StartRunResult> {
   const { project, worktree } = request;
   if (!isTicketToken(request.ticket)) return { ok: false, status: 400, reason: "field `ticket` is required" };
-  const ticket = request.ticket;
+  const ticket = ticketForProject(project, request.ticket);
+  if (!ticket) {
+    return { ok: false, status: 400, reason: `ticket "${request.ticket}" does not belong to project "${project.name}"` };
+  }
   const reference = validateTicketRef(project, ticket, deps.workItems);
   if (!reference.ok) return { ok: false, status: 400, reason: reference.reason };
 
