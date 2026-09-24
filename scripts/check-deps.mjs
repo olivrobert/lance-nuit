@@ -113,8 +113,13 @@ function checkClassification() {
 }
 
 function cruise(configPath) {
-  const binary = join(REPO_ROOT, "node_modules", ".bin", "depcruise");
-  const result = spawnSync(binary, ["--config", configPath, "--output-type", "json", "src"], {
+  // The package entry point, not the `.bin/depcruise` wrapper: that wrapper carries
+  // a `#!/usr/bin/env node` shebang, so on a Bun-only machine it fails with exit 127
+  // and an empty stdout — read below as "depcruise refused to run", which names the
+  // config rather than the missing runtime. `process.execPath` is the runtime that
+  // started this script, as `checkDeps` already does in tests/deps.
+  const binary = join(REPO_ROOT, "node_modules", "dependency-cruiser", "bin", "dependency-cruise.mjs");
+  const result = spawnSync(process.execPath, [binary, "--config", configPath, "--output-type", "json", "src"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });

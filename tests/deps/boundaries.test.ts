@@ -18,7 +18,9 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const CONFIG = join(REPO_ROOT, ".dependency-cruiser.cjs");
 const CHECK_DEPS = join(REPO_ROOT, "scripts/check-deps.mjs");
-const DEPCRUISE = join(REPO_ROOT, "node_modules/.bin/depcruise");
+// The package entry point rather than `.bin/depcruise`, whose `node` shebang is not
+// honoured on a Bun-only machine; it is spawned with `process.execPath` below.
+const DEPCRUISE = join(REPO_ROOT, "node_modules/dependency-cruiser/bin/dependency-cruise.mjs");
 
 function fixture(name: string): string {
   return join(REPO_ROOT, "tests/deps/fixtures", name);
@@ -26,7 +28,7 @@ function fixture(name: string): string {
 
 /** Rule names raised by cruising the fixture with the repository's own config. */
 function rulesRaisedIn(name: string): string[] {
-  const run = spawnSync(DEPCRUISE, ["--config", CONFIG, "--output-type", "json", "src"], {
+  const run = spawnSync(process.execPath, [DEPCRUISE, "--config", CONFIG, "--output-type", "json", "src"], {
     cwd: fixture(name),
     encoding: "utf8",
   });
