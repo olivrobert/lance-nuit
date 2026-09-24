@@ -158,6 +158,53 @@ RUNNER_DISABLE_DISPATCH=1 bun /path/to/lance-nuit/src/runner.ts PROJ-28-01
 bun /path/to/lance-nuit/src/runner.ts --scan --pipeline queue
 ```
 
+## Dashboard
+
+`lancenuit ui [--port <n>]` serves a local dashboard on `127.0.0.1` only (build
+it once with `bun run ui:build` in a checkout). Reach it from another machine
+through an SSH tunnel that keeps the same port on both ends:
+`ssh -L <n>:127.0.0.1:<n> <host>`. Names allowed to act are listed by hand in
+`~/.lance-nuit/ui/users.json` (`{"users": ["Olivier"]}`); projects are added
+from the dashboard or in `~/.lance-nuit/ui/projects.json`.
+
+### Launch an interactive run
+
+**Launch a run** opens a dialog: the ticket, the pipeline (listed from the
+project's kit chain), and whether to use a worktree. The server validates the
+ticket through the project's work-item provider, refuses an item whose run is
+already in progress, then starts a tmux session in the project's main clone,
+running your `$SHELL`, and types into it:
+
+```bash
+claude --agent lancenuit-operator 'Lance la pipeline : lancenuit run PROJ-28 --pipeline default --worktree'
+```
+
+The `claude` CLI must be on the dashboard's `PATH` (otherwise the launch is
+refused with 503), and a `lancenuit-operator` agent must be defined in your
+Claude configuration. The agent drives the run and answers in the pane; when it
+exits, the shell stays open.
+
+The dashboard then shows the session in an embedded terminal you can type into.
+Closing the page only detaches; the session keeps running. The same session is
+reachable from any shell on the machine:
+
+```bash
+tmux -L lancenuit attach -t ln-<project>-<ticket>
+```
+
+Sessions live on a dedicated tmux socket (`-L lancenuit`), so your own tmux
+server is never touched. tmux is the only record: a session killed from a shell
+disappears from the dashboard, and a restarted dashboard finds every session
+still there. One session per project and ticket; a second launch is refused
+while the first one is open.
+
+**Security.** The embedded terminal is a shell. Every terminal request needs a
+declared name and a same-origin request, every `/api/*` request must carry
+`Host: 127.0.0.1:<port>` or `localhost:<port>` (which blocks DNS rebinding),
+and typing into a terminal needs the viewer token its stream handed out.
+Anyone who can reach the port with a declared name can type into a shell as
+the user running the dashboard: keep it on loopback and behind the tunnel.
+
 ## Project configuration
 
 The canonical configuration is `.lance-nuit/config.json`. A user configuration
