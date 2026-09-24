@@ -20,6 +20,11 @@
 // which is exactly what `styles/tokens.css` wants. Because a single entry point
 // pulls in both kinds, esbuild emits one JS file and one sibling CSS file named
 // after `outfile` — hence `app.js` and `app.css` from one `build()` call.
+//
+// The terminal screen's xterm (`@xterm/xterm`, `@xterm/addon-fit`) is bundled
+// the same way, from devDependencies: its stylesheet is imported by `index.tsx`
+// like any other global `.css`, so it lands in `app.css` and the static handler
+// still serves exactly two assets.
 
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

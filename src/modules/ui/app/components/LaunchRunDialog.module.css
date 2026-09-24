@@ -1,0 +1,98 @@
+/* The launch dialog. The project name in the title is set large and on the
+   accent ground on purpose: it is the one thing a reader must not misread
+   before pressing Launch. */
+
+.dialog {
+  width: min(480px, calc(100vw - 32px));
+  padding: 0;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 22%);
+}
+
+.dialog::backdrop {
+  background: rgb(32 37 43 / 38%);
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+  padding: 22px 24px;
+}
+
+.title {
+  font-size: 19px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.project {
+  display: inline-block;
+  padding: 1px 9px;
+  color: #fff;
+  border-radius: 5px;
+  background: var(--accent);
+  font-size: 21px;
+  font-weight: 750;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.field input,
+.field select {
+  min-height: 34px;
+  padding: 6px 10px;
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--panel);
+  font: inherit;
+  font-weight: 400;
+}
+
+.field input:focus,
+.field select:focus,
+.check input:focus-visible {
+  outline: 2px solid #7ca69d;
+  outline-offset: 2px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.warning,
+.error {
+  margin: -4px 0 0;
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.warning {
+  color: var(--stop);
+  background: var(--stop-bg);
+}
+
+.error {
+  color: var(--fail);
+  background: var(--fail-bg);
+  white-space: pre-wrap;
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
