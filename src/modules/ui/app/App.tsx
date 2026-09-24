@@ -1,7 +1,10 @@
 // The shell.
 //
-// It answers exactly one question — is there a reader? — and then assembles the
-// three zones the screens live in. Everything else is delegated: the banner, the
+// It answers two questions — is there a reader, and which screen does the URL
+// hash name? — and then assembles the zones that screen lives in. The inbox is
+// three zones; the terminal screen (`#/terminal/<id>`) keeps the banner and
+// gives the rest of the viewport to one tmux session. Identity comes first for
+// both: the terminal is a shell, and nobody reaches it without a name. Everything else is delegated: the banner, the
 // project bar, the list and the sheet each own their data through the store, so
 // this file never passes props down and never has to be edited when one of them
 // changes.
@@ -18,9 +21,12 @@ import { Banner } from "./components/Banner.js";
 import { ItemList } from "./components/ItemList.js";
 import { ProjectBar } from "./components/ProjectBar.js";
 import { Sheet } from "./components/Sheet/index.js";
+import { TerminalScreen } from "./components/Terminal/index.js";
+import { cx } from "./lib/cx.js";
 import { queueCount } from "./lib/derive.js";
 import { useActions, useUiState } from "./store/store.js";
 import { usePolling } from "./store/usePolling.js";
+import { useRoute } from "./store/useRoute.js";
 
 /** "Who are you?" — the only screen shown before a name is chosen. The name
  *  signs approvals and launches, so nothing else is reachable without it. */
@@ -69,6 +75,7 @@ function useDocumentTitle(count: number): void {
 
 export function App(): JSX.Element | null {
   const state = useUiState();
+  const route = useRoute();
   usePolling();
   useDocumentTitle(queueCount(state.items, "attention"));
 
@@ -79,6 +86,18 @@ export function App(): JSX.Element | null {
         <Identity />
         <ToastView />
       </>
+    );
+  }
+
+  if (route.view === "terminal") {
+    // Keyed on the id: another session is another screen, never a pane reused
+    // with a stale viewer token.
+    return (
+      <div className={cx(styles.shell, styles.terminalShell)}>
+        <Banner />
+        <TerminalScreen key={route.id} id={route.id} />
+        <ToastView />
+      </div>
     );
   }
 

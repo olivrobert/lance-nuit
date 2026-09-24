@@ -17,7 +17,11 @@ import type {
   ItemsResponse,
   LaunchLog,
   MeResponse,
+  PipelinesResponse,
   ProjectsResponse,
+  RunResponse,
+  TerminalInfo,
+  TerminalsResponse,
 } from "./types.js";
 
 /** What every call returns: the status, whether it was a success, and the body
@@ -102,4 +106,59 @@ export interface ActionPayload {
 
 export function postAction(verb: string, payload: ActionPayload): Promise<ApiResult<ActionResponse>> {
   return postJson<ActionResponse>(`/api/actions/${encodeURIComponent(verb)}`, payload);
+}
+
+/** Pipeline names a project can run, for the launch dialog's select. */
+export function fetchPipelines(project: string): Promise<ApiResult<PipelinesResponse>> {
+  return getJson<PipelinesResponse>(`/api/projects/${encodeURIComponent(project)}/pipelines`);
+}
+
+/** What the launch dialog posts. The server builds the command from it; the
+ *  browser never sends a command line. */
+export interface RunPayload {
+  project: string;
+  ticket: string;
+  pipeline: string;
+  worktree: boolean;
+}
+
+export function postRun(payload: RunPayload): Promise<ApiResult<RunResponse>> {
+  return postJson<RunResponse>("/api/runs", payload);
+}
+
+function terminalUrl(id: string, suffix = ""): string {
+  return `/api/terminals/${encodeURIComponent(id)}${suffix}`;
+}
+
+export function fetchTerminals(): Promise<ApiResult<TerminalsResponse>> {
+  return getJson<TerminalsResponse>("/api/terminals");
+}
+
+export function fetchTerminal(id: string): Promise<ApiResult<TerminalInfo>> {
+  return getJson<TerminalInfo>(terminalUrl(id));
+}
+
+/** The SSE stream of one viewer, opened at the size xterm fitted to. */
+export function terminalStreamUrl(id: string, cols: number, rows: number): string {
+  return terminalUrl(id, `/stream?cols=${cols}&rows=${rows}`);
+}
+
+/** `viewer` is the token of the stream's `hello` event: input and resize are
+ *  refused without the stream that owns them. */
+export function postTerminalInput(id: string, viewer: string, data: string): Promise<ApiResult<unknown>> {
+  return postJson<unknown>(terminalUrl(id, "/input"), { viewer, data });
+}
+
+export function postTerminalResize(
+  id: string,
+  viewer: string,
+  cols: number,
+  rows: number,
+): Promise<ApiResult<unknown>> {
+  return postJson<unknown>(terminalUrl(id, "/resize"), { viewer, cols, rows });
+}
+
+/** Kill the tmux session itself, not only this viewer. */
+export function killTerminal(id: string): Promise<ApiResult<unknown>> {
+  return postJson<unknown>(terminalUrl(id, "/kill"), {});
 }
