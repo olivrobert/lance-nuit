@@ -1,0 +1,82 @@
+#!/usr/bin/env node
+// Stands in for `gh` inside the night VM.
+//
+// The VM holds no credential and no real `gh`. This shim forwards the argument
+// list to the host broker, which decides whether to run it and owns the token.
+// Everything the lance-nuit GitHub adapter needs from `gh` is stdout, stderr and
+// an exit code, so that is all this reproduces.
+//
+// One broker runs per night run, on its own port, so the endpoint cannot be
+// hardcoded. It is resolved in this order:
+//   1. GH_BROKER_URL              -- for testing from the host
+//   2. /etc/lance-nuit/gh-broker.url  -- written into the VM by night-run.sh
+//   3. the single-run default
+// A missing file is not an error here: it degrades to the default, and an
+// unreachable broker is reported below as exit 127.
+
+const ENDPOINT_FILE = "/etc/lance-nuit/gh-broker.url";
+const DEFAULT_ENDPOINT = "http://10.174.226.1:8099/gh";
+
+// Installed as /usr/local/bin/gh, an extension-less file, Node loads this as
+// CommonJS; run from a checkout it may be loaded as ESM instead. A dynamic
+// import is the one form that works in both, so the shim stays testable from
+// the host.
+async function resolveEndpoint() {
+	if (process.env.GH_BROKER_URL) return process.env.GH_BROKER_URL;
+	try {
+		const { readFileSync } = await import("node:fs");
+		const fromFile = readFileSync(ENDPOINT_FILE, "utf8").trim();
+		if (fromFile) return fromFile;
+	} catch {
+		// no file: single-run default
+	}
+	return DEFAULT_ENDPOINT;
+}
+
+const args = process.argv.slice(2);
+
+async function main() {
+	const endpoint = await resolveEndpoint();
+	let token;
+	try {
+		const { readFileSync } = await import("node:fs");
+		token = readFileSync(process.env.GH_BROKER_TOKEN_FILE || "/etc/lance-nuit/gh-broker.token", "utf8").trim();
+		if (!/^[a-f0-9]{64}$/.test(token)) throw new Error("invalid credential");
+	} catch {
+		process.stderr.write("gh shim: missing or invalid run credential\n");
+		process.exit(127);
+	}
+	let response;
+	try {
+		response = await fetch(endpoint, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+			body: JSON.stringify({ args }),
+			signal: AbortSignal.timeout(130_000),
+		});
+	} catch (error) {
+		// Unreachable broker is an environment failure, not a refusal: use 127,
+		// the code the runner reads as "binary not available".
+		process.stderr.write(`gh shim: broker unreachable at ${endpoint}: ${error.message}\n`);
+		process.exit(127);
+	}
+
+	let payload;
+	try {
+		payload = await response.json();
+	} catch {
+		process.stderr.write(`gh shim: malformed broker response (HTTP ${response.status})\n`);
+		process.exit(1);
+	}
+
+	if (!response.ok) {
+		process.stderr.write(`gh shim: refused by broker: ${payload.error ?? response.status}\n`);
+		process.exit(1);
+	}
+
+	if (payload.stdout) process.stdout.write(payload.stdout);
+	if (payload.stderr) process.stderr.write(payload.stderr);
+	process.exit(typeof payload.code === "number" ? payload.code : 1);
+}
+
+main();
