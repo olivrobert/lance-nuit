@@ -12,12 +12,12 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  rmdirSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { runSupervisedCommand } from "../exec/process-runner.js";
 import { log } from "../runtime/logging.js";
 
@@ -182,41 +182,53 @@ function unshareRunDir(worktreePath: string): void {
   mkdirSync(runDir, { recursive: true });
 }
 
-/** Work-item sub-directories the worktree SHARES with the main clone instead of
- * receiving a copy of:
- * - `runs/` is machine telemetry with a single history;
- * - `reports/` holds what a run produces about itself (constraint reports, quality
- *   proposals). Written from the worktree, a copy dies with the worktree.
- * - `artifacts/` holds the durable planning output (spec.md, plan.md, lots.json,
- *   triage.json, ui-checks.md…). It outlives the branch: it is what the next run,
- *   `inspect` and the UI read back, and what a human re-reads after the merge. A
- *   copy leaves the only up-to-date version inside a worktree deleted right after
- *   the MR.
- * - `decisions/` holds the approval decisions, each locked on the SHA-256 of the
- *   artifact it approved. A decision belongs to the work item, not to the branch:
- *   copied, the human approvals are lost with the worktree and the next run asks
- *   for them again — and, worse, they stay invisible to an `approve` issued from
- *   the main clone.
- * All four are symlinked, so writes from the worktree land in the main clone and
- * survive its deletion. They are excluded from the copy below for the same reason:
- * a copied dir can no longer be linked. */
-const SHARED_ITEM_DIRS = ["runs", "reports", "artifacts", "decisions"] as const;
+/** The work item the worktree SHARES with the main clone: its whole directory is a
+ * link, never a copy. Everything under it outlives the branch — run state (`runs/`),
+ * planning output (`artifacts/`: spec.md, plan.md, lots.json…), approval decisions
+ * locked on the SHA-256 of the artifact they approved (`decisions/`), reports and
+ * sub-US items (`US-NN/`). It is what the next run, `inspect`, the UI and an
+ * `approve` issued from the main clone read back. A copy — or a link on a fixed list
+ * of sub-directories — leaves whatever the list forgot inside a worktree deleted
+ * right after the MR, and two histories that diverge on the first run.
+ *
+ * A sub-US (`PROJ-59/US-01`) links its parent, whose artifacts it reads. */
+function sharedItemRoot(ticketDir: string): string {
+  const subUs = ticketDir.match(/^(.+)\/US-\d{2,}$/);
+  return subUs ? subUs[1] : ticketDir;
+}
 
-/** Sub-directories never copied main → worktree: the shared ones, linked instead. */
-const UNCOPIED_ITEM_DIRS = new Set<string>(SHARED_ITEM_DIRS);
+/** Whether a real worktree directory holds nothing the main clone lacks: only links,
+ * empty directories and files identical to their main-clone counterpart. That is the
+ * leftover of a worktree provisioned with a copy plus per-directory links; replacing
+ * it by a link loses nothing. */
+function isDisposableShadow(dirWt: string, dirMain: string): boolean {
+  for (const name of readdirSync(dirWt)) {
+    const wt = join(dirWt, name);
+    const main = join(dirMain, name);
+    const stat = lstatSync(wt);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) {
+      if (!isDisposableShadow(wt, main)) return false;
+      continue;
+    }
+    if (!existsSync(main) || !readFileSync(wt).equals(readFileSync(main))) return false;
+  }
+  return true;
+}
 
 /** Point `dirWt` at `dirMain`, creating the target on the main clone side.
  *
- * `mkdirSync(dirMain, { recursive: true })` also materializes the parent work-item
- * directory, so a brand new ticket gets a real target instead of a dangling link.
+ * `mkdirSync(dirMain, { recursive: true })` also materializes the parent
+ * directories, so a brand new ticket gets a real target instead of a dangling link.
  *
  * Three states on the worktree side:
  * - absent → symlink;
  * - already a symlink → nothing to do;
- * - a real directory → it shadows the main clone. Empty, it is a leftover of a
- *   worktree provisioned before the dirs were shared: it is removed and linked, no
- *   data at stake. Non-empty, it holds a history written into the worktree that a
- *   blind `rmdir` would destroy: it is kept and reported, migration is manual.
+ * - a real directory → it shadows the main clone. Empty — or, with
+ *   `options.replaceDisposable`, holding nothing the main clone lacks — it is a
+ *   leftover of an earlier layout: it is removed and linked, no data at stake.
+ *   Otherwise it holds a history written into the worktree that a blind removal
+ *   would destroy: it is kept and reported, migration is manual.
  *
  * `options.sourceRequired` inverts the first line for a directory a project may
  * track in Git: there, a missing main-clone directory means "this project keeps
@@ -227,7 +239,7 @@ const UNCOPIED_ITEM_DIRS = new Set<string>(SHARED_ITEM_DIRS);
 function linkSharedDir(
   dirMain: string,
   dirWt: string,
-  options: { sourceRequired?: boolean; shadowIsNormal?: boolean } = {},
+  options: { sourceRequired?: boolean; shadowIsNormal?: boolean; replaceDisposable?: boolean } = {},
 ): void {
   if (options.sourceRequired) {
     if (!existsSync(dirMain)) return;
@@ -242,23 +254,21 @@ function linkSharedDir(
   if (existing) {
     if (readdirSync(dirWt).length > 0) {
       if (options.shadowIsNormal) return;
-      log.warn(
-        `${dirWt} is a real directory in the worktree, not a link to ${dirMain} — ` +
-          "what it holds stays invisible from the main clone and dies with the worktree. " +
-          "It is kept as-is rather than overwritten: merge it into the main clone by hand " +
-          "(worktree provisioned before this directory became shared, or content tracked by Git).",
-      );
-      return;
+      if (!options.replaceDisposable || !isDisposableShadow(dirWt, dirMain)) {
+        log.warn(
+          `${dirWt} is a real directory in the worktree, not a link to ${dirMain} — ` +
+            "what it holds stays invisible from the main clone and dies with the worktree. " +
+            "It is kept as-is rather than overwritten: merge it into the main clone by hand " +
+            "(worktree provisioned before this directory became shared, or content tracked by Git).",
+        );
+        return;
+      }
     }
-    rmdirSync(dirWt);
+    // Links inside are removed, never followed: their main-clone targets stay intact.
+    rmSync(dirWt, { recursive: true, force: true });
   }
   mkdirSync(dirname(dirWt), { recursive: true });
   symlinkSync(dirMain, dirWt);
-}
-
-/** Point the work-item sub-directories of the worktree at the main clone's. */
-function linkSharedItemDirs(itemsMain: string, itemsWt: string): void {
-  for (const name of SHARED_ITEM_DIRS) linkSharedDir(join(itemsMain, name), join(itemsWt, name));
 }
 
 /** Kit sub-directories the worktree SHARES with the main clone instead of owning.
@@ -306,27 +316,10 @@ function provisionLocalFiles(spec: WorktreeSpec, ticketDir: string | undefined, 
   }
 
   if (ticketDir && specPath) {
-    const itemsMain = join(spec.mainRepo, specPath, ticketDir);
-    const itemsWt = join(spec.path, specPath, ticketDir);
-    if (existsSync(itemsMain) && !existsSync(itemsWt)) {
-      mkdirSync(dirname(itemsWt), { recursive: true });
-      // The shared dirs (runs/, reports/, artifacts/, decisions/) stay in the main
-      // clone, including sub-US data: copying them creates two histories that
-      // diverge on the first worktree run.
-      cpSync(itemsMain, itemsWt, {
-        recursive: true,
-        filter: (source) =>
-          !relative(itemsMain, source)
-            .split(sep)
-            .some((segment) => UNCOPIED_ITEM_DIRS.has(segment)),
-      });
-    }
-    // A brand new ticket has no work-items anywhere yet: the dir must still exist in the
-    // worktree so its shared sub-dirs can be linked to the main clone. Without it the
-    // pipeline creates a real runs/ (or artifacts/) inside the worktree, invisible to
-    // `inspect`/`logs`/UI from the main clone and destroyed with the worktree.
-    mkdirSync(itemsWt, { recursive: true });
-    linkSharedItemDirs(itemsMain, itemsWt);
+    const shared = sharedItemRoot(ticketDir);
+    linkSharedDir(join(spec.mainRepo, specPath, shared), join(spec.path, specPath, shared), {
+      replaceDisposable: true,
+    });
   }
 }
 
