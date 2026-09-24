@@ -70,5 +70,5 @@ existing boundaries in [guide/architecture.md](guide/architecture.md).
 - Write public-facing text in English.
 - Run checks proportionate to the change; use the full verification list in
   `CONTRIBUTING.md` when preparing a complete contribution.
-- Format with `npm run format` (Biome). Never run `npx prettier`: it pulls an
+- Format with `bun run format` (Biome). Never run `npx prettier`: it pulls an
   external version and rewrites files against the repository style.
