@@ -21,6 +21,17 @@ describe("Claude backend args", () => {
     expect(JSON_VERDICT_INSTRUCTION).not.toContain("\\n");
   });
 
+  test("grants the work item as add-dir when it lives outside cwd (worktree)", () => {
+    const scope = {
+      artifactsDir: "/main/.lance-nuit/work-items/P-1/artifacts",
+      workItemDir: "/main/.lance-nuit/work-items/P-1",
+    };
+    const outside = buildClaudeArgs("work", { cwd: "/wt", outputFormat: "text", artifactScope: scope });
+    expect(outside.join(" ")).toContain("--add-dir /main/.lance-nuit/work-items/P-1");
+    const inside = buildClaudeArgs("work", { cwd: "/main", outputFormat: "text", artifactScope: scope });
+    expect(inside.filter((a) => a === "--add-dir")).toHaveLength(1);
+  });
+
   test("passes cwd as add-dir and never sets an allowed-tools option", () => {
     const args = buildClaudeArgs("work", { cwd: "/repo", outputFormat: "text" });
     expect(args).toContain("/repo");

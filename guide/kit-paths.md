@@ -87,12 +87,14 @@ run cwd. For a ticket, artifacts and state are stored under:
 
 The top-level `.lance-nuit/runs/` fallback is used only for runs without a ticket.
 `.lance-nuit/run/` is a local lock/worktree directory, not the canonical snapshot
-location. Worktree setup copies the project config and requested work-item files
-into the linked worktree; `$PIPELINE_HOME` is still the shared kit root.
+location. Worktree setup copies the project config into the linked worktree;
+`$PIPELINE_HOME` is still the shared kit root.
 
-What a worktree must not own, it links back to the main clone: the work-item
-`runs/`, `reports/`, `artifacts/`, and `decisions/` directories, plus
-`.lance-nuit/pipeline-history/`:
+What a worktree must not own, it links back to the main clone: the whole
+work-item directory of the ticket (a sub-US links its parent), plus
+`.lance-nuit/pipeline-history/`. Steps and agents receive the work item by its
+real path in the main clone, never through the link: agent file search does not
+follow links, and backends grant that directory beside the worktree cwd.
 
 ```text
 <project>/.lance-nuit/pipeline-history/

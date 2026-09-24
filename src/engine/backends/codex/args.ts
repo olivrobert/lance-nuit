@@ -1,5 +1,5 @@
 import type { ArtifactScope } from "../../../contracts/index.js";
-import { artifactScopeInstruction } from "../artifact-scope.js";
+import { artifactScopeDirsOutside, artifactScopeInstruction } from "../artifact-scope.js";
 import { CODEX_SANDBOX, type CodexOptions } from "./types.js";
 
 export interface CodexArgsOptions {
@@ -37,6 +37,8 @@ export function buildCodexArgs(prompt: string, options: CodexOptions = {}, run: 
   if (options.skipGitRepoCheck) args.push("--skip-git-repo-check");
   if (!resumed) {
     for (const dir of options.addDirs ?? []) pushOption(args, "--add-dir", dir);
+    if (run.cwd)
+      for (const dir of artifactScopeDirsOutside(run.cwd, run.artifactScope)) pushOption(args, "--add-dir", dir);
     pushOption(args, "--cd", run.cwd);
   }
   if (run.outputFormat === "json" && run.schemaPath) args.push("--output-schema", run.schemaPath);
