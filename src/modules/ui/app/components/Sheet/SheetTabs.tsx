@@ -22,6 +22,7 @@ export function SheetTabs({ item, detail, current }: SheetTabsProps): JSX.Elemen
   const tree = detail.tree;
   const tabs: [SheetTab, string, boolean][] = [
     ["diagnostic", "Diagnostic", item.group === "failure" || Boolean(item.launch)],
+    ["recap", "Recap", Boolean(detail.recap)],
     ["steps", "Steps", Boolean(detail.steps)],
     ["document", "Document", Boolean(tree?.gatePath || tree?.defaultPath)],
     ["files", "Files", Boolean(tree)],

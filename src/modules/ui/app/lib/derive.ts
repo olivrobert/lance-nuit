@@ -17,6 +17,7 @@ import type {
   TreeFile,
   TreeNode,
   VerbAction,
+  WorkItemTree,
 } from "../api/types.js";
 
 /** Reading order of the list, and the heading each group carries. */
@@ -173,6 +174,7 @@ export function failedBeforeRun(item: Item): boolean {
 export function defaultSheetTab(item: Item): SheetTab {
   if (item.group === "failure") return "diagnostic";
   if (item.group === "running") return "steps";
+  if (item.group === "done") return "recap";
   return "document";
 }
 
@@ -183,10 +185,13 @@ export function defaultSheetTab(item: Item): SheetTab {
  * once, to the item's default — and `document` falls back further, to `files`
  * when there is a tree and to `diagnostic` when there is none. The chain is
  * shallow on purpose; a second-level fallback that could itself fall back would
- * be a loop waiting to happen.
+ * be a loop waiting to happen. `recap` is the one tab placed before that
+ * chain: without a recap it reads as a request for `document`, and goes no
+ * further than `document` itself would.
  */
 export function currentSheetTab(item: Item, detail: ItemDetail | null, requested: RequestedSheetTab): SheetTab {
-  const wanted = requested === "auto" ? defaultSheetTab(item) : requested;
+  const asked = requested === "auto" ? defaultSheetTab(item) : requested;
+  const wanted = asked === "recap" && !detail?.recap ? "document" : asked;
   const tree = detail?.tree;
   if (wanted === "document" && !tree?.gatePath && !tree?.defaultPath) return tree ? "files" : "diagnostic";
   if (wanted === "files" && !tree) return defaultSheetTab(item);
@@ -275,4 +280,45 @@ export function mimeOf(path: string): string {
   if (lower.endsWith(".gif")) return "image/gif";
   if (lower.endsWith(".webp")) return "image/webp";
   return "image/png";
+}
+
+/** The images of one directory of `reports/`, with the summary a browser step
+ *  left beside them, when it left one. */
+export interface ScreenshotGroup {
+  dir: string;
+  images: TreeFile[];
+  summary?: TreeFile;
+}
+
+/** Names a browser step gives the table that explains its screenshots. A
+ *  convention of the pipelines, not a contract: a directory without one simply
+ *  shows its images. */
+const SUMMARY_NAMES: readonly string[] = ["summary.md", "report.md"];
+
+function collectScreenshots(node: TreeNode, groups: ScreenshotGroup[]): void {
+  if (node.kind === "file") return;
+  const images = node.children.filter(
+    (child): child is TreeFile => child.kind === "file" && child.contentKind === "png",
+  );
+  if (images.length > 0) {
+    const summary = node.children.find(
+      (child): child is TreeFile => child.kind === "file" && SUMMARY_NAMES.includes(child.name.toLowerCase()),
+    );
+    groups.push({ dir: node.path, images, ...(summary ? { summary } : {}) });
+  }
+  for (const child of node.children) collectScreenshots(child, groups);
+}
+
+/**
+ * Screenshots of a run, grouped by the directory that holds them, in tree order.
+ *
+ * Only `reports/` is searched: it is where the pipelines put what a step
+ * produced as evidence, whereas an image under `artifacts/` is an input — a
+ * mock-up attached to the ticket — and would pass for a result of the run.
+ */
+export function screenshotGroups(tree: WorkItemTree | null): ScreenshotGroup[] {
+  const reports = tree?.children.find((node) => node.kind === "directory" && node.name === "reports");
+  const groups: ScreenshotGroup[] = [];
+  if (reports) collectScreenshots(reports, groups);
+  return groups;
 }

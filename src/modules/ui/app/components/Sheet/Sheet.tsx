@@ -35,6 +35,7 @@ import { Assumptions } from "./Assumptions.js";
 import { Callout, LaunchFailureCallout } from "./Callout.js";
 import { Launch } from "./Launch.js";
 import { Meta } from "./Meta.js";
+import { Recap } from "./Recap.js";
 import { Reply } from "./Reply.js";
 import styles from "./Sheet.module.css";
 import { SheetTabs } from "./SheetTabs.js";
@@ -46,9 +47,16 @@ import { TerminalLink } from "./TerminalLink.js";
 function TabContent(): JSX.Element | null {
   const { detail, sheetTab } = useUiState();
   if (!detail) return null;
-  const { item, steps } = detail;
+  const { item, steps, recap, tree } = detail;
   const tab = currentSheetTab(item, detail, sheetTab);
 
+  if (tab === "recap" && recap) {
+    return (
+      <section className={styles.primaryContent}>
+        <Recap item={item} recap={recap} tree={tree} />
+      </section>
+    );
+  }
   if (tab === "steps") {
     return (
       <section className={styles.primaryContent}>

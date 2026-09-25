@@ -217,6 +217,12 @@ export type FileRead =
   | { status: "not-found"; relativePath: string }
   | { status: "denied"; relativePath: string; reason: string };
 
+/** Raw read of one image, for an `<img src>`. */
+export type ImageRead =
+  | { status: "ok"; mime: string; bytes: Uint8Array }
+  | { status: "not-found" }
+  | { status: "denied"; reason: string };
+
 /** Persisted step status, as the run list shows it. */
 export type RunStepStatus = "pending" | "running" | "done" | "failed" | "skipped" | "aborted";
 
@@ -251,4 +257,52 @@ export interface RunStepsView {
   /** Present only while the run is RUNNING: the snapshot is behind, the journal
    *  is not. */
   lastEvent?: RunEventView;
+}
+
+/** Tokens an agent consumed, as the backends report them. `cacheWrite` is the
+ *  prompt cache being filled, `cacheRead` it being reused. */
+export interface RunTokens {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** What one step cost, in time and money. Every figure is optional: a command
+ *  step has a duration and nothing else, a skipped step has nothing at all. */
+export interface RunRecapStep {
+  id: string;
+  status: RunStepStatus;
+  durationMs?: number;
+  costUsd?: number;
+  /** The figure came from a rate table rather than from the provider. */
+  costEstimated?: true;
+  /** An attempt of the step spent tokens no pricing table could price. */
+  costUnknown?: true;
+  model?: string;
+  profile?: string;
+  retries?: number;
+  tokens?: RunTokens;
+}
+
+/**
+ * The run as a whole, once it is over: how long it took and where the money
+ * went. The run's own cost is not repeated here — `Item.cost` already carries
+ * it, with the latches that decide how it must be printed.
+ */
+export interface RunRecap {
+  pipeline: string;
+  runId: string;
+  status: ItemStatus;
+  /** First and last write of the snapshot. The span between them includes
+   *  every pause — a gate waiting overnight — so it is shown beside the active
+   *  time, never instead of it. */
+  startedAt?: string;
+  endedAt?: string;
+  /** Time spent executing steps, as the runner accounted it. */
+  activeMs?: number;
+  tokens?: RunTokens;
+  /** Models the steps ran on, in order of first use. */
+  models: string[];
+  steps: RunRecapStep[];
 }
