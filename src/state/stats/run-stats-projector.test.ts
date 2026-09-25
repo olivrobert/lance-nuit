@@ -140,3 +140,19 @@ test("run-stats-projector: an abort event carrying costUsd and usage changes not
   // Aborted is not failed: no fix event is fabricated from it.
   expect(bare.fixEvents).toEqual([]);
 });
+
+test("run-stats-projector: a node composing pipelines is attributed to no model", () => {
+  // Snapshots written before the fix carry the child's last model on the node; its
+  // tokens are the whole subtree's, and the child entries already break them down.
+  const run = runWithStores();
+  const step = run.steps[0]!;
+  step.control = { duration_ms: 60_000, total_cost_usd: 7.4, model: "claude-haiku-4-5" };
+  step.usage = { input_tokens: 400, output_tokens: 2000 };
+  step.orchestration = { kind: "forEachPipeline", children: [] };
+
+  const entry = projectRunStatsEntry(run, { ticketDir: "PROJ-42" });
+
+  expect(entry.models).toEqual({});
+  expect(entry.phases["quality.tests"]).toMatchObject({ costUsd: 7.4, tokens: { in: 400, out: 2000 } });
+  expect(entry.costUsd).toBeCloseTo(7.4, 8);
+});

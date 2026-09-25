@@ -41,6 +41,17 @@ function stepCost(step: RunRecapStep): string {
   });
 }
 
+/** Model cell of a step: its own model, or — for a node composing pipelines —
+ *  what each model of its children cost. */
+function stepModel(step: RunRecapStep): string {
+  const models = step.models?.map((split) =>
+    typeof split.costUsd === "number"
+      ? `${split.model} ${fmtCost({ usd: split.costUsd, estimated: false })}`
+      : split.model,
+  );
+  return [step.profile, ...(models ?? [step.model])].filter(Boolean).join(" · ");
+}
+
 function Figures({ item, recap }: { item: Item; recap: RunRecap }): JSX.Element {
   const tokens = recap.tokens;
   return (
@@ -105,7 +116,7 @@ function StepTable({ recap }: { recap: RunRecap }): JSX.Element {
                 <code>{step.id}</code>
                 {step.retries ? <span className="small mute">{` · ${step.retries} retries`}</span> : null}
               </td>
-              <td className="small mute">{[step.profile, step.model].filter(Boolean).join(" · ")}</td>
+              <td className="small mute">{stepModel(step)}</td>
               <td className={styles.num}>{fmtDuration(step.durationMs)}</td>
               <td className={styles.num}>{stepCost(step)}</td>
               <td className={styles.barCell}>
