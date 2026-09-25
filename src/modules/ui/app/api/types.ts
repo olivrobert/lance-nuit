@@ -112,3 +112,39 @@ export interface VerbAction {
   primary?: boolean;
   danger?: boolean;
 }
+
+/**
+ * One interactive run: a tmux session on the dashboard's own socket, running
+ * the reader's shell in the project's main clone. tmux is the authoritative
+ * state; the server rebuilds this record from the session's user options.
+ * Declared here until the server module that owns it can be re-exported.
+ */
+export interface TerminalInfo {
+  id: string;
+  project: string;
+  ticket: string;
+  pipeline: string;
+  worktree: boolean;
+  by: string;
+  /** ISO timestamp. */
+  createdAt: string;
+  /** For display only: the `lancenuit run …` line typed into the session. */
+  command: string;
+  /** The line a reader types to attach from their own terminal. */
+  attach: string;
+}
+
+/** `GET /api/projects/<name>/pipelines`. */
+export interface PipelinesResponse {
+  pipelines: string[];
+}
+
+/** `POST /api/runs`: the session started (201), or the one already there (409). */
+export interface RunResponse {
+  terminal: TerminalInfo;
+}
+
+/** `GET /api/terminals`. */
+export interface TerminalsResponse {
+  terminals: TerminalInfo[];
+}

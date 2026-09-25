@@ -1,0 +1,125 @@
+/* The terminal screen: a header, then the xterm filling what is left of the
+   viewport. The `minmax(0, 1fr)` track is what lets the pane shrink with the
+   window instead of pushing the page into a scroll, so the fit addon always
+   measures the space actually visible. */
+
+.screen {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  background: var(--bg);
+}
+
+.header {
+  display: grid;
+  gap: 6px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.back {
+  font-size: 13px;
+}
+
+/* The project is the loudest thing on the screen, on purpose. */
+.project {
+  padding: 1px 9px;
+  color: #fff;
+  border-radius: 5px;
+  background: var(--accent);
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.ticket {
+  font-size: 17px;
+}
+
+.commands {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  font-size: 12px;
+}
+
+.command {
+  flex: 1 1 320px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.attach button {
+  min-height: 24px;
+  padding: 2px 8px;
+}
+
+.pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  padding: 8px 10px 10px;
+  background: #1f2426;
+}
+
+/* Pinned to the second track: the notice above it comes and goes, and without
+   an explicit row the terminal would slide into the `auto` one. */
+.xterm {
+  grid-row: 2;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.notice {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  color: #e6ebe8;
+  border-radius: 5px;
+  background: #33393b;
+  font-size: 13px;
+}
+
+.notice button {
+  min-height: 26px;
+  margin-left: 6px;
+  padding: 2px 10px;
+}
+
+.notice a {
+  color: #9ec9e8;
+}
+
+.lost {
+  color: #fff;
+  background: var(--fail);
+}
+
+.ended {
+  color: var(--ink);
+  background: var(--stop-bg);
+}
+
+.ended a {
+  color: #285a80;
+}
+
+.message {
+  margin: 40px;
+}

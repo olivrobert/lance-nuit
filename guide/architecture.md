@@ -152,7 +152,8 @@ bin/lancenuit   verb-oriented wrapper
 browser, so it is the only one with a build of its own:
 
 ```text
-src/modules/ui/            server.ts, static-files.ts, actions.ts, store.ts (server side)
+src/modules/ui/            server.ts, static-files.ts, actions.ts, store.ts,
+                           tmux.ts, terminals.ts, terminal-viewers.ts (server side)
 src/modules/ui/app/        React 19 + TypeScript sources of the front end
   index.tsx                entry point: mounts <App> into #app
   App.tsx                  the shell (identity page, banner, project bar, list, sheet)

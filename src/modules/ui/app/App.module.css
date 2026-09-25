@@ -6,6 +6,11 @@
   height: 100dvh;
 }
 
+/* The terminal screen: the banner, then everything else for the terminal. */
+.terminalShell {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 /* The list and the sheet, side by side. The `minmax(0, 1fr)` on both tracks is
    what lets each of them scroll on its own instead of stretching the grid. */
 .mail {
@@ -76,5 +81,12 @@
     display: block;
     height: auto;
     min-height: 0;
+  }
+
+  /* A terminal needs a height to fit to, even where the inbox scrolls as one
+     page. */
+  .terminalShell {
+    display: grid;
+    height: 100dvh;
   }
 }
