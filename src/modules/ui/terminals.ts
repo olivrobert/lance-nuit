@@ -211,7 +211,11 @@ export async function startRun(request: StartRunRequest, deps: StartRunDeps): Pr
   if (!isTicketToken(request.ticket)) return { ok: false, status: 400, reason: "field `ticket` is required" };
   const ticket = ticketForProject(project, request.ticket);
   if (!ticket) {
-    return { ok: false, status: 400, reason: `ticket "${request.ticket}" does not belong to project "${project.name}"` };
+    return {
+      ok: false,
+      status: 400,
+      reason: `ticket "${request.ticket}" does not belong to project "${project.name}"`,
+    };
   }
   const reference = validateTicketRef(project, ticket, deps.workItems);
   if (!reference.ok) return { ok: false, status: 400, reason: reference.reason };
