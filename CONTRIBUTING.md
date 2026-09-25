@@ -6,13 +6,16 @@ issues and pull requests are welcome.
 ## Setup
 
 Requirements: [Bun](https://bun.sh) 1.3+ for dependency installation, repository
-scripts and the runner, plus Node.js 22+ and npm for development tooling and
-package verification, Git, and Bash. Tools such as ESLint, dependency-cruiser
-(which requires Node 22), and TypeScript keep their Node shebangs; do not force
-`--bun`. Node/npm remain required in CI and locally for the complete checks:
-`pack:audit` uses `npm pack`, and `verify:production` tests npm installation,
-registry resolution, and extension imports under Node. Using lance-nuit itself
-requires no Node.js; see the [usage guide](guide/usage.md#installation).
+scripts and the runner, Git, and Bash, plus Node.js 22+ and npm for packaging
+verification only: `pack:audit` uses `npm pack`, and `verify:production` tests
+npm installation, registry resolution, and extension imports under Node. Every
+other check runs on Bun alone. ESLint, dependency-cruiser and TypeScript keep
+their `node` shebangs, which `bun run` substitutes for its own runtime; a script
+that spawns one of them therefore names the package entry point and
+`process.execPath`, never the `node_modules/.bin/` wrapper, whose shebang a
+Bun-only machine cannot honour — it fails with exit 127 and an empty stdout, a
+symptom that does not name the missing runtime. Using lance-nuit itself requires
+no Node.js; see the [usage guide](guide/usage.md#installation).
 
 The security scanners are optional locally — CI installs them itself. To run
 them yourself:

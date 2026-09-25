@@ -4,6 +4,7 @@
 // supervision, bash, agent backends, and sessions. Machine reports and error
 // extraction live in `report-extraction.ts`.
 
+import { appendFileSync } from "node:fs";
 import type { AgentBackendRegistry, AttemptStats, RunnerResult } from "../contracts/backends.js";
 import {
   type AgentIntent,
@@ -200,6 +201,12 @@ export async function executeStep(
       return { ok: true, output: output ?? "", stats: { duration_ms: Date.now() - start } };
     } catch (e) {
       const message = errorMessage(e);
+      // The failure report points at the attempt log, and an in-process action
+      // writes nothing there on its own: without this entry the path it names
+      // is an empty directory. The stack already starts with the message.
+      if (budget?.stepLogPath) {
+        appendFileSync(budget.stepLogPath, `${e instanceof Error && e.stack ? e.stack : message}\n`);
+      }
       return {
         ok: false,
         output: message,
