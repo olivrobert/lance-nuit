@@ -56,3 +56,6 @@ src/modules/ui/static/app.css.map
 
 # Scratch notes (local only)
 .scratch/
+
+# AI working notes and plans (local only)
+.ia/
