@@ -46,3 +46,22 @@ export function fmtDate(iso: string | undefined | null): string {
   if (!iso) return ABSENT;
   return String(iso).slice(0, 16).replace("T", " ");
 }
+
+/** A duration, to the second under a minute and to the minute beyond: the
+ *  recap compares steps, and `1h 04m` reads faster than `3842 s`. */
+export function fmtDuration(ms: number | undefined | null): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return ABSENT;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}`;
+}
+
+/** A token count, in thousands or millions once it stops being readable whole. */
+export function fmtTokens(count: number | undefined | null): string {
+  if (typeof count !== "number" || !Number.isFinite(count)) return ABSENT;
+  if (count < 1000) return String(count);
+  if (count < 1_000_000) return `${(count / 1000).toFixed(1)} k`;
+  return `${(count / 1_000_000).toFixed(2)} M`;
+}

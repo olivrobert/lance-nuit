@@ -167,6 +167,24 @@ through an SSH tunnel that keeps the same port on both ends:
 `~/.lance-nuit/ui/users.json` (`{"users": ["Olivier"]}`); projects are added
 from the dashboard or in `~/.lance-nuit/ui/projects.json`.
 
+### Run recap
+
+A completed run opens on its **Recap** tab. The tab shows:
+
+- the run's cost, its active time, the time elapsed between the first and last
+  write of its snapshot (pauses included), its tokens, and the models it used;
+- each step that took at least a second or cost money, with its duration,
+  cost, profile, and model;
+- the screenshots found under the work item's `reports/`, grouped by
+  directory. A `summary.md` or `report.md` next to the images opens in the
+  Files tab.
+
+Every figure comes from the run's `state.json`, the ledger the budget is
+enforced against. The recap only displays those figures and never sums them.
+Images are served as raw bytes by
+`GET /api/items/<project>/<ticket>/raw?path=<relative path>`, and only files
+with an image extension are served this way.
+
 ### Launch an interactive run
 
 **Launch a run** opens a dialog: the ticket, the pipeline (listed from the
