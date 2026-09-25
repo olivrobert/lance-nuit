@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import type { Item, ItemDetail, Launch, RunStepsView, TreeNode, WorkItemTree } from "../api/types.js";
+import type {
+  Item,
+  ItemDetail,
+  Launch,
+  RunRecap,
+  RunStepsView,
+  TreeFile,
+  TreeNode,
+  WorkItemTree,
+} from "../api/types.js";
 import {
   countFiles,
   currentSheetTab,
@@ -12,6 +21,7 @@ import {
   mimeOf,
   queueCount,
   reasonOf,
+  screenshotGroups,
   splitKey,
   verbLabel,
   unmeteredResumeCommand,
@@ -70,7 +80,7 @@ const STEPS: RunStepsView = {
 };
 
 function detailOf(tree: WorkItemTree | null, steps: RunStepsView | null, item = makeItem()): ItemDetail {
-  return { item, tree, steps };
+  return { item, tree, steps, recap: null };
 }
 
 describe("reasonOf and headlineOf", () => {
@@ -208,17 +218,76 @@ describe("failedBeforeRun", () => {
   });
 });
 
+describe("screenshotGroups", () => {
+  function file(path: string, contentKind: TreeFile["contentKind"] = "png"): TreeFile {
+    return { kind: "file", name: path.split("/").at(-1) ?? path, path, size: 1, contentKind };
+  }
+
+  test("images of reports/ are grouped by directory, with the summary beside them", () => {
+    const tree: WorkItemTree = {
+      ...TREE,
+      children: [
+        { kind: "directory", name: "artifacts", path: "artifacts", children: [file("artifacts/mockup.png")] },
+        {
+          kind: "directory",
+          name: "reports",
+          path: "reports",
+          children: [
+            {
+              kind: "directory",
+              name: "screenshots",
+              path: "reports/screenshots",
+              children: [
+                file("reports/screenshots/01.png"),
+                file("reports/screenshots/summary.md", "md"),
+                file("reports/screenshots/02.png"),
+              ],
+            },
+            file("reports/constraints.md", "md"),
+          ],
+        },
+      ],
+    };
+
+    expect(screenshotGroups(tree)).toEqual([
+      {
+        dir: "reports/screenshots",
+        images: [file("reports/screenshots/01.png"), file("reports/screenshots/02.png")],
+        summary: file("reports/screenshots/summary.md", "md"),
+      },
+    ]);
+  });
+
+  test("no tree, or no reports/, means no screenshots", () => {
+    expect(screenshotGroups(null)).toEqual([]);
+    expect(screenshotGroups(TREE)).toEqual([]);
+  });
+});
+
 describe("defaultSheetTab", () => {
   test("each group opens on the tab that answers its question", () => {
     expect(defaultSheetTab(makeItem({ group: "failure" }))).toBe("diagnostic");
     expect(defaultSheetTab(makeItem({ group: "running" }))).toBe("steps");
     expect(defaultSheetTab(makeItem({ group: "decision" }))).toBe("document");
-    expect(defaultSheetTab(makeItem({ group: "done" }))).toBe("document");
+    expect(defaultSheetTab(makeItem({ group: "done" }))).toBe("recap");
   });
 });
 
 describe("currentSheetTab", () => {
   const withDocument: WorkItemTree = { ...TREE, gatePath: "artifacts/plan.md" };
+  const RECAP: RunRecap = { pipeline: "feature", runId: "run-1", status: "PASS", models: [], steps: [] };
+
+  test("a finished run opens on its recap", () => {
+    const item = makeItem({ group: "done" });
+    expect(currentSheetTab(item, { ...detailOf(withDocument, STEPS, item), recap: RECAP }, "auto")).toBe("recap");
+  });
+
+  test("recap with no recap reads as document, and falls back no further than document does", () => {
+    const item = makeItem({ group: "done" });
+    expect(currentSheetTab(item, detailOf(withDocument, STEPS, item), "auto")).toBe("document");
+    expect(currentSheetTab(item, detailOf(TREE, STEPS, item), "recap")).toBe("files");
+    expect(currentSheetTab(item, detailOf(null, null, item), "recap")).toBe("diagnostic");
+  });
 
   test("auto follows the item's default when the content exists", () => {
     const item = makeItem({ group: "decision" });

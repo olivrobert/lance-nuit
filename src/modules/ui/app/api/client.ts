@@ -88,6 +88,12 @@ export function fetchFile(
   return getJson<FileView>(itemUrl(item.project.name, item.ticket, `/file${query}`));
 }
 
+/** Address of one image of a work item as raw bytes, for an `<img src>`: a
+ *  gallery cannot afford one base64 JSON round-trip per screenshot. */
+export function rawFileUrl(item: Pick<Item, "project" | "ticket">, path: string): string {
+  return itemUrl(item.project.name, item.ticket, `/raw?path=${encodeURIComponent(path)}`);
+}
+
 export function fetchLaunchLog(id: string, lines: number): Promise<ApiResult<LaunchLog>> {
   return getJson<LaunchLog>(`/api/launches/${encodeURIComponent(id)}/log?lines=${lines}`);
 }

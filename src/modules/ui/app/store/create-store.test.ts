@@ -100,8 +100,8 @@ function fakeApi(scenario: Scenario = {}) {
 }
 
 const DETAILS: Record<string, ItemDetail> = {
-  "web/A": { item: A, tree: null, steps: null },
-  "web/B": { item: B, tree: null, steps: null },
+  "web/A": { item: A, tree: null, steps: null, recap: null },
+  "web/B": { item: B, tree: null, steps: null, recap: null },
 };
 
 describe("a detail answer that arrives after the reader moved on", () => {
