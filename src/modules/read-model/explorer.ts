@@ -21,7 +21,7 @@ import { isValidSubjectToken, readDecisionAt } from "../../state/decisions.js";
 import { isPathWithin } from "../../state/stores/path-safety.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
-import type { FileContentKind, FileRead, TreeDirectory, TreeFile, TreeNode, WorkItemTree } from "./types.js";
+import type { FileContentKind, FileRead, ImageRead, TreeDirectory, TreeFile, TreeNode, WorkItemTree } from "./types.js";
 
 /** Text, including an unknown extension: a work-item directory holds documents,
  *  reports, and journals, so serving an unknown file as text is right far more
@@ -31,6 +31,10 @@ export const TEXT_LIMIT_BYTES = 1024 * 1024;
 /** Images are the one binary the dashboard renders inline (a screenshot left by
  *  a browser step), so they get their own, larger cap. */
 export const IMAGE_LIMIT_BYTES = 2 * 1024 * 1024;
+
+/** Cap of an image served as raw bytes. Far above any screenshot, and still a
+ *  bound: the response is built in memory. */
+export const RAW_IMAGE_LIMIT_BYTES = 20 * 1024 * 1024;
 
 /** Reading order of the work-item directory: the business outputs first, the run
  *  telemetry last. Anything else — a nested work item, `ticket.md` — follows. */
@@ -304,8 +308,15 @@ function realRoot(path: string): string | undefined {
   }
 }
 
+/** Where a relative path of the tree lands on disk, once both containment
+ *  checks passed — or why it does not land anywhere. */
+type Located =
+  | { status: "ok"; real: string; contentKind: FileContentKind; size: number }
+  | { status: "not-found" }
+  | { status: "denied"; reason: string };
+
 /**
- * Read one file of a work item, read-only and bounded.
+ * Resolve one path of the tree to a real file of the work item.
  *
  * The path is the one the tree gave, relative to the effective work-item
  * directory — or, under the `run/` prefix, to a run directory that sits outside
@@ -313,17 +324,10 @@ function realRoot(path: string): string | undefined {
  * which answers `..`, then on the real path, which answers a symbolic link
  * pointing out of the tree.
  */
-export function readFile(
-  projectName: string,
-  ticket: string,
-  relativePath: string,
-  options: ReadModelOptions = {},
-): FileRead {
+function locate(projectName: string, ticket: string, relativePath: string, options: ReadModelOptions): Located {
   const resolved = resolveRun(projectName, ticket, options);
-  if (!resolved) return { status: "not-found", relativePath };
-  if (!isSafeRelativePath(relativePath)) {
-    return { status: "denied", relativePath, reason: "path escapes the work item" };
-  }
+  if (!resolved) return { status: "not-found" };
+  if (!isSafeRelativePath(relativePath)) return { status: "denied", reason: "path escapes the work item" };
 
   const detached = !isPathWithin(resolved.workItemDir, resolved.run.runDir);
   const underRun = detached && relativePath.startsWith(`${RUN_PREFIX}/`);
@@ -331,26 +335,37 @@ export function readFile(
   const path = underRun ? relativePath.slice(RUN_PREFIX.length + 1) : relativePath;
 
   const candidate = resolve(root, path);
-  if (!isPathWithin(root, candidate)) {
-    return { status: "denied", relativePath, reason: "path escapes the work item" };
-  }
+  if (!isPathWithin(root, candidate)) return { status: "denied", reason: "path escapes the work item" };
 
   let real: string;
   try {
     real = realpathSync(candidate);
   } catch {
     // Absent, or a broken link: nothing to read either way.
-    return { status: "not-found", relativePath };
+    return { status: "not-found" };
   }
 
   const realRootPath = realRoot(root);
   if (!realRootPath || !isPathWithin(realRootPath, real)) {
-    return { status: "denied", relativePath, reason: "path resolves outside the work item" };
+    return { status: "denied", reason: "path resolves outside the work item" };
   }
-  if (!isFile(real)) return { status: "not-found", relativePath };
+  if (!isFile(real)) return { status: "not-found" };
+  return { status: "ok", real, contentKind: contentKindOf(real), size: sizeOf(real) };
+}
 
-  const contentKind = contentKindOf(real);
-  const size = sizeOf(real);
+/** Read one file of a work item, read-only and bounded. See `locate` for how the
+ *  path is resolved and contained. */
+export function readFile(
+  projectName: string,
+  ticket: string,
+  relativePath: string,
+  options: ReadModelOptions = {},
+): FileRead {
+  const located = locate(projectName, ticket, relativePath, options);
+  if (located.status === "not-found") return { status: "not-found", relativePath };
+  if (located.status === "denied") return { status: "denied", relativePath, reason: located.reason };
+
+  const { real, contentKind, size } = located;
   const limit = limitFor(contentKind);
   if (size > limit) return { status: "too-large", path: real, relativePath, contentKind, size, limit };
 
@@ -369,5 +384,44 @@ export function readFile(
     // Readable a moment ago, unreadable now (permissions, removal): the reader
     // is told the file is not there rather than being handed an exception.
     return { status: "not-found", relativePath };
+  }
+}
+
+const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+
+/**
+ * The bytes of one image of a work item, for an `<img src>` rather than a JSON
+ * envelope: a gallery of screenshots would otherwise travel as base64 inside
+ * JSON, a third larger, and every one of them past `IMAGE_LIMIT_BYTES` would be
+ * refused.
+ *
+ * Only images are served this way. The MIME type comes from the extension, like
+ * every content kind of the explorer, so a text file renamed `.png` is at worst
+ * a broken image — never a document the browser would interpret.
+ */
+export function readImage(
+  projectName: string,
+  ticket: string,
+  relativePath: string,
+  options: ReadModelOptions = {},
+): ImageRead {
+  const located = locate(projectName, ticket, relativePath, options);
+  if (located.status !== "ok") return located;
+
+  const mime = IMAGE_MIME_BY_EXTENSION[extensionOf(basename(located.real))];
+  if (!mime) return { status: "denied", reason: "not an image" };
+  if (located.size > RAW_IMAGE_LIMIT_BYTES) return { status: "denied", reason: "image too large" };
+
+  try {
+    return { status: "ok", mime, bytes: readFileSync(located.real) };
+  } catch {
+    // Same as `readFile`: a file that became unreadable is reported absent.
+    return { status: "not-found" };
   }
 }

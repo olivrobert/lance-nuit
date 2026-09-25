@@ -28,9 +28,12 @@ export type {
   LaunchRecord,
   ProjectEntry,
   RunEventView,
+  RunRecap,
+  RunRecapStep,
   RunStepStatus,
   RunStepsView,
   RunStepView,
+  RunTokens,
   TreeDirectory,
   TreeFile,
   TreeNode,
@@ -38,7 +41,7 @@ export type {
 } from "../../../read-model/index.js";
 export type { Verb } from "../../actions.js";
 
-import type { FileRead, Item, ProjectEntry, RunStepsView, WorkItemTree } from "../../../read-model/index.js";
+import type { FileRead, Item, ProjectEntry, RunRecap, RunStepsView, WorkItemTree } from "../../../read-model/index.js";
 
 /** `GET /api/me` and `POST /api/me`. `user` is `null` until a name is chosen. */
 export interface MeResponse {
@@ -57,12 +60,13 @@ export interface ItemsResponse {
   items: Item[];
 }
 
-/** `GET /api/items/<project>/<ticket>`: the three reads the sheet shows
- *  together. `tree` and `steps` are `null` when the run has neither. */
+/** `GET /api/items/<project>/<ticket>`: the reads the sheet shows together.
+ *  `tree`, `steps` and `recap` are `null` when the run has none. */
 export interface ItemDetail {
   item: Item;
   tree: WorkItemTree | null;
   steps: RunStepsView | null;
+  recap: RunRecap | null;
 }
 
 /**
@@ -100,7 +104,7 @@ export type Queue = "attention" | "running" | "done";
 
 /** Sheet tabs. `auto` is not a tab: it means "follow the item's state", and is
  *  resolved by `currentSheetTab`. */
-export type SheetTab = "diagnostic" | "steps" | "document" | "files";
+export type SheetTab = "diagnostic" | "recap" | "steps" | "document" | "files";
 export type RequestedSheetTab = SheetTab | "auto";
 
 /** One action button: the verb posted, its label, and the command the server
