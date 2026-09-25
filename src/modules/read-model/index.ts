@@ -4,7 +4,15 @@
 // `src/state`. The dashboard (`src/modules/ui/`) imports this file and nothing
 // below it; a Semgrep `ERROR` rule in `.semgrep.yml` enforces that direction.
 
-export { contentKindOf, IMAGE_LIMIT_BYTES, readFile, readTree, TEXT_LIMIT_BYTES } from "./explorer.js";
+export {
+  contentKindOf,
+  IMAGE_LIMIT_BYTES,
+  RAW_IMAGE_LIMIT_BYTES,
+  readFile,
+  readImage,
+  readTree,
+  TEXT_LIMIT_BYTES,
+} from "./explorer.js";
 export { GROUP_ORDER, listItems, readItem } from "./items.js";
 export {
   describeLaunch,
@@ -25,12 +33,14 @@ export {
   uiDir,
   workItemsRoot,
 } from "./projects.js";
+export { readRecap } from "./recap.js";
 export { readSteps } from "./steps.js";
 export { isTicketToken, validateTicketRef } from "./tickets.js";
 export type {
   ApprovalState,
   FileContentKind,
   FileRead,
+  ImageRead,
   Item,
   ItemApproval,
   ItemClosure,
@@ -45,9 +55,12 @@ export type {
   Launch,
   LaunchRecord,
   RunEventView,
+  RunRecap,
+  RunRecapStep,
   RunStepStatus,
   RunStepsView,
   RunStepView,
+  RunTokens,
   TreeDirectory,
   TreeFile,
   TreeNode,

@@ -31,9 +31,11 @@ import {
   type ProjectEntry,
   listItems,
   readFile,
+  readImage,
   readItem,
   readLaunchesFor,
   readProjects,
+  readRecap,
   readSteps,
   readTree,
   validateTicketRef,
@@ -246,8 +248,8 @@ async function handleItems(res: ServerResponse, env: NodeJS.ProcessEnv): Promise
 }
 
 /** One item, with everything the detail pane shows: the item, its folder tree,
- *  and its run's steps. Three reads of the same work item, answered in one
- *  round-trip because the pane shows them together. */
+ *  its run's steps, and the run's recap. Reads of the same work item, answered
+ *  in one round-trip because the pane shows them together. */
 async function handleItem(res: ServerResponse, project: string, ticket: string, env: NodeJS.ProcessEnv): Promise<void> {
   const item = await findItem(project, ticket, env);
   if (!item) {
@@ -258,6 +260,7 @@ async function handleItem(res: ServerResponse, project: string, ticket: string, 
     item,
     tree: readTree(project, ticket, { env }) ?? null,
     steps: readSteps(project, ticket, { env }) ?? null,
+    recap: readRecap(project, ticket, { env }) ?? null,
   });
 }
 
@@ -302,6 +305,50 @@ async function handleFile(
     return;
   }
   sendJson(res, 200, { ...file, html: renderMarkdown(file.content) });
+}
+
+/**
+ * One image of a work item, as raw bytes, for an `<img src>`.
+ *
+ * The one binary answer of the API. It may be cached privately for a short
+ * while: a screenshot of a finished run does not change, and a gallery reloaded
+ * on every poll of the sheet would fetch every image again.
+ */
+async function handleRaw(
+  res: ServerResponse,
+  project: string,
+  ticket: string,
+  url: URL,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const item = await findItem(project, ticket, env);
+  if (!item) {
+    sendError(res, 404, "unknown work item");
+    return;
+  }
+
+  const path = url.searchParams.get("path");
+  if (!path) {
+    sendError(res, 400, "query parameter `path` is required");
+    return;
+  }
+
+  const image = readImage(project, ticket, path, { env });
+  if (image.status === "denied") {
+    sendError(res, 403, image.reason, { relativePath: path });
+    return;
+  }
+  if (image.status === "not-found") {
+    sendError(res, 404, "file not found", { relativePath: path });
+    return;
+  }
+  res.writeHead(200, {
+    "Content-Type": image.mime,
+    "Content-Length": String(image.bytes.byteLength),
+    "Cache-Control": "private, max-age=300",
+    "X-Content-Type-Options": "nosniff",
+  });
+  res.end(image.bytes);
 }
 
 function handleProjects(res: ServerResponse, env: NodeJS.ProcessEnv): void {
@@ -860,6 +907,10 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
     }
     if (tail[0] === "file") {
       await handleFile(res, project, ticket, url, env);
+      return;
+    }
+    if (tail[0] === "raw") {
+      await handleRaw(res, project, ticket, url, env);
       return;
     }
     sendError(res, 404, "not found");

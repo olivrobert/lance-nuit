@@ -1,7 +1,14 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { IMAGE_LIMIT_BYTES, readFile, readTree, TEXT_LIMIT_BYTES } from "./explorer.ts";
+import {
+  IMAGE_LIMIT_BYTES,
+  RAW_IMAGE_LIMIT_BYTES,
+  readFile,
+  readImage,
+  readTree,
+  TEXT_LIMIT_BYTES,
+} from "./explorer.ts";
 import {
   cleanupTempDirs,
   makeProject,
@@ -283,4 +290,33 @@ test("readFile: an absent file, a directory, and an unknown item all read as mis
   expect(readFile("demo-app", "DEMO-1", "artifacts/nope.md").status).toBe("not-found");
   expect(readFile("demo-app", "DEMO-1", "artifacts").status).toBe("not-found");
   expect(readFile("demo-app", "DEMO-404", "artifacts/plan.md").status).toBe("not-found");
+});
+
+test("readImage: an image comes back as bytes with the MIME of its extension", () => {
+  const project = listedProject();
+  stoppedWorkItem(project, "DEMO-1", "plan");
+  const bytes = Buffer.alloc(IMAGE_LIMIT_BYTES + 1, 7);
+  writeWorkItemFile(project, "DEMO-1", "reports/screenshots/01-home.jpg", "");
+  writeFileSync(join(workItemDir(project, "DEMO-1"), "reports", "screenshots", "01-home.jpg"), bytes);
+
+  const result = readImage("demo-app", "DEMO-1", "reports/screenshots/01-home.jpg");
+
+  // Past the JSON cap: the raw route exists so a screenshot this size still shows.
+  expect(result.status).toBe("ok");
+  expect(result.status === "ok" && result.mime).toBe("image/jpeg");
+  expect(result.status === "ok" && result.bytes.byteLength).toBe(IMAGE_LIMIT_BYTES + 1);
+});
+
+test("readImage: a text file, a traversal, and an oversized image are refused", () => {
+  const project = listedProject();
+  stoppedWorkItem(project, "DEMO-1", "plan");
+  writeFileSync(join(workItemDir(project, "DEMO-1"), "artifacts", "huge.png"), Buffer.alloc(RAW_IMAGE_LIMIT_BYTES + 1));
+
+  expect(readImage("demo-app", "DEMO-1", "artifacts/plan.md")).toEqual({ status: "denied", reason: "not an image" });
+  expect(readImage("demo-app", "DEMO-1", "../../../etc/passwd").status).toBe("denied");
+  expect(readImage("demo-app", "DEMO-1", "artifacts/huge.png")).toEqual({
+    status: "denied",
+    reason: "image too large",
+  });
+  expect(readImage("demo-app", "DEMO-1", "artifacts/absent.png").status).toBe("not-found");
 });
