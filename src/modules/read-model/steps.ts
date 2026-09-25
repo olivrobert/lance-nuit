@@ -22,7 +22,9 @@ import type { ItemFailCause, ItemFailKind, RunEventView, RunStepStatus, RunSteps
  *  without loading a journal that grew to megabytes. */
 const TAIL_BYTES = 64 * 1024;
 
-function statusOf(step: PersistedStepState): RunStepStatus {
+/** Persisted step status in the dashboard's vocabulary; shared with the recap so
+ *  both views name a step's state the same way. */
+export function stepStatusOf(step: PersistedStepState): RunStepStatus {
   switch (step.status) {
     case "pending":
     case "running":
@@ -56,7 +58,7 @@ function stepView(step: PersistedStepState): RunStepView {
   const failCause = failCauseOf(step.fail_cause);
   return {
     id: step.id,
-    status: statusOf(step),
+    status: stepStatusOf(step),
     ...(step.started_at ? { startedAt: step.started_at } : {}),
     ...(step.finished_at ? { finishedAt: step.finished_at } : {}),
     ...(typeof step.retries === "number" && step.retries > 0 ? { retries: step.retries } : {}),

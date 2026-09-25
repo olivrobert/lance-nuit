@@ -6,6 +6,7 @@ import {
   cleanupTempDirs,
   makeProject,
   makeTempDir,
+  workItemDir,
   writeArtifact,
   writeProjectsFile,
   writeRun,
@@ -193,7 +194,7 @@ test("api: the morning box lists the fixture item", async () => {
   expect(body.items[0]?.stop?.subject).toBe("plan");
 });
 
-test("api: one item carries its tree and its steps", async () => {
+test("api: one item carries its tree, its steps, and its recap", async () => {
   const { url } = await fixture();
   const response = await fetch(url("/api/items/demo-app/DEMO-1"));
 
@@ -202,10 +203,13 @@ test("api: one item carries its tree and its steps", async () => {
     item: { ticket: string };
     tree: { gatePath?: string } | null;
     steps: { steps: Array<{ id: string }> } | null;
+    recap: { runId: string; steps: Array<{ id: string }> } | null;
   };
   expect(body.item.ticket).toBe("DEMO-1");
   expect(body.tree?.gatePath).toBe("artifacts/plan.md");
   expect(body.steps?.steps.map((step) => step.id)).toEqual(["plan"]);
+  expect(body.recap?.runId).toBe("r-stopped");
+  expect(body.recap?.steps.map((step) => step.id)).toEqual(["plan"]);
 });
 
 test("api: an unknown project or ticket is 404, never a filesystem lookup", async () => {
@@ -240,6 +244,23 @@ test("api: a missing file is 404 and a missing `path` is 400", async () => {
   const { url } = await fixture();
   expect((await fetch(url("/api/items/demo-app/DEMO-1/file?path=artifacts/absent.md"))).status).toBe(404);
   expect((await fetch(url("/api/items/demo-app/DEMO-1/file"))).status).toBe(400);
+});
+
+test("api: an image comes back as raw bytes; anything else is refused", async () => {
+  const { project, url } = await fixture();
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  writeFileSync(join(workItemDir(project, "DEMO-1"), "artifacts", "shot.png"), png);
+
+  const image = await fetch(url("/api/items/demo-app/DEMO-1/raw?path=artifacts/shot.png"));
+  expect(image.status).toBe(200);
+  expect(image.headers.get("content-type")).toBe("image/png");
+  expect(image.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(Buffer.from(await image.arrayBuffer()).equals(png)).toBe(true);
+
+  expect((await fetch(url("/api/items/demo-app/DEMO-1/raw?path=artifacts/plan.md"))).status).toBe(403);
+  expect((await fetch(url("/api/items/demo-app/DEMO-1/raw?path=../../../../etc/passwd"))).status).toBe(403);
+  expect((await fetch(url("/api/items/demo-app/DEMO-1/raw?path=artifacts/absent.png"))).status).toBe(404);
+  expect((await fetch(url("/api/items/demo-app/DEMO-1/raw"))).status).toBe(400);
 });
 
 test("projects: adding one writes projects.json and shows up in the list", async () => {
