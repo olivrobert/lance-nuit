@@ -56,6 +56,7 @@ export type {
   LaunchRecord,
   RunEventView,
   RunRecap,
+  RunModelCost,
   RunRecapStep,
   RunStepStatus,
   RunStepsView,

@@ -279,10 +279,22 @@ export interface RunRecapStep {
   costEstimated?: true;
   /** An attempt of the step spent tokens no pricing table could price. */
   costUnknown?: true;
+  /** Model of a step that ran one agent. Absent on a node composing pipelines,
+   *  which ran none of its own: see `models`. */
   model?: string;
+  /** Spend of a node composing pipelines, split by the models its child runs
+   *  used, costliest first. */
+  models?: RunModelCost[];
   profile?: string;
   retries?: number;
   tokens?: RunTokens;
+}
+
+/** What one model cost inside a composed subtree. `costUsd` is absent when no
+ *  step on that model reported a figure. */
+export interface RunModelCost {
+  model: string;
+  costUsd?: number;
 }
 
 /**

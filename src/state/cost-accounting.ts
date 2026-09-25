@@ -363,11 +363,9 @@ export function chargeChildReconciliation(input: ChildReconciliation): number {
       ...(step.control?.total_cost_usd !== undefined || delta > 0
         ? { total_cost_usd: (step.control?.total_cost_usd ?? 0) + delta }
         : {}),
-      ...(child.total_control?.model
-        ? { model: child.total_control.model }
-        : step.control?.model
-          ? { model: step.control.model }
-          : {}),
+      // No `model`: a child runs as many models as it has agent steps, and its
+      // `total_control.model` is only the last one. Copied here it labelled the
+      // whole subtree's spend with, say, the commit-message extractor's model.
       ...(child.total_control?.provider
         ? { provider: child.total_control.provider }
         : step.control?.provider
