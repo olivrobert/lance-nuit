@@ -210,7 +210,11 @@ export function projectStepStats(
   }
 
   const attemptsWithModel = (step.attempts ?? []).filter((attempt) => !!attempt.control?.model);
-  if (attemptsWithModel.length > 0) {
+  if (step.orchestration) {
+    // A node that composes pipelines ran no model of its own: its tokens are its
+    // children's, which their own entries break down by model. Snapshots written
+    // before the fix still carry the last child model here; it is ignored.
+  } else if (attemptsWithModel.length > 0) {
     for (const attempt of attemptsWithModel) addModelUsage(aggregate.models, attempt.control!.model!, attempt.usage);
   } else if (step.control?.model) {
     // Snapshots without attempt detail remain grouped under the last known model;

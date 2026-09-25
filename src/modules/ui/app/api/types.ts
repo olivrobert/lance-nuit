@@ -29,6 +29,7 @@ export type {
   ProjectEntry,
   RunEventView,
   RunRecap,
+  RunModelCost,
   RunRecapStep,
   RunStepStatus,
   RunStepsView,

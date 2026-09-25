@@ -174,7 +174,9 @@ A completed run opens on its **Recap** tab. The tab shows:
 - the run's cost, its active time, the time elapsed between the first and last
   write of its snapshot (pauses included), its tokens, and the models it used;
 - each step that took at least a second or cost money, with its duration,
-  cost, profile, and model;
+  cost, profile, and model. A step that composes pipelines (`runPipeline`,
+  `forEachPipeline`) ran no model of its own: it shows what each model of its
+  child runs cost instead;
 - the screenshots found under the work item's `reports/`, grouped by
   directory. A `summary.md` or `report.md` next to the images opens in the
   Files tab.
