@@ -281,6 +281,20 @@ test("chargeChildReconciliation: a child is charged once, by difference", () => 
   expect(reconciled.map((event) => event.deltaCostUsd)).toEqual([1.5, 0]);
 });
 
+test("chargeChildReconciliation: the parent node takes no model from its child", () => {
+  // The child's run-level model is its LAST agent step's; on the parent it would
+  // label the whole subtree's spend with, say, a cheap extractor's model.
+  const step = { id: "compose" } as RunStep;
+  const parent = makeRun([step]);
+  const child = makeRun();
+  child.total_control = { duration_ms: 10, total_cost_usd: 7.4, model: "claude-haiku-4-5" };
+
+  chargeChildReconciliation({ parent, step, ref: childRef(), child, budget: { cumulative: 0 }, fallbackCost: 0 });
+
+  expect(step.control?.total_cost_usd).toBeCloseTo(7.4, 8);
+  expect(step.control?.model).toBeUndefined();
+});
+
 test("chargeChildReconciliation: a child that could not price itself latches the parent", () => {
   const step = { id: "compose" } as RunStep;
   const parent = makeRun([step]);

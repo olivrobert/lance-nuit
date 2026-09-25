@@ -109,3 +109,123 @@ test("recap: an unknown project or work item has no recap", () => {
   expect(readRecap("demo-app", "DEMO-404")).toBeUndefined();
   expect(readRecap("unknown", "DEMO-1")).toBeUndefined();
 });
+
+test("recap: a node composing pipelines shows its children's models, not the last one", () => {
+  const project = listedProject();
+  // The child run: a costly coder on one model, a cheap extractor last on another.
+  writeRun(project, "DEMO-1", "lot", {
+    runId: "lot-1",
+    status: "PASS",
+    updatedAt: "2026-09-05T07:30:00.000Z",
+    steps: [
+      { id: "scope", status: "done", retries: 0, control: { duration_ms: 500 } },
+      {
+        id: "implement",
+        status: "done",
+        retries: 0,
+        control: { duration_ms: 1000, total_cost_usd: 5, model: "opus" },
+      },
+      {
+        id: "review",
+        status: "done",
+        retries: 0,
+        control: { duration_ms: 1000, total_cost_usd: 2, model: "opus" },
+      },
+      {
+        id: "commit-message",
+        status: "done",
+        retries: 0,
+        control: { duration_ms: 1000, total_cost_usd: 0.25, model: "haiku" },
+      },
+    ],
+  });
+  writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "PASS",
+    updatedAt: "2026-09-05T08:00:00.000Z",
+    steps: [
+      {
+        id: "plan",
+        status: "done",
+        retries: 0,
+        control: { duration_ms: 1000, total_cost_usd: 1, model: "opus" },
+      },
+      {
+        id: "implement-lots",
+        status: "done",
+        retries: 0,
+        // Written before the runner stopped copying the child's last model here.
+        control: { duration_ms: 3000, total_cost_usd: 7.25, model: "haiku" },
+        orchestration: {
+          kind: "forEachPipeline",
+          children: [
+            {
+              key: "main:0",
+              kind: "main",
+              pipeline: "lot",
+              ticket: "DEMO-1",
+              runId: "lot-1",
+              status: "done",
+              accountedCostUsd: 7.25,
+            },
+            // Never started: no run to read, no split to show.
+            { key: "main:1", kind: "main", pipeline: "lot", status: "pending", accountedCostUsd: 0 },
+          ],
+        },
+      },
+    ],
+  });
+
+  const recap = readRecap("demo-app", "DEMO-1");
+
+  expect(recap?.steps[1]).toEqual({
+    id: "implement-lots",
+    status: "done",
+    durationMs: 3000,
+    // The node's own figure stays the ledger's; the split only explains it.
+    costUsd: 7.25,
+    models: [
+      { model: "opus", costUsd: 7 },
+      { model: "haiku", costUsd: 0.25 },
+    ],
+  });
+  expect(recap?.models).toEqual(["opus", "haiku"]);
+});
+
+test("recap: a child reference that cannot name a run safely is skipped", () => {
+  const project = listedProject();
+  writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "PASS",
+    steps: [
+      {
+        id: "implement-lots",
+        status: "done",
+        retries: 0,
+        control: { duration_ms: 3000, total_cost_usd: 1, model: "haiku" },
+        orchestration: {
+          kind: "runPipeline",
+          children: [
+            { key: "main:0", kind: "main", pipeline: "..", runId: "x", status: "done", accountedCostUsd: 1 },
+            {
+              key: "main:1",
+              kind: "main",
+              pipeline: "lot",
+              ticket: "../etc",
+              runId: "x",
+              status: "done",
+              accountedCostUsd: 0,
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  expect(readRecap("demo-app", "DEMO-1")?.steps[0]).toEqual({
+    id: "implement-lots",
+    status: "done",
+    durationMs: 3000,
+    costUsd: 1,
+  });
+});
