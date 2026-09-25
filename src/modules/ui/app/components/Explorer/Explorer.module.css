@@ -21,6 +21,10 @@
 .folder {
   display: grid;
   grid-template-columns: minmax(180px, 230px) minmax(0, 1fr);
+  /* Without an explicit row, the implicit one grows to the content and the
+     columns never overflow themselves: `max-height` would clip them instead of
+     letting `.tree` and `.view` scroll. */
+  grid-template-rows: minmax(0, 1fr);
   min-height: 300px;
   max-height: 62vh;
   overflow: hidden;
