@@ -68,6 +68,10 @@ export interface RunnerArgs {
   approve?: string;
   /** Record --approve, then exit without running a pipeline. */
   approveOnly: boolean;
+  /** Mark the latest run of `--pipeline` as closed by hand, then exit. */
+  close: boolean;
+  /** Remove a closure written by --close, then exit. */
+  reopen: boolean;
   /** Diagnostic commands outside a run. */
   inspect: boolean;
   logs: boolean;
@@ -261,6 +265,13 @@ export const FLAGS: FlagSpec[] = [
     kind: "boolean",
     desc: "With --approve, write the decision and exit without running the pipeline.",
   },
+  {
+    long: "--close",
+    key: "close",
+    kind: "boolean",
+    desc: "Mark the latest failed or stopped run of --pipeline as closed by hand, without changing its status.",
+  },
+  { long: "--reopen", key: "reopen", kind: "boolean", desc: "Remove the closure written by --close." },
   { long: "--inspect", key: "inspect", kind: "boolean", desc: "Display a ticket's run state." },
   { long: "--logs", key: "logs", kind: "boolean", desc: "Display a ticket's logs, optionally filtered by --step." },
   {

@@ -166,3 +166,25 @@ Project helpers can build richer gates that add an escalation note, branch
 cleanup, or a resume command. Those policies use the same hash-locked decision
 primitive; they do not change the distinction between human control and capacity
 escalation. The package's current `default` pipeline declares no approval subject.
+
+## Close a run finished by hand
+
+When a ticket was finished outside lance-nuit, its last failed, stopped, or
+aborted run keeps waiting for attention. Close it:
+
+```bash
+lancenuit close PROJ-28 --pipeline release
+lancenuit reopen PROJ-28 --pipeline release   # undo
+```
+
+The dashboard offers the same action as **Mark as closed**, under **More
+actions**, and **Reopen** on a closed item.
+
+A closure is not a verdict. `state.json` keeps its `FAIL`, `STOPPED`, or
+`ABORTED` status, so resume, stats, and history are unchanged. The command writes
+`closure.json` beside the snapshot, with the actor (`LANCENUIT_ACTOR`, as for an
+approval) and the snapshot's `updatedAt`. The dashboard lists the item under
+**Completed** with a `CLOSED` tag. The closure only applies to the snapshot it was
+taken on: once a later rerun or approval writes the snapshot again, it no longer
+applies, and the item comes back to the attention queue. Passed and running runs
+cannot be closed.

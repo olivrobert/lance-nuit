@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { writeClosureAt } from "../../state/closure.ts";
 import { listItems, readItem } from "./items.ts";
 import {
   cleanupTempDirs,
@@ -523,4 +524,38 @@ test("items: the typed stop kind decides which banner a run gets, over the flags
 
   expect(cost.costUnaccounted).toBe(true);
   expect(cost.budgetExceeded).toBeUndefined();
+});
+
+test("items: a closed failure is done, keeps its status, and reopens when the run moves", async () => {
+  const project = listedProject();
+  const updatedAt = "2026-09-05T08:00:00.000Z";
+  const runDir = writeRun(project, "DEMO-8", "feature", { runId: "r-fail", status: "FAIL", updatedAt });
+  writeClosureAt(runDir, {
+    schemaVersion: 1,
+    closedAt: "2026-09-06T08:00:00.000Z",
+    closedBy: "Olivier",
+    runUpdatedAt: updatedAt,
+  });
+
+  const [closed] = await listItems();
+  expect(closed?.group).toBe("done");
+  expect(closed?.status).toBe("FAIL");
+  expect(closed?.closed).toEqual({ at: "2026-09-06T08:00:00.000Z", by: "Olivier" });
+
+  // The runner rewrote the snapshot after the closure: the closure is stale.
+  writeRun(project, "DEMO-8", "feature", { runId: "r-fail", status: "FAIL", updatedAt: "2026-09-07T08:00:00.000Z" });
+  const [moved] = await listItems();
+  expect(moved?.group).toBe("failure");
+  expect(moved?.closed).toBeUndefined();
+});
+
+test("items: a closure on a run nobody waits on is ignored", async () => {
+  const project = listedProject();
+  const updatedAt = "2026-09-05T08:00:00.000Z";
+  const runDir = writeRun(project, "DEMO-9", "feature", { runId: "r-run", status: "RUNNING", updatedAt });
+  writeClosureAt(runDir, { schemaVersion: 1, closedAt: updatedAt, closedBy: "Olivier", runUpdatedAt: updatedAt });
+
+  const [item] = await listItems();
+  expect(item?.group).toBe("running");
+  expect(item?.closed).toBeUndefined();
 });

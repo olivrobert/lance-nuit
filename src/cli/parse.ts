@@ -27,6 +27,8 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
     version: false,
     wrapperHelp: false,
     approveOnly: false,
+    close: false,
+    reopen: false,
     inspect: false,
     logs: false,
     clean: false,
@@ -101,6 +103,9 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
   }
   if (args.approve && !args.ticket) {
     throw new CliError("Option --approve requires a ticket.");
+  }
+  if (args.close && args.reopen) {
+    throw new CliError("Commands --close and --reopen are mutually exclusive.");
   }
   if ([args.inspect, args.logs, args.clean].filter(Boolean).length > 1) {
     throw new CliError("Commands --inspect, --logs, and --clean are mutually exclusive.");

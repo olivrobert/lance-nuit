@@ -192,6 +192,14 @@ case "$VERB" in
     exec "$RUNNER_BIN" "$RUNNER_ENTRY" "$TICKET" --pipeline "$APPROVE_PIPELINE" \
       --approve "$SUBJECT" --approve-only "${APPROVE_ARGS[@]+"${APPROVE_ARGS[@]}"}"
     ;;
+  close|reopen)
+    if [[ $# -lt 1 ]]; then
+      echo "Usage: lancenuit $VERB <id> --pipeline <name>" >&2
+      exit 1
+    fi
+    TICKET="$1"; shift
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" "$TICKET" "--$VERB" "$@"
+    ;;
 esac
 
 # Map command to pipeline NAME (`run` uses default; `single` disables dispatch).

@@ -49,6 +49,18 @@ export const WRAPPER_COMMANDS: readonly WrapperCommand[] = [
     desc: "Record approval for a subject declared by the pipeline, without running (use `run --approve <subject>` to approve and resume).",
   },
   {
+    verb: "close",
+    flag: "--close",
+    usage: "close <id> --pipeline <name>",
+    desc: "Mark the latest failed or stopped run as closed by hand; its status is kept, and a later run reopens it.",
+  },
+  {
+    verb: "reopen",
+    flag: "--reopen",
+    usage: "reopen <id> --pipeline <name>",
+    desc: "Remove the closure written by close.",
+  },
+  {
     verb: "inspect",
     flag: "--inspect",
     usage: "inspect <id>",

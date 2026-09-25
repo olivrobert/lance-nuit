@@ -75,6 +75,14 @@ export interface ItemCost {
   unknown?: boolean;
 }
 
+/** A failed or stopped run somebody closed by hand (`lancenuit close`): the
+ *  ticket was finished outside lance-nuit. The status is kept; only the group
+ *  changes. */
+export interface ItemClosure {
+  at: string;
+  by: string;
+}
+
 /** Dashboard record of one verb it triggered, as written to
  *  `~/.lance-nuit/ui/launches/<id>.json` (spec 5.2). `exitCode` is `null` when the
  *  process ended without a code the server could observe — killed, or gone when
@@ -138,6 +146,9 @@ export interface Item {
   /** Latest dashboard launch for this item, when one exists. An alive launch puts
    *  the item in the `running` group whatever `state.json` still says. */
   launch?: Launch;
+  /** Present while a hand closure still describes the run: the item is then in
+   *  the `done` group whatever its status. */
+  closed?: ItemClosure;
 }
 
 /** How the dashboard renders a file, derived from its extension alone. `other`

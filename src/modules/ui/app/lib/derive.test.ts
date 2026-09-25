@@ -103,22 +103,31 @@ describe("reasonOf and headlineOf", () => {
 describe("verbsFor", () => {
   test("a stop with a subject offers approve-and-rerun, approve only, and start fresh", () => {
     const verbs = verbsFor(makeItem({ status: "STOPPED", stop: { detail: "gate", subject: "plan" } }));
-    expect(verbs.map((verb) => verb.verb)).toEqual(["approve-and-rerun", "approve", "fresh"]);
+    expect(verbs.map((verb) => verb.verb)).toEqual(["approve-and-rerun", "approve", "close", "fresh"]);
     expect(verbs[0]?.primary).toBe(true);
     expect(verbs[0]?.command).toBe("lancenuit run ABC-1 --pipeline feature --approve plan");
   });
 
   test("a stop with no subject offers a plain rerun", () => {
     const verbs = verbsFor(makeItem({ status: "STOPPED", stop: { detail: "blocked" } }));
-    expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "fresh"]);
+    expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "close", "fresh"]);
   });
 
   test("FAIL and ABORTED both rerun from the failure", () => {
     for (const status of ["FAIL", "ABORTED"] as const) {
       const verbs = verbsFor(makeItem({ status, group: "failure" }));
-      expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "fresh"]);
+      expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "close", "fresh"]);
       expect(verbs[0]?.label).toBe("Rerun from failure");
     }
+  });
+
+  test("a closed run offers only reopen and start fresh", () => {
+    const item = makeItem({ status: "FAIL", group: "done", closed: { at: "2026-09-06T08:00:00.000Z", by: "Olivier" } });
+    const verbs = verbsFor(item);
+    expect(verbs.map((verb) => verb.verb)).toEqual(["reopen", "fresh"]);
+    expect(verbs[0]?.command).toBe("lancenuit reopen ABC-1 --pipeline feature");
+    expect(headlineOf(item)).toBe("Closed by hand");
+    expect(reasonOf(item)).toBe("closed by Olivier");
   });
 
   test("RUNNING offers nothing, not even start fresh", () => {
@@ -133,7 +142,7 @@ describe("verbsFor", () => {
 
   test("a budget ceiling adds its own verb, and a worktree run carries the flag", () => {
     const verbs = verbsFor(makeItem({ status: "FAIL", group: "failure", budgetExceeded: true, worktree: true }));
-    expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "budget", "fresh"]);
+    expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "budget", "close", "fresh"]);
     expect(verbs[1]?.command).toBe("lancenuit run ABC-1 --pipeline feature --budget <usd> --worktree");
   });
 
@@ -142,7 +151,7 @@ describe("verbsFor", () => {
     const verbs = verbsFor(item);
     // No `unmetered` verb, and no `budget` one either: the run never reached its
     // ceiling, so raising it would answer a question nobody asked.
-    expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "fresh"]);
+    expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "close", "fresh"]);
     expect(verbs.every((verb) => !verb.command.includes("--allow-unmetered"))).toBe(true);
     // The command is shown as text instead, worktree flag included.
     expect(unmeteredResumeCommand(item)).toBe("lancenuit run ABC-1 --pipeline feature --allow-unmetered --worktree");

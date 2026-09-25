@@ -17,6 +17,7 @@ import { join } from "node:path";
 import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import { createArtifactRef } from "../../model/artifact-ports.js";
 import type { PersistedRun } from "../../model/persisted.js";
+import { isClosableStatus, isClosureCurrent, readClosureAt } from "../../state/closure.js";
 import { runProvesUnpricedSpend } from "../../state/cost-accounting.js";
 import { isValidSubjectToken, readDecisionAt } from "../../state/decisions.js";
 import { sha256Text } from "../../state/hash.js";
@@ -28,7 +29,17 @@ import { FileWorkItemArtifactStore } from "../../state/stores/file-work-item-art
 import { latestLaunchByItem } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl } from "./projects.js";
 import { effectiveCwd, latestRuns, statusOf, ticketDirectories } from "./runs.js";
-import type { Item, ItemApproval, ItemCost, ItemFailure, ItemGroup, ItemStatus, ItemStop, Launch } from "./types.js";
+import type {
+  Item,
+  ItemApproval,
+  ItemClosure,
+  ItemCost,
+  ItemFailure,
+  ItemGroup,
+  ItemStatus,
+  ItemStop,
+  Launch,
+} from "./types.js";
 
 const GROUP_BY_STATUS: Record<ItemStatus, ItemGroup> = {
   STOPPED: "decision",
@@ -201,6 +212,20 @@ async function approvalOf(
   };
 }
 
+/**
+ * The hand closure of the run, while it still describes the snapshot.
+ *
+ * A closure taken on a snapshot the runner has since rewritten is ignored: the
+ * run moved, so whatever it now waits on is new. A closure on a status nobody
+ * waits on (PASS, RUNNING) is ignored too, rather than hiding a live run.
+ */
+function closureOfRun(runDir: string, state: PersistedRun, status: ItemStatus): ItemClosure | undefined {
+  if (!isClosableStatus(status)) return undefined;
+  const closure = readClosureAt(runDir);
+  if (!closure || !isClosureCurrent(closure, state)) return undefined;
+  return { at: closure.closedAt, by: closure.closedBy };
+}
+
 /** Branch of the run, as the central history recorded it at finalization. */
 function branchOf(project: ProjectEntry, runId: string, cache: RequestCache): string | undefined {
   let entries = cache.history.get(project.cwd);
@@ -231,9 +256,11 @@ async function buildItem(
   const branch = runId ? branchOf(project, runId, cache) : undefined;
   const key = `${project.name}/${ticket}`;
   const launch = cache.launches.get(key);
+  const closed = closureOfRun(selected.runDir, state, status);
   // A runner the dashboard just spawned is running before it has written
-  // anything: the launch, not the snapshot, is what knows that.
-  const group: ItemGroup = launch?.alive ? "running" : GROUP_BY_STATUS[status];
+  // anything: the launch, not the snapshot, is what knows that. A closed run
+  // waits on nobody, whatever its status says.
+  const group: ItemGroup = launch?.alive ? "running" : closed ? "done" : GROUP_BY_STATUS[status];
 
   return {
     key,
@@ -259,6 +286,7 @@ async function buildItem(
     worktree: state.worktree === true,
     effectiveWorkItemDir: join(runCwd, project.specPath, ticket),
     ...(launch ? { launch } : {}),
+    ...(closed ? { closed } : {}),
   };
 }
 

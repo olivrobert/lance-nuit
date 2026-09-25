@@ -11,5 +11,7 @@ import type { Item } from "../api/types.js";
 
 export function StatusTag({ item }: { item: Item }): JSX.Element {
   if (item.launch?.alive) return <span className="tag RUNNING">RUNNING</span>;
+  // The status stays in the sheet's details; the pill says why nobody waits on it.
+  if (item.closed) return <span className="tag CLOSED">CLOSED</span>;
   return <span className={`tag ${item.status}`}>{item.status}</span>;
 }

@@ -2,7 +2,7 @@
 
 Source of truth: the `FLAGS` registry in `model/cli-options.ts`, which drives the
 parser (`cli/parse.ts`) and `runner --help`. The `pipeline` wrapper maps `run`, `single`, `inspect`, `logs`,
-`clean`, `stats`, `typecheck`, `lint`, `create`, `approve`, and `list` to these
+`clean`, `stats`, `typecheck`, `lint`, `create`, `approve`, `close`, `reopen`, and `list` to these
 flags.
 
 | Option | Alias | Description |
@@ -29,6 +29,8 @@ flags.
 | `--version` | | Display the installed package version without loading project configuration |
 | `--approve <subject>` | | Record approval for a declared artifact, then run: the approved gate is re-evaluated in the same invocation. Requires a ticket and `--pipeline` |
 | `--approve-only` | | With `--approve`, write the decision and exit without running. The `lancenuit approve` subcommand always implies it |
+| `--close` | | Mark the latest failed, stopped, or aborted run of `--pipeline` as closed by hand, keeping its status. Requires a ticket and `--pipeline` (`lancenuit close <ticket> --pipeline <name>`). See [human-control.md](human-control.md#close-a-run-finished-by-hand) |
+| `--reopen` | | Remove the closure written by `--close` (`lancenuit reopen <ticket> --pipeline <name>`) |
 | `--inspect` | | Display a ticket's run state with its sub-runs (`forEachPipeline` children) listed under their parent; combine with `--run` to select a run |
 | `--logs` | | Display a ticket's logs; combine with `--step` and/or `--run` |
 | `--run <runId>` | | Explicitly resume a run, or filter `--inspect`/`--logs` |
@@ -54,6 +56,7 @@ The wrapper forms are usually easier to remember:
 lancenuit run PROJ-28 -p release
 lancenuit inspect PROJ-28 --run <run-id>
 lancenuit logs PROJ-28 --step tests
+lancenuit close PROJ-28 --pipeline release
 lancenuit clean --logs-only --older-than 30d --keep-failed
 lancenuit stats
 lancenuit stats -p release --since 30d

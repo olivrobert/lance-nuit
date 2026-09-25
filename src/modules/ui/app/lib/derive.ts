@@ -43,6 +43,7 @@ export function reasonOf(item: Item): string {
     return `${item.failure.phase} — ${item.failure.reason}`;
   }
   if (item.group === "running") return "running";
+  if (item.closed) return `closed by ${item.closed.by}`;
   return "completed";
 }
 
@@ -53,6 +54,7 @@ export function headlineOf(item: Item): string {
     return item.failure?.phase ? `Failed at ${item.failure.phase}` : "Execution failed";
   }
   if (item.group === "running") return "Execution in progress";
+  if (item.closed) return "Closed by hand";
   if (item.group === "done") return "Run completed";
   return item.stop?.subject ? `Review ${item.stop.subject}` : "Your input is needed";
 }
@@ -65,6 +67,8 @@ export const VERB_LABELS: Record<string, string> = {
   rerun: "rerun",
   fresh: "start fresh",
   budget: "raise budget",
+  close: "mark as closed",
+  reopen: "reopen",
 };
 
 export function verbLabel(verb: string): string {
@@ -90,6 +94,20 @@ export function verbsFor(item: Item): VerbAction[] {
   const verbs: VerbAction[] = [];
   const subject = item.status === "STOPPED" ? item.stop?.subject : undefined;
 
+  // A closed run waits on nobody: the only questions left are to reopen it, or
+  // to start over. A plain rerun would reopen it too, but silently.
+  if (item.closed) {
+    return [
+      {
+        verb: "reopen",
+        label: "Reopen",
+        primary: true,
+        command: `lancenuit reopen ${item.ticket} --pipeline ${item.pipeline}`,
+      },
+      { verb: "fresh", label: "Start fresh", danger: true, command: `${base} --fresh${worktree}` },
+    ];
+  }
+
   if (item.status === "STOPPED" && subject) {
     verbs.push({
       verb: "approve-and-rerun",
@@ -111,6 +129,13 @@ export function verbsFor(item: Item): VerbAction[] {
   }
   if (item.budgetExceeded) {
     verbs.push({ verb: "budget", label: "Raise budget", command: `${base} --budget <usd>${worktree}` });
+  }
+  if (item.status === "STOPPED" || item.status === "FAIL" || item.status === "ABORTED") {
+    verbs.push({
+      verb: "close",
+      label: "Mark as closed",
+      command: `lancenuit close ${item.ticket} --pipeline ${item.pipeline}`,
+    });
   }
   if (item.status !== "RUNNING") {
     verbs.push({ verb: "fresh", label: "Start fresh", danger: true, command: `${base} --fresh${worktree}` });
