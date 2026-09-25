@@ -20,12 +20,18 @@ import styles from "./Actions.module.css";
 
 const selectPending = (state: UiState): string | null => state.pending;
 
-/** Ask before abandoning a run, and ask for the amount a budget verb needs.
+/** Ask before abandoning or closing a run, and ask for the amount a budget verb needs.
  *  Returns the options to post with, or `null` when the reader backed out. */
 function askFor(item: Item, verb: VerbAction): { budget?: number } | null {
   if (verb.verb === "fresh") {
     const sure = window.confirm(
       `Start ${item.ticket} fresh?\n\nThe current run will be abandoned and pipeline ${item.pipeline} will restart from the beginning. Existing approvals remain on disk.`,
+    );
+    return sure ? {} : null;
+  }
+  if (verb.verb === "close") {
+    const sure = window.confirm(
+      `Mark ${item.ticket} as closed?\n\nUse this when the ticket was finished by hand. The run keeps its ${item.status} status and leaves the attention queue; a later run on it brings it back.`,
     );
     return sure ? {} : null;
   }

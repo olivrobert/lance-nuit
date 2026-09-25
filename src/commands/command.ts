@@ -7,6 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { approvalCommand } from "./approval.js";
+import { closeCommand, reopenCommand } from "./closure.js";
 import { createPipelineCommand } from "./create-pipeline.js";
 import { cleanCommand, inspectCommand, logsCommand } from "./diagnostics.js";
 import { renderHelp } from "./help.js";
@@ -51,6 +52,8 @@ export const COMMANDS: RunnerCommand[] = [
   typecheckCommand,
   typesInstallCommand,
   approvalCommand,
+  closeCommand,
+  reopenCommand,
   inspectCommand,
   logsCommand,
   cleanCommand,

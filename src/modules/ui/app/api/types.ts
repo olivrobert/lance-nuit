@@ -17,6 +17,7 @@ export type {
   FileRead,
   Item,
   ItemApproval,
+  ItemClosure,
   ItemCost,
   ItemFailure,
   ItemGroup,

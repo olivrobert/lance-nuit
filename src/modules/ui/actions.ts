@@ -46,7 +46,7 @@ import {
   readLaunchRecord,
 } from "../read-model/index.js";
 
-export const VERBS = ["approve-and-rerun", "approve", "rerun", "fresh", "budget"] as const;
+export const VERBS = ["approve-and-rerun", "approve", "rerun", "fresh", "budget", "close", "reopen"] as const;
 export type Verb = (typeof VERBS)[number];
 
 export function isVerb(value: unknown): value is Verb {
@@ -132,6 +132,15 @@ export function buildArgv(item: Item, verb: Verb, input: ActionInput = {}): Argv
     }
     case "fresh":
       return { ok: true, argv: [...run, "--fresh", ...worktree] };
+    case "close": {
+      const waiting = item.status === "STOPPED" || item.status === "FAIL" || item.status === "ABORTED";
+      if (!waiting || item.closed)
+        return { ok: false, status: 409, reason: "only an open failed or stopped run can be closed" };
+      return { ok: true, argv: ["close", item.ticket, "--pipeline", item.pipeline] };
+    }
+    case "reopen":
+      if (!item.closed) return { ok: false, status: 409, reason: "this run is not closed" };
+      return { ok: true, argv: ["reopen", item.ticket, "--pipeline", item.pipeline] };
   }
 }
 

@@ -116,6 +116,26 @@ test("argv: fresh is allowed on everything that is not running", () => {
   });
 });
 
+test("argv: close targets an open failed or stopped run, reopen a closed one", () => {
+  const failed = item({ status: "FAIL", group: "failure", stop: undefined });
+  expect(argvOf(buildArgv(failed, "close"))).toEqual(["close", "DEMO-1", "--pipeline", "feature"]);
+  expect(buildArgv(item(), "close").ok).toBe(true);
+  expect(buildArgv(item({ status: "PASS", group: "done", stop: undefined }), "close")).toMatchObject({
+    ok: false,
+    status: 409,
+  });
+  expect(buildArgv(failed, "reopen")).toMatchObject({ ok: false, status: 409 });
+
+  const closed = item({
+    status: "FAIL",
+    group: "done",
+    stop: undefined,
+    closed: { at: "2026-09-06T08:00:00.000Z", by: "Olivier" },
+  });
+  expect(buildArgv(closed, "close")).toMatchObject({ ok: false, status: 409 });
+  expect(argvOf(buildArgv(closed, "reopen"))).toEqual(["reopen", "DEMO-1", "--pipeline", "feature"]);
+});
+
 test("argv: budget needs a budget stop and a bounded positive amount the server formats", () => {
   const stopped = item({ status: "FAIL", group: "failure", stop: undefined, budgetExceeded: true });
   expect(argvOf(buildArgv(stopped, "budget", { budget: 12.5 }))).toEqual([
