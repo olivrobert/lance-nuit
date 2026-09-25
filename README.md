@@ -155,12 +155,13 @@ TypeScript sources directly; nothing has to be built.
 git clone https://github.com/olivrobert/lance-nuit
 cd lance-nuit
 bun install --frozen-lockfile
-export PATH="$PWD/bin:$PATH"
+ln -s "$PWD/bin/lancenuit" ~/.local/bin/lancenuit   # any directory on the PATH
 lancenuit --version
 ```
 
-Run `lancenuit` from the root of the project you want to automate, not from this
-checkout. To equip a machine that has no checkout, build a tarball with
+The wrapper follows the link back to the checkout, so it keeps running its
+sources. Run `lancenuit` from the root of the project you want to automate, not
+from this checkout. To equip a machine that has no checkout, build a tarball with
 `npm pack` and install it globally; see
 [installation](guide/usage.md#installation).
 

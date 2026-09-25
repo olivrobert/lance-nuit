@@ -66,6 +66,20 @@ lancenuit --version
 lancenuit types install --user                        # equip the shared kit once
 ```
 
+A machine that has no npm — the supported case, since the runner needs only Bun —
+links the wrapper from a checkout instead, into a directory already on the `PATH`:
+
+```bash
+ln -s /path/to/lance-nuit/bin/lancenuit ~/.local/bin/lancenuit
+lancenuit types install --user
+```
+
+The wrapper resolves its own directory through the link, so it keeps running the
+checkout's sources and follows every edit without a rebuild. Prefer this to
+exporting `PATH` from a shell profile: an export lives in the shell that ran it,
+and a `lancenuit` missing from a fresh terminal — or from an editor task — sends
+the reader looking for an installation problem that is not there.
+
 Projects then need no `lance-nuit` dependency of their own. `lancenuit create`
 and `lancenuit types install` equip each project kit with the DSL declarations
 and with a vendored copy of `lance-nuit/contracts`, so an extension inside
@@ -106,7 +120,7 @@ the vendored contracts under `.lance-nuit/node_modules/lance-nuit/`, compiled
 from `src/contracts/**` on the fly. No build step is involved.
 
 Bun installs checkout dependencies from the single `bun.lock`. Node.js 22+ and
-npm are still required for development tools and package verification; see
+npm are still required for packaging verification, and for nothing else; see
 [Contributing](../CONTRIBUTING.md#setup) and [Lockfiles](#lockfiles) below.
 
 Working on the runner itself goes through Bun as well:
