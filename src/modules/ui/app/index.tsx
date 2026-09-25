@@ -28,7 +28,8 @@
 //   `render()` and `el()`       -> `components/`, one file per zone.
 //   the rules inside `render()` -> `lib/derive.ts`, pure and unit-tested.
 //   one 1038-line `app.css`     -> a `*.module.css` beside each component, plus
-//                                  `styles/tokens.css` for what must stay global.
+//                                  `styles/tokens.css` for what must stay global
+//                                  and xterm's stylesheet for the terminal screen.
 //
 // `StrictMode` is on in development and stays on in production: it costs a
 // double render of pure components in development, which is exactly the pressure
@@ -38,6 +39,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
+// xterm's own stylesheet, ahead of the tokens so the global reset wins a tie.
+import "@xterm/xterm/css/xterm.css";
 import "./styles/tokens.css";
 
 const container = document.getElementById("app");
