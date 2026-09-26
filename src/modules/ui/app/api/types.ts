@@ -1,13 +1,13 @@
 // The shapes the dashboard receives over HTTP.
 //
-// Every DTO the server already owns is RE-EXPORTED from the read model rather
-// than copied here. The read model is the source of truth for what a work item
-// is; a second hand-written declaration would drift silently the first time a
-// field moves, and the browser would keep compiling against a shape the server
+// Every DTO the server already owns is RE-EXPORTED from the module that owns
+// it — the read model, the verbs, the terminals — rather than copied here. A
+// second hand-written declaration would drift silently the first time a field
+// moves, and the browser would keep compiling against a shape the server
 // stopped sending. These are type-only exports, so nothing of `src/modules/`
 // reaches the bundle — the whole file disappears at build time.
 //
-// What is declared below is only what has no counterpart in the read model: the
+// What is declared below is only what has no counterpart on the server: the
 // envelopes the HTTP layer wraps those shapes in, and the front end's own
 // vocabulary (which sheet tab is open).
 
@@ -59,6 +59,7 @@ export type {
 // An item as the server answers it: the read model's item plus the verbs the
 // server decided it admits.
 export type { ActionableItem as Item, Verb, VerbAction } from "../../verbs.js";
+export type { TerminalInfo } from "../../terminals.js";
 
 import type {
   FileRead,
@@ -68,6 +69,7 @@ import type {
   RunStepsView,
   WorkItemTree,
 } from "../../../read-model/index.js";
+import type { TerminalInfo } from "../../terminals.js";
 import type { ActionableItem as Item } from "../../verbs.js";
 
 /** `GET /api/me` and `POST /api/me`. `user` is `null` until a name is chosen. */
@@ -132,27 +134,6 @@ export interface Assumptions {
  *  resolved by `currentSheetTab`. */
 export type SheetTab = "diagnostic" | "report" | "run" | "document" | "files";
 export type RequestedSheetTab = SheetTab | "auto";
-
-/**
- * One interactive run: a tmux session on the dashboard's own socket, running
- * the reader's shell in the project's main clone. tmux is the authoritative
- * state; the server rebuilds this record from the session's user options.
- * Declared here until the server module that owns it can be re-exported.
- */
-export interface TerminalInfo {
-  id: string;
-  project: string;
-  ticket: string;
-  pipeline: string;
-  worktree: boolean;
-  by: string;
-  /** ISO timestamp. */
-  createdAt: string;
-  /** For display only: the `lancenuit run …` line typed into the session. */
-  command: string;
-  /** The line a reader types to attach from their own terminal. */
-  attach: string;
-}
 
 /** `GET /api/projects/<name>/pipelines`. */
 export interface PipelinesResponse {
