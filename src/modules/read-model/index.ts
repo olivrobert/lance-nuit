@@ -33,6 +33,7 @@ export {
   ticketUrl,
   workItemsRoot,
 } from "./projects.js";
+export { createReadModel, type ReadModel } from "./read-model.js";
 export { readRecap } from "./recap.js";
 export { parseRunReport, type ReportRead, readReport } from "./report.js";
 export { readStats, STATS_ARCHIVE_FILE, STATS_CONFIG_FILE } from "./stats.js";
