@@ -7,7 +7,7 @@
 
 import type { JSX } from "react";
 import type { Item } from "../../api/types.js";
-import { reasonOf } from "../../lib/derive.js";
+import { reasonOf } from "../../lib/items.js";
 import { fmtAge, fmtCost, fmtDate } from "../../lib/format.js";
 import { linkableUrl } from "../../lib/url.js";
 import { ProjectBadge } from "../ProjectBadge.js";

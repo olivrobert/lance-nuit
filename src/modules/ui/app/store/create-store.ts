@@ -46,7 +46,9 @@ import type {
   RequestedSheetTab,
   VerbAction,
 } from "../api/types.js";
-import { failedBeforeRun, findAssumptions, isWaiting, splitKey, visibleItems } from "../lib/derive.js";
+import { visibleItems } from "../lib/inbox.js";
+import { failedBeforeRun, isWaiting, splitKey } from "../lib/items.js";
+import { findAssumptions } from "../lib/work-item-tree.js";
 
 /** Poll interval of the morning box: the dashboard polls, it opens no SSE stream. */
 export const POLL_MS = 15000;

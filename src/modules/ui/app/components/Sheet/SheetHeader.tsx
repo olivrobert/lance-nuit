@@ -12,7 +12,7 @@
 
 import type { JSX } from "react";
 import type { Item, RunRecap } from "../../api/types.js";
-import { headlineOf, isDelivered } from "../../lib/derive.js";
+import { headlineOf, isDelivered } from "../../lib/items.js";
 import { fmtClock, fmtCost, fmtDuration, shortRunId } from "../../lib/format.js";
 import { linkableUrl } from "../../lib/url.js";
 import { ProjectBadge } from "../ProjectBadge.js";

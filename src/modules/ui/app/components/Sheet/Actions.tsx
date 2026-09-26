@@ -17,7 +17,7 @@
 import type { JSX } from "react";
 import type { Item, RunReport, VerbAction } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
-import { deliveryActions } from "../../lib/derive.js";
+import { deliveryActions } from "../../lib/sheet.js";
 import type { UiState } from "../../store/store.js";
 import { actions, useUiSelector } from "../../store/store.js";
 import styles from "./Actions.module.css";

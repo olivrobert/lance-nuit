@@ -15,7 +15,7 @@
 import type { JSX } from "react";
 import type { TreeNode } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
-import { countFiles } from "../../lib/derive.js";
+import { countFiles } from "../../lib/work-item-tree.js";
 import { fmtSize } from "../../lib/format.js";
 import { useActions, useUiSelector } from "../../store/store.js";
 import styles from "./Explorer.module.css";

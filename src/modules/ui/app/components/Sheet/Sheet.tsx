@@ -24,7 +24,9 @@
 // subtree, not a decision. A reader who opened it keeps it open.
 
 import type { JSX } from "react";
-import { currentSheetTab, hasAssumptionContent, visibleItems } from "../../lib/derive.js";
+import { visibleItems } from "../../lib/inbox.js";
+import { currentSheetTab } from "../../lib/sheet.js";
+import { hasAssumptionContent } from "../../lib/work-item-tree.js";
 import { useUiState } from "../../store/store.js";
 import { DocumentView, Folder } from "../Explorer/index.js";
 import { Actions } from "./Actions.js";

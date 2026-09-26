@@ -17,15 +17,9 @@ import type { CSSProperties, JSX } from "react";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Item } from "../api/types.js";
 import { cx } from "../lib/cx.js";
-import {
-  reasonOf,
-  rowShowsTag,
-  rowTime,
-  type TimelineSection,
-  type TimelineSectionId,
-  timeline,
-  visibleItems,
-} from "../lib/derive.js";
+import { visibleItems } from "../lib/inbox.js";
+import { rowShowsTag, rowTime, timeline, type TimelineSection, type TimelineSectionId } from "../lib/inbox-timeline.js";
+import { reasonOf } from "../lib/items.js";
 import { fmtCost } from "../lib/format.js";
 import { useActions, useUiSelector } from "../store/store.js";
 import styles from "./ItemList.module.css";

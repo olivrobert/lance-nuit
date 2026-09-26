@@ -10,7 +10,7 @@
 
 import type { JSX } from "react";
 import type { Item } from "../../api/types.js";
-import { failedBeforeRun, reasonOf, unmeteredResumeCommand, verbLabel } from "../../lib/derive.js";
+import { failedBeforeRun, reasonOf, unmeteredResumeCommand, verbLabel } from "../../lib/items.js";
 import { fmtAge, fmtDate } from "../../lib/format.js";
 import type { UiState } from "../../store/store.js";
 import { POLL_MS, useUiSelector } from "../../store/store.js";

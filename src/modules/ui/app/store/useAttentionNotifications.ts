@@ -11,7 +11,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Item } from "../api/types.js";
-import { newlyWaiting, reasonOf, waitingKeys } from "../lib/derive.js";
+import { newlyWaiting, waitingKeys } from "../lib/inbox.js";
+import { reasonOf } from "../lib/items.js";
 import { actions, useUiSelector } from "./store.js";
 import { navigate } from "./useRoute.js";
 

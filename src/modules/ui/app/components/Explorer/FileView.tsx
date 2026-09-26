@@ -8,7 +8,7 @@
 // components here.
 
 import type { JSX } from "react";
-import { mimeOf } from "../../lib/derive.js";
+import { mimeOf } from "../../lib/work-item-tree.js";
 import { fmtSize } from "../../lib/format.js";
 import { useActions, useUiSelector } from "../../store/store.js";
 import styles from "./Explorer.module.css";

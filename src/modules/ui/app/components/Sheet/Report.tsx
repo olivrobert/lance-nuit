@@ -13,7 +13,7 @@ import type { JSX } from "react";
 import { rawFileUrl } from "../../api/client.js";
 import type { Item, RunReport, RunReportCriterion } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
-import { captureNumbers, capturePath, leftForYou, reviewText } from "../../lib/derive.js";
+import { captureNumbers, capturePath, leftForYou, reviewText } from "../../lib/report.js";
 import { linkableUrl } from "../../lib/url.js";
 import { actions } from "../../store/store.js";
 import styles from "./Report.module.css";
