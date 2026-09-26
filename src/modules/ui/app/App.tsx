@@ -25,7 +25,7 @@ import { Sheet } from "./components/Sheet/index.js";
 import { StatsScreen } from "./components/Stats/index.js";
 import { TerminalScreen } from "./components/Terminal/index.js";
 import { cx } from "./lib/cx.js";
-import { waitingCount } from "./lib/derive.js";
+import { waitingCount } from "./lib/inbox.js";
 import { POLL_MS, useActions, useUiState } from "./store/store.js";
 import { useAttentionNotifications } from "./store/useAttentionNotifications.js";
 import { useListKeyboard } from "./store/useListKeyboard.js";

@@ -14,7 +14,7 @@
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import { cx } from "../lib/cx.js";
-import { freshnessOf, updatedLabel } from "../lib/derive.js";
+import { freshnessOf, updatedLabel } from "../lib/freshness.js";
 import { useUiSelector } from "../store/store.js";
 import { useNotificationPermission } from "../store/useAttentionNotifications.js";
 import { useRoute } from "../store/useRoute.js";

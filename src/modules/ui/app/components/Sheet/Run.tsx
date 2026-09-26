@@ -8,7 +8,13 @@
 
 import type { JSX } from "react";
 import type { Item, RunRecap, RunRecapStep, RunStepsView, WorkItemTree } from "../../api/types.js";
-import { NOTABLE_MS, type RunTimeline, type RunTimelineLane, costByModel, timelineLanes } from "../../lib/derive.js";
+import {
+  costByModel,
+  NOTABLE_MS,
+  type RunTimeline,
+  type RunTimelineLane,
+  timelineLanes,
+} from "../../lib/run-timeline.js";
 import { fmtCost, fmtDuration, fmtTokens } from "../../lib/format.js";
 import styles from "./Run.module.css";
 import { Screenshots } from "./Screenshots.js";

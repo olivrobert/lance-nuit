@@ -11,7 +11,7 @@
 
 import type { JSX } from "react";
 import type { Item } from "../../api/types.js";
-import { verbLabel } from "../../lib/derive.js";
+import { verbLabel } from "../../lib/items.js";
 import { fmtDate } from "../../lib/format.js";
 import type { UiState } from "../../store/store.js";
 import { actions, LOG_LINES, useUiSelector } from "../../store/store.js";

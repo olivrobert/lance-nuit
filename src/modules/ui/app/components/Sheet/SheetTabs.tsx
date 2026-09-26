@@ -12,7 +12,7 @@
 
 import type { JSX } from "react";
 import type { Item, ItemDetail, SheetTab } from "../../api/types.js";
-import { countFiles } from "../../lib/derive.js";
+import { countFiles } from "../../lib/work-item-tree.js";
 import { actions } from "../../store/store.js";
 import styles from "./Sheet.module.css";
 

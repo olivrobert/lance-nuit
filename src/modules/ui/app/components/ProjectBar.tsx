@@ -14,7 +14,7 @@
 import type { JSX } from "react";
 import { useState } from "react";
 import { cx } from "../lib/cx.js";
-import { waitingCount } from "../lib/derive.js";
+import { waitingCount } from "../lib/inbox.js";
 import { useActions, useUiSelector } from "../store/store.js";
 import { LaunchRunDialog } from "./LaunchRunDialog.js";
 import styles from "./ProjectBar.module.css";

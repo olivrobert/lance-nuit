@@ -7,7 +7,7 @@
 import type { JSX } from "react";
 import { rawFileUrl } from "../../api/client.js";
 import type { Item, WorkItemTree } from "../../api/types.js";
-import { screenshotGroups } from "../../lib/derive.js";
+import { screenshotGroups } from "../../lib/work-item-tree.js";
 import { actions } from "../../store/store.js";
 import styles from "./Screenshots.module.css";
 
