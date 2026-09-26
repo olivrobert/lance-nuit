@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { projectsFile, readProjects, ticketUrl, uiDir } from "./projects.ts";
+import { dashboardPaths } from "../dashboard-home/index.ts";
+import { readProjects, ticketUrl } from "./projects.ts";
 import { cleanupTempDirs, makeProject, makeTempDir, writeProjectsFile } from "./test-harness.ts";
 
 const originalHome = process.env.PIPELINE_HOME;
@@ -21,8 +22,8 @@ afterEach(() => {
 test("projects: no file yet means no project, not an error", () => {
   const dir = home();
 
-  expect(uiDir()).toBe(join(dir, "ui"));
-  expect(projectsFile()).toBe(join(dir, "ui", "projects.json"));
+  expect(dashboardPaths()?.dir).toBe(join(dir, "ui"));
+  expect(dashboardPaths()?.projects).toBe(join(dir, "ui", "projects.json"));
   expect(readProjects()).toEqual([]);
 });
 

@@ -5,6 +5,8 @@
 // vocabulary of the morning box (item, group, stop, approval), so a change in
 // the durable schema never reaches the HTTP layer or the browser.
 
+import type { Launch } from "../dashboard-home/index.js";
+
 /** Durable run status, restricted to the values an item can carry. `UNKNOWN` is
  *  read as `RUNNING`: a snapshot that never received a verdict is still, from a
  *  reader's point of view, a run nobody finished. */
@@ -83,33 +85,9 @@ export interface ItemClosure {
   by: string;
 }
 
-/** Dashboard record of one verb it triggered, as written to
- *  `~/.lance-nuit/ui/launches/<id>.json` (spec 5.2). `exitCode` is `null` when the
- *  process ended without a code the server could observe — killed, or gone when
- *  the server restarted. */
-export interface LaunchRecord {
-  /** `<timestamp>-<ticket>-<verb>`. */
-  id: string;
-  at: string;
-  /** Name from the identity cookie. */
-  by: string;
-  /** Project name, as `Item.project.name`. */
-  project: string;
-  ticket: string;
-  verb: string;
-  /** Exact arguments handed to `lancenuit`, without the executable. */
-  argv: string[];
-  cwd: string;
-  pid: number;
-  exitCode?: number | null;
-  finishedAt?: string;
-}
-
-/** A launch as the dashboard shows it: the record plus whether its process still
- *  runs, derived from the pid rather than trusted from the file. */
-export interface Launch extends LaunchRecord {
-  alive: boolean;
-}
+/** Launch records are owned by `dashboard-home/`; the read model only attaches
+ *  the latest one to its item. */
+export type { Launch, LaunchRecord } from "../dashboard-home/index.js";
 
 /** One work item as the morning box shows it: the latest run of the ticket,
  *  across every pipeline it ran on. */

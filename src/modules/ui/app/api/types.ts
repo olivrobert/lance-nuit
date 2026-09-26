@@ -57,7 +57,7 @@ export type {
   TreeNode,
   WorkItemTree,
 } from "../../../read-model/index.js";
-export type { Verb } from "../../actions.js";
+export type { Verb } from "../../verbs.js";
 
 import type {
   FileRead,
