@@ -146,24 +146,55 @@ examples/builtin-reviews/ executable review-step reference
 bin/lancenuit   verb-oriented wrapper
 ```
 
-### The dashboard front end
+### The dashboard
 
 `src/modules/ui/` is the only part of the repository that ships code for a
-browser, so it is the only one with a build of its own:
+browser, so it is the only one with a build of its own. Its server side runs
+against explicit ports and never reads `env` past its composition root:
 
 ```text
-src/modules/ui/            server.ts, static-files.ts, actions.ts, store.ts,
-                           tmux.ts, terminals.ts, terminal-viewers.ts (server side)
-src/modules/ui/app/        React 19 + TypeScript sources of the front end
-  index.tsx                entry point: mounts <App> into #app
-  App.tsx                  the shell (identity page, banner, project bar, list, sheet)
-  api/                     typed client and the DTO of the read model
-  store/                   store factory (create-store.ts), its one instance + hooks (store.ts), the poll, the attention notifications
-  lib/                     pure derivation and formatting, unit-tested
-  components/              one folder or file per zone of the screen
-  styles/tokens.css        the only global stylesheet; everything else is a CSS Module
-src/modules/ui/static/     index.html, plus the built app.js and app.css
+src/modules/dashboard-home/  the files under ~/.lance-nuit/ui/, one owner each:
+                             FileUserList, FileProjectList, FileLaunchStore
+                             (openDashboardHome binds the three to one home)
+src/modules/read-model/      every dashboard read, bound once as the ReadModel port
+src/modules/ui/              server side
+  server.ts                  composition root: builds UiDeps, starts node:http
+  deps.ts                    UiDeps — readModel, home, launcher, terminals, workItems
+  router.ts                  host, method and same-origin checks, then the ROUTES table
+  routes/                    one module per /api resource; `open` or `operator` access
+  http/                      respond, body, guards, identity: the HTTP helpers
+  verbs.ts                   which verbs an item admits, and their exact argv
+  launcher.ts                VerbLauncher: spawns the runner detached, records the launch
+  tmux.ts, terminals.ts,
+  terminal-viewers.ts        the embedded terminals
+  static-files.ts, markdown.ts, cookies.ts
+src/modules/ui/app/          React 19 + TypeScript sources of the front end
+  index.tsx                  entry point: mounts <App> into #app
+  App.tsx                    the shell (identity page, banner, project bar, list, sheet)
+  api/                       client.ts, the only HTTP code; types.ts, type-only
+                             re-exports of the server's DTOs
+  store/                     one snapshot: state.ts (shape and contract), core.ts
+                             (set, stage, signed commit), selection.ts (race token),
+                             detail-loader.ts, refresh.ts (serialised), toasts.ts,
+                             wired by create-store.ts; store.ts holds the one
+                             instance and the React hooks, next to the poll and
+                             the attention notifications
+  lib/                       pure derivation and formatting, one module per screen
+                             concern (items, inbox, sheet, run-timeline, report...),
+                             unit-tested
+  components/                one folder or file per zone of the screen
+  styles/tokens.css          the only global stylesheet; everything else is a CSS Module
+src/modules/ui/static/       index.html, plus the built app.js and app.css
 ```
+
+The server is authoritative for actions. Each item it serves carries `busy`
+and `verbs`, the offers `verbsFor` computes from the same admission rules and
+the same argv builder that `POST /api/actions` applies; the front end renders
+those offers and holds no copy of the rules. A route reaches the filesystem
+only through `home` or `readModel` and a process only through `launcher` or
+`terminals`: `UiDeps` is the whole seam between a route and the machine.
+The front end imports server types only as `import type`: nothing from the
+server side enters the bundle.
 
 The server side reads work items only through `src/modules/read-model/`
 (`index.ts` is its public surface, and the only module allowed to import
