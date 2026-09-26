@@ -36,6 +36,8 @@ import {
   readLaunchesFor,
   readProjects,
   readRecap,
+  readReport,
+  readStats,
   readSteps,
   readTree,
   validateTicketRef,
@@ -248,7 +250,7 @@ async function handleItems(res: ServerResponse, env: NodeJS.ProcessEnv): Promise
 }
 
 /** One item, with everything the detail pane shows: the item, its folder tree,
- *  its run's steps, and the run's recap. Reads of the same work item, answered
+ *  its run's steps, the run's recap, and its delivery report. Reads of the same work item, answered
  *  in one round-trip because the pane shows them together. */
 async function handleItem(res: ServerResponse, project: string, ticket: string, env: NodeJS.ProcessEnv): Promise<void> {
   const item = await findItem(project, ticket, env);
@@ -261,6 +263,7 @@ async function handleItem(res: ServerResponse, project: string, ticket: string, 
     tree: readTree(project, ticket, { env }) ?? null,
     steps: readSteps(project, ticket, { env }) ?? null,
     recap: readRecap(project, ticket, { env }) ?? null,
+    ...(readReport(project, ticket, { env }) ?? { report: null }),
   });
 }
 
@@ -349,6 +352,12 @@ async function handleRaw(
     "X-Content-Type-Options": "nosniff",
   });
   res.end(image.bytes);
+}
+
+/** Every ticket's cost and duration. Read on request, never polled: the scan
+ *  opens every run snapshot of every project, for figures read now and then. */
+function handleStats(res: ServerResponse, env: NodeJS.ProcessEnv): void {
+  sendJson(res, 200, readStats({ env }));
 }
 
 function handleProjects(res: ServerResponse, env: NodeJS.ProcessEnv): void {
@@ -914,6 +923,15 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
       return;
     }
     sendError(res, 404, "not found");
+    return;
+  }
+
+  if (resource === "stats" && method === "GET") {
+    if (rest.length > 0) {
+      sendError(res, 404, "not found");
+      return;
+    }
+    handleStats(res, env);
     return;
   }
 

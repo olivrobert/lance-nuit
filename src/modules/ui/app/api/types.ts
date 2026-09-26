@@ -9,7 +9,7 @@
 //
 // What is declared below is only what has no counterpart in the read model: the
 // envelopes the HTTP layer wraps those shapes in, and the front end's own
-// vocabulary (which sheet tab is open, which queue is selected).
+// vocabulary (which sheet tab is open).
 
 export type {
   ApprovalState,
@@ -28,13 +28,30 @@ export type {
   LaunchRecord,
   ProjectEntry,
   RunEventView,
-  RunRecap,
   RunModelCost,
+  RunRecap,
   RunRecapStep,
+  RunReport,
+  RunReportCaptureGroup,
+  RunReportCriterion,
+  RunReportDelivered,
+  RunReportFollowUp,
+  RunReportLink,
+  RunReportNote,
+  RunReportProof,
+  RunReportReview,
   RunStepStatus,
   RunStepsView,
   RunStepView,
   RunTokens,
+  StatsArchiveState,
+  StatsHandover,
+  StatsRead,
+  StatsRun,
+  StatsSource,
+  StatsTicket,
+  TicketKind,
+  TicketOutcome,
   TreeDirectory,
   TreeFile,
   TreeNode,
@@ -42,7 +59,15 @@ export type {
 } from "../../../read-model/index.js";
 export type { Verb } from "../../actions.js";
 
-import type { FileRead, Item, ProjectEntry, RunRecap, RunStepsView, WorkItemTree } from "../../../read-model/index.js";
+import type {
+  FileRead,
+  Item,
+  ProjectEntry,
+  ReportRead,
+  RunRecap,
+  RunStepsView,
+  WorkItemTree,
+} from "../../../read-model/index.js";
 
 /** `GET /api/me` and `POST /api/me`. `user` is `null` until a name is chosen. */
 export interface MeResponse {
@@ -62,8 +87,10 @@ export interface ItemsResponse {
 }
 
 /** `GET /api/items/<project>/<ticket>`: the reads the sheet shows together.
- *  `tree`, `steps` and `recap` are `null` when the run has none. */
-export interface ItemDetail {
+ *  `tree`, `steps` and `recap` are `null` when the run has none. `report` is
+ *  `null` without a valid `report.json` for the current run; `reportError` and
+ *  `reportWarnings` come from `ReportRead`. */
+export interface ItemDetail extends ReportRead {
   item: Item;
   tree: WorkItemTree | null;
   steps: RunStepsView | null;
@@ -100,12 +127,9 @@ export interface Assumptions {
   resolved?: { subject?: string; answer?: string; evidence?: string }[];
 }
 
-/** Coarse view the sidebar filters on. */
-export type Queue = "attention" | "running" | "done";
-
 /** Sheet tabs. `auto` is not a tab: it means "follow the item's state", and is
  *  resolved by `currentSheetTab`. */
-export type SheetTab = "diagnostic" | "recap" | "steps" | "document" | "files";
+export type SheetTab = "diagnostic" | "report" | "run" | "document" | "files";
 export type RequestedSheetTab = SheetTab | "auto";
 
 /** One action button: the verb posted, its label, and the command the server

@@ -217,6 +217,9 @@ lancenuit approve release-42 release --pipeline release
 lancenuit clean --logs-only --older-than 30d
 ```
 
+`lancenuit ui` serves a local [dashboard](guide/usage.md#dashboard): a review
+inbox, interactive runs, and what every ticket cost across your projects.
+
 ## What is in the box
 
 Three step kinds:

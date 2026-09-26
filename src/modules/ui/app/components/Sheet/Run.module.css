@@ -1,0 +1,234 @@
+/* The Run tab: three figures, the timeline of the steps over the run span,
+   and the cost split by model.
+
+   Agent steps are drawn in the accent colour and commands in the muted ink,
+   so the eye lands on where the money went. */
+
+.run {
+  display: grid;
+  gap: 24px;
+}
+
+.heading {
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 18px 24px;
+  margin: 0;
+  padding: 4px 0;
+}
+
+.figures > div {
+  min-width: 0;
+}
+
+.figures dt {
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.figures dd {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.figures dd small {
+  display: block;
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.timelineBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.timelineWrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.timeline {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr) 72px 76px;
+  min-width: 640px;
+  font-size: 12.5px;
+}
+
+.timeline > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.timeline > .hd {
+  padding-block: 9px;
+  border-top: 0;
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.timeline > .num {
+  justify-content: flex-end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.name code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brokenText {
+  color: var(--fail);
+}
+
+.track {
+  position: relative;
+  width: 100%;
+  height: 16px;
+}
+
+.axis {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px calc(100% / 8));
+  opacity: 0.7;
+}
+
+.wall {
+  position: absolute;
+  top: 3px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.tick {
+  position: absolute;
+  top: 1px;
+  width: 2px;
+  height: 14px;
+  border-radius: 1px;
+  background: var(--mute);
+  opacity: 0.45;
+}
+
+.agent {
+  background: var(--accent);
+}
+
+.command {
+  background: var(--mute);
+  opacity: 0.55;
+}
+
+.broken {
+  background: var(--fail);
+}
+
+.axisLabels {
+  position: relative;
+  width: 100%;
+  height: 16px;
+}
+
+.axisLabels span {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.axisLabels span:first-child {
+  transform: none;
+}
+
+.axisLabels span:last-child {
+  transform: translateX(-100%);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 14px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.models {
+  display: grid;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.modelRow {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr) 72px;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.modelRow code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelRow .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.modelBar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.modelBar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+@media (max-width: 620px) {
+  .modelRow {
+    grid-template-columns: minmax(0, 1fr) 72px;
+  }
+
+  .modelBar {
+    display: none;
+  }
+}

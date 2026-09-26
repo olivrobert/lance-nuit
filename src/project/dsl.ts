@@ -105,6 +105,18 @@ export {
 } from "../dsl.js";
 export type { ClaudeBackendOptions } from "../contracts/backends/claude-code.js";
 export type {
+  RunReport,
+  RunReportCaptureGroup,
+  RunReportCriterion,
+  RunReportDelivered,
+  RunReportFollowUp,
+  RunReportLink,
+  RunReportNote,
+  RunReportProof,
+  RunReportReview,
+} from "../model/run-report.js";
+export { RUN_REPORT_FILE } from "../model/run-report.js";
+export type {
   ActionStepOptions as ProviderNeutralActionStepOptions,
   AuthoringContext,
   AuthoringStep,

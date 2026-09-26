@@ -118,6 +118,12 @@ export interface Item {
   key: string;
   project: ItemProject;
   ticket: string;
+  /** Ticket title: the first `# ` heading of `artifacts/ticket.md` in
+   *  `effectiveWorkItemDir`, after its optional front matter. Absent when that
+   *  file is missing, unreadable, or has no heading (a pipeline without a
+   *  work-item source step, or one writing `ticket.md` elsewhere): the list then
+   *  shows the ticket key instead. Never fetched from the provider. */
+  title?: string;
   pipeline: string;
   runId: string;
   status: ItemStatus;
@@ -317,4 +323,89 @@ export interface RunRecap {
   /** Models the steps ran on, in order of first use. */
   models: string[];
   steps: RunRecapStep[];
+}
+
+/** What a ticket was about, as the stats screen sorts it. `other` covers every
+ *  ticket no configured rule classified: triage-only runs, chores, unknowns. */
+export type TicketKind = "bug" | "feature" | "other";
+
+/** How a ticket ended. `PASS` only when its work was handed over; a delivery
+ *  run that passed without shipping is `UNSHIPPED`, never a success. */
+export type TicketOutcome = ItemStatus | "UNSHIPPED";
+
+/** How a run's shipping step ended. `failed` still means the work was done:
+ *  the run reached the handover, and what failed was the handover itself — a
+ *  revoked tracker token, a locked git config. */
+export type StatsHandover = "shipped" | "failed";
+
+/** Where a run's figures were read: a live `state.json`, or the archive file an
+ *  export script wrote for runs older than the current layout. */
+export type StatsSource = "live" | "archive";
+
+/** One root run, as the stats screen unfolds it under its ticket. */
+export interface StatsRun {
+  runId: string;
+  pipeline: string;
+  status: ItemStatus;
+  source: StatsSource;
+  costUsd?: number;
+  costEstimated?: true;
+  /** The figure is a lower bound: the run spent tokens nobody could price. */
+  costUnknown?: true;
+  /** Time spent executing steps, as the runner accounted it. */
+  activeMs?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  /** Its pipeline delivers the ticket: the most recent such run is the outcome. */
+  delivery?: true;
+  /** It reached a shipping step, one of `delivery.steps` in `stats.json`,
+   *  such as pushing the merge request; absent when it never ran one. */
+  handover?: StatsHandover;
+}
+
+/**
+ * One ticket, summed over its ROOT runs across every pipeline it ran on.
+ *
+ * A child run is already inside its parent's total, so it never appears here;
+ * summing it again would count its spend twice.
+ */
+export interface StatsTicket {
+  /** `<project>/<ticket>`. */
+  key: string;
+  project: string;
+  ticket: string;
+  ticketUrl?: string;
+  kind: TicketKind;
+  /** `mixed` when the ticket has both live and archived runs. */
+  source: StatsSource | "mixed";
+  /** Absent when no run reported a figure. */
+  costUsd?: number;
+  costEstimated: boolean;
+  costUnknown: boolean;
+  activeMs?: number;
+  /** Earliest `createdAt` and latest `updatedAt` of its runs: the span includes
+   *  every pause, so it is shown beside the active time, never instead of it. */
+  firstAt?: string;
+  lastAt?: string;
+  /** How the ticket ended. `PASS` once a run reached its handover; otherwise the status
+   *  of its most recent delivery run — a pipeline `stats.json` lists under
+   *  `delivery.pipelines`, every pipeline when it lists none — with a pass that
+   *  shipped nothing read as `UNSHIPPED`. Without `delivery.steps` a pass is a
+   *  pass. Absent when no run delivers: a ticket only ever triaged. */
+  outcome?: TicketOutcome;
+  /** Pipelines of its runs, in order of first use. */
+  pipelines: string[];
+  /** Most recent first. */
+  runs: StatsRun[];
+}
+
+/** State of the optional archive file. `invalid` carries why it was ignored. */
+export type StatsArchiveState =
+  | { status: "absent" }
+  | { status: "ok"; generatedAt?: string; runs: number }
+  | { status: "invalid"; error: string };
+
+export interface StatsRead {
+  tickets: StatsTicket[];
+  archive: StatsArchiveState;
 }

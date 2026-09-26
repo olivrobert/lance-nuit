@@ -183,8 +183,9 @@ actions**, and **Reopen** on a closed item.
 A closure is not a verdict. `state.json` keeps its `FAIL`, `STOPPED`, or
 `ABORTED` status, so resume, stats, and history are unchanged. The command writes
 `closure.json` beside the snapshot, with the actor (`LANCENUIT_ACTOR`, as for an
-approval) and the snapshot's `updatedAt`. The dashboard lists the item under
-**Completed** with a `CLOSED` tag. The closure only applies to the snapshot it was
-taken on: once a later rerun or approval writes the snapshot again, it no longer
-applies, and the item comes back to the attention queue. Passed and running runs
-cannot be closed.
+approval) and the snapshot's `updatedAt`. The dashboard moves the item out of
+**Needs you** into the section of the night its snapshot was last written in, with a
+`CLOSED` tag.
+The closure only applies to the snapshot it was taken on: once a later rerun or
+approval writes the snapshot again, it no longer applies, and the item comes back
+to **Needs you**. Passed and running runs cannot be closed.

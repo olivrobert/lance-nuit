@@ -1,0 +1,47 @@
+/* The screenshot gallery: one block per directory, thumbnails cropped to the
+   top of the page, where a screenshot's point usually is. */
+
+.heading {
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+
+.group {
+  margin-bottom: 18px;
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.gallery a {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.gallery img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  object-position: top;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+}
+
+.gallery a:hover img {
+  border-color: var(--accent);
+}
+
+.gallery span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

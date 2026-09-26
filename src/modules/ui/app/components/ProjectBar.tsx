@@ -1,4 +1,4 @@
-// Search, the three queue tabs, one chip per project — a path that
+// Search, one chip per project — a path that
 // disappeared stays listed, greyed, with its own removal button (spec 4.2) —
 // and the "Launch a run" button.
 //
@@ -13,25 +13,17 @@
 
 import type { JSX } from "react";
 import { useState } from "react";
-import type { Queue } from "../api/types.js";
 import { cx } from "../lib/cx.js";
-import { queueCount, waitingCount } from "../lib/derive.js";
+import { waitingCount } from "../lib/derive.js";
 import { useActions, useUiSelector } from "../store/store.js";
 import { LaunchRunDialog } from "./LaunchRunDialog.js";
 import styles from "./ProjectBar.module.css";
-
-const QUEUES: readonly (readonly [Queue, string])[] = [
-  ["attention", "Attention"],
-  ["running", "Running"],
-  ["done", "Completed"],
-];
 
 export function ProjectBar(): JSX.Element {
   const projects = useUiSelector((state) => state.projects);
   const items = useUiSelector((state) => state.items);
   const filter = useUiSelector((state) => state.filter);
   const query = useUiSelector((state) => state.query);
-  const queue = useUiSelector((state) => state.queue);
   const user = useUiSelector((state) => state.user);
   const actions = useActions();
   const [launching, setLaunching] = useState(false);
@@ -57,24 +49,13 @@ export function ProjectBar(): JSX.Element {
       <input
         className={styles.search}
         type="search"
-        placeholder="Search ticket or pipeline…"
+        placeholder="Search ticket, title or pipeline…"
         aria-label="Search"
+        data-list-search=""
+        aria-keyshortcuts="/"
         value={query}
         onChange={(event) => actions.setQuery(event.target.value)}
       />
-      <nav className={styles.queues} aria-label="Filter runs">
-        {QUEUES.map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            className={cx(styles.queue, queue === key && styles.on)}
-            aria-pressed={queue === key}
-            onClick={() => actions.setQueue(key)}
-          >
-            {`${label} ${queueCount(items, key)}`}
-          </button>
-        ))}
-      </nav>
       <div className={styles.chips}>
         <span className="small mute">Projects</span>
         <button type="button" className={cx(styles.chip, !filter && styles.on)} onClick={() => actions.setFilter(null)}>

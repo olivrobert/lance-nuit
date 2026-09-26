@@ -20,6 +20,7 @@ import type {
   PipelinesResponse,
   ProjectsResponse,
   RunResponse,
+  StatsRead,
   TerminalInfo,
   TerminalsResponse,
 } from "./types.js";
@@ -70,6 +71,12 @@ export function writeProject(action: "add" | "remove", path: string): Promise<Ap
 
 export function fetchItems(): Promise<ApiResult<ItemsResponse>> {
   return getJson<ItemsResponse>("/api/items");
+}
+
+/** Every ticket's cost and duration. Asked for by the stats screen when it
+ *  opens and on a manual refresh, never by the poll. */
+export function fetchStats(): Promise<ApiResult<StatsRead>> {
+  return getJson<StatsRead>("/api/stats");
 }
 
 export function fetchItemDetail(project: string, ticket: string): Promise<ApiResult<ItemDetail>> {

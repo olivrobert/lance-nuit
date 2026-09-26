@@ -65,3 +65,37 @@ export function fmtTokens(count: number | undefined | null): string {
   if (count < 1_000_000) return `${(count / 1000).toFixed(1)} k`;
   return `${(count / 1_000_000).toFixed(2)} M`;
 }
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+/** Calendar days between two local dates, ignoring the time of day. Rounded: a
+ *  daylight-saving change makes one day 23 or 25 hours long. */
+function calendarDaysBetween(earlier: Date, later: Date): number {
+  const start = new Date(earlier.getFullYear(), earlier.getMonth(), earlier.getDate());
+  const end = new Date(later.getFullYear(), later.getMonth(), later.getDate());
+  return Math.round((end.getTime() - start.getTime()) / 86_400_000);
+}
+
+/** A moment as a wall clock in the reader's time zone, with just enough date to
+ *  place it: `17:36` today, `Fri 25, 17:36` within the last six days, and
+ *  `24 Sep, 17:36` before that (or for a clock ahead of ours on another day).
+ *  Local on purpose, unlike `fmtDate`: it answers "when did it finish", which a
+ *  reader asks in their own hours. */
+export function fmtClock(iso: string | undefined | null, now: number = Date.now()): string {
+  if (!iso) return ABSENT;
+  const at = new Date(iso);
+  if (!Number.isFinite(at.getTime())) return ABSENT;
+  const clock = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+  const days = calendarDaysBetween(at, new Date(now));
+  if (days === 0) return clock;
+  if (days > 0 && days < 7) return `${WEEKDAYS[at.getDay()]} ${at.getDate()}, ${clock}`;
+  return `${at.getDate()} ${MONTHS[at.getMonth()]}, ${clock}`;
+}
+
+/** The start of a run id, enough to tell two runs apart on screen: the
+ *  timestamp of `20260925T141236.406Z-feature-a22f24`, or the first twelve
+ *  characters of an id of another shape. */
+export function shortRunId(runId: string): string {
+  return /^\d{8}T\d{6}/.exec(runId)?.[0] ?? runId.slice(0, 12);
+}
