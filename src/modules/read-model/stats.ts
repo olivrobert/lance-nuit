@@ -32,7 +32,8 @@ import { asFiniteNumber, asRecord } from "../../lib/json-values.js";
 import type { PersistedRun } from "../../model/persisted.js";
 import { runProvesUnpricedSpend } from "../../state/cost-accounting.js";
 import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
-import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl, uiDir, workItemsRoot } from "./projects.js";
+import { dashboardPaths } from "../dashboard-home/index.js";
+import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl, workItemsRoot } from "./projects.js";
 import { directoryNames, effectiveCwd, statusOf, ticketDirectories } from "./runs.js";
 import { isTicketToken } from "./tickets.js";
 import type {
@@ -103,7 +104,7 @@ function readJson(path: string | null): JsonRead {
 }
 
 function uiFile(name: string, options: ReadModelOptions): string | null {
-  const dir = uiDir(options.env ?? process.env);
+  const dir = dashboardPaths(options.env ?? process.env)?.dir;
   return dir ? join(dir, name) : null;
 }
 

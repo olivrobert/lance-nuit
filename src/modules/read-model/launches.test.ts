@@ -2,7 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { listItems } from "./items.ts";
-import { isPidAlive, latestLaunchByItem, readLaunches, readLaunchesFor } from "./launches.ts";
+import { isPidAlive } from "../dashboard-home/index.ts";
+import { latestLaunchByItem, readLaunches, readLaunchesFor } from "./launches.ts";
 import { cleanupTempDirs, makeProject, makeTempDir, writeProjectsFile, writeRun } from "./test-harness.ts";
 import type { LaunchRecord } from "./types.ts";
 

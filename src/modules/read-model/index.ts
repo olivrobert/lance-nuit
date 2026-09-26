@@ -25,23 +25,12 @@ export {
   TEXT_LIMIT_BYTES,
 } from "./explorer.js";
 export { GROUP_ORDER, listItems, readItem } from "./items.js";
-export {
-  describeLaunch,
-  isPidAlive,
-  isValidLaunchId,
-  launchesDir,
-  launchPaths,
-  readLaunches,
-  readLaunchesFor,
-  readLaunchRecord,
-} from "./launches.js";
+export { readLaunches, readLaunchesFor } from "./launches.js";
 export {
   type ProjectEntry,
-  projectsFile,
   type ReadModelOptions,
   readProjects,
   ticketUrl,
-  uiDir,
   workItemsRoot,
 } from "./projects.js";
 export { readRecap } from "./recap.js";

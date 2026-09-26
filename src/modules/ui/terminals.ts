@@ -26,7 +26,7 @@
 import { isPipelineName } from "../../env/builtin-pipeline.js";
 import type { WorkItemGatewayRegistry } from "../../contracts/registry.js";
 import { type Item, isTicketToken, type ProjectEntry, validateTicketRef } from "../read-model/index.js";
-import { isBusy } from "./actions.js";
+import { isBusy } from "./verbs.js";
 import type { Tmux } from "./tmux.js";
 
 /** What the browser is told about one interactive run. */

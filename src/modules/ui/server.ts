@@ -23,6 +23,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { basename, resolve } from "node:path";
 import type { WorkItemGatewayRegistry } from "../../contracts/registry.js";
+import { type DashboardHome, isValidUserName, openDashboardHome } from "../dashboard-home/index.js";
 import { listPipelineFiles } from "../../env/builtin-pipeline.js";
 import { DEFAULT_UI_PORT, UI_HOST } from "../../lib/ui-defaults.js";
 import {
@@ -42,11 +43,10 @@ import {
   readTree,
   validateTicketRef,
 } from "../read-model/index.js";
-import { buildArgv, isVerb, launchVerb, readLaunchLogTail, reconcileLaunches } from "./actions.js";
 import { clearedUserCookie, parseCookies, USER_COOKIE, userCookie } from "./cookies.js";
+import { VerbLauncher } from "./launcher.js";
 import { renderMarkdown } from "./markdown.js";
 import { matchesEtag, readStaticAsset } from "./static-files.js";
-import { addProject, ensureUiFiles, isKnownUser, isValidUserName, readUsers, removeProject } from "./store.js";
 import { type AttachSpawner, bunAttachSpawner, ViewerRegistry } from "./terminal-viewers.js";
 import {
   findTerminal,
@@ -58,6 +58,7 @@ import {
   startRun,
 } from "./terminals.js";
 import { Tmux } from "./tmux.js";
+import { buildArgv, isVerb } from "./verbs.js";
 
 export { DEFAULT_UI_PORT, UI_HOST } from "../../lib/ui-defaults.js";
 
@@ -103,7 +104,8 @@ interface RouteContext {
   host: string;
   port: number;
   terminals: TerminalContext;
-  launcher?: string;
+  home: DashboardHome;
+  launcher: VerbLauncher;
   workItems: WorkItemGatewayRegistry;
 }
 
@@ -214,10 +216,10 @@ function isExpectedHost(req: IncomingMessage, host: string, port: number): boole
   return typeof header === "string" && [`${host}:${port}`, `localhost:${port}`].includes(header.toLowerCase());
 }
 
-function identityOf(req: IncomingMessage, env: NodeJS.ProcessEnv): Identity {
+function identityOf(req: IncomingMessage, home: DashboardHome): Identity {
   const claimed = parseCookies(req.headers.cookie).get(USER_COOKIE);
   if (!isValidUserName(claimed)) return {};
-  return isKnownUser(claimed, env) ? { claimed, user: claimed } : { claimed };
+  return home.users.isKnown(claimed) ? { claimed, user: claimed } : { claimed };
 }
 
 /** Split a URL path into decoded segments; `undefined` when a segment is not
@@ -379,7 +381,7 @@ function isDirectory(path: string): boolean {
  * a typo is worth reporting at once. Removing accepts anything, because the
  * whole point of the button is to drop a path that no longer exists.
  */
-async function handleProjectWrite(req: IncomingMessage, res: ServerResponse, env: NodeJS.ProcessEnv): Promise<void> {
+async function handleProjectWrite(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
   const body = await readJsonBody(req);
   if (!body.ok) {
     sendError(res, 400, body.reason);
@@ -402,12 +404,12 @@ async function handleProjectWrite(req: IncomingMessage, res: ServerResponse, env
     return;
   }
 
-  const write = action === "add" ? addProject(absolute, env) : removeProject(absolute, env);
+  const write = action === "add" ? ctx.home.projects.add(absolute) : ctx.home.projects.remove(absolute);
   if (write.status === "error") {
     sendError(res, 500, write.reason);
     return;
   }
-  sendJson(res, 200, { projects: readProjects({ env }) });
+  sendJson(res, 200, { projects: readProjects({ env: ctx.env }) });
 }
 
 /**
@@ -417,9 +419,9 @@ async function handleProjectWrite(req: IncomingMessage, res: ServerResponse, env
  * cleared: the browser drops it, and the choice page is what the reader gets
  * next instead of a name that silently does nothing.
  */
-function handleMe(req: IncomingMessage, res: ServerResponse, env: NodeJS.ProcessEnv): void {
-  const identity = identityOf(req, env);
-  const users = readUsers(env);
+function handleMe(req: IncomingMessage, res: ServerResponse, home: DashboardHome): void {
+  const identity = identityOf(req, home);
+  const users = home.users.list();
   if (identity.user) {
     sendJson(res, 200, { user: identity.user, users });
     return;
@@ -431,7 +433,7 @@ function handleMe(req: IncomingMessage, res: ServerResponse, env: NodeJS.Process
   sendJson(res, 200, { user: null, users });
 }
 
-async function handleMeWrite(req: IncomingMessage, res: ServerResponse, env: NodeJS.ProcessEnv): Promise<void> {
+async function handleMeWrite(req: IncomingMessage, res: ServerResponse, home: DashboardHome): Promise<void> {
   const body = await readJsonBody(req);
   if (!body.ok) {
     sendError(res, 400, body.reason);
@@ -442,9 +444,9 @@ async function handleMeWrite(req: IncomingMessage, res: ServerResponse, env: Nod
     sendError(res, 400, "field `user` is required");
     return;
   }
-  const users = readUsers(env);
+  const users = home.users.list();
   const chosen = name.trim();
-  if (!isKnownUser(chosen, env)) {
+  if (!home.users.isKnown(chosen)) {
     sendJson(res, 401, { user: null, users, error: "unknown user" }, { "Set-Cookie": clearedUserCookie() });
     return;
   }
@@ -486,10 +488,10 @@ function handleLaunches(res: ServerResponse, url: URL, env: NodeJS.ProcessEnv): 
 }
 
 /** Tail of a launch log: `GET /api/launches/<id>/log?lines=20`. */
-function handleLaunchLog(res: ServerResponse, id: string, url: URL, env: NodeJS.ProcessEnv): void {
+function handleLaunchLog(res: ServerResponse, id: string, url: URL, home: DashboardHome): void {
   const requested = Number(url.searchParams.get("lines") ?? LOG_TAIL_LINES);
   const lines = Number.isInteger(requested) && requested > 0 ? Math.min(requested, LOG_TAIL_MAX_LINES) : LOG_TAIL_LINES;
-  const tail = readLaunchLogTail(id, lines, env);
+  const tail = home.launches.logTail(id, lines);
   if (tail.status === "not-found") {
     sendError(res, 404, "unknown launch");
     return;
@@ -507,7 +509,7 @@ function handleLaunchLog(res: ServerResponse, id: string, url: URL, env: NodeJS.
  * cursor and the click is refused rather than applied to a run they never saw.
  */
 async function handleAction(req: IncomingMessage, res: ServerResponse, verb: string, ctx: RouteContext): Promise<void> {
-  const identity = identityOf(req, ctx.env);
+  const identity = identityOf(req, ctx.home);
   if (!identity.user) {
     sendError(res, 403, "choose a name before launching anything");
     return;
@@ -558,14 +560,7 @@ async function handleAction(req: IncomingMessage, res: ServerResponse, verb: str
     sendError(res, argv.status, argv.reason, { item });
     return;
   }
-  const launched = launchVerb({
-    item,
-    verb,
-    argv: argv.argv,
-    by: identity.user,
-    env: ctx.env,
-    ...(ctx.launcher ? { launcher: ctx.launcher } : {}),
-  });
+  const launched = ctx.launcher.launch({ item, verb, argv: argv.argv, by: identity.user });
   if (!launched.ok) {
     sendError(res, launched.status, launched.reason);
     return;
@@ -870,8 +865,8 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
       sendError(res, 404, "not found");
       return;
     }
-    if (method === "POST") await handleMeWrite(req, res, env);
-    else handleMe(req, res, env);
+    if (method === "POST") await handleMeWrite(req, res, ctx.home);
+    else handleMe(req, res, ctx.home);
     return;
   }
 
@@ -890,11 +885,11 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
     }
     // Every write is attributed, so an anonymous browser cannot change what the
     // dashboard reads (spec 5.3).
-    if (!identityOf(req, env).user) {
+    if (!identityOf(req, ctx.home).user) {
       sendError(res, 403, "choose a name before changing the project list");
       return;
     }
-    await handleProjectWrite(req, res, env);
+    await handleProjectWrite(req, res, ctx);
     return;
   }
 
@@ -941,14 +936,14 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
       return;
     }
     if (rest.length === 2 && rest[1] === "log" && rest[0]) {
-      handleLaunchLog(res, rest[0], url, env);
+      handleLaunchLog(res, rest[0], url, ctx.home);
       return;
     }
     sendError(res, 404, "not found");
     return;
   }
   if (resource === "runs" || resource === "terminals") {
-    const user = identityOf(req, env).user;
+    const user = identityOf(req, ctx.home).user;
     if (!user) {
       sendError(res, 403, "choose a name before opening a terminal");
       return;
@@ -990,8 +985,15 @@ export function startUiServer(options: UiServerOptions): Promise<RunningUiServer
   const env = options.env ?? process.env;
   const host = options.host ?? UI_HOST;
   const requestedPort = options.port ?? DEFAULT_UI_PORT;
-  ensureUiFiles(env);
-  reconcileLaunches(env);
+  const home = openDashboardHome(env);
+  home.users.ensure();
+  home.projects.ensure();
+  home.launches.reconcile();
+  const launcher = new VerbLauncher({
+    launches: home.launches,
+    env,
+    ...(options.launcher ? { executable: options.launcher } : {}),
+  });
 
   const tmux = options.tmux ?? new Tmux({ env });
   const terminals: TerminalContext = {
@@ -1009,8 +1011,9 @@ export function startUiServer(options: UiServerOptions): Promise<RunningUiServer
       host,
       port,
       terminals,
+      home,
+      launcher,
       workItems: options.workItems,
-      ...(options.launcher ? { launcher: options.launcher } : {}),
     };
     route(req, res, ctx).catch((error: unknown) => {
       // A route that threw is a bug in this server, not something the reader can
