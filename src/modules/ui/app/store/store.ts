@@ -18,7 +18,8 @@
 
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import * as client from "../api/client.js";
-import { createUiStore, type UiActions, type UiState } from "./create-store.js";
+import { createUiStore } from "./create-store.js";
+import type { UiActions, UiState } from "./state.js";
 
 export {
   HIDDEN_POLL_MS,
@@ -28,7 +29,7 @@ export {
   type Toast,
   type UiActions,
   type UiState,
-} from "./create-store.js";
+} from "./state.js";
 
 const store = createUiStore(client);
 
