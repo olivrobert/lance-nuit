@@ -874,7 +874,9 @@ export interface RunReportCriterion {
     text: string;
     met: boolean;
     proof: RunReportProof[];
-    /** File names listed in `captures`. */
+    /** Screenshots that prove it, each as `<group dir>/<file name>` of an entry
+     *  of `captures`. The directory is part of the key: two lots may write the
+     *  same file name. */
     captures?: string[];
     /** What is left unproved or conditional, even when `met` is true. */
     reserve?: string;
