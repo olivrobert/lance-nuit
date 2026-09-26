@@ -13,7 +13,7 @@
   width: 24px;
   height: 7px;
   border-radius: 3px;
-  background: #d9ddda;
+  background: var(--line);
 }
 
 .steps .done {
@@ -29,7 +29,7 @@
 }
 
 .steps .pending {
-  background: #d9ddda;
+  background: var(--line);
 }
 
 .steps .aborted {
@@ -37,6 +37,6 @@
 }
 
 .steps .skipped {
-  border: 1px solid #cbd0cc;
+  border: 1px solid var(--line-strong);
   background: transparent;
 }

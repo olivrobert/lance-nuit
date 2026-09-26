@@ -1,5 +1,6 @@
-// The status line at the top of the page: the name of the tool, whether what is
-// on screen is current, and the switch for notifications.
+// The status line at the top of the page: the name of the tool, the links
+// between screens, whether what is on screen is current, and the switch for
+// notifications.
 //
 // It carries no counts. The list's jump chips already say how many items wait,
 // run and finished each night; a second copy of those numbers higher up was
@@ -16,6 +17,7 @@ import { cx } from "../lib/cx.js";
 import { freshnessOf, updatedLabel } from "../lib/derive.js";
 import { useUiSelector } from "../store/store.js";
 import { useNotificationPermission } from "../store/useAttentionNotifications.js";
+import { useRoute } from "../store/useRoute.js";
 import styles from "./Banner.module.css";
 
 /** How often the age of the screen is re-read. The label counts in minutes, so
@@ -74,10 +76,30 @@ function NotifyToggle(): JSX.Element | null {
   );
 }
 
+/** The two screens a reader moves between on purpose. A terminal is reached
+ *  from its item, never from here. */
+function Nav(): JSX.Element {
+  const route = useRoute();
+  return (
+    <nav className={styles.nav}>
+      <a href="#/" className={cx(route.view === "inbox" && styles.current)}>
+        Inbox
+      </a>
+      <a href="#/stats" className={cx(route.view === "stats" && styles.current)}>
+        Stats
+      </a>
+    </nav>
+  );
+}
+
 export function Banner(): JSX.Element {
   return (
     <header className={styles.banner}>
-      <strong>lancenuit</strong>
+      <strong className={styles.brand}>
+        <span className={styles.moon} aria-hidden="true" />
+        lancenuit
+      </strong>
+      <Nav />
       <span className={styles.end}>
         <Freshness />
         <NotifyToggle />

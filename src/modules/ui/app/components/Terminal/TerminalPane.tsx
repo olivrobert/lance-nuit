@@ -71,7 +71,7 @@ export function TerminalPane({ id, onEnded }: TerminalPaneProps): JSX.Element {
       fontSize: 13,
       scrollback: SCROLLBACK,
       macOptionIsMeta: true,
-      theme: { background: "#1f2426", foreground: "#e6ebe8" },
+      theme: { background: "#141a36", foreground: "#dfe4f7" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);

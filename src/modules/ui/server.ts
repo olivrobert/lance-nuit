@@ -37,6 +37,7 @@ import {
   readProjects,
   readRecap,
   readReport,
+  readStats,
   readSteps,
   readTree,
   validateTicketRef,
@@ -351,6 +352,12 @@ async function handleRaw(
     "X-Content-Type-Options": "nosniff",
   });
   res.end(image.bytes);
+}
+
+/** Every ticket's cost and duration. Read on request, never polled: the scan
+ *  opens every run snapshot of every project, for figures read now and then. */
+function handleStats(res: ServerResponse, env: NodeJS.ProcessEnv): void {
+  sendJson(res, 200, readStats({ env }));
 }
 
 function handleProjects(res: ServerResponse, env: NodeJS.ProcessEnv): void {
@@ -916,6 +923,15 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
       return;
     }
     sendError(res, 404, "not found");
+    return;
+  }
+
+  if (resource === "stats" && method === "GET") {
+    if (rest.length > 0) {
+      sendError(res, 404, "not found");
+      return;
+    }
+    handleStats(res, env);
     return;
   }
 

@@ -175,7 +175,10 @@ from a bounded prefix of the file and absent when there is none, and `readReport
 `artifacts/report.json` field by field against the current run
 ([delivery report](work-item-layout.md#delivery-report-artifactsreportjson)).
 Both read the effective work-item directory, so a worktree run shows its
-worktree copy, and neither calls the work-item provider.
+worktree copy, and neither calls the work-item provider. `readStats`
+(`stats.ts`) serves the ticket-costs screen: it walks every root run of every
+listed project on request, never from the poll, and merges the external
+archive described in [usage](usage.md#ticket-costs).
 
 `bun run ui:build` bundles `app/index.tsx` with esbuild into
 `static/app.js` and `static/app.css`, which the static handler serves verbatim.

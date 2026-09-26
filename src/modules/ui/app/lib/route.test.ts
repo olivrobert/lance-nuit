@@ -13,6 +13,11 @@ describe("parseRoute", () => {
     expect(parseRoute("#/terminal/ln%20odd")).toEqual({ view: "terminal", id: "ln odd" });
   });
 
+  test("the stats hash is the stats screen, and nothing below it", () => {
+    expect(parseRoute("#/stats")).toEqual({ view: "stats" });
+    expect(parseRoute("#/stats/x")).toEqual({ view: "inbox" });
+  });
+
   test("a malformed escape or a nested path is not an id", () => {
     expect(parseRoute("#/terminal/%E0%A4%A")).toEqual({ view: "inbox" });
     expect(parseRoute("#/terminal/a/b")).toEqual({ view: "inbox" });
@@ -25,5 +30,6 @@ describe("formatRoute", () => {
       expect(parseRoute(formatRoute({ view: "terminal", id }))).toEqual({ view: "terminal", id });
     }
     expect(formatRoute({ view: "inbox" })).toBe("#/");
+    expect(parseRoute(formatRoute({ view: "stats" }))).toEqual({ view: "stats" });
   });
 });

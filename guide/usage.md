@@ -334,6 +334,129 @@ and typing into a terminal needs the viewer token its stream handed out.
 Anyone who can reach the port with a declared name can type into a shell as
 the user running the dashboard: keep it on loopback and behind the tunnel.
 
+### Ticket costs
+
+**Stats** in the banner (`#/stats`) lists what every ticket cost, across every
+listed project: one row per ticket, sortable by project, ticket, kind, cost,
+active time, span, run count, outcome and last run, filterable by period,
+scope, project, kind and source. A ticket unfolds into its runs. The screen reads the
+figures when it opens and on **Refresh**, never from the poll.
+
+A ticket's **outcome** says how it ended:
+
+- `PASS` once a run **reached its handover**: it ran one of the steps listed
+  under `delivery.steps` in `stats.json`, such as the step that pushes the
+  merge request. The step may have failed: the work was finished by then, and
+  what failed was the push itself — a revoked token, a locked git config. The
+  unfolded run reads `shipped` or `handover failed`. A later failed rerun does
+  not undo it;
+- otherwise, the status of its most recent delivery run, a run of a pipeline
+  listed under `delivery.pipelines` (every pipeline when the list is absent or
+  empty). A delivery run that passed without shipping — its merge request
+  skipped, or never reached — is **not shipped**, never `PASS`. Without
+  `delivery.steps`, a pass is a pass.
+
+A later triage or commit run does not change the outcome, and the unfolded runs
+dim those that do not deliver. A ticket no delivery run touched, such as one
+only triaged, has no outcome; the default **delivery** scope hides it, **all**
+shows it.
+
+**Period** keeps the tickets whose last run was updated within the range:
+the last 7, 30 or 90 days, or two local days of your choice, both included.
+Each ticket falls in a single period, by its last activity, so the costs of
+consecutive periods add up. A ticket without a timestamp shows only when the
+range is open.
+
+The cards above the table describe the rows on screen:
+
+- **Mean cost · passed** — what a shipped ticket cost: the mean and median of
+  the tickets whose outcome is `PASS`, next to the mean over every ticket;
+- **Passed** and **Failed** — tickets by outcome, with their share and cost;
+- **Unfinished** — outcome stopped, aborted, still running or not shipped;
+- **Total** — every ticket, its cost and its active time.
+
+A mean or median counts only the tickets that have a cost.
+
+How a ticket is summed:
+
+- only root runs count. A composed child's cost is already in its parent's
+  `total_control`, so it is never added again;
+- each snapshot is read once by its real path, so a `latest` link does not
+  count a run twice;
+- every root run of the ticket counts, triage and auxiliary pipelines
+  included: the cost is what the whole ticket spent, not only its delivery;
+- the cost and the active time are the run's `total_control` figures
+  (`total_cost_usd`, `duration_ms`), never a re-sum of its steps. An estimated
+  figure or a run that spent tokens no table could price marks the ticket's
+  cost `~` or `≥`, as in the inbox;
+- **Active** is the time spent executing steps; **Span** is first run created
+  to last run updated, pauses and waits for review included.
+
+Kinds (`bug`, `feature`, `other`) are your vocabulary, declared in
+`~/.lance-nuit/ui/stats.json` with the delivery pipelines. Without the file
+every ticket is `other` and every run delivers.
+
+```json
+{
+  "kinds": {
+    "pipelines": { "bugfix": "bug", "feature": "feature", "triage": "other" },
+    "artifacts": [
+      { "file": "ticket-kind.txt" },
+      { "file": "triage.json", "field": "kind" },
+      { "file": "bug.json", "kind": "bug" }
+    ]
+  },
+  "delivery": {
+    "pipelines": ["feature", "bugfix"],
+    "steps": ["create-mr", "push-mr"]
+  }
+}
+```
+
+An artifact rule reads `artifacts/<file>` of the ticket: the whole text, a
+top-level `field` of a JSON file, or, with `kind`, the file's mere presence.
+The first rule that yields `bug` or `feature` wins; otherwise the pipeline of
+the most recent run that maps to one does; otherwise the kind an archived run
+carries; otherwise `other`.
+
+**Archive.** Runs lance-nuit cannot read live — other formats, other
+snapshot schemas, projects no longer listed — can be merged from
+`~/.lance-nuit/ui/stats-archive.json`, which you generate with a script of your
+own:
+
+```json
+{
+  "version": 1,
+  "generatedAt": "2026-09-26T15:30:12Z",
+  "runs": [
+    {
+      "project": "shop",
+      "ticket": "SHOP-12",
+      "runId": "run_2026-07-15T07-49-59",
+      "pipeline": "bugfix",
+      "kind": "bug",
+      "status": "PASS",
+      "costUsd": 2.09,
+      "costEstimated": true,
+      "costUnknown": true,
+      "activeMs": 557760,
+      "createdAt": "2026-07-15T07:49:59Z",
+      "updatedAt": "2026-07-15T08:45:22Z",
+      "handover": "shipped"
+    }
+  ]
+}
+```
+
+`project`, `ticket` and `runId` are required; a run missing one is skipped.
+`project` is the project directory's name. An unknown `status` reads as
+`RUNNING`, an unknown `kind` as none. `handover` (`shipped` or `failed`) marks
+a run that reached a shipping step; the archive decides it, since the screen
+cannot see the steps of an archived run. The archive holds root runs only, one
+entry per run. A run found both live and in the archive (same project, ticket
+and run id) is read live. A malformed archive is reported on the screen and
+ignored; the live figures still show.
+
 ## Project configuration
 
 The canonical configuration is `.lance-nuit/config.json`. A user configuration

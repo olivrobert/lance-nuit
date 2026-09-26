@@ -27,7 +27,7 @@
 }
 
 .primaryLink:hover {
-  background: #244b44;
+  background: var(--accent-strong);
 }
 
 /* The value a copy button copies (a branch), cut short: the title carries it whole. */
@@ -74,12 +74,12 @@
 }
 
 .actionMenu > summary:hover {
-  border-color: #aeb5b1;
-  background: #f7f8f6;
+  border-color: var(--line-hover);
+  background: var(--hover);
 }
 
 .actionMenu[open] > summary {
-  border-color: #aeb5b1;
+  border-color: var(--line-hover);
 }
 
 .actionMenu > summary::-webkit-details-marker {

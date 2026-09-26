@@ -205,7 +205,7 @@
   padding: 2px 5px;
   color: var(--mute);
   border-radius: 3px;
-  background: #eceeeb;
+  background: var(--tint);
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
@@ -254,9 +254,9 @@
 /* The tail of a launch log, on the runner's own dark ground. */
 .log {
   max-height: 320px;
-  color: #e6ebe8;
+  color: var(--night-ink);
   border: 0;
-  background: #252b2c;
+  background: var(--night);
   white-space: pre;
 }
 

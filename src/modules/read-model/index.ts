@@ -4,6 +4,17 @@
 // `src/state`. The dashboard (`src/modules/ui/`) imports this file and nothing
 // below it; a Semgrep `ERROR` rule in `.semgrep.yml` enforces that direction.
 
+export type {
+  RunReport,
+  RunReportCaptureGroup,
+  RunReportCriterion,
+  RunReportDelivered,
+  RunReportFollowUp,
+  RunReportLink,
+  RunReportNote,
+  RunReportProof,
+  RunReportReview,
+} from "../../model/run-report.js";
 export {
   contentKindOf,
   IMAGE_LIMIT_BYTES,
@@ -35,19 +46,9 @@ export {
 } from "./projects.js";
 export { readRecap } from "./recap.js";
 export { parseRunReport, type ReportRead, readReport } from "./report.js";
+export { readStats, STATS_ARCHIVE_FILE, STATS_CONFIG_FILE } from "./stats.js";
 export { readSteps } from "./steps.js";
 export { isTicketToken, validateTicketRef } from "./tickets.js";
-export type {
-  RunReport,
-  RunReportCaptureGroup,
-  RunReportCriterion,
-  RunReportDelivered,
-  RunReportFollowUp,
-  RunReportLink,
-  RunReportNote,
-  RunReportProof,
-  RunReportReview,
-} from "../../model/run-report.js";
 export type {
   ApprovalState,
   FileContentKind,
@@ -67,13 +68,21 @@ export type {
   Launch,
   LaunchRecord,
   RunEventView,
-  RunRecap,
   RunModelCost,
+  RunRecap,
   RunRecapStep,
   RunStepStatus,
   RunStepsView,
   RunStepView,
   RunTokens,
+  StatsArchiveState,
+  StatsHandover,
+  StatsRead,
+  StatsRun,
+  StatsSource,
+  StatsTicket,
+  TicketKind,
+  TicketOutcome,
   TreeDirectory,
   TreeFile,
   TreeNode,
