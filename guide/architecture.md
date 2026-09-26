@@ -158,12 +158,27 @@ src/modules/ui/app/        React 19 + TypeScript sources of the front end
   index.tsx                entry point: mounts <App> into #app
   App.tsx                  the shell (identity page, banner, project bar, list, sheet)
   api/                     typed client and the DTO of the read model
-  store/                   store factory (create-store.ts), its one instance + hooks (store.ts), the 15 s poll
+  store/                   store factory (create-store.ts), its one instance + hooks (store.ts), the poll, the attention notifications
   lib/                     pure derivation and formatting, unit-tested
   components/              one folder or file per zone of the screen
   styles/tokens.css        the only global stylesheet; everything else is a CSS Module
 src/modules/ui/static/     index.html, plus the built app.js and app.css
 ```
+
+The server side reads work items only through `src/modules/read-model/`
+(`index.ts` is its public surface, and the only module allowed to import
+`src/state/`; a Semgrep rule enforces the direction). It projects snapshots
+into the DTO the front end renders. Two of its readers take
+content a pipeline wrote rather than runner state: `Item.title`, the first
+`# ` heading of `artifacts/ticket.md` (a leading ticket key dropped), read
+from a bounded prefix of the file and absent when there is none, and `readReport`, which validates
+`artifacts/report.json` field by field against the current run
+([delivery report](work-item-layout.md#delivery-report-artifactsreportjson)).
+Both read the effective work-item directory, so a worktree run shows its
+worktree copy, and neither calls the work-item provider. `readStats`
+(`stats.ts`) serves the ticket-costs screen: it walks every root run of every
+listed project on request, never from the poll, and merges the external
+archive described in [usage](usage.md#ticket-costs).
 
 `bun run ui:build` bundles `app/index.tsx` with esbuild into
 `static/app.js` and `static/app.css`, which the static handler serves verbatim.

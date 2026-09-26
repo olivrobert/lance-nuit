@@ -1,0 +1,241 @@
+/* The stats screen: recap cards, a filter bar, and one wide table. The
+   table scrolls sideways inside its own frame so the page never does. */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 16px 18px 32px;
+  overflow: auto;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.head h1 {
+  font-size: 18px;
+}
+
+.refresh {
+  margin-left: auto;
+}
+
+.warn {
+  color: var(--fail);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip {
+  min-height: 28px;
+  padding: 3px 11px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.date {
+  min-height: 28px;
+  padding: 2px 8px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font: inherit;
+  font-size: 12px;
+}
+
+.date:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Held under the pointer too: the global `button:hover` rule is more specific. */
+.chip.on,
+.chip.on:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.card {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.card dt {
+  color: var(--mute);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.card dd {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.value {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.card.pass {
+  border-left-color: var(--ok);
+}
+
+.card.fail {
+  border-left-color: var(--fail);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  padding: 0;
+  background: var(--panel-subtle);
+}
+
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sort {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  color: var(--mute);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: inherit;
+  text-transform: uppercase;
+}
+
+.sort:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+.arrow {
+  display: inline-block;
+  width: 1em;
+  margin-left: 2px;
+}
+
+.row:hover {
+  background: var(--hover);
+}
+
+.expanded {
+  background: var(--tint);
+}
+
+.run td {
+  color: var(--mute);
+  background: var(--panel-subtle);
+}
+
+/* A run that does not decide the outcome — a triage, a quality pass — recedes. */
+.run.aside td {
+  opacity: 0.6;
+}
+
+.link {
+  min-height: 0;
+  padding: 0;
+  color: var(--link);
+  border: 0;
+  background: transparent;
+  font: inherit;
+}
+
+.link:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.kind {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bug {
+  color: var(--fail);
+  background: var(--fail-bg);
+}
+
+.feature {
+  color: var(--run);
+  background: var(--run-bg);
+}
+
+.other {
+  color: var(--mute);
+  background: var(--tint);
+}
+
+@media (max-width: 620px) {
+  .screen {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}

@@ -1,63 +1,136 @@
-/* The status line: a summary and three counts, never a second alarm panel. */
+/* The status line: the name, how current the screen is, and the notification
+   switch. Nothing here competes with the list below it. */
 
+/* The one strip drawn as the night sky, so the page carries the tool's name
+   without turning dark: a band of deep blue, a few fixed stars, and the moon
+   beside the name. The stars are background gradients — no image to serve. */
 .banner {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-height: 42px;
-  padding: 8px 18px;
-  color: var(--ink);
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  padding: 6px 18px;
+  color: var(--night-ink);
+  background:
+    radial-gradient(1px 1px at 22% 30%, rgb(255 255 255 / 70%), transparent),
+    radial-gradient(1px 1px at 37% 72%, rgb(255 255 255 / 45%), transparent),
+    radial-gradient(1.5px 1.5px at 51% 38%, rgb(255 255 255 / 60%), transparent),
+    radial-gradient(1px 1px at 63% 64%, rgb(255 255 255 / 40%), transparent),
+    radial-gradient(1px 1px at 74% 26%, rgb(255 255 255 / 55%), transparent),
+    radial-gradient(1px 1px at 86% 70%, rgb(255 255 255 / 35%), transparent),
+    linear-gradient(100deg, var(--night-deep), var(--night) 55%, #2a3470);
   font-size: 13px;
 }
 
-.summary {
-  color: var(--mute);
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+/* A crescent: a lit disc with a sky-coloured disc offset over it. */
+.moon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: inset -4px -2px 0 0 var(--moon);
+  transform: rotate(-20deg);
+  filter: drop-shadow(0 0 4px rgb(226 185 92 / 45%));
+}
+
+.nav {
+  display: flex;
+  gap: 2px;
+  margin-left: 10px;
+}
+
+.nav a {
+  padding: 3px 10px;
+  color: var(--night-mute);
+  border-radius: 999px;
+  text-decoration: none;
+}
+
+.nav a:hover {
+  color: var(--night-ink);
+  background: rgb(255 255 255 / 8%);
+}
+
+.nav a.current {
+  color: var(--night-ink);
+  background: rgb(255 255 255 / 14%);
+}
+
+.end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--night-mute);
+  font-size: 12px;
   white-space: nowrap;
 }
 
-.counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin-left: auto;
-  color: var(--mute);
+.pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6fd39b;
+  box-shadow: 0 0 6px rgb(111 211 155 / 60%);
+}
+
+.stale {
+  color: var(--moon);
+}
+
+.stale .pulse {
+  background: var(--moon);
+}
+
+/* A server that stopped answering is the one state this line must not let
+   pass unnoticed: it reads as a pill, not as a muted caption. */
+.lost {
+  padding: 3px 10px;
+  color: var(--fail);
+  border-radius: 999px;
+  background: var(--fail-bg);
+  font-weight: 600;
+}
+
+.lost .pulse {
+  background: var(--fail);
+}
+
+.notify {
+  min-height: 26px;
+  color: var(--night-ink);
+  border-color: rgb(255 255 255 / 25%);
+  background: transparent;
+  padding: 2px 10px;
   font-size: 12px;
 }
 
-/* Named per role rather than one shared class: a generic name would collide,
-   once bundled, with the list header's own count and the step bar. */
-.attention,
-.running,
-.done {
-  white-space: nowrap;
-}
-
-.attention {
-  color: var(--stop);
-}
-
-.running {
-  color: var(--run);
-}
-
-.done {
-  color: var(--ok);
+.notify:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 45%);
+  background: rgb(255 255 255 / 8%);
 }
 
 @media (max-width: 620px) {
   .banner {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
     padding-right: 12px;
     padding-left: 12px;
   }
 
-  .counts {
-    gap: 10px;
-    margin-left: 0;
+  .freshness {
+    white-space: normal;
   }
 }

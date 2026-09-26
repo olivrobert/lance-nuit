@@ -2,7 +2,8 @@
 //
 // It answers two questions — is there a reader, and which screen does the URL
 // hash name? — and then assembles the zones that screen lives in. The inbox is
-// three zones; the terminal screen (`#/terminal/<id>`) keeps the banner and
+// three zones; the stats screen (`#/stats`) keeps the banner and gives the rest
+// to one table; the terminal screen (`#/terminal/<id>`) keeps the banner and
 // gives the rest of the viewport to one tmux session. Identity comes first for
 // both: the terminal is a shell, and nobody reaches it without a name. Everything else is delegated: the banner, the
 // project bar, the list and the sheet each own their data through the store, so
@@ -21,10 +22,13 @@ import { Banner } from "./components/Banner.js";
 import { ItemList } from "./components/ItemList.js";
 import { ProjectBar } from "./components/ProjectBar.js";
 import { Sheet } from "./components/Sheet/index.js";
+import { StatsScreen } from "./components/Stats/index.js";
 import { TerminalScreen } from "./components/Terminal/index.js";
 import { cx } from "./lib/cx.js";
-import { queueCount } from "./lib/derive.js";
-import { useActions, useUiState } from "./store/store.js";
+import { waitingCount } from "./lib/derive.js";
+import { POLL_MS, useActions, useUiState } from "./store/store.js";
+import { useAttentionNotifications } from "./store/useAttentionNotifications.js";
+import { useListKeyboard } from "./store/useListKeyboard.js";
 import { usePolling } from "./store/usePolling.js";
 import { useRoute } from "./store/useRoute.js";
 
@@ -66,7 +70,7 @@ function ToastView(): JSX.Element | null {
 }
 
 /** The number in the tab title: what is waiting for this reader, across every
- *  project, whatever chip or queue is currently selected. */
+ *  project, whatever chip is currently selected. */
 function useDocumentTitle(count: number): void {
   useEffect(() => {
     document.title = `${count ? `(${count}) ` : ""}lancenuit — review inbox`;
@@ -77,9 +81,22 @@ export function App(): JSX.Element | null {
   const state = useUiState();
   const route = useRoute();
   usePolling();
-  useDocumentTitle(queueCount(state.items, "attention"));
+  useAttentionNotifications();
+  useListKeyboard(route.view === "inbox" && state.user !== null);
+  useDocumentTitle(waitingCount(state.items, null));
 
-  if (!state.loaded) return <ToastView />;
+  if (!state.loaded) {
+    // Nothing was ever read: without this line the page stays blank, and a
+    // blank page says nothing about a server that is down or a tunnel that dropped.
+    return state.refreshError ? (
+      <div className={styles.whoPage}>
+        <h1>Dashboard server unreachable</h1>
+        <p className="mute">{`Retrying every ${POLL_MS / 1000} seconds. Last error: ${state.refreshError}`}</p>
+      </div>
+    ) : (
+      <ToastView />
+    );
+  }
   if (!state.user) {
     return (
       <>
@@ -96,6 +113,16 @@ export function App(): JSX.Element | null {
       <div className={cx(styles.shell, styles.terminalShell)}>
         <Banner />
         <TerminalScreen key={route.id} id={route.id} />
+        <ToastView />
+      </div>
+    );
+  }
+
+  if (route.view === "stats") {
+    return (
+      <div className={cx(styles.shell, styles.statsShell)}>
+        <Banner />
+        <StatsScreen />
         <ToastView />
       </div>
     );

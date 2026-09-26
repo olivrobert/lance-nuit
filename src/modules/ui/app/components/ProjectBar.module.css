@@ -1,4 +1,4 @@
-/* The filter bar: search, the three queue tabs, and the project chips. A chip
+/* The filter bar: search and the project chips. A chip
    whose path disappeared keeps its place, dashed and grey, so the reader can
    tell "moved" from "gone" instead of the project silently vanishing. */
 
@@ -11,7 +11,7 @@
   padding: 8px 18px;
   color: var(--mute);
   border-bottom: 1px solid var(--line);
-  background: rgb(255 255 255 / 94%);
+  background: var(--panel);
   font-size: 12px;
 }
 
@@ -30,33 +30,7 @@
 }
 
 .search::placeholder {
-  color: #8b928d;
-}
-
-.queues {
-  display: flex;
-  gap: 3px;
-}
-
-.queue {
-  min-height: 30px;
-  padding: 4px 10px;
   color: var(--mute);
-  border-color: var(--line);
-  border-radius: 5px;
-  background: var(--panel);
-  font-size: 12px;
-}
-
-.queue:hover {
-  color: var(--ink);
-  background: #f7f8f6;
-}
-
-.queue.on {
-  color: #fff;
-  border-color: var(--ink);
-  background: var(--ink);
 }
 
 .chips {
@@ -82,7 +56,9 @@
   cursor: pointer;
 }
 
-.chip.on {
+/* Held under the pointer too: the global `button:hover` rule is more specific. */
+.chip.on,
+.chip.on:hover:not(:disabled) {
   color: #fff;
   border-color: var(--ink);
   background: var(--ink);
@@ -99,17 +75,17 @@
   height: 7px;
   margin-right: 6px;
   border-radius: 50%;
-  background: #8b9590;
+  background: var(--line-hover);
 }
 
 .gone {
   color: var(--mute);
   border-style: dashed;
-  background: #f1f2ef;
+  background: var(--tint);
 }
 
 .gone .dot {
-  background: #c4c9c5;
+  background: var(--line-strong);
 }
 
 .drop {
@@ -140,7 +116,7 @@
   padding: 5px 11px;
   color: var(--ink);
   border-radius: 999px;
-  background: #eef0ed;
+  background: var(--tint);
   font-weight: 650;
 }
 
@@ -153,14 +129,6 @@
   .search {
     flex-basis: 100%;
     width: 100%;
-  }
-
-  .queues {
-    flex: 1 1 100%;
-  }
-
-  .queue {
-    flex: 1 1 0;
   }
 
   .chips {

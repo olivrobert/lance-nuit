@@ -27,6 +27,7 @@ const PUBLIC_DSL_SOURCES = [
   "model/context.ts",
   "model/artifact.ts",
   "model/persisted.ts",
+  "model/run-report.ts",
   "model/input.ts",
   "model/definition.ts",
   "pipeline/context.ts",

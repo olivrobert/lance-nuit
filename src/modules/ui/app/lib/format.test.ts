@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fmtAge, fmtCost, fmtDate, fmtDuration, fmtSize, fmtTokens } from "./format.js";
+import { fmtAge, fmtClock, fmtCost, fmtDate, fmtDuration, fmtSize, fmtTokens, shortRunId } from "./format.js";
 
 const NOW = Date.parse("2026-01-10T12:00:00.000Z");
 
@@ -83,5 +83,42 @@ describe("fmtTokens", () => {
     expect(fmtTokens(2864)).toBe("2.9 k");
     expect(fmtTokens(11_841_980)).toBe("11.84 M");
     expect(fmtTokens(undefined)).toBe("—");
+  });
+});
+
+describe("fmtClock", () => {
+  // Built in local time: the clock is the reader's, so the test must not
+  // depend on the time zone it runs in. Friday 25 September 2026, 18:00.
+  const now = new Date(2026, 8, 25, 18, 0).getTime();
+  const at = (day: number, hours: number, minutes: number): string =>
+    new Date(2026, 8, day, hours, minutes).toISOString();
+
+  test("shows the clock alone for today", () => {
+    expect(fmtClock(at(25, 17, 36), now)).toBe("17:36");
+    expect(fmtClock(at(25, 0, 5), now)).toBe("00:05");
+  });
+
+  test("adds the weekday within the last six days", () => {
+    expect(fmtClock(at(24, 23, 59), now)).toBe("Thu 24, 23:59");
+    expect(fmtClock(at(19, 9, 0), now)).toBe("Sat 19, 09:00");
+  });
+
+  test("shows the date beyond, and for another day ahead of our clock", () => {
+    expect(fmtClock(at(18, 17, 36), now)).toBe("18 Sep, 17:36");
+    expect(fmtClock(at(26, 1, 0), now)).toBe("26 Sep, 01:00");
+  });
+
+  test("answers with a dash for an absent or unparsable date", () => {
+    expect(fmtClock(undefined, now)).toBe("—");
+    expect(fmtClock("", now)).toBe("—");
+    expect(fmtClock("not a date", now)).toBe("—");
+  });
+});
+
+describe("shortRunId", () => {
+  test("keeps the timestamp of a runner id, and the head of any other", () => {
+    expect(shortRunId("20260925T141236.406Z-feature-a22f24")).toBe("20260925T141236");
+    expect(shortRunId("run-1")).toBe("run-1");
+    expect(shortRunId("abcdefghijklmnop")).toBe("abcdefghijkl");
   });
 });

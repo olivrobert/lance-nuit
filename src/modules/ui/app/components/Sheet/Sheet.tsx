@@ -1,11 +1,12 @@
 // The sheet: everything the dashboard knows about the item the reader selected.
 //
 // It is laid out in two parts, and the split matters. The sticky header answers
-// "what is this and what can I do about it" — identity, headline, actions, tabs
-// — and never scrolls away. Below it, exactly one tab is on screen at a time,
-// followed by a collapsed panel holding what is true of the run but is not the
-// question being asked: its metadata, its launch, its approval, its assumptions,
-// the reply being drafted.
+// "what is this and what can I do about it" — identity and verdict
+// (`SheetHeader.tsx`), actions, tabs
+// — and never scrolls away. Below it, a stopped run first shows the question it
+// asks (`Decision.tsx`), then exactly one tab is on screen at a time, followed
+// by a collapsed panel holding what is true of the run but is not the question
+// being asked: its metadata, its launch, its approval, its assumptions.
 //
 // The `<details>` panel is deliberately rendered at a FIXED position in the tree,
 // as a sibling of the tab section rather than inside a branch of it. The DOM
@@ -18,57 +19,56 @@
 //
 // One consequence is a deliberate divergence from the DOM version: the panel now
 // stays open across a tab switch, where the old renderer closed it. Nothing in
-// it — the metadata, the launch, the approval, the assumptions, the draft reply —
+// it — the metadata, the launch, the approval, the assumptions —
 // belongs to a tab, so closing it was an artifact of a renderer that rebuilt the
 // subtree, not a decision. A reader who opened it keeps it open.
 
 import type { JSX } from "react";
-import { currentSheetTab, hasAssumptionContent, headlineOf, visibleItems } from "../../lib/derive.js";
-import { fmtAge, fmtCost } from "../../lib/format.js";
+import { currentSheetTab, hasAssumptionContent, visibleItems } from "../../lib/derive.js";
 import { useUiState } from "../../store/store.js";
 import { DocumentView, Folder } from "../Explorer/index.js";
-import { ProjectBadge } from "../ProjectBadge.js";
-import { StatusTag } from "../StatusTag.js";
 import { Actions } from "./Actions.js";
 import { Approval } from "./Approval.js";
 import { Assumptions } from "./Assumptions.js";
 import { Callout, LaunchFailureCallout } from "./Callout.js";
+import { Decision, showsDecision } from "./Decision.js";
 import { Launch } from "./Launch.js";
 import { Meta } from "./Meta.js";
-import { Recap } from "./Recap.js";
-import { Reply } from "./Reply.js";
+import { Report } from "./Report.js";
+import { Run } from "./Run.js";
 import styles from "./Sheet.module.css";
+import { SheetHeader } from "./SheetHeader.js";
 import { SheetTabs } from "./SheetTabs.js";
 import { Steps } from "./Steps.js";
-import { TerminalLink } from "./TerminalLink.js";
 
 /** The one tab on screen. The header owns the action row, so the diagnostic
  *  callout is asked not to draw a second one. */
 function TabContent(): JSX.Element | null {
   const { detail, sheetTab } = useUiState();
   if (!detail) return null;
-  const { item, steps, recap, tree } = detail;
+  const { item, steps, recap, tree, report } = detail;
   const tab = currentSheetTab(item, detail, sheetTab);
 
-  if (tab === "recap" && recap) {
+  if (tab === "report" && report) {
     return (
       <section className={styles.primaryContent}>
-        <Recap item={item} recap={recap} tree={tree} />
+        <Report item={item} report={report} {...(detail.reportWarnings ? { warnings: detail.reportWarnings } : {})} />
       </section>
     );
   }
-  if (tab === "steps") {
+  if (tab === "run") {
+    // A report that lists its captures shows them itself, labelled with their
+    // criteria; the Run tab keeps the raw gallery only when it does not.
+    const reportShowsCaptures = Boolean(report?.captures?.some((group) => group.files.length > 0));
     return (
       <section className={styles.primaryContent}>
-        <h3>Run steps</h3>
-        <Steps steps={steps} />
+        <Run item={item} recap={recap} steps={steps} tree={reportShowsCaptures ? null : tree} />
       </section>
     );
   }
   if (tab === "files") {
     return (
       <section className={styles.primaryContent}>
-        <h3>Run files</h3>
         <Folder />
       </section>
     );
@@ -76,7 +76,6 @@ function TabContent(): JSX.Element | null {
   if (tab === "document") {
     return (
       <section className={styles.primaryContent}>
-        {item.group === "decision" && item.approval ? <Approval item={item} /> : null}
         <DocumentView />
       </section>
     );
@@ -97,10 +96,10 @@ function TabContent(): JSX.Element | null {
         <p className="mute">
           Resume from this step once the cause is resolved. Completed work and existing approvals are kept.
         </p>
-      ) : (
+      ) : showsDecision(item) ? null : (
         <Callout item={item} includeActions={false} />
       )}
-      {item.group !== "decision" ? <Steps steps={steps} compact /> : null}
+      {item.group !== "decision" ? <Steps steps={steps} /> : null}
       {item.failure?.reason && !stepCarriesError ? <pre>{item.failure.reason}</pre> : null}
       {item.launch ? <Launch item={item} /> : null}
     </section>
@@ -112,11 +111,11 @@ export function Sheet(): JSX.Element {
   const detail = state.detail;
 
   if (!detail) {
-    const rows = visibleItems(state.items, { filter: state.filter, queue: state.queue, query: state.query });
+    const rows = visibleItems(state.items, { filter: state.filter, query: state.query });
     return (
       <main className={styles.sheet}>
         <p className="mute" style={{ padding: 40 }}>
-          {rows.length ? "Choose an item." : "Nothing to review."}
+          {rows.length ? "Choose a run in the list." : "Nothing selected."}
         </p>
       </main>
     );
@@ -124,26 +123,20 @@ export function Sheet(): JSX.Element {
 
   const { item, tree } = detail;
   const folderLabel = tree ? `work-items/${item.ticket}/` : "";
-  const approvalRelevant = item.group === "decision" || (item.approval && item.approval.state !== "absent");
-  const replyRelevant = item.group === "decision";
+  // A decision shows its approval and its reply in the panel above the tabs.
+  const decision = showsDecision(item);
+  const approvalRelevant = !decision && item.approval && item.approval.state !== "absent";
   const tab = currentSheetTab(item, detail, state.sheetTab);
 
   return (
     <main className={styles.sheet}>
       <div className={styles.top}>
-        <div className="row">
-          <ProjectBadge name={item.project.name} />
-          <StatusTag item={item} />
-          <span className="grow" />
-          <TerminalLink item={item} />
-        </div>
-        <p className={styles.breadcrumb}>{`${item.ticket} · ${item.pipeline}`}</p>
-        <h2>{headlineOf(item)}</h2>
-        <p className={styles.sheetSubtitle}>{`${fmtAge(item.updatedAt)} · ${fmtCost(item.cost)}`}</p>
-        <Actions item={item} className={styles.topActions} />
+        <SheetHeader item={item} recap={detail.recap} />
+        <Actions item={item} report={detail.report} className={styles.topActions} />
         <SheetTabs item={item} detail={detail} current={tab} />
       </div>
       <div className={styles.body}>
+        {decision ? <Decision item={item} /> : null}
         <TabContent />
         <details className={styles.detailsPanel}>
           <summary>Run details</summary>
@@ -164,12 +157,6 @@ export function Sheet(): JSX.Element {
             <section className={styles.block}>
               <h3>Assumptions</h3>
               <Assumptions />
-            </section>
-          ) : null}
-          {replyRelevant ? (
-            <section className={styles.block}>
-              <h3>Reply</h3>
-              <Reply item={item} />
             </section>
           ) : null}
           <p className="small mute">{folderLabel ? `Folder: ${folderLabel}` : ""}</p>

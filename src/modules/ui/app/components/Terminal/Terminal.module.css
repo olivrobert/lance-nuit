@@ -76,7 +76,7 @@
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   padding: 8px 10px 10px;
-  background: #1f2426;
+  background: #141a36;
 }
 
 /* Pinned to the second track: the notice above it comes and goes, and without
@@ -90,9 +90,9 @@
 .notice {
   margin: 0 0 8px;
   padding: 6px 10px;
-  color: #e6ebe8;
+  color: var(--night-ink);
   border-radius: 5px;
-  background: #33393b;
+  background: #252c52;
   font-size: 13px;
 }
 
@@ -117,7 +117,7 @@
 }
 
 .ended a {
-  color: #285a80;
+  color: var(--link);
 }
 
 .message {

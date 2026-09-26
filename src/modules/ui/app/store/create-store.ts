@@ -43,7 +43,6 @@ import type {
   ItemDetail,
   LaunchLog,
   ProjectEntry,
-  Queue,
   RequestedSheetTab,
   VerbAction,
 } from "../api/types.js";
@@ -51,6 +50,10 @@ import { failedBeforeRun, findAssumptions, isWaiting, splitKey, visibleItems } f
 
 /** Poll interval of the morning box: the dashboard polls, it opens no SSE stream. */
 export const POLL_MS = 15000;
+
+/** Poll interval while the tab is hidden: slow enough to cost nothing, fast
+ *  enough for its title count and its notifications to stay useful. */
+export const HIDDEN_POLL_MS = 60000;
 
 /** Lines of a launch log shown in the sheet. */
 export const LOG_LINES = 20;
@@ -93,7 +96,6 @@ export interface UiState {
   /** Project name the chips filter on, or `null` for every project. */
   filter: string | null;
   query: string;
-  queue: Queue;
   /** `<project>/<ticket>` of the open sheet. */
   selected: string | null;
   detail: ItemDetail | null;
@@ -114,6 +116,13 @@ export interface UiState {
   /** False until the first `refresh` answered: the shell shows nothing rather
    *  than flashing an empty inbox. */
   loaded: boolean;
+  /** When the last refresh read the server whole, in epoch milliseconds. Left
+   *  out of the repaint signature: it moves on every poll, and the banner that
+   *  shows its age ticks on its own clock. */
+  refreshedAt: number | null;
+  /** Why the last refresh failed, or `null` once one succeeds again. The screen
+   *  keeps what it last read, so the banner is what says it may be stale. */
+  refreshError: string | null;
 }
 
 const INITIAL: UiState = {
@@ -123,7 +132,6 @@ const INITIAL: UiState = {
   items: [],
   filter: null,
   query: "",
-  queue: "attention",
   selected: null,
   detail: null,
   filePath: null,
@@ -136,14 +144,16 @@ const INITIAL: UiState = {
   pending: null,
   toast: null,
   loaded: false,
+  refreshedAt: null,
+  refreshError: null,
 };
 
 export interface UiActions {
-  /** Read everything again; `force` repaints even when nothing moved. */
+  /** Read everything again; `force` repaints even when nothing moved. A failed
+   *  read never rejects: it is recorded in `refreshError`. */
   refresh(force?: boolean): Promise<void>;
   chooseUser(name: string): Promise<void>;
   setFilter(name: string | null): void;
-  setQueue(queue: Queue): void;
   setQuery(text: string): void;
   select(key: string): void;
   setSheetTab(tab: RequestedSheetTab): void;
@@ -203,6 +213,7 @@ function signatureOf(next: UiState): string {
     next.launchLog,
     next.pending,
     next.loaded,
+    next.refreshError,
   ]);
 }
 
@@ -275,13 +286,13 @@ export function createUiStore(api: UiApi): UiStore {
 
   /** Keep the reader on the first item that wants them, as the box opens. */
   function pickFirst(next: UiState): Partial<UiState> {
-    const rows = visibleItems(next.items, { filter: next.filter, queue: next.queue, query: next.query });
+    const rows = visibleItems(next.items, { filter: next.filter, query: next.query });
     const first = rows.find(isWaiting) ?? rows[0];
     return { selected: first ? first.key : null, ...clearedDetail() };
   }
 
   function currentSelectionVisible(): boolean {
-    return visibleItems(state.items, { filter: state.filter, queue: state.queue, query: state.query }).some(
+    return visibleItems(state.items, { filter: state.filter, query: state.query }).some(
       (item) => item.key === state.selected,
     );
   }
@@ -382,12 +393,28 @@ export function createUiStore(api: UiApi): UiStore {
    * after its own action.
    */
   function refresh(force = false): Promise<void> {
-    const run = (inflightRefresh ?? Promise.resolve()).then(() => performRefresh(force));
+    const run = (inflightRefresh ?? Promise.resolve()).then(() => guardedRefresh(force));
     const settled = run.finally(() => {
       if (inflightRefresh === settled) inflightRefresh = null;
     });
     inflightRefresh = settled;
     return settled;
+  }
+
+  /**
+   * One refresh, with its outcome recorded rather than thrown.
+   *
+   * A server that stopped answering is a state of the screen, not an incident of
+   * one poll: the banner keeps saying so until a read succeeds again, instead of
+   * a toast repeated every fifteen seconds and gone in between.
+   */
+  async function guardedRefresh(force: boolean): Promise<void> {
+    try {
+      await performRefresh(force);
+    } catch (error) {
+      stage({ refreshError: error instanceof Error ? error.message : String(error) });
+      commit(force);
+    }
   }
 
   async function performRefresh(force: boolean): Promise<void> {
@@ -398,14 +425,26 @@ export function createUiStore(api: UiApi): UiStore {
       loaded: true,
     });
     if (!state.user) {
+      stage({ refreshedAt: Date.now(), refreshError: null });
       commit(force);
       return;
     }
 
     const [projects, items] = await Promise.all([api.fetchProjects(), api.fetchItems()]);
+    // A refused read keeps the previous list on screen: an inbox that empties
+    // itself on one server error reads as "nothing to review", which is the
+    // one wrong answer this page must never give.
+    if (!projects.ok || !items.ok) {
+      const failed = projects.ok ? items : projects;
+      stage({ refreshError: failed.body.error ?? `error ${failed.status}` });
+      commit(force);
+      return;
+    }
     stage({
-      projects: projects.ok ? (projects.body.projects ?? []) : [],
-      items: items.ok ? (items.body.items ?? []) : [],
+      projects: projects.body.projects ?? [],
+      items: items.body.items ?? [],
+      refreshedAt: Date.now(),
+      refreshError: null,
     });
 
     if (state.selected && !state.items.some((item) => item.key === state.selected)) stage(pickFirst(state));
@@ -456,13 +495,6 @@ export function createUiStore(api: UiApi): UiStore {
       if (!currentSelectionVisible()) stage(pickFirst(state));
       commit(true);
       if (!state.detail) void loadDetail().then(() => commit(true));
-    },
-
-    setQueue(queue: Queue): void {
-      stage({ queue });
-      stage(pickFirst(state));
-      commit(true);
-      void loadDetail().then(() => commit(true));
     },
 
     /**

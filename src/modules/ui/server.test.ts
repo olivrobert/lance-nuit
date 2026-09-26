@@ -1,5 +1,4 @@
 import { afterEach, expect, test } from "bun:test";
-import { createDefaultWorkItemGatewayRegistry } from "../work-item/registry.ts";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -11,6 +10,7 @@ import {
   writeProjectsFile,
   writeRun,
 } from "../read-model/test-harness.js";
+import { createDefaultWorkItemGatewayRegistry } from "../work-item/registry.ts";
 import { USER_COOKIE } from "./cookies.js";
 import { type RunningUiServer, startUiServer } from "./server.js";
 
@@ -192,6 +192,17 @@ test("api: the morning box lists the fixture item", async () => {
   expect(body.items[0]?.key).toBe("demo-app/DEMO-1");
   expect(body.items[0]?.group).toBe("decision");
   expect(body.items[0]?.stop?.subject).toBe("plan");
+});
+
+test("api: the stats screen reads every ticket once, on request", async () => {
+  const { url } = await fixture();
+  const response = await fetch(url("/api/stats"));
+
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as { tickets: Array<{ key: string }>; archive: { status: string } };
+  expect(body.tickets.map((ticket) => ticket.key)).toEqual(["demo-app/DEMO-1"]);
+  expect(body.archive.status).toBe("absent");
+  expect((await fetch(url("/api/stats/extra"))).status).toBe(404);
 });
 
 test("api: one item carries its tree, its steps, and its recap", async () => {
