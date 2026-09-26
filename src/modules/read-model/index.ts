@@ -34,8 +34,20 @@ export {
   workItemsRoot,
 } from "./projects.js";
 export { readRecap } from "./recap.js";
+export { parseRunReport, type ReportRead, readReport } from "./report.js";
 export { readSteps } from "./steps.js";
 export { isTicketToken, validateTicketRef } from "./tickets.js";
+export type {
+  RunReport,
+  RunReportCaptureGroup,
+  RunReportCriterion,
+  RunReportDelivered,
+  RunReportFollowUp,
+  RunReportLink,
+  RunReportNote,
+  RunReportProof,
+  RunReportReview,
+} from "../../model/run-report.js";
 export type {
   ApprovalState,
   FileContentKind,

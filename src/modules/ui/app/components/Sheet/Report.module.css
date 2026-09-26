@@ -1,0 +1,412 @@
+/* The Report tab: "Left for you" is the only tinted block, so it is the first
+   thing the eye lands on; everything below it is a white panel on the page. */
+
+.report {
+  display: grid;
+  gap: 26px;
+}
+
+.block {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.head h3 {
+  font-size: 15px;
+}
+
+.src {
+  margin-left: auto;
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.label {
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.hint {
+  color: var(--mute);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.acid {
+  padding-top: 2px;
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.copy {
+  min-height: 26px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+/* Left for you */
+
+.todo {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--stop) 25%, transparent);
+  border-radius: 7px;
+  background: var(--stop-bg);
+}
+
+.todo h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--stop);
+  font-size: 14px;
+}
+
+.todo h3 small {
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.todo ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.box {
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  border: 1.5px solid var(--stop);
+  border-radius: 3px;
+}
+
+.why {
+  color: var(--mute);
+  font-size: 12.5px;
+}
+
+.go {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  color: var(--run);
+  background: transparent;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.go:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.source {
+  color: var(--mute);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* Delivered */
+
+.deliver {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--line);
+}
+
+.deliver > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--panel);
+}
+
+.value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.value code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Acceptance criteria */
+
+.count {
+  color: var(--ok);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.countFail {
+  color: var(--fail);
+}
+
+.crit {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.critRow + .critRow {
+  border-top: 1px solid var(--line);
+}
+
+.critHead {
+  display: grid;
+  grid-template-columns: 22px 52px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 14px;
+}
+
+details > summary.critHead {
+  padding: 10px 14px;
+  font-weight: 400;
+  list-style: none;
+}
+
+details > summary.critHead::-webkit-details-marker {
+  display: none;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 50%;
+  color: var(--ok);
+  background: var(--ok-bg);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.markFail {
+  color: var(--fail);
+  background: var(--fail-bg);
+}
+
+.failText {
+  color: var(--fail);
+}
+
+.proofs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  padding-top: 1px;
+}
+
+.chip {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--mute);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chipTest {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.chipShot {
+  color: var(--run);
+  border-color: color-mix(in srgb, var(--run) 40%, transparent);
+}
+
+.chipReserve {
+  color: var(--stop);
+  border-color: color-mix(in srgb, var(--stop) 40%, transparent);
+}
+
+.critBody {
+  display: grid;
+  gap: 6px;
+  max-width: 90ch;
+  padding: 0 14px 12px 98px;
+  color: var(--mute);
+  font-size: 13px;
+}
+
+.critBody p {
+  margin: 0;
+}
+
+/* Screenshots */
+
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.shot {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.shot img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  object-position: top;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+}
+
+.shot:hover img {
+  border-color: var(--accent);
+}
+
+.caption {
+  display: grid;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* A caption is a line of context, not the proof: three lines, the rest in the
+   tooltip and the image's alt text. */
+.caption .hint {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.acs {
+  color: var(--run);
+  font-size: 11px;
+}
+
+/* For review */
+
+.review {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.review > div {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.review > div + div {
+  border-top: 1px solid var(--line);
+}
+
+.review p {
+  margin: 0;
+}
+
+/* Notes */
+
+.fold {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.fold > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 11px 14px;
+}
+
+.fold > summary .hint {
+  font-weight: 400;
+}
+
+.foldBody {
+  display: grid;
+  gap: 8px;
+  padding: 0 14px 14px;
+  color: var(--mute);
+  font-size: 13px;
+}
+
+.foldBody p {
+  margin: 0;
+}
+
+@media (max-width: 820px) {
+  .critHead {
+    grid-template-columns: 22px 46px minmax(0, 1fr);
+  }
+
+  .critHead .proofs {
+    grid-column: 3;
+    justify-content: flex-start;
+  }
+
+  .critBody {
+    padding-left: 14px;
+  }
+
+  /* The source or the "See AC" link goes under the text instead of taking a
+     column from it. */
+  .todo li {
+    grid-template-columns: 18px minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .todo li > :last-child {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

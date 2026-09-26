@@ -1,4 +1,4 @@
-/* The filter bar: search, the three queue tabs, and the project chips. A chip
+/* The filter bar: search and the project chips. A chip
    whose path disappeared keeps its place, dashed and grey, so the reader can
    tell "moved" from "gone" instead of the project silently vanishing. */
 
@@ -33,32 +33,6 @@
   color: #8b928d;
 }
 
-.queues {
-  display: flex;
-  gap: 3px;
-}
-
-.queue {
-  min-height: 30px;
-  padding: 4px 10px;
-  color: var(--mute);
-  border-color: var(--line);
-  border-radius: 5px;
-  background: var(--panel);
-  font-size: 12px;
-}
-
-.queue:hover {
-  color: var(--ink);
-  background: #f7f8f6;
-}
-
-.queue.on {
-  color: #fff;
-  border-color: var(--ink);
-  background: var(--ink);
-}
-
 .chips {
   display: flex;
   flex: 1 1 auto;
@@ -82,7 +56,9 @@
   cursor: pointer;
 }
 
-.chip.on {
+/* Held under the pointer too: the global `button:hover` rule is more specific. */
+.chip.on,
+.chip.on:hover:not(:disabled) {
   color: #fff;
   border-color: var(--ink);
   background: var(--ink);
@@ -153,14 +129,6 @@
   .search {
     flex-basis: 100%;
     width: 100%;
-  }
-
-  .queues {
-    flex: 1 1 100%;
-  }
-
-  .queue {
-    flex: 1 1 0;
   }
 
   .chips {

@@ -94,14 +94,15 @@ function fakeApi(scenario: Scenario = {}) {
     scenario,
     hold: (name: keyof UiApi) => holding.add(name),
     fail: (name: keyof UiApi, error: string) => failing.set(name, error),
+    failing,
     of: (name: keyof UiApi) => calls.filter((call) => call.name === name),
     names: () => calls.map((call) => call.name),
   };
 }
 
 const DETAILS: Record<string, ItemDetail> = {
-  "web/A": { item: A, tree: null, steps: null, recap: null },
-  "web/B": { item: B, tree: null, steps: null, recap: null },
+  "web/A": { item: A, tree: null, steps: null, recap: null, report: null },
+  "web/B": { item: B, tree: null, steps: null, recap: null, report: null },
 };
 
 describe("a detail answer that arrives after the reader moved on", () => {
@@ -272,5 +273,33 @@ describe("the poll and the screen", () => {
     await store.actions.refresh();
     expect(store.getSnapshot().selected).toBe("web/A");
     expect(store.getSnapshot().detail?.item.key).toBe("web/A");
+  });
+});
+
+describe("a refresh that fails", () => {
+  test("keeps the inbox on screen and says the server is unreachable", async () => {
+    const fake = fakeApi({ items: [A, B], details: DETAILS });
+    const store = createUiStore(fake.api);
+    await store.actions.refresh();
+    expect(store.getSnapshot()).toMatchObject({ refreshError: null, items: [A, B] });
+    expect(store.getSnapshot().refreshedAt).not.toBeNull();
+
+    fake.fail("fetchItems", "server restarting");
+    await store.actions.refresh();
+    expect(store.getSnapshot()).toMatchObject({ refreshError: "server restarting", items: [A, B] });
+
+    fake.failing.delete("fetchItems");
+    await store.actions.refresh();
+    expect(store.getSnapshot().refreshError).toBeNull();
+  });
+
+  test("never rejects when the network itself fails", async () => {
+    const fake = fakeApi({ items: [A] });
+    const store = createUiStore({
+      ...fake.api,
+      fetchMe: () => Promise.reject(new Error("Failed to fetch")),
+    });
+    await store.actions.refresh();
+    expect(store.getSnapshot()).toMatchObject({ refreshError: "Failed to fetch", loaded: false });
   });
 });

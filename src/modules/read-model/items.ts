@@ -13,6 +13,7 @@
 // cached across calls — a per-call cache is enough for a few dozen work items
 // per project, and a persistent one would show a stale morning box.
 
+import { closeSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import { createArtifactRef } from "../../model/artifact-ports.js";
@@ -237,6 +238,70 @@ function branchOf(project: ProjectEntry, runId: string, cache: RequestCache): st
   return typeof branch === "string" && branch.length > 0 ? branch : undefined;
 }
 
+/** Bytes of `ticket.md` read for the title. The heading sits at the top; the
+ *  rest of the file can hold a long comment thread nobody needs for a row. */
+const TICKET_TITLE_READ_BYTES = 8 * 1024;
+
+/**
+ * The ticket title in `artifacts/ticket.md`: the first `# ` heading after an
+ * optional leading `---` front matter block, trimmed. A leading `<ticket> — `
+ * (or `-`, `–`, `:`) is dropped when `ticket` is given: the dashboard shows the
+ * key on its own line, and some providers write it into the heading. `undefined`
+ * when there is no such heading, when it is empty, or when the front matter
+ * never closes.
+ */
+export function titleOfTicketMarkdown(text: string, ticket?: string): string | undefined {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  let start = 0;
+  if (lines[0]?.trim() === "---") {
+    const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+    if (end === -1) return undefined;
+    start = end + 1;
+  }
+  const heading = lines.slice(start).find((line) => line.startsWith("# "));
+  const title = heading?.slice(2).trim();
+  const rest = title && ticket ? withoutTicketPrefix(title, ticket) : title;
+  return rest ? rest : undefined;
+}
+
+/** `title` without a leading `<ticket>` and its separator; `title` itself when
+ *  it does not start with the key followed by a separator. */
+function withoutTicketPrefix(title: string, ticket: string): string {
+  if (!title.startsWith(ticket)) return title;
+  const match = /^\s*[—–:-]\s*/.exec(title.slice(ticket.length));
+  return match ? title.slice(ticket.length + match[0].length).trim() : title;
+}
+
+/**
+ * The first bytes of the work item's `artifacts/ticket.md`, complete lines only.
+ *
+ * Bounded on purpose: the title is at the top and the list reads one file per
+ * item on every poll. When the read is cut, the last line may be partial (even
+ * mid-character), so it is dropped rather than shown truncated.
+ */
+function readTicketHead(workItemDir: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(join(workItemDir, "artifacts", "ticket.md"), "r");
+    const buffer = Buffer.alloc(TICKET_TITLE_READ_BYTES);
+    const read = readSync(fd, buffer, 0, buffer.length, 0);
+    const text = buffer.subarray(0, read).toString("utf8");
+    return read < buffer.length ? text : text.slice(0, text.lastIndexOf("\n") + 1);
+  } catch {
+    // No ticket.md (a pipeline without a work-item source step, or a custom
+    // `dir`) or an unreadable one: the row falls back to the ticket key.
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Nothing left to read from a descriptor that will not close.
+      }
+    }
+  }
+}
+
 async function buildItem(
   project: ProjectEntry,
   ticket: string,
@@ -260,6 +325,13 @@ async function buildItem(
   // A runner the dashboard just spawned is running before it has written
   // anything: the launch, not the snapshot, is what knows that. A closed run
   // waits on nobody, whatever its status says.
+  const effectiveWorkItemDir = join(runCwd, project.specPath, ticket);
+  // A worktree is removed once its run is merged: the main clone's copy
+  // still holds the ticket.
+  const ticketHead =
+    readTicketHead(effectiveWorkItemDir) ??
+    (runCwd === project.cwd ? undefined : readTicketHead(join(project.cwd, project.specPath, ticket)));
+  const title = ticketHead === undefined ? undefined : titleOfTicketMarkdown(ticketHead, ticket);
   const group: ItemGroup = launch?.alive ? "running" : closed ? "done" : GROUP_BY_STATUS[status];
 
   return {
@@ -271,6 +343,7 @@ async function buildItem(
       ...(url ? { ticketUrl: url } : {}),
     },
     ticket,
+    ...(title ? { title } : {}),
     pipeline: selected.pipeline,
     runId,
     status,
@@ -284,7 +357,7 @@ async function buildItem(
     updatedAt: state.updatedAt ?? state.createdAt ?? "",
     ...(branch ? { branch } : {}),
     worktree: state.worktree === true,
-    effectiveWorkItemDir: join(runCwd, project.specPath, ticket),
+    effectiveWorkItemDir,
     ...(launch ? { launch } : {}),
     ...(closed ? { closed } : {}),
   };

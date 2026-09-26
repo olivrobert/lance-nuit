@@ -203,6 +203,25 @@ const SECTIONS: Section[] = [
     note: "The exported work-item types are provider-neutral. Types used only by the injected context or gateway signatures are included for completeness and are not all importable from `@lance-nuit/dsl`.",
   },
   {
+    // The dashboard renders `artifacts/report.json` against this shape; a
+    // pipeline's report step typechecks against it. See guide/work-item-layout.md.
+    title: "Run report",
+    file: "model/run-report.d.ts",
+    names: [
+      "RUN_REPORT_FILE",
+      "RunReport",
+      "RunReportLink",
+      "RunReportDelivered",
+      "RunReportCriterion",
+      "RunReportProof",
+      "RunReportFollowUp",
+      "RunReportReview",
+      "RunReportCaptureGroup",
+      "RunReportNote",
+    ],
+    note: "Written by a pipeline to `artifacts/report.json`; the dashboard shows it only while its `runId` is the work item's current run.",
+  },
+  {
     title: "Human review",
     file: "builtin-steps/lib/human-review.d.ts",
     names: ["ReviewKind", "ReviewApproval", "HumanReviewOptions", "humanReview"],

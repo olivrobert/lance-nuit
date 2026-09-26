@@ -289,8 +289,9 @@ export function readTree(
 }
 
 /** Lexical rejection, before any filesystem call: an absolute path, a traversal
- *  segment, or a NUL byte never even becomes a candidate. */
-function isSafeRelativePath(value: string): boolean {
+ *  segment, or a NUL byte never even becomes a candidate. Shared with the report
+ *  validator, whose paths are later opened through `readFile`. */
+export function isSafeRelativePath(value: string): boolean {
   if (value.length === 0 || value.includes("\0") || isAbsolute(value)) return false;
   return value
     .split(/[\\/]/)

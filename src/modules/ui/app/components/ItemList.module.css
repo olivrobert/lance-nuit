@@ -1,7 +1,12 @@
-/* The review inbox: the sticky group headers and the rows under them.
+/* The review inbox: the sticky header with its jump chips, the sticky section
+   headers under it, and the rows.
 
    A row is a `<button>` rather than a `<div>` so it is keyboard-reachable, which
-   is why so much of `.it` is undoing the button defaults from `tokens.css`. */
+   is why so much of `.it` is undoing the button defaults from `tokens.css`.
+
+   `--list-head` is the measured height of the list header, set by the
+   component: the section headers stick right under it, and a row scrolled into
+   view by the keyboard stops below both. */
 
 .list {
   min-width: 0;
@@ -14,54 +19,113 @@
 .list header {
   position: sticky;
   top: 0;
-  z-index: 2;
-  padding: 14px 14px 12px;
+  z-index: 3;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
 
-.list h2 {
-  font-size: 15px;
+.jumps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.count {
+.jumps button {
+  min-height: 0;
+  padding: 2px 10px;
+  border-color: var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.n {
+  margin-left: 4px;
   color: var(--mute);
+}
+
+.sec {
+  scroll-margin-top: var(--list-head, 0);
+}
+
+/* The header of a section, whether a plain `<div>` or a `<summary>`. */
+.head {
+  position: sticky;
+  top: var(--list-head, 0);
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 12px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
   font-weight: 400;
 }
 
-.grp {
-  padding: 15px 14px 5px;
-  color: var(--mute);
-  border-bottom: 1px solid #eff0ee;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  font-size: 10px;
+summary.head {
+  list-style: none;
+}
+
+summary.head::-webkit-details-marker {
+  display: none;
+}
+
+.l {
+  min-width: 0;
+  font-size: 13px;
   font-weight: 700;
 }
 
-.grp.decision {
+.l small {
+  margin-left: 6px;
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.s {
+  flex: none;
+  color: var(--mute);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pin .l {
   color: var(--stop);
+}
+
+.sec:not([open]) > summary .l::after {
+  content: " ▸";
+  color: var(--mute);
 }
 
 .it {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 3px 8px;
+  gap: 1px 10px;
   width: 100%;
   min-width: 0;
-  padding: 11px 14px;
+  min-height: 0;
+  padding: 9px 12px;
   text-align: left;
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
   background: var(--panel);
+  scroll-margin-top: calc(var(--list-head, 0px) + 40px);
 }
 
-.it:hover {
-  background: #f7f8f6;
+/* `:not(:disabled)` lifts these rules above the global `button:hover` one,
+   which would otherwise repaint a selected row grey under the pointer. */
+.it:hover:not(:disabled) {
+  background: var(--panel-subtle);
 }
 
-.it.sel {
+.it.sel,
+.it.sel:hover:not(:disabled) {
   background: var(--accent-soft);
   box-shadow: inset 3px 0 0 var(--accent);
 }
@@ -70,17 +134,30 @@
   box-shadow: inset 3px 0 0 var(--stop);
 }
 
-.it.decision.sel {
-  background: #fff3dc;
+.it.decision.sel,
+.it.decision.sel:hover:not(:disabled) {
+  background: var(--stop-bg);
   box-shadow: inset 3px 0 0 var(--stop);
 }
 
 .it .t {
   min-width: 0;
   overflow: hidden;
-  font-weight: 650;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.c {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .it .r,
@@ -92,23 +169,52 @@
   white-space: nowrap;
 }
 
-.it .r {
-  color: var(--ink);
-  font-size: 12.5px;
-}
-
-.it.running .r,
-.it.done .r,
 .it .m {
   color: var(--mute);
+  font-size: 12px;
 }
 
-.it .m {
+.m > span + span::before {
+  content: " · ";
+}
+
+.k {
+  font-family: var(--mono);
   font-size: 11.5px;
 }
 
+.it .r {
+  font-size: 12.5px;
+}
+
+.it.decision .r {
+  color: var(--stop);
+}
+
+.it.failure .r {
+  color: var(--fail);
+}
+
+.it.running .r,
+.it.done .r {
+  color: var(--mute);
+}
+
+.empty {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding: 20px 14px;
+  color: var(--mute);
+}
+
+.empty p {
+  margin: 0;
+}
+
 /* Stacked under the banner rather than beside the sheet: the list gets a
-   capped height and its separator moves from the right edge to the bottom. */
+   capped height and its separator moves from the right edge to the bottom.
+   The jump chips already wrap. */
 @media (max-width: 620px) {
   .list {
     max-height: 42vh;

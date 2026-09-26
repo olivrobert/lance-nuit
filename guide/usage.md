@@ -181,22 +181,114 @@ through an SSH tunnel that keeps the same port on both ends:
 `~/.lance-nuit/ui/users.json` (`{"users": ["Olivier"]}`); projects are added
 from the dashboard or in `~/.lance-nuit/ui/projects.json`.
 
-### Run recap
+### Review inbox
 
-A completed run opens on its **Recap** tab. The tab shows:
+The list holds every run, in the order a morning reader goes through it:
 
-- the run's cost, its active time, the time elapsed between the first and last
-  write of its snapshot (pauses included), its tokens, and the models it used;
-- each step that took at least a second or cost money, with its duration,
-  cost, profile, and model. A step that composes pipelines (`runPipeline`,
-  `forEachPipeline`) ran no model of its own: it shows what each model of its
-  child runs cost instead;
+- **Needs you**: runs stopped for a decision, then technical failures;
+- **Running**: runs in progress;
+- one section per night for the finished runs. A night starts at 18:00 local
+  time and runs until 18:00 the next day. The current night is **Tonight** once
+  it started today and **Last night** in the morning, the one before it
+  **Yesterday** (or **Last night** in the evening), the six nights before that
+  are merged into **This week**, and anything older goes to **Earlier**, folded
+  by default. Each night section gives its dates, its run count, and its cost.
+
+Empty sections are not shown. Inside a section the newest run comes first. A
+row leads with the ticket title, the first `# ` heading of the work item's
+`artifacts/ticket.md` without a leading `<key> — ` the provider may have
+written into it, and falls back to the ticket key when that file has none; the
+key, the pipeline, and the time follow on the line below. The time
+is an age in **Needs you** and **Running**, a clock in a night, a weekday and a
+clock in **This week**, and a date in **Earlier**. A row carries a tag only for
+an exception (`FAIL`, `STOPPED`, `ABORTED`, `CLOSED`, a run in progress), and a
+project badge only when no project is selected and the rows span several
+projects.
+
+The chips above the list jump to a section, opening it when it is folded; they
+do not filter. The search box and the project chips filter every section. The
+folded or open state of a night survives the periodic refresh. `j` or `↓` and
+`k` or `↑` move the selection over the rows on screen, `/` focuses the search,
+and `Escape` in the search clears it and returns to the list. These keys are
+ignored while typing in a field, while a dialog is open, on the terminal
+screen, and with a modifier key. Outside the list, in the sheet or a file view,
+the arrows keep scrolling the page; only `j` and `k` move the selection there.
+
+A run waiting for a decision opens with its question above the tabs: the
+reason it stopped, the approval to give when the step asks for one, and
+**Answer on the ticket instead** to reply without approving.
+
+The dashboard reads the server every 15 seconds, and every 60 seconds while
+its tab is in the background. Coming back to the tab reads the server at once.
+The banner says when the list was last updated, and warns when the server has
+stopped answering: the list then keeps what it last received.
+
+**Notify me** in the banner asks the browser for permission to show
+notifications. Once granted, the dashboard notifies each run that newly needs a
+decision or failed, only while its tab is in the background. Clicking the
+notification opens that run. Browsers allow notifications on `127.0.0.1` and
+`localhost`, which the SSH tunnel preserves.
+
+### Run sheet
+
+Selecting a run opens its sheet. The header is the same for every run: the
+project, ticket key, pipeline, and short run id, with links to the ticket and
+to the run's terminal; the ticket title (or its key); and a verdict line. A
+passed run that was not closed says **Delivered**, when it finished in your
+local time, how long it took from the first to the last write of its snapshot,
+and its cost. Any other run keeps its status tag and the reason it stopped.
+
+A delivered run whose [delivery report](work-item-layout.md#delivery-report-artifactsreportjson)
+names a primary link leads with it (typically **Open merge request**), followed
+by a copy button for the value the report marks as copyable, such as the
+branch. Rerun, Start fresh, and Mark as closed then move under **More
+actions**. Without a report, the actions are the usual ones.
+
+The tabs are **Report**, **Run**, and **Files**, plus **Diagnostic** for a
+failure or a launch and **Document** when the run has a document to show. A
+tab with nothing to show is not listed. A finished run opens on **Report** when
+its current run wrote a valid `report.json`, and on **Run** otherwise; a
+running run opens on **Run**, a failure on **Diagnostic**, and a run waiting
+for a decision on its **Document**. A `report.json` the dashboard rejected
+leaves one line with the reason in place of the Report tab.
+
+The **Report** tab shows, each block only when the report fills it: **Left for
+you** (follow-ups and the reserve of every criterion that has one), what was
+**Delivered** with the report's other links, the **acceptance criteria** with
+their met count, proofs, and screenshots (a criterion not met or with a reserve
+is open by default), the **screenshots** labelled with their criteria, the
+points **for review** with a Copy button, and folded **notes** that open their
+file in the Files tab. The content is shown as the pipeline wrote it; the
+dashboard never reads a status out of the markdown reports, which stay in
+Files.
+
+The **Files** tab lists each directory with the markdown documents first, then
+the other files, then the runner's own files (`*.json`, `*.sha`,
+`.provenance/`, `runs/`) folded under **Machine files**. **Run details**, below
+the tab content, holds the run's identity, its last launch, its approval, and
+its assumptions.
+
+### Run tab
+
+The **Run** tab shows where the time went:
+
+- three figures: the time elapsed between the first and last write of the
+  snapshot (pauses included, with the clock times), the cost, and the tokens
+  in and out (with the share read from cache);
+- a timeline: one lane per step that took at least a second, cost money,
+  failed, or is still running, placed over the run span by its start and end.
+  The bar is the step's wall time; the Duration and Cost columns repeat it with
+  the step's cost. Shorter
+  steps share one lane of ticks, and skipped steps are listed under it;
+- the cost by model. A step that composes pipelines (`runPipeline`,
+  `forEachPipeline`) ran no model of its own: its cost is split by the models
+  its child runs used;
 - the screenshots found under the work item's `reports/`, grouped by
-  directory. A `summary.md` or `report.md` next to the images opens in the
-  Files tab.
+  directory, unless the run's report lists its own screenshots. A `summary.md`
+  or `report.md` next to the images opens in the Files tab.
 
 Every figure comes from the run's `state.json`, the ledger the budget is
-enforced against. The recap only displays those figures and never sums them.
+enforced against. The tab only displays those figures and never sums them.
 Images are served as raw bytes by
 `GET /api/items/<project>/<ticket>/raw?path=<relative path>`, and only files
 with an image extension are served this way.

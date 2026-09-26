@@ -1,4 +1,5 @@
-/* The status line: a summary and three counts, never a second alarm panel. */
+/* The status line: the name, how current the screen is, and the notification
+   switch. Nothing here competes with the list below it. */
 
 .banner {
   display: flex;
@@ -6,58 +7,71 @@
   align-items: center;
   gap: 10px;
   min-height: 42px;
-  padding: 8px 18px;
+  padding: 6px 18px;
   color: var(--ink);
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   font-size: 13px;
 }
 
-.summary {
-  color: var(--mute);
-  white-space: nowrap;
+.end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
 }
 
-.counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin-left: auto;
+.freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: var(--mute);
   font-size: 12px;
-}
-
-/* Named per role rather than one shared class: a generic name would collide,
-   once bundled, with the list header's own count and the step bar. */
-.attention,
-.running,
-.done {
   white-space: nowrap;
 }
 
-.attention {
+.pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.stale {
   color: var(--stop);
 }
 
-.running {
-  color: var(--run);
+.stale .pulse {
+  background: var(--stop);
 }
 
-.done {
-  color: var(--ok);
+/* A server that stopped answering is the one state this line must not let
+   pass unnoticed: it reads as a pill, not as a muted caption. */
+.lost {
+  padding: 3px 10px;
+  color: var(--fail);
+  border-radius: 999px;
+  background: var(--fail-bg);
+  font-weight: 600;
+}
+
+.lost .pulse {
+  background: var(--fail);
+}
+
+.notify {
+  min-height: 26px;
+  padding: 2px 10px;
+  font-size: 12px;
 }
 
 @media (max-width: 620px) {
   .banner {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
     padding-right: 12px;
     padding-left: 12px;
   }
 
-  .counts {
-    gap: 10px;
-    margin-left: 0;
+  .freshness {
+    white-space: normal;
   }
 }

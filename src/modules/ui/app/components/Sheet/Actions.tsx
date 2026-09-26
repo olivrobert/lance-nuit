@@ -7,13 +7,17 @@
 // are a property of the browser, and the store — which the poll also drives —
 // must stay callable without one. The store receives an amount already resolved.
 //
+// A delivered run with a report (`deliveryActions`) leads with what the report
+// delivered instead: its merge request as the primary link and a copy button for
+// its branch. Its verbs are unchanged, and all of them go behind "More".
+//
 // Every button is disabled while a run is in progress on the item and while any
 // verb is being posted, which is what stops a double click from launching twice.
 
 import type { JSX } from "react";
-import type { Item, VerbAction } from "../../api/types.js";
+import type { Item, RunReport, VerbAction } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
-import { isBusy, verbsFor } from "../../lib/derive.js";
+import { deliveryActions, isBusy, verbsFor } from "../../lib/derive.js";
 import type { UiState } from "../../store/store.js";
 import { actions, useUiSelector } from "../../store/store.js";
 import styles from "./Actions.module.css";
@@ -31,7 +35,7 @@ function askFor(item: Item, verb: VerbAction): { budget?: number } | null {
   }
   if (verb.verb === "close") {
     const sure = window.confirm(
-      `Mark ${item.ticket} as closed?\n\nUse this when the ticket was finished by hand. The run keeps its ${item.status} status and leaves the attention queue; a later run on it brings it back.`,
+      `Mark ${item.ticket} as closed?\n\nUse this when the ticket was finished by hand. The run keeps its ${item.status} status and leaves Needs you; a later run on it brings it back.`,
     );
     return sure ? {} : null;
   }
@@ -50,15 +54,19 @@ function askFor(item: Item, verb: VerbAction): { budget?: number } | null {
 
 export interface ActionsProps {
   item: Item;
+  /** The run's report, when the sheet has one: it supplies the delivery
+   *  actions of a finished run. */
+  report?: RunReport | null;
   /** Extra class of the row, so the sticky header can tighten its margins. */
   className?: string;
 }
 
-export function Actions({ item, className }: ActionsProps): JSX.Element | null {
+export function Actions({ item, report, className }: ActionsProps): JSX.Element | null {
   const pending = useUiSelector(selectPending);
   const busy = isBusy(item);
   const verbs = verbsFor(item);
-  if (verbs.length === 0) return null;
+  const delivery = deliveryActions(item, report);
+  if (verbs.length === 0 && !delivery) return null;
 
   const run = (verb: VerbAction): void => {
     const options = askFor(item, verb);
@@ -73,17 +81,33 @@ export function Actions({ item, className }: ActionsProps): JSX.Element | null {
       disabled={busy || pending !== null}
       className={verb.primary ? "primary" : verb.danger ? "danger" : undefined}
       title={verb.command}
-      onClick={() => run(verb)}
+      onClick={(event) => {
+        // Fold the menu the verb was picked from: left open, it covers the
+        // callout that is about to say the run started.
+        event.currentTarget.closest("details")?.removeAttribute("open");
+        run(verb);
+      }}
     >
       {pending === verb.verb ? `${verb.label}…` : verb.label}
     </button>
   );
 
-  const primary = verbs.find((verb) => verb.primary);
+  const primary = delivery ? undefined : verbs.find((verb) => verb.primary);
   const secondary = verbs.filter((verb) => verb !== primary);
+  const copy = delivery?.copy;
 
   return (
     <div className={cx(styles.actions, className)}>
+      {delivery?.link ? (
+        <a className={styles.primaryLink} href={delivery.link.url} target="_blank" rel="noreferrer">
+          {`${delivery.link.label} ↗`}
+        </a>
+      ) : null}
+      {copy ? (
+        <button type="button" title={copy.value} onClick={() => void actions.copy(copy.value)}>
+          {copy.label} <span className={styles.copyValue}>{copy.value}</span>
+        </button>
+      ) : null}
       {primary ? button(primary) : null}
       {secondary.length > 0 ? (
         <details className={styles.actionMenu}>

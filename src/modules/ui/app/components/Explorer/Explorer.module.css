@@ -80,6 +80,18 @@
   list-style: none;
 }
 
+/* The "Machine files" fold closing a directory's list: the runner's own
+   bookkeeping, set apart from what a reader reviews. */
+.machine {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+}
+
+.machine > details > summary {
+  color: var(--mute);
+}
+
 /* A real `<button>` for keyboard reachability, reset back to the plain row
    the reference stylesheet drew on an `li.f`. */
 .f {

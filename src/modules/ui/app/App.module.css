@@ -12,10 +12,11 @@
 }
 
 /* The list and the sheet, side by side. The `minmax(0, 1fr)` on both tracks is
-   what lets each of them scroll on its own instead of stretching the grid. */
+   what lets each of them scroll on its own instead of stretching the grid.
+   The list is wide enough for a row to lead with a readable ticket title. */
 .mail {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
   min-height: 0;
 }
 
