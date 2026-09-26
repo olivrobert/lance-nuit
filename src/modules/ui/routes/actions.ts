@@ -7,7 +7,7 @@ import type { UiDeps } from "../deps.js";
 import { readJsonBody } from "../http/body.js";
 import { identityOf } from "../http/identity.js";
 import { sendError, sendJson, sendNotFound } from "../http/respond.js";
-import { buildArgv, isVerb } from "../verbs.js";
+import { actionable, buildArgv, isVerb } from "../verbs.js";
 import type { Route, RouteRequest } from "./route.js";
 
 /**
@@ -56,17 +56,17 @@ async function handleAction({ req, res }: RouteRequest, verb: string, deps: UiDe
     return;
   }
   if (typeof payload.pipeline === "string" && payload.pipeline !== item.pipeline) {
-    sendError(res, 409, "the item's pipeline changed; reload the page", { item });
+    sendError(res, 409, "the item's pipeline changed; reload the page", { item: actionable(item) });
     return;
   }
   if (typeof payload.runId === "string" && payload.runId !== item.runId) {
-    sendError(res, 409, "the item's run changed; reload the page", { item });
+    sendError(res, 409, "the item's run changed; reload the page", { item: actionable(item) });
     return;
   }
 
   const argv = buildArgv(item, verb, { subject: payload.subject, budget: payload.budget });
   if (!argv.ok) {
-    sendError(res, argv.status, argv.reason, { item });
+    sendError(res, argv.status, argv.reason, { item: actionable(item) });
     return;
   }
   const launched = deps.launcher.launch({ item, verb, argv: argv.argv, by: identity.user });

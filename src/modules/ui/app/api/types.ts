@@ -15,7 +15,6 @@ export type {
   ApprovalState,
   FileContentKind,
   FileRead,
-  Item,
   ItemApproval,
   ItemClosure,
   ItemCost,
@@ -57,17 +56,19 @@ export type {
   TreeNode,
   WorkItemTree,
 } from "../../../read-model/index.js";
-export type { Verb } from "../../verbs.js";
+// An item as the server answers it: the read model's item plus the verbs the
+// server decided it admits.
+export type { ActionableItem as Item, Verb, VerbAction } from "../../verbs.js";
 
 import type {
   FileRead,
-  Item,
   ProjectEntry,
   ReportRead,
   RunRecap,
   RunStepsView,
   WorkItemTree,
 } from "../../../read-model/index.js";
+import type { ActionableItem as Item } from "../../verbs.js";
 
 /** `GET /api/me` and `POST /api/me`. `user` is `null` until a name is chosen. */
 export interface MeResponse {
@@ -131,16 +132,6 @@ export interface Assumptions {
  *  resolved by `currentSheetTab`. */
 export type SheetTab = "diagnostic" | "report" | "run" | "document" | "files";
 export type RequestedSheetTab = SheetTab | "auto";
-
-/** One action button: the verb posted, its label, and the command the server
- *  will build — shown as the tooltip so the reader can see it before clicking. */
-export interface VerbAction {
-  verb: string;
-  label: string;
-  command: string;
-  primary?: boolean;
-  danger?: boolean;
-}
 
 /**
  * One interactive run: a tmux session on the dashboard's own socket, running

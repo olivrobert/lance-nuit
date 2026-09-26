@@ -23,6 +23,8 @@ function makeItem(ticket: string, overrides: Partial<Item> = {}): Item {
     updatedAt: "2026-01-10T10:00:00.000Z",
     worktree: false,
     effectiveWorkItemDir: `/srv/web/work-items/${ticket}`,
+    busy: false,
+    verbs: [],
     ...overrides,
   };
 }
