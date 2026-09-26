@@ -15,12 +15,12 @@ Tooling checked: `biome.json`, `eslint.config.mjs`, `tsconfig.ui.json`, `package
 
 ```rules
 UIC-003 | absent | export default | MUST NOT A component file has no default export
-UIC-005 | absent | \buseState\b | MUST NOT A component does not hold screen state in useState: that state lives in the store
 ```
 
 ## Semantic Rules
 
 - MUST: A component is an exported named function declaration with an explicit JSX.Element return type. Trigger: definition of a component rendered by the dashboard. Anchor: export function Name(...): JSX.Element, with import type { JSX } from "react". — consistency, non-blocking (20/20)
+- MUST NOT: A component does not keep in useState state that another zone reads or that must survive a poll repaint (selection, detail, drafts, open directories): that state lives in the store; useState holds only what is local to one screen or dialog. Trigger: useState call in a component. Anchor: the setter is only called from that component's own handlers or effects; shared state goes through useUiSelector / useActions. (9/9)
 - MUST NOT: An optional JSX block is not rendered via the && operator but via a ternary ending in null. Trigger: conditional rendering of an element in a JSX tree. Anchor: cond ? <X /> : null instead of cond && <X />. (20/20)
 - MUST: A component without props reads its context directly from the store rather than receiving it via prop drilling. Trigger: screen or tab component declared without a parameter. Anchor: a useUiSelector, useUiState or useActions call in the body. — consistency, non-blocking (8/8)
 - SHOULD: Classes specific to a component come from a CSS Module imported alongside it, global classes remaining reserved for shared primitives. Trigger: need for a style class in a component's render. Anchor: import styles from "./X.module.css" then className={styles.y}. — consistency, non-blocking (20/20)
