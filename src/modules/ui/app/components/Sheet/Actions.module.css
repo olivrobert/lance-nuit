@@ -4,8 +4,44 @@
 .actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 14px 0;
+}
+
+/* The merge request of a delivered run: a link drawn as the primary button,
+   with the same colours as `button.primary` in `styles/tokens.css`. */
+.primaryLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  color: #fff;
+  background: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: normal;
+}
+
+.primaryLink:hover {
+  background: #244b44;
+}
+
+/* The value a copy button copies (a branch), cut short: the title carries it whole. */
+.copyValue {
+  display: inline-block;
+  max-width: 22ch;
+  margin-left: 4px;
+  overflow: hidden;
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .actionMenu {
@@ -14,16 +50,36 @@
 
 /* `list-style: none` plus the WebKit marker rule is what removes the disclosure
    triangle; the pointer and the weight come from the `details > summary` reset. */
+/* Drawn as a secondary button: as plain grey text it read as a caption, and on
+   a completed run — where it is the only control — nothing looked clickable. */
 .actionMenu > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-height: 32px;
-  padding: 6px 0;
-  color: var(--mute);
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  color: var(--ink);
+  background: var(--panel);
   list-style: none;
   font-size: 13px;
+  font-weight: 400;
+}
+
+.actionMenu > summary::after {
+  content: "▾";
+  color: var(--mute);
+  font-size: 11px;
 }
 
 .actionMenu > summary:hover {
-  color: var(--ink);
+  border-color: #aeb5b1;
+  background: #f7f8f6;
+}
+
+.actionMenu[open] > summary {
+  border-color: #aeb5b1;
 }
 
 .actionMenu > summary::-webkit-details-marker {
@@ -33,7 +89,7 @@
 .actionMenu .actionOptions {
   position: absolute;
   top: 100%;
-  right: 0;
+  left: 0;
   z-index: 10;
   min-width: 190px;
   margin-top: 2px;

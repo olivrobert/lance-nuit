@@ -20,7 +20,15 @@ import { useCallback, useRef, useSyncExternalStore } from "react";
 import * as client from "../api/client.js";
 import { createUiStore, type UiActions, type UiState } from "./create-store.js";
 
-export { LOG_LINES, POLL_MS, SEARCH_DEBOUNCE_MS, type Toast, type UiActions, type UiState } from "./create-store.js";
+export {
+  HIDDEN_POLL_MS,
+  LOG_LINES,
+  POLL_MS,
+  SEARCH_DEBOUNCE_MS,
+  type Toast,
+  type UiActions,
+  type UiState,
+} from "./create-store.js";
 
 const store = createUiStore(client);
 

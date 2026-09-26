@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { writeClosureAt } from "../../state/closure.ts";
-import { listItems, readItem } from "./items.ts";
+import { listItems, readItem, titleOfTicketMarkdown } from "./items.ts";
 import {
   cleanupTempDirs,
   makeProject,
@@ -558,4 +558,109 @@ test("items: a closure on a run nobody waits on is ignored", async () => {
   const [item] = await listItems();
   expect(item?.group).toBe("running");
   expect(item?.closed).toBeUndefined();
+});
+
+test("items: the title is the first heading of ticket.md", async () => {
+  const project = listedProject();
+  writeRun(project, "DEMO-1", "feature", { runId: "r-1", status: "PASS", updatedAt: "2026-09-05T08:00:00.000Z" });
+  writeArtifact(project, "DEMO-1", "ticket.md", "# Fix the login redirect  \n\nDescription.\n\n# Not this one\n");
+
+  const [item] = await listItems();
+
+  expect(item.title).toBe("Fix the login redirect");
+});
+
+test("items: the title skips the front matter of ticket.md", async () => {
+  const project = listedProject();
+  writeRun(project, "DEMO-1", "feature", { runId: "r-1", status: "PASS", updatedAt: "2026-09-05T08:00:00.000Z" });
+  writeArtifact(
+    project,
+    "DEMO-1",
+    "ticket.md",
+    "---\nurl: https://example.test/DEMO-1\n# not a title\n---\n\n# Export invoices as CSV\n\nBody.\n",
+  );
+
+  const [item] = await listItems();
+
+  expect(item.title).toBe("Export invoices as CSV");
+});
+
+test("items: no title without a heading or without ticket.md, and the item still loads", async () => {
+  const project = listedProject();
+  writeRun(project, "DEMO-1", "feature", { runId: "r-1", status: "PASS", updatedAt: "2026-09-05T08:00:00.000Z" });
+  writeRun(project, "DEMO-2", "feature", { runId: "r-2", status: "PASS", updatedAt: "2026-09-05T07:00:00.000Z" });
+  writeArtifact(project, "DEMO-1", "ticket.md", "Just a description.\n## A second-level heading\n");
+
+  const items = await listItems();
+
+  expect(items.map((item) => item.ticket)).toEqual(["DEMO-1", "DEMO-2"]);
+  expect(items.every((item) => !("title" in item))).toBe(true);
+});
+
+test("items: a worktree run reads its title from the worktree copy", async () => {
+  const project = listedProject();
+  const worktree = join(makeTempDir("read-model-worktree-"), "demo-app");
+  mkdirSync(worktree, { recursive: true });
+  writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "PASS",
+    updatedAt: "2026-09-05T08:00:00.000Z",
+    worktree: true,
+    cwd: worktree,
+  });
+  writeArtifact(project, "DEMO-1", "ticket.md", "# Title in the main clone\n");
+  writeArtifact(worktree, "DEMO-1", "ticket.md", "# Title in the worktree\n");
+
+  const [item] = await listItems();
+
+  expect(item.title).toBe("Title in the worktree");
+});
+
+test("items: a worktree run whose worktree is gone reads its title from the main clone", async () => {
+  const project = listedProject();
+  const worktree = join(makeTempDir("read-model-worktree-"), "removed-app");
+  writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "PASS",
+    updatedAt: "2026-09-05T08:00:00.000Z",
+    worktree: true,
+    cwd: worktree,
+  });
+  writeArtifact(project, "DEMO-1", "ticket.md", "# Title in the main clone\n");
+
+  const [item] = await listItems();
+
+  expect(item.title).toBe("Title in the main clone");
+});
+
+test("items: the title read stays bounded to the head of a long ticket.md", async () => {
+  const project = listedProject();
+  writeRun(project, "DEMO-1", "feature", { runId: "r-1", status: "PASS", updatedAt: "2026-09-05T08:00:00.000Z" });
+  writeRun(project, "DEMO-2", "feature", { runId: "r-2", status: "PASS", updatedAt: "2026-09-05T07:00:00.000Z" });
+  const thread = "- a comment in a long exchange\n".repeat(2000);
+  writeArtifact(project, "DEMO-1", "ticket.md", `# Long ticket\n\n## Exchanges\n\n${thread}`);
+  writeArtifact(project, "DEMO-2", "ticket.md", `${"filler line\n".repeat(2000)}# Heading far below\n`);
+
+  const items = await listItems();
+
+  expect(items.find((item) => item.ticket === "DEMO-1")?.title).toBe("Long ticket");
+  expect(items.find((item) => item.ticket === "DEMO-2")?.title).toBeUndefined();
+});
+
+test("titleOfTicketMarkdown: heading, front matter, CRLF, and the empty cases", () => {
+  expect(titleOfTicketMarkdown("# Title\n")).toBe("Title");
+  expect(titleOfTicketMarkdown("\uFEFF---\r\nurl: x\r\n---\r\n\r\n# Title  \r\n")).toBe("Title");
+  expect(titleOfTicketMarkdown("#   \nbody\n")).toBeUndefined();
+  expect(titleOfTicketMarkdown("#Title\n")).toBeUndefined();
+  expect(titleOfTicketMarkdown("---\nurl: x\n# inside an unclosed front matter\n")).toBeUndefined();
+  expect(titleOfTicketMarkdown("")).toBeUndefined();
+});
+
+test("titleOfTicketMarkdown: drops a leading ticket key and its separator", () => {
+  expect(titleOfTicketMarkdown("# PROJ-1 — Sort contracts\n", "PROJ-1")).toBe("Sort contracts");
+  expect(titleOfTicketMarkdown("# PROJ-1: Sort contracts\n", "PROJ-1")).toBe("Sort contracts");
+  expect(titleOfTicketMarkdown("# PROJ-1 - Sort contracts\n", "PROJ-1")).toBe("Sort contracts");
+  expect(titleOfTicketMarkdown("# PROJ-12 — Other\n", "PROJ-1")).toBe("PROJ-12 — Other");
+  expect(titleOfTicketMarkdown("# PROJ-1 fixes the list\n", "PROJ-1")).toBe("PROJ-1 fixes the list");
+  expect(titleOfTicketMarkdown("# PROJ-1 —\n", "PROJ-1")).toBeUndefined();
 });

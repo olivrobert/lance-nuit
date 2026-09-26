@@ -13,7 +13,7 @@ import type { Item } from "../../api/types.js";
 import { failedBeforeRun, reasonOf, unmeteredResumeCommand, verbLabel } from "../../lib/derive.js";
 import { fmtAge, fmtDate } from "../../lib/format.js";
 import type { UiState } from "../../store/store.js";
-import { useUiSelector } from "../../store/store.js";
+import { POLL_MS, useUiSelector } from "../../store/store.js";
 import { Actions } from "./Actions.js";
 import styles from "./Callout.module.css";
 import sheet from "./Sheet.module.css";
@@ -27,10 +27,10 @@ function RunningCallout({ item }: { item: Item }): JSX.Element | null {
     <div className={`${styles.callout} ${styles.run}`}>
       <h3>{`▶ Running — ${verbLabel(launch.verb)}`}</h3>
       <p>
-        <b>{`par ${launch.by}`}</b>
+        <b>{`by ${launch.by}`}</b>
         <span className="mute">{` · ${fmtAge(launch.at)} · pid ${launch.pid}`}</span>
       </p>
-      <p>The runner is active. This view updates every 15 seconds.</p>
+      <p>{`The runner is active. This view updates every ${POLL_MS / 1000} seconds.`}</p>
     </div>
   );
 }
@@ -74,7 +74,7 @@ export function Callout({ item, includeActions = true }: CalloutProps): JSX.Elem
       <h3>{heading}</h3>
       <p>
         <b>{reasonOf(item)}</b>
-        <span className="mute">{` · waiting for ${fmtAge(item.updatedAt)}`}</span>
+        <span className="mute">{` · ${stopped || unaccounted ? "stopped" : "failed"} ${fmtAge(item.updatedAt)}`}</span>
       </p>
       <p>{explanation}</p>
       {unaccounted ? <pre className={sheet.log}>{unmeteredResumeCommand(item)}</pre> : null}

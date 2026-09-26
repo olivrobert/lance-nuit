@@ -118,6 +118,12 @@ export interface Item {
   key: string;
   project: ItemProject;
   ticket: string;
+  /** Ticket title: the first `# ` heading of `artifacts/ticket.md` in
+   *  `effectiveWorkItemDir`, after its optional front matter. Absent when that
+   *  file is missing, unreadable, or has no heading (a pipeline without a
+   *  work-item source step, or one writing `ticket.md` elsewhere): the list then
+   *  shows the ticket key instead. Never fetched from the provider. */
+  title?: string;
   pipeline: string;
   runId: string;
   status: ItemStatus;

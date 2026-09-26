@@ -13,19 +13,21 @@
   background: var(--bg);
 }
 
+/* No bottom border of its own: the tab bar closing the header already draws
+   that line, and two of them a few pixels apart read as a glitch. */
 .top {
   position: sticky;
   top: 0;
   z-index: 5;
-  padding: 18px 0 14px;
-  border-bottom: 1px solid var(--line);
+  padding: 18px 0 0;
   background: var(--bg);
 }
 
-.top h2 {
-  margin-top: 7px;
-  font-size: 24px;
-  line-height: 1.2;
+.top h2.title {
+  max-width: 62ch;
+  margin-top: 8px;
+  font-size: 23px;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
@@ -33,18 +35,85 @@
   padding-top: 12px;
 }
 
+/* Where the run is: project, ticket, pipeline, run, then the ways out. */
 .breadcrumb {
-  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
   color: var(--mute);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12.5px;
   overflow-wrap: anywhere;
 }
 
-.sheetSubtitle {
-  margin: 5px 0 0;
+.breadcrumb code {
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  font-weight: 600;
+}
+
+.breadcrumb a,
+.crumbButton {
+  color: var(--mute);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--line-strong);
+}
+
+/* "Open terminal" is a button (it navigates inside the app) drawn as the
+   breadcrumb's second link. */
+.breadcrumb .crumbButton {
+  min-height: 0;
+  padding: 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+  font-size: inherit;
+}
+
+.breadcrumb .crumbButton:hover:not(:disabled) {
+  color: var(--ink);
+  background: transparent;
+}
+
+/* How the run ended, in the reader's clock. */
+.verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-top: 10px;
   color: var(--mute);
   font-size: 13px;
+}
+
+.verdict b {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.headline {
+  color: var(--ink);
+}
+
+.delivered {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border-radius: 4px;
+  color: var(--ok);
+  background: var(--ok-bg);
+  font-weight: 650;
+}
+
+.delivered::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
 }
 
 /* The action row sits tighter under the headline than it does inside a callout. */
@@ -67,6 +136,21 @@
   border-radius: 0;
   color: var(--mute);
   background: transparent;
+}
+
+.tabNote {
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabCount {
+  margin-left: 5px;
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .sheetTabs button.on {
@@ -199,7 +283,7 @@
     padding-top: 14px;
   }
 
-  .top h2 {
+  .top h2.title {
     font-size: 21px;
   }
 
@@ -211,4 +295,28 @@
   .kv dt {
     margin-top: 8px;
   }
+}
+
+/* The question a stopped run asks, above the tabs. */
+.decision {
+  padding: 14px 0 4px;
+}
+
+.decision > :global(.small) {
+  margin: 0 0 12px;
+}
+
+.replyPanel {
+  margin: 0 0 6px;
+}
+
+.replyPanel > summary {
+  padding: 4px 0;
+  color: var(--mute);
+  font-size: 13px;
+}
+
+.replyPanel[open] > summary {
+  margin-bottom: 8px;
+  color: var(--ink);
 }

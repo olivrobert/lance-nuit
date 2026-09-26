@@ -23,8 +23,10 @@ import { ProjectBar } from "./components/ProjectBar.js";
 import { Sheet } from "./components/Sheet/index.js";
 import { TerminalScreen } from "./components/Terminal/index.js";
 import { cx } from "./lib/cx.js";
-import { queueCount } from "./lib/derive.js";
-import { useActions, useUiState } from "./store/store.js";
+import { waitingCount } from "./lib/derive.js";
+import { POLL_MS, useActions, useUiState } from "./store/store.js";
+import { useAttentionNotifications } from "./store/useAttentionNotifications.js";
+import { useListKeyboard } from "./store/useListKeyboard.js";
 import { usePolling } from "./store/usePolling.js";
 import { useRoute } from "./store/useRoute.js";
 
@@ -66,7 +68,7 @@ function ToastView(): JSX.Element | null {
 }
 
 /** The number in the tab title: what is waiting for this reader, across every
- *  project, whatever chip or queue is currently selected. */
+ *  project, whatever chip is currently selected. */
 function useDocumentTitle(count: number): void {
   useEffect(() => {
     document.title = `${count ? `(${count}) ` : ""}lancenuit — review inbox`;
@@ -77,9 +79,22 @@ export function App(): JSX.Element | null {
   const state = useUiState();
   const route = useRoute();
   usePolling();
-  useDocumentTitle(queueCount(state.items, "attention"));
+  useAttentionNotifications();
+  useListKeyboard(route.view === "inbox" && state.user !== null);
+  useDocumentTitle(waitingCount(state.items, null));
 
-  if (!state.loaded) return <ToastView />;
+  if (!state.loaded) {
+    // Nothing was ever read: without this line the page stays blank, and a
+    // blank page says nothing about a server that is down or a tunnel that dropped.
+    return state.refreshError ? (
+      <div className={styles.whoPage}>
+        <h1>Dashboard server unreachable</h1>
+        <p className="mute">{`Retrying every ${POLL_MS / 1000} seconds. Last error: ${state.refreshError}`}</p>
+      </div>
+    ) : (
+      <ToastView />
+    );
+  }
   if (!state.user) {
     return (
       <>

@@ -13,7 +13,7 @@ import { fetchTerminals } from "../../api/client.js";
 import type { Item } from "../../api/types.js";
 import { navigate } from "../../store/useRoute.js";
 
-export function TerminalLink({ item }: { item: Item }): JSX.Element | null {
+export function TerminalLink({ item, className }: { item: Item; className?: string }): JSX.Element | null {
   const project = item.project.name;
   const ticket = item.ticket;
   const [id, setId] = useState<string | null>(null);
@@ -35,7 +35,12 @@ export function TerminalLink({ item }: { item: Item }): JSX.Element | null {
 
   if (!id) return null;
   return (
-    <button type="button" title="Show the tmux session of this item" onClick={() => navigate({ view: "terminal", id })}>
+    <button
+      type="button"
+      className={className}
+      title="Show the tmux session of this item"
+      onClick={() => navigate({ view: "terminal", id })}
+    >
       Open terminal
     </button>
   );

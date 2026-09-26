@@ -36,6 +36,7 @@ import {
   readLaunchesFor,
   readProjects,
   readRecap,
+  readReport,
   readSteps,
   readTree,
   validateTicketRef,
@@ -248,7 +249,7 @@ async function handleItems(res: ServerResponse, env: NodeJS.ProcessEnv): Promise
 }
 
 /** One item, with everything the detail pane shows: the item, its folder tree,
- *  its run's steps, and the run's recap. Reads of the same work item, answered
+ *  its run's steps, the run's recap, and its delivery report. Reads of the same work item, answered
  *  in one round-trip because the pane shows them together. */
 async function handleItem(res: ServerResponse, project: string, ticket: string, env: NodeJS.ProcessEnv): Promise<void> {
   const item = await findItem(project, ticket, env);
@@ -261,6 +262,7 @@ async function handleItem(res: ServerResponse, project: string, ticket: string, 
     tree: readTree(project, ticket, { env }) ?? null,
     steps: readSteps(project, ticket, { env }) ?? null,
     recap: readRecap(project, ticket, { env }) ?? null,
+    ...(readReport(project, ticket, { env }) ?? { report: null }),
   });
 }
 
