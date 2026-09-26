@@ -1,7 +1,7 @@
 // The action row of the sheet.
 //
-// The verbs themselves are decided by `verbsFor`, which is the closed set of
-// what the server accepts (spec 5.1); this component only draws them and asks
+// The verbs themselves are decided by the server, which sends with every item
+// the closed set it accepts (spec 5.1); this component only draws them and asks
 // the two questions that must be answered before a verb is posted. Those two
 // questions live HERE and not in the store on purpose: `confirm` and `prompt`
 // are a property of the browser, and the store — which the poll also drives —
@@ -17,7 +17,7 @@
 import type { JSX } from "react";
 import type { Item, RunReport, VerbAction } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
-import { deliveryActions, isBusy, verbsFor } from "../../lib/derive.js";
+import { deliveryActions } from "../../lib/derive.js";
 import type { UiState } from "../../store/store.js";
 import { actions, useUiSelector } from "../../store/store.js";
 import styles from "./Actions.module.css";
@@ -63,8 +63,7 @@ export interface ActionsProps {
 
 export function Actions({ item, report, className }: ActionsProps): JSX.Element | null {
   const pending = useUiSelector(selectPending);
-  const busy = isBusy(item);
-  const verbs = verbsFor(item);
+  const { busy, verbs } = item;
   const delivery = deliveryActions(item, report);
   if (verbs.length === 0 && !delivery) return null;
 

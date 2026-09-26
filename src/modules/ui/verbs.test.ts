@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Item, LaunchRecord } from "../read-model/types.js";
-import { buildArgv, isBusy, MAX_BUDGET_USD } from "./verbs.js";
+import { actionable, buildArgv, isBusy, MAX_BUDGET_USD, verbsFor } from "./verbs.js";
 
 /** A stopped item at a gate, in a worktree, as the read model would build it. */
 function item(overrides: Partial<Item> = {}): Item {
@@ -170,3 +170,82 @@ function launchOf(fields: Partial<LaunchRecord> & { alive: boolean }): Item["lau
     ...fields,
   };
 }
+
+/** An item outside a worktree with no stop, the base of the offers below. */
+function quiet(overrides: Partial<Item> = {}): Item {
+  return item({ worktree: false, stop: undefined, ...overrides });
+}
+
+const names = (offers: ReturnType<typeof verbsFor>): string[] => offers.map((offer) => offer.verb);
+
+test("offers: a stop with a subject offers approve-and-rerun, approve only, close, and start fresh", () => {
+  const offers = verbsFor(quiet({ stop: { subject: "plan", kind: "needs-decision", detail: "gate" } }));
+  expect(names(offers)).toEqual(["approve-and-rerun", "approve", "close", "fresh"]);
+  expect(offers[0]?.primary).toBe(true);
+  expect(offers[0]?.command).toBe("lancenuit run DEMO-1 --pipeline feature --approve plan");
+});
+
+test("offers: a stop with no subject offers a plain rerun", () => {
+  expect(names(verbsFor(quiet()))).toEqual(["rerun", "close", "fresh"]);
+});
+
+test("offers: FAIL and ABORTED both rerun from the failure", () => {
+  for (const status of ["FAIL", "ABORTED"] as const) {
+    const offers = verbsFor(quiet({ status, group: "failure" }));
+    expect(names(offers)).toEqual(["rerun", "close", "fresh"]);
+    expect(offers[0]?.label).toBe("Rerun from failure");
+  }
+});
+
+test("offers: a closed run offers only reopen and start fresh", () => {
+  const offers = verbsFor(
+    quiet({ status: "FAIL", group: "done", closed: { at: "2026-09-06T08:00:00.000Z", by: "O" } }),
+  );
+  expect(names(offers)).toEqual(["reopen", "fresh"]);
+  expect(offers[0]?.command).toBe("lancenuit reopen DEMO-1 --pipeline feature");
+});
+
+test("offers: RUNNING offers nothing, PASS only start fresh", () => {
+  expect(verbsFor(quiet({ status: "RUNNING", group: "running" }))).toEqual([]);
+  const pass = verbsFor(quiet({ status: "PASS", group: "done" }));
+  expect(names(pass)).toEqual(["fresh"]);
+  expect(pass[0]?.danger).toBe(true);
+});
+
+test("offers: a budget ceiling adds its own verb, with the amount left as a placeholder", () => {
+  const offers = verbsFor(quiet({ status: "FAIL", group: "failure", budgetExceeded: true, worktree: true }));
+  expect(names(offers)).toEqual(["rerun", "budget", "close", "fresh"]);
+  expect(offers[1]?.command).toBe("lancenuit run DEMO-1 --pipeline feature --budget <usd> --worktree");
+});
+
+test("offers: an accounting stop gets no verb, authorizing unpriced spend is a terminal decision", () => {
+  const offers = verbsFor(quiet({ status: "FAIL", group: "failure", costUnaccounted: true }));
+  expect(names(offers)).toEqual(["rerun", "close", "fresh"]);
+  expect(offers.every((offer) => !offer.command.includes("--allow-unmetered"))).toBe(true);
+});
+
+test("offers: every offer is admitted, and its command is the argv the server builds", () => {
+  const cases = [
+    item(),
+    quiet(),
+    quiet({ status: "FAIL", group: "failure", budgetExceeded: true, worktree: true }),
+    quiet({ status: "ABORTED", group: "failure" }),
+    quiet({ status: "FAIL", group: "done", closed: { at: "2026-09-06T08:00:00.000Z", by: "O" } }),
+    quiet({ status: "PASS", group: "done" }),
+  ];
+  for (const subject of cases) {
+    for (const offer of verbsFor(subject)) {
+      const built = argvOf(buildArgv(subject, offer.verb, { subject: subject.stop?.subject, budget: 5 }));
+      const shown = offer.verb === "budget" ? built.map((arg) => (arg === "5" ? "<usd>" : arg)) : built;
+      expect(offer.command).toBe(["lancenuit", ...shown].join(" "));
+    }
+  }
+});
+
+test("actionable: an item is served with its offers and whether it is busy", () => {
+  const served = actionable(quiet({ status: "RUNNING", group: "running" }));
+  expect(served.busy).toBe(true);
+  expect(served.verbs).toEqual([]);
+  expect(actionable(quiet()).busy).toBe(false);
+  expect(names(actionable(quiet()).verbs)).toEqual(["rerun", "close", "fresh"]);
+});

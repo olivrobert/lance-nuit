@@ -20,7 +20,6 @@ import type {
   SheetTab,
   TreeFile,
   TreeNode,
-  VerbAction,
   WorkItemTree,
 } from "../api/types.js";
 import { fmtAge } from "./format.js";
@@ -82,74 +81,6 @@ export function verbLabel(verb: string): string {
   return VERB_LABELS[verb] ?? verb;
 }
 
-/** Nothing may be launched on an item whose runner runs, or whose launch of
- *  ours is still alive (spec 5.1). */
-export function isBusy(item: Item): boolean {
-  return item.status === "RUNNING" || item.launch?.alive === true;
-}
-
-/**
- * The closed set of verbs for one item (spec 5.1).
- *
- * The command carried by each entry is what the server will build: the server
- * builds `argv` itself from the item, the browser only names the verb. It is
- * shown as a tooltip so a reader can read the command before running it.
- */
-export function verbsFor(item: Item): VerbAction[] {
-  const worktree = item.worktree ? " --worktree" : "";
-  const base = `lancenuit run ${item.ticket} --pipeline ${item.pipeline}`;
-  const verbs: VerbAction[] = [];
-  const subject = item.status === "STOPPED" ? item.stop?.subject : undefined;
-
-  // A closed run waits on nobody: the only questions left are to reopen it, or
-  // to start over. A plain rerun would reopen it too, but silently.
-  if (item.closed) {
-    return [
-      {
-        verb: "reopen",
-        label: "Reopen",
-        primary: true,
-        command: `lancenuit reopen ${item.ticket} --pipeline ${item.pipeline}`,
-      },
-      { verb: "fresh", label: "Start fresh", danger: true, command: `${base} --fresh${worktree}` },
-    ];
-  }
-
-  if (item.status === "STOPPED" && subject) {
-    verbs.push({
-      verb: "approve-and-rerun",
-      label: "Approve and rerun",
-      primary: true,
-      command: `${base} --approve ${subject}${worktree}`,
-    });
-    verbs.push({
-      verb: "approve",
-      label: "Approve only",
-      command: `lancenuit approve ${item.ticket} ${subject} --pipeline ${item.pipeline}${worktree}`,
-    });
-  }
-  if (item.status === "STOPPED" && !subject) {
-    verbs.push({ verb: "rerun", label: "Rerun", primary: true, command: `${base}${worktree}` });
-  }
-  if (item.status === "FAIL" || item.status === "ABORTED") {
-    verbs.push({ verb: "rerun", label: "Rerun from failure", primary: true, command: `${base}${worktree}` });
-  }
-  if (item.budgetExceeded) {
-    verbs.push({ verb: "budget", label: "Raise budget", command: `${base} --budget <usd>${worktree}` });
-  }
-  if (item.status === "STOPPED" || item.status === "FAIL" || item.status === "ABORTED") {
-    verbs.push({
-      verb: "close",
-      label: "Mark as closed",
-      command: `lancenuit close ${item.ticket} --pipeline ${item.pipeline}`,
-    });
-  }
-  if (item.status !== "RUNNING") {
-    verbs.push({ verb: "fresh", label: "Start fresh", danger: true, command: `${base} --fresh${worktree}` });
-  }
-  return verbs;
-}
-
 /** A finished run that delivered: `PASS`, in the `done` group, neither closed
  *  by hand nor relaunched. The one case the header calls "Delivered". */
 export function isDelivered(item: Item): boolean {
@@ -166,7 +97,7 @@ export interface DeliveryActions {
 
 /**
  * The delivery actions of an item, or `null` when it has none — then the
- * action row is exactly `verbsFor`.
+ * action row is exactly the item's verbs.
  *
  * Only a delivered run (`isDelivered`) with a report has them. The link must be
  * one this dashboard links to (`linkableUrl`), even though the read model
@@ -189,7 +120,7 @@ export function deliveryActions(item: Item, report: RunReport | null | undefined
 /**
  * The CLI line that lifts an accounting stop, for a reader to copy.
  *
- * It is text, never a button: `verbsFor` deliberately has no verb for it. A
+ * It is text, never a button: the server deliberately offers no verb for it. A
  * dashboard click authorizing spend nobody can price would be a budget decision
  * taken by whoever happened to have the tab open; the terminal is where that
  * decision belongs.

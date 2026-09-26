@@ -12,6 +12,7 @@ import type { Item } from "../../read-model/index.js";
 import type { UiDeps } from "../deps.js";
 import { renderMarkdown } from "../markdown.js";
 import { sendError, sendJson, sendNotFound } from "../http/respond.js";
+import { actionable } from "../verbs.js";
 import type { Route, RouteRequest } from "./route.js";
 
 /** The item, or `undefined` once the 404 is sent. */
@@ -41,7 +42,7 @@ async function handleItem(request: RouteRequest, project: string, ticket: string
   if (!item) return;
   const { readModel } = deps;
   sendJson(request.res, 200, {
-    item,
+    item: actionable(item),
     tree: readModel.tree(project, ticket) ?? null,
     steps: readModel.steps(project, ticket) ?? null,
     recap: readModel.recap(project, ticket) ?? null,
@@ -116,7 +117,7 @@ export const itemsRoute: Route = {
   async handle(request, deps) {
     const { res, rest } = request;
     if (rest.length === 0) {
-      sendJson(res, 200, { items: await deps.readModel.items() });
+      sendJson(res, 200, { items: (await deps.readModel.items()).map(actionable) });
       return;
     }
     // A ticket is one path segment: a nested work item gets no item of its own,

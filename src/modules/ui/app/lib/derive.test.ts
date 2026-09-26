@@ -26,7 +26,6 @@ import {
   freshnessOf,
   hasAssumptionContent,
   headlineOf,
-  isBusy,
   isDelivered,
   leftForYou,
   mimeOf,
@@ -44,7 +43,6 @@ import {
   unmeteredResumeCommand,
   updatedLabel,
   verbLabel,
-  verbsFor,
   visibleItems,
   waitingCount,
   waitingKeys,
@@ -63,6 +61,8 @@ function makeItem(overrides: Partial<Item> = {}): Item {
     updatedAt: "2026-01-10T10:00:00.000Z",
     worktree: false,
     effectiveWorkItemDir: "/srv/web/work-items/ABC-1",
+    busy: false,
+    verbs: [],
     ...overrides,
   };
 }
@@ -130,74 +130,21 @@ describe("reasonOf and headlineOf", () => {
   });
 });
 
-describe("verbsFor", () => {
-  test("a stop with a subject offers approve-and-rerun, approve only, and start fresh", () => {
-    const verbs = verbsFor(makeItem({ status: "STOPPED", stop: { detail: "gate", subject: "plan" } }));
-    expect(verbs.map((verb) => verb.verb)).toEqual(["approve-and-rerun", "approve", "close", "fresh"]);
-    expect(verbs[0]?.primary).toBe(true);
-    expect(verbs[0]?.command).toBe("lancenuit run ABC-1 --pipeline feature --approve plan");
-  });
-
-  test("a stop with no subject offers a plain rerun", () => {
-    const verbs = verbsFor(makeItem({ status: "STOPPED", stop: { detail: "blocked" } }));
-    expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "close", "fresh"]);
-  });
-
-  test("FAIL and ABORTED both rerun from the failure", () => {
-    for (const status of ["FAIL", "ABORTED"] as const) {
-      const verbs = verbsFor(makeItem({ status, group: "failure" }));
-      expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "close", "fresh"]);
-      expect(verbs[0]?.label).toBe("Rerun from failure");
-    }
-  });
-
-  test("a closed run offers only reopen and start fresh", () => {
+describe("closed runs and verb labels", () => {
+  test("a closed run reads as closed by hand", () => {
     const item = makeItem({ status: "FAIL", group: "done", closed: { at: "2026-09-06T08:00:00.000Z", by: "Olivier" } });
-    const verbs = verbsFor(item);
-    expect(verbs.map((verb) => verb.verb)).toEqual(["reopen", "fresh"]);
-    expect(verbs[0]?.command).toBe("lancenuit reopen ABC-1 --pipeline feature");
     expect(headlineOf(item)).toBe("Closed by hand");
     expect(reasonOf(item)).toBe("closed by Olivier");
   });
 
-  test("RUNNING offers nothing, not even start fresh", () => {
-    expect(verbsFor(makeItem({ status: "RUNNING", group: "running" }))).toEqual([]);
-  });
-
-  test("PASS offers only start fresh", () => {
-    const verbs = verbsFor(makeItem({ status: "PASS", group: "done" }));
-    expect(verbs.map((verb) => verb.verb)).toEqual(["fresh"]);
-    expect(verbs[0]?.danger).toBe(true);
-  });
-
-  test("a budget ceiling adds its own verb, and a worktree run carries the flag", () => {
-    const verbs = verbsFor(makeItem({ status: "FAIL", group: "failure", budgetExceeded: true, worktree: true }));
-    expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "budget", "close", "fresh"]);
-    expect(verbs[1]?.command).toBe("lancenuit run ABC-1 --pipeline feature --budget <usd> --worktree");
-  });
-
-  test("an accounting stop gets no verb: authorizing unpriced spend is a terminal decision", () => {
+  test("the unmetered resume is shown as a command, worktree flag included", () => {
     const item = makeItem({ status: "FAIL", group: "failure", costUnaccounted: true, worktree: true });
-    const verbs = verbsFor(item);
-    // No `unmetered` verb, and no `budget` one either: the run never reached its
-    // ceiling, so raising it would answer a question nobody asked.
-    expect(verbs.map((verb) => verb.verb)).toEqual(["rerun", "close", "fresh"]);
-    expect(verbs.every((verb) => !verb.command.includes("--allow-unmetered"))).toBe(true);
-    // The command is shown as text instead, worktree flag included.
     expect(unmeteredResumeCommand(item)).toBe("lancenuit run ABC-1 --pipeline feature --allow-unmetered --worktree");
   });
 
   test("a verb the browser does not know falls through to its own name", () => {
     expect(verbLabel("approve")).toBe("approve only");
     expect(verbLabel("teleport")).toBe("teleport");
-  });
-});
-
-describe("isBusy", () => {
-  test("a running run or a live launch of ours blocks every button", () => {
-    expect(isBusy(makeItem({ status: "RUNNING" }))).toBe(true);
-    expect(isBusy(makeItem({ launch: makeLaunch({ alive: true }) }))).toBe(true);
-    expect(isBusy(makeItem({ launch: makeLaunch({ exitCode: 0 }) }))).toBe(false);
   });
 });
 
