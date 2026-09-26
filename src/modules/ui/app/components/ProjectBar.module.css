@@ -11,7 +11,7 @@
   padding: 8px 18px;
   color: var(--mute);
   border-bottom: 1px solid var(--line);
-  background: rgb(255 255 255 / 94%);
+  background: var(--panel);
   font-size: 12px;
 }
 
@@ -30,7 +30,7 @@
 }
 
 .search::placeholder {
-  color: #8b928d;
+  color: var(--mute);
 }
 
 .chips {
@@ -75,17 +75,17 @@
   height: 7px;
   margin-right: 6px;
   border-radius: 50%;
-  background: #8b9590;
+  background: var(--line-hover);
 }
 
 .gone {
   color: var(--mute);
   border-style: dashed;
-  background: #f1f2ef;
+  background: var(--tint);
 }
 
 .gone .dot {
-  background: #c4c9c5;
+  background: var(--line-strong);
 }
 
 .drop {
@@ -116,7 +116,7 @@
   padding: 5px 11px;
   color: var(--ink);
   border-radius: 999px;
-  background: #eef0ed;
+  background: var(--tint);
   font-weight: 650;
 }
 

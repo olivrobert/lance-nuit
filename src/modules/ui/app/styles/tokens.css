@@ -13,15 +13,29 @@
  */
 
 :root {
-  --bg: #f5f5f2;
+  /* A light page lit like a moonlit one: cool paper, night-blue ink, an indigo
+     accent and one warm moon tone. Only the banner is drawn as the night sky
+     itself; everything the reader works in stays bright. */
+  --bg: #f1f3f9;
   --panel: #fff;
-  --panel-subtle: #fafaf8;
-  --ink: #20252b;
-  --mute: #707780;
-  --line: #e1e3e1;
-  --line-strong: #ccd0cd;
-  --accent: #2d5a52;
-  --accent-soft: #e8f0ed;
+  --panel-subtle: #f8f9fd;
+  --tint: #eceff8;
+  --hover: #f5f6fc;
+  --ink: #1b2242;
+  --mute: #6a7191;
+  --line: #e0e4f0;
+  --line-strong: #c8cee3;
+  --line-hover: #a9b1d1;
+  --accent: #34408a;
+  --accent-strong: #283270;
+  --accent-soft: #eaedfb;
+  --focus: #8e99d6;
+  --link: #3848a8;
+  --night: #161c3d;
+  --night-deep: #0e1330;
+  --night-ink: #dfe4f7;
+  --night-mute: #9aa3cc;
+  --moon: #e2b95c;
   --stop: #a86616;
   --stop-bg: #fff8eb;
   --fail: #b33a34;
@@ -78,10 +92,10 @@ pre {
   white-space: pre-wrap;
   border: 1px solid var(--line);
   border-radius: 5px;
-  background: #f1f2f0;
+  background: var(--tint);
 }
 a {
-  color: #285a80;
+  color: var(--link);
   overflow-wrap: anywhere;
 }
 button {
@@ -95,8 +109,8 @@ button {
   cursor: pointer;
 }
 button:hover:not(:disabled) {
-  border-color: #aeb5b1;
-  background: #f7f8f6;
+  border-color: var(--line-hover);
+  background: var(--hover);
 }
 button.primary {
   color: #fff;
@@ -104,7 +118,7 @@ button.primary {
   background: var(--accent);
 }
 button.primary:hover:not(:disabled) {
-  background: #244b44;
+  background: var(--accent-strong);
 }
 button.danger {
   color: var(--fail);
@@ -127,7 +141,7 @@ textarea {
 textarea:focus,
 button:focus-visible,
 a:focus-visible {
-  outline: 2px solid #7ca69d;
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 /* Native disclosure widgets are used in four unrelated places (the sheet panel,
@@ -186,9 +200,10 @@ details > summary {
   color: var(--run);
   background: var(--run-bg);
 }
-.tag.CLOSED {
+.tag.CLOSED,
+.tag.UNSHIPPED {
   color: var(--mute);
-  background: #eef0ee;
+  background: var(--tint);
 }
 .tag.stale {
   color: var(--stale);
@@ -200,7 +215,7 @@ details > summary {
 }
 .tag.absent {
   color: var(--mute);
-  background: #eef0ee;
+  background: var(--tint);
 }
 .proj {
   display: inline-block;

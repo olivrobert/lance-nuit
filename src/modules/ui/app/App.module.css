@@ -6,8 +6,10 @@
   height: 100dvh;
 }
 
-/* The terminal screen: the banner, then everything else for the terminal. */
-.terminalShell {
+/* The terminal and stats screens: the banner, then everything else for the
+   one zone they show. */
+.terminalShell,
+.statsShell {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
@@ -27,9 +29,9 @@
   z-index: 70;
   max-width: 520px;
   padding: 10px 14px;
-  color: #f5f7f5;
+  color: var(--night-ink);
   border-radius: 5px;
-  background: #252b2c;
+  background: var(--night);
   font-size: 13px;
   box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
   white-space: pre-wrap;

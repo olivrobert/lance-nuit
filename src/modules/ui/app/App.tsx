@@ -2,7 +2,8 @@
 //
 // It answers two questions — is there a reader, and which screen does the URL
 // hash name? — and then assembles the zones that screen lives in. The inbox is
-// three zones; the terminal screen (`#/terminal/<id>`) keeps the banner and
+// three zones; the stats screen (`#/stats`) keeps the banner and gives the rest
+// to one table; the terminal screen (`#/terminal/<id>`) keeps the banner and
 // gives the rest of the viewport to one tmux session. Identity comes first for
 // both: the terminal is a shell, and nobody reaches it without a name. Everything else is delegated: the banner, the
 // project bar, the list and the sheet each own their data through the store, so
@@ -21,6 +22,7 @@ import { Banner } from "./components/Banner.js";
 import { ItemList } from "./components/ItemList.js";
 import { ProjectBar } from "./components/ProjectBar.js";
 import { Sheet } from "./components/Sheet/index.js";
+import { StatsScreen } from "./components/Stats/index.js";
 import { TerminalScreen } from "./components/Terminal/index.js";
 import { cx } from "./lib/cx.js";
 import { waitingCount } from "./lib/derive.js";
@@ -111,6 +113,16 @@ export function App(): JSX.Element | null {
       <div className={cx(styles.shell, styles.terminalShell)}>
         <Banner />
         <TerminalScreen key={route.id} id={route.id} />
+        <ToastView />
+      </div>
+    );
+  }
+
+  if (route.view === "stats") {
+    return (
+      <div className={cx(styles.shell, styles.statsShell)}>
+        <Banner />
+        <StatsScreen />
         <ToastView />
       </div>
     );
