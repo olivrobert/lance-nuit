@@ -153,6 +153,7 @@ export function createJiraWorkItemGateway(opts: JiraGatewayOptions): WorkItemGat
 
   return {
     provider: PROVIDER,
+    ...(opts.workItem.project ? { refPrefix: opts.workItem.project } : {}),
     validateRef,
     async fetch(ref: WorkItemRef): Promise<WorkItem> {
       requireValid(ref);

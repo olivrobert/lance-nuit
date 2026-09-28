@@ -37,6 +37,7 @@ src/builtin-steps/lib/work-item-steps.ts  deterministic actionSteps
 | `AutomationQueue` | `WorkQueue \| TerminalQueue` | queues projected by the provider however it chooses (label, custom field, column), through Jira's `config.labels` |
 | `WorkItemState` | `todo`, `inReview` | workflow state. The real status name and allowed transition are adapter data (`workItem.todoState` / `reviewState`) |
 | `WorkItemRef` | opaque string | `validateRef` is the **sole** authority on its shape |
+| `refPrefix` | optional string | the prefix every reference of the configured project carries before a `-` (Jira: the project key). Omit it when references are bare (GitHub issue numbers); the dashboard uses it to refuse another project's ticket |
 | `WorkItemNote` | structured `{ headline, fields, footer? }` | the adapter renders the text and knows whether its provider interprets Markdown |
 | `MoveTarget` | `{ queue?, from?, state? }` | one logical move may become N provider operations |
 

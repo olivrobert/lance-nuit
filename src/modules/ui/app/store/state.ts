@@ -21,7 +21,7 @@ import type {
   Item,
   ItemDetail,
   LaunchLog,
-  ProjectEntry,
+  ProjectView,
   RequestedSheetTab,
   VerbAction,
 } from "../api/types.js";
@@ -66,7 +66,7 @@ export interface UiState {
   /** `null` until a name is chosen; the identity page is shown instead. */
   user: string | null;
   users: string[];
-  projects: ProjectEntry[];
+  projects: ProjectView[];
   items: Item[];
   /** Project name the chips filter on, or `null` for every project. */
   filter: string | null;

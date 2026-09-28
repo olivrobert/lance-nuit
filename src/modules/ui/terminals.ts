@@ -25,7 +25,7 @@
 
 import { isPipelineName } from "../../env/builtin-pipeline.js";
 import type { WorkItemGatewayRegistry } from "../../contracts/registry.js";
-import { type Item, isTicketToken, type ProjectEntry, validateTicketRef } from "../read-model/index.js";
+import { type Item, isTicketToken, type ProjectEntry, ticketPrefixOf, validateTicketRef } from "../read-model/index.js";
 import { isBusy } from "./verbs.js";
 import type { Tmux } from "./tmux.js";
 
@@ -185,13 +185,14 @@ export type StartRunResult =
  * The ticket as the project's tracker spells it, or `undefined` when it names
  * another project. A provider validates the shape of a reference, not whose it
  * is, so a `FOOD-1` typed while on a `PACASEC` project would otherwise start a
- * run in the wrong repository. The key is matched case-insensitively and
- * rewritten as declared (`food-12` becomes `FOOD-12`); a project that declares
- * no key accepts any reference its provider accepts.
+ * run in the wrong repository. The prefix is the provider's `refPrefix`, matched
+ * case-insensitively and rewritten as declared (`food-12` becomes `FOOD-12`); a
+ * provider with bare references (a GitHub issue number) declares none, and any
+ * reference it accepts is kept.
  */
-export function ticketForProject(project: Pick<ProjectEntry, "key">, ticket: string): string | undefined {
-  if (!project.key) return ticket;
-  const prefix = `${project.key}-`;
+export function ticketForProject(refPrefix: string | undefined, ticket: string): string | undefined {
+  if (!refPrefix) return ticket;
+  const prefix = `${refPrefix}-`;
   if (ticket.slice(0, prefix.length).toUpperCase() !== prefix.toUpperCase()) return undefined;
   return prefix + ticket.slice(prefix.length);
 }
@@ -209,7 +210,7 @@ export function ticketForProject(project: Pick<ProjectEntry, "key">, ticket: str
 export async function startRun(request: StartRunRequest, deps: StartRunDeps): Promise<StartRunResult> {
   const { project, worktree } = request;
   if (!isTicketToken(request.ticket)) return { ok: false, status: 400, reason: "field `ticket` is required" };
-  const ticket = ticketForProject(project, request.ticket);
+  const ticket = ticketForProject(ticketPrefixOf(project, deps.workItems), request.ticket);
   if (!ticket) {
     return {
       ok: false,

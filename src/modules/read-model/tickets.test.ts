@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { createDefaultWorkItemGatewayRegistry } from "../work-item/registry.ts";
 import { readProjects } from "./projects.ts";
 import { cleanupTempDirs, makeProject, makeTempDir, writeProjectsFile } from "./test-harness.ts";
-import { isTicketToken, validateTicketRef } from "./tickets.ts";
+import { isTicketToken, ticketPrefixOf, validateTicketRef } from "./tickets.ts";
 
 afterEach(() => cleanupTempDirs());
 
@@ -31,6 +31,20 @@ test("tickets: the project's provider decides what a reference looks like", () =
   expect(validateTicketRef(jiraProject, "12", registry).ok).toBe(false);
   expect(validateTicketRef(githubProject, "12", registry)).toEqual({ ok: true });
   expect(validateTicketRef(githubProject, "DEMO-12", registry).ok).toBe(false);
+});
+
+test("tickets: only a provider whose references carry the project key declares a prefix", () => {
+  const home = makeTempDir("read-model-home-");
+  const jira = makeProject("demo-app", { provider: "jira", project: "DEMO" });
+  const github = makeProject("site", { provider: "github", project: "owner/site" });
+  const odd = makeProject("odd", { provider: "carrier-pigeon" });
+  writeProjectsFile(home, [jira, github, odd]);
+  const [jiraProject, githubProject, oddProject] = readProjects({ env: { ...process.env, PIPELINE_HOME: home } });
+  if (!jiraProject || !githubProject || !oddProject) throw new Error("projects not listed");
+
+  expect(ticketPrefixOf(jiraProject, registry)).toBe("DEMO");
+  expect(ticketPrefixOf(githubProject, registry)).toBeUndefined();
+  expect(ticketPrefixOf(oddProject, registry)).toBeUndefined();
 });
 
 test("tickets: a project that is gone or whose provider is unknown refuses every reference", () => {

@@ -121,12 +121,29 @@ test("start: the session runs the shell in the project, then the command is type
   expect(listed).toEqual([started.ok ? started.terminal : (undefined as never)]);
 });
 
-test("project key: a ticket of another project is refused, the key's case is the tracker's", () => {
-  expect(ticketForProject({ key: "PROJ" }, "proj-12")).toBe("PROJ-12");
-  expect(ticketForProject({ key: "PROJ" }, "PROJ-12")).toBe("PROJ-12");
-  expect(ticketForProject({ key: "PROJ" }, "FOOD-12")).toBeUndefined();
-  expect(ticketForProject({ key: "PROJ" }, "PROJECT-12")).toBeUndefined();
-  expect(ticketForProject({}, "anything-1")).toBe("anything-1");
+test("ref prefix: a ticket of another project is refused, the prefix's case is the tracker's", () => {
+  expect(ticketForProject("PROJ", "proj-12")).toBe("PROJ-12");
+  expect(ticketForProject("PROJ", "PROJ-12")).toBe("PROJ-12");
+  expect(ticketForProject("PROJ", "FOOD-12")).toBeUndefined();
+  expect(ticketForProject("PROJ", "PROJECT-12")).toBeUndefined();
+  expect(ticketForProject(undefined, "anything-1")).toBe("anything-1");
+});
+
+test("start: a GitHub project takes a bare issue number, not its owner/repo as a prefix", async () => {
+  const cwd = makeProject("gh-app", { provider: "github", project: "owner/repo" });
+  const entry: ProjectEntry = {
+    name: "gh-app",
+    cwd,
+    provider: "github",
+    key: "owner/repo",
+    specPath: ".lance-nuit/work-items",
+    found: true,
+  };
+  const server = new FakeTmuxServer();
+  const started = await startRun(request(entry, { ticket: "123" }), deps(server));
+  expect(started.ok && started.terminal.ticket).toBe("123");
+  const refused = await startRun(request(entry, { ticket: "PROJ-12" }), deps(new FakeTmuxServer()));
+  expect(refused.ok).toBe(false);
 });
 
 test("start: a ticket typed in lowercase starts the run on the tracker's spelling", async () => {

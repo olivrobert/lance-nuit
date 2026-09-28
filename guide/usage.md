@@ -297,9 +297,11 @@ with an image extension are served this way.
 
 **Launch a run** opens a dialog: the ticket, the pipeline (listed from the
 project's kit chain), and whether to use a worktree. When a project chip is
-selected the dialog is locked to it. A ticket must start with the project's
-declared key (`food-12` is accepted as `FOOD-12` on a `FOOD` project, a
-`PACASEC-3` is refused there). The server validates the
+selected the dialog is locked to it. When the project's provider declares a
+reference prefix, the ticket must start with it: Jira's prefix is the project
+key (`food-12` is accepted as `FOOD-12` on a `FOOD` project, a `PACASEC-3` is
+refused there). GitHub references are bare issue numbers (`123`), with no
+prefix to match. The server validates the
 ticket through the project's work-item provider, refuses an item whose run is
 already in progress, then starts a tmux session in the project's main clone,
 running your `$SHELL`, and types into it:
