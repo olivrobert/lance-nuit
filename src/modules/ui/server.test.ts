@@ -289,7 +289,22 @@ test("projects: adding one writes projects.json and shows up in the list", async
     projects: [{ path: added }],
   });
   const listed = (await response.json()) as { projects: Array<{ name: string; found: boolean }> };
-  expect(listed.projects).toEqual([expect.objectContaining({ name: "other", found: true })]);
+  expect(listed.projects).toEqual([expect.objectContaining({ name: "other", found: true, ticketPrefix: "PROJ" })]);
+});
+
+test("projects: a GitHub project is listed without a ticket prefix", async () => {
+  const { url } = await fixture({ listProject: false });
+  const added = makeProject("site", { provider: "github", project: "owner/site" });
+
+  const response = await fetch(url("/api/projects"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: `${USER_COOKIE}=Olivier` },
+    body: JSON.stringify({ action: "add", path: added }),
+  });
+
+  const listed = (await response.json()) as { projects: Array<Record<string, unknown>> };
+  expect(listed.projects[0]).toEqual(expect.objectContaining({ name: "site", key: "owner/site" }));
+  expect(listed.projects[0]).not.toHaveProperty("ticketPrefix");
 });
 
 test("projects: removing one drops it, and removing it twice is not an error", async () => {

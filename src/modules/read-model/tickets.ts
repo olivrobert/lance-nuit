@@ -8,7 +8,7 @@
 // The registry is a parameter: composing the built-in providers is the entry
 // point's job, not the read model's.
 
-import type { RefValidation } from "../../contracts/types.js";
+import type { RefValidation, WorkItemGateway } from "../../contracts/types.js";
 import type { WorkItemGatewayRegistry } from "../../contracts/registry.js";
 import { loadPipelineConfig } from "../../env/config.js";
 import { errorMessage } from "../../lib/errors.js";
@@ -37,9 +37,27 @@ export function validateTicketRef(
   if (!isTicketToken(ticket)) return { ok: false, reason: `ticket "${ticket}" is not a valid reference` };
   if (!project.found) return { ok: false, reason: `project "${project.name}" is not on disk` };
   try {
-    const config = loadPipelineConfig(project.cwd);
-    return registry.resolve({ workItem: config.workItem, labels: config.labels }).validateRef(ticket);
+    return gatewayOf(project, registry).validateRef(ticket);
   } catch (error) {
     return { ok: false, reason: errorMessage(error) };
   }
+}
+
+/**
+ * The prefix the project's tickets carry, as its provider declares it, or
+ * `undefined` when its references are bare or its configuration cannot be read
+ * — in which case `validateTicketRef` is the one that refuses.
+ */
+export function ticketPrefixOf(project: ProjectEntry, registry: WorkItemGatewayRegistry): string | undefined {
+  if (!project.found) return undefined;
+  try {
+    return gatewayOf(project, registry).refPrefix || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function gatewayOf(project: ProjectEntry, registry: WorkItemGatewayRegistry): WorkItemGateway {
+  const config = loadPipelineConfig(project.cwd);
+  return registry.resolve({ workItem: config.workItem, labels: config.labels });
 }

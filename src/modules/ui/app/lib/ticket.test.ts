@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { ticketPlaceholder, ticketPrefixMismatch } from "./ticket.js";
 
 describe("ticketPlaceholder", () => {
-  test("uses the project key, or a neutral stand-in", () => {
+  test("uses the provider's prefix, or a bare number when references carry none", () => {
     expect(ticketPlaceholder("PACASEC")).toBe("PACASEC-123");
-    expect(ticketPlaceholder(undefined)).toBe("TICKET-123");
-    expect(ticketPlaceholder("  ")).toBe("TICKET-123");
+    expect(ticketPlaceholder(undefined)).toBe("123");
+    expect(ticketPlaceholder("  ")).toBe("123");
   });
 });
 

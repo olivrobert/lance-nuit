@@ -60,15 +60,10 @@ export type {
 // server decided it admits.
 export type { ActionableItem as Item, Verb, VerbAction } from "../../verbs.js";
 export type { TerminalInfo } from "../../terminals.js";
+export type { ProjectView } from "../../routes/projects.js";
 
-import type {
-  FileRead,
-  ProjectEntry,
-  ReportRead,
-  RunRecap,
-  RunStepsView,
-  WorkItemTree,
-} from "../../../read-model/index.js";
+import type { FileRead, ReportRead, RunRecap, RunStepsView, WorkItemTree } from "../../../read-model/index.js";
+import type { ProjectView } from "../../routes/projects.js";
 import type { TerminalInfo } from "../../terminals.js";
 import type { ActionableItem as Item } from "../../verbs.js";
 
@@ -81,7 +76,7 @@ export interface MeResponse {
 
 /** `GET /api/projects` and `POST /api/projects`. */
 export interface ProjectsResponse {
-  projects: ProjectEntry[];
+  projects: ProjectView[];
 }
 
 /** `GET /api/items`. */

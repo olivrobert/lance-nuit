@@ -5,12 +5,25 @@
 import { statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { listPipelineFiles } from "../../../env/builtin-pipeline.js";
-import type { ProjectEntry } from "../../read-model/index.js";
+import { type ProjectEntry, ticketPrefixOf } from "../../read-model/index.js";
 import type { UiDeps } from "../deps.js";
 import { readJsonBody } from "../http/body.js";
 import { identityOf } from "../http/identity.js";
 import { sendError, sendJson, sendNotFound } from "../http/respond.js";
 import type { Route, RouteRequest } from "./route.js";
+
+/** A project as `/api/projects` answers it. The ticket prefix comes from the
+ *  project's provider, which the read model does not compose. */
+export interface ProjectView extends ProjectEntry {
+  ticketPrefix?: string;
+}
+
+function projectViews(deps: UiDeps): ProjectView[] {
+  return deps.readModel.projects().map((project) => {
+    const ticketPrefix = ticketPrefixOf(project, deps.workItems);
+    return ticketPrefix ? { ...project, ticketPrefix } : project;
+  });
+}
 
 /** Pipeline names of a project: the basenames of the kit chain's files. */
 export function projectPipelines(project: ProjectEntry): string[] {
@@ -71,7 +84,7 @@ async function handleProjectWrite({ req, res }: RouteRequest, deps: UiDeps): Pro
     sendError(res, 500, write.reason);
     return;
   }
-  sendJson(res, 200, { projects: deps.readModel.projects() });
+  sendJson(res, 200, { projects: projectViews(deps) });
 }
 
 export const projectsRoute: Route = {
@@ -88,7 +101,7 @@ export const projectsRoute: Route = {
       return;
     }
     if (method === "GET") {
-      sendJson(res, 200, { projects: deps.readModel.projects() });
+      sendJson(res, 200, { projects: projectViews(deps) });
       return;
     }
     // Every write is attributed, so an anonymous browser cannot change what the

@@ -814,6 +814,11 @@ export interface WorkItemQuery {
 
 export interface WorkItemGateway {
     readonly provider: string;
+    /** The prefix every reference of the configured project carries, before a
+     *  `-` (`PROJ` for `PROJ-123`). Absent when references are bare, like a
+     *  GitHub issue number: the dashboard then has no prefix to check or suggest.
+     *  `validateRef` checks a reference's shape; this says whose it is. */
+    readonly refPrefix?: string;
     validateRef(ref: string): RefValidation;
     fetch(ref: WorkItemRef): Promise<WorkItem>;
     findCandidates(query: WorkItemQuery): Promise<WorkItemRef[]>;

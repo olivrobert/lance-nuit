@@ -12,7 +12,7 @@
 // THE PROJECT IS NEVER GUESSED. A dialog opened from a selected project chip is
 // locked to that project, and its name is the title; opened from "All", it asks
 // for one explicitly. The ticket field then warns — without blocking — when the
-// typed prefix is not the project's key: launching a `FOOD-` ticket from the
+// typed prefix is not the one the project's provider declares: launching a `FOOD-` ticket from the
 // wrong project is the one mistake this form exists to make hard.
 //
 // Why the state is local and not in the store: the answers, the pipeline list
@@ -30,14 +30,14 @@
 import type { FormEvent, JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import { fetchPipelines, postRun } from "../api/client.js";
-import type { ProjectEntry } from "../api/types.js";
+import type { ProjectView } from "../api/types.js";
 import { ticketPlaceholder, ticketPrefixMismatch } from "../lib/ticket.js";
 import { navigate } from "../store/useRoute.js";
 import styles from "./LaunchRunDialog.module.css";
 
 export interface LaunchRunDialogProps {
   /** Projects that can be launched on: the ones whose path still exists. */
-  projects: readonly ProjectEntry[];
+  projects: readonly ProjectView[];
   /** The selected chip. `null` means "All", and the dialog asks for a project. */
   locked: string | null;
   onClose(): void;
@@ -114,7 +114,7 @@ export function LaunchRunDialog({ projects, locked, onClose }: LaunchRunDialogPr
   }, []);
 
   const project = projects.find((entry) => entry.name === projectName);
-  const mismatch = ticketPrefixMismatch(ticket, project?.key);
+  const mismatch = ticketPrefixMismatch(ticket, project?.ticketPrefix);
   const ready = Boolean(project) && ticket.trim() !== "" && pipelines.status === "ok" && pipeline !== "" && !pending;
 
   const chooseProject = (name: string): void => {
@@ -187,7 +187,7 @@ export function LaunchRunDialog({ projects, locked, onClose }: LaunchRunDialogPr
             required
             spellCheck={false}
             autoComplete="off"
-            placeholder={ticketPlaceholder(project?.key)}
+            placeholder={ticketPlaceholder(project?.ticketPrefix)}
             value={ticket}
             onChange={(event) => setTicket(event.target.value)}
             aria-describedby={mismatch ? "launch-run-mismatch" : undefined}
@@ -195,7 +195,7 @@ export function LaunchRunDialog({ projects, locked, onClose }: LaunchRunDialogPr
         </label>
         {mismatch && project ? (
           <p id="launch-run-mismatch" className={styles.warning} role="status">
-            {`This ticket does not start with ${project.key}-: are you sure it belongs to ${project.name}?`}
+            {`This ticket does not start with ${project.ticketPrefix}-: are you sure it belongs to ${project.name}?`}
           </p>
         ) : null}
 

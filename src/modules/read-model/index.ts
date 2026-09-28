@@ -38,7 +38,7 @@ export { readRecap } from "./recap.js";
 export { parseRunReport, type ReportRead, readReport } from "./report.js";
 export { readStats, STATS_ARCHIVE_FILE, STATS_CONFIG_FILE } from "./stats.js";
 export { readSteps } from "./steps.js";
-export { isTicketToken, validateTicketRef } from "./tickets.js";
+export { isTicketToken, ticketPrefixOf, validateTicketRef } from "./tickets.js";
 export type {
   ApprovalState,
   FileContentKind,
