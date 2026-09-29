@@ -34,7 +34,7 @@ import { runProvesUnpricedSpend } from "../../state/cost-accounting.js";
 import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
 import { dashboardPaths } from "../dashboard-home/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl, workItemsRoot } from "./projects.js";
-import { directoryNames, effectiveCwd, statusOf, ticketDirectories } from "./runs.js";
+import { directoryNames, statusOf, ticketDirectories } from "./runs.js";
 import { isTicketToken } from "./tickets.js";
 import type {
   ItemStatus,
@@ -308,9 +308,7 @@ function liveRuns(project: ProjectEntry, store: FileRunStateStore, steps: Readon
           project: project.name,
           ticket: ticketOfRun(folder, state),
           run: liveRunView(pipeline, state, steps),
-          // The worktree copy first: that is where the run wrote its artifacts.
-          // The main clone next, for a worktree removed once merged.
-          workItemDirs: [join(effectiveCwd(project, state), project.specPath, folder), join(root, folder)],
+          workItemDirs: [join(root, folder)],
         });
       }
     }
@@ -451,7 +449,6 @@ function buildTicket(
   delivery: DeliveryRule,
   projects: ReadonlyMap<string, ProjectEntry>,
 ): StatsTicket {
-  // Scan order, not recency: the worktree of a run before the main clone.
   const workItemDirs = [...new Set(collected.flatMap((entry) => entry.workItemDirs))];
   const newestFirst = [...collected].sort((a, b) => recency(b.run) - recency(a.run));
   const runs = newestFirst.map(({ run }) =>

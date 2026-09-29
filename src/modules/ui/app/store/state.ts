@@ -74,7 +74,7 @@ export interface UiState {
   /** `<project>/<ticket>` of the open sheet. */
   selected: string | null;
   detail: ItemDetail | null;
-  /** Explorer selection, relative to the effective work-item directory. */
+  /** Explorer selection, relative to the work-item directory. */
   filePath: string | null;
   file: FileView | null;
   assumptions: Assumptions | null;

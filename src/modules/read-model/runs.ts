@@ -90,14 +90,26 @@ export function statusOf(state: PersistedRun): ItemStatus {
 }
 
 /**
- * Directory whose `artifacts/` and `decisions/` this run reads.
+ * Directory the run's code and git operations ran in.
  *
  * A worktree run records its effective `cwd`; a run written before that field
- * existed falls back to the main clone, which is where it ran.
+ * existed falls back to the main clone, which is where it ran. It never locates
+ * the work item: see `workItemDirOf`.
  */
 export function effectiveCwd(project: ProjectEntry, state: PersistedRun): string {
   const cwd = state.cwd?.trim();
   return cwd && cwd.length > 0 ? cwd : project.cwd;
+}
+
+/**
+ * The work item of `ticket`, always in the main clone.
+ *
+ * A worktree links its work item to the main clone's (`env/worktree.ts`), so the
+ * main clone holds the only copy — and the only one left once the worktree is
+ * removed.
+ */
+export function workItemDirOf(project: ProjectEntry, ticket: string): string {
+  return join(workItemsRoot(project), ticket);
 }
 
 /** The run a ticket is about, with the directories every reader needs. */
@@ -106,9 +118,11 @@ export interface ResolvedRun {
   ticket: string;
   run: SelectedRun;
   status: ItemStatus;
-  /** Effective working directory of the run, after any worktree `chdir`. */
+  /** Effective working directory of the run, after any worktree `chdir`: where
+   *  its code and git state live, not its work item. */
   cwd: string;
-  /** Effective work-item directory: `<cwd>/<specPath>/<ticket>`. */
+  /** Work-item directory, in the main clone whatever `cwd` is:
+   *  `<project.cwd>/<specPath>/<ticket>`. */
   workItemDir: string;
 }
 
@@ -125,13 +139,12 @@ export function resolveRun(
   const [run] = latestRuns(project, ticket, new FileRunStateStore());
   if (!run) return undefined;
 
-  const cwd = effectiveCwd(project, run.state);
   return {
     project,
     ticket,
     run,
     status: statusOf(run.state),
-    cwd,
-    workItemDir: join(cwd, project.specPath, ticket),
+    cwd: effectiveCwd(project, run.state),
+    workItemDir: workItemDirOf(project, ticket),
   };
 }
