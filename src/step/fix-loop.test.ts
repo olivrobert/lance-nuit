@@ -246,6 +246,39 @@ test("a single fix attempt: validates the contract", async () => {
   expect(calls.retry).toBe(1);
 });
 
+test("a fix without replay settles the step on the original failure, marked unverified", async () => {
+  const step = makeStep({ fix_prompt: "fix", max_retries: 1, replay_after_fix: false }, { blocking: false });
+  const run = makeRun(step);
+  const { deps, calls } = fakes({ fix: [{ ok: true }] });
+
+  const res = await runFixLoop(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "1 MUST violation", {
+    deps,
+    output: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
+
+  expect(res.failed).toBe(false);
+  expect(calls.fix.length).toBe(1);
+  expect(calls.retry).toBe(0);
+  expect(step.status).toBe("done");
+  expect(step.errors).toBe("1 MUST violation (fix applied, not replayed)");
+});
+
+test("a failed fix without replay keeps the original reason unannotated", async () => {
+  const step = makeStep({ fix_prompt: "fix", max_retries: 1, replay_after_fix: false }, { blocking: false });
+  const run = makeRun(step);
+  const { deps, calls } = fakes({ fix: [{ ok: false }] });
+
+  await runFixLoop(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "1 MUST violation", {
+    deps,
+    output: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
+
+  expect(calls.retry).toBe(0);
+  expect(step.errors).toBe("1 MUST violation");
+});
+
 test("resumed fix: validates the contract", async () => {
   const step = makeStep({ resume_session: RESUMED, fix_prompt: "fix", max_retries: 1 });
   const run = makeRun(step);

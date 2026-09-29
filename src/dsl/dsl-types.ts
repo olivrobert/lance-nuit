@@ -49,6 +49,13 @@ interface FixPolicyBase {
    *  failing exit code with no extracted error is still repaired from the raw
    *  output. */
   fixOnlyWhenExtracted?: boolean;
+  /** `false`: a successful repair ends the step without replaying its command; the
+   *  original failure is absorbed with a note that the fix was not verified. For a
+   *  check whose second verdict would change nothing but its own cost (an advisory
+   *  review), where later steps still exercise the repaired code. Requires
+   *  `blocking: false` — an unverified repair must never open a blocking gate —
+   *  and a single repair (`retries: 1`). Default `true`. */
+  replayAfterFix?: boolean;
 }
 
 /** Failure policy. Without `fix`, the command is replayed `retries` times. With

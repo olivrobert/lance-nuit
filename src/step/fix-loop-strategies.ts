@@ -94,6 +94,14 @@ export async function runFixRetryLoop(
       break;
     }
 
+    // The original failure is kept as the step's reason: nothing re-checked the
+    // code, so reports must not read the repair as a verified success.
+    if (failure.replay_after_fix === false) {
+      fx.output.emit({ type: "runner.message", level: "info", message: `  Fix applied, command not replayed` });
+      lastFailReason = `${lastFailReason ?? "failure"} (fix applied, not replayed)`;
+      break;
+    }
+
     const beforeRetry = costDecision(run.max_cost_usd, budget);
     if (beforeRetry !== "continue") {
       fx.output.emit({

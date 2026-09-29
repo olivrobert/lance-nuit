@@ -42,6 +42,9 @@ export interface StepFailure {
    *  the documented fallback, where a failing exit code with no extracted error is
    *  still repaired from the raw output. */
   fix_only_when_extracted?: boolean;
+  /** Opt-out: `false` settles the step right after a successful repair instead of
+   *  replaying its command. Only on a non-blocking step with a single repair. */
+  replay_after_fix?: boolean;
 }
 
 /** Child pipeline call declared by an orchestration node. */
