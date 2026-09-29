@@ -2,7 +2,7 @@
 
 Source of truth: the `FLAGS` registry in `model/cli-options.ts`, which drives the
 parser (`cli/parse.ts`) and `runner --help`. The `pipeline` wrapper maps `run`, `single`, `inspect`, `logs`,
-`clean`, `stats`, `typecheck`, `lint`, `create`, `approve`, `close`, `reopen`, and `list` to these
+`clean`, `worktree clean`, `stats`, `typecheck`, `lint`, `create`, `approve`, `close`, `reopen`, and `list` to these
 flags.
 
 | Option | Alias | Description |
@@ -18,6 +18,7 @@ flags.
 | `--fresh` | `-f` | Ignore `latest` and force a new run |
 | `--allow-dirty` | | Bypass the clean Git tree guard for a top-level *fresh* run |
 | `--worktree` | | Run in a dedicated Git worktree; optional project hooks perform setup |
+| `--worktree-clean` | | Internal form used by `lancenuit worktree clean <ticket>`: run the optional `worktree-teardown.sh` hook, then remove the ticket worktree. See [usage.md](usage.md#worktrees) |
 | `--scan` | | Without a ticket: discover through `forEachWorkItem({ scan })` and loop over tickets. Rejected without a scannable loop |
 | `--limit <n>` | `-n` | Bound the items a command handles: tickets processed by `--scan` (overriding the `forEachWorkItem` limit), or runs listed by `--stats`. Error outside those two |
 | `--base-branch <branch>` | `-b` | Available through `ctx.baseBranch` |
@@ -58,6 +59,7 @@ lancenuit inspect PROJ-28 --run <run-id>
 lancenuit logs PROJ-28 --step tests
 lancenuit close PROJ-28 --pipeline release
 lancenuit clean --logs-only --older-than 30d --keep-failed
+lancenuit worktree clean PROJ-28
 lancenuit stats
 lancenuit stats -p release --since 30d
 lancenuit stats --failures --limit 20

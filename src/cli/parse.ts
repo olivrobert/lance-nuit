@@ -32,6 +32,7 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
     inspect: false,
     logs: false,
     clean: false,
+    worktreeClean: false,
     stats: false,
     ui: false,
     failures: false,
@@ -109,6 +110,9 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
   }
   if ([args.inspect, args.logs, args.clean].filter(Boolean).length > 1) {
     throw new CliError("Commands --inspect, --logs, and --clean are mutually exclusive.");
+  }
+  if (args.worktreeClean && !args.ticket) {
+    throw new CliError("lancenuit worktree clean requires a ticket.");
   }
   if ((args.inspect || args.logs) && !args.ticket) {
     throw new CliError("This command requires a ticket.");

@@ -113,6 +113,14 @@ case "$VERB" in
   clean)
     exec "$RUNNER_BIN" "$RUNNER_ENTRY" --clean "$@"
     ;;
+  worktree)
+    if [[ $# -lt 2 || "$1" != "clean" ]]; then
+      echo "Usage: lancenuit worktree clean <id>" >&2
+      exit 1
+    fi
+    TICKET="$2"; shift 2
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" "$TICKET" --worktree-clean "$@"
+    ;;
   stats)
     exec "$RUNNER_BIN" "$RUNNER_ENTRY" --stats "$@"
     ;;
