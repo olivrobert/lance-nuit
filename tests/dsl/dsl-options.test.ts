@@ -189,6 +189,38 @@ test("onFail: fixOnlyWhenExtracted without errorExtractor is refused", () => {
   ).toThrow(/fixOnlyWhenExtracted requires errorExtractor/);
 });
 
+test("onFail: replayAfterFix reaches the canonical definition", () => {
+  const step = bashStep({
+    id: "review",
+    name: "Review",
+    command,
+    blocking: false,
+    onFail: { fix: fixPrompt, retries: 1, replayAfterFix: false },
+  }).build();
+
+  expect(step.on_failure).toEqual({ fix_prompt: fixPrompt, max_retries: 1, replay_after_fix: false });
+});
+
+// An unverified repair must never let a blocking gate pass.
+test("onFail: replayAfterFix: false on a blocking step is refused", () => {
+  expect(() =>
+    bashStep({ id: "review", name: "Review", command, onFail: { fix: fixPrompt, replayAfterFix: false } }).build(),
+  ).toThrow(/replayAfterFix: false requires blocking: false/);
+});
+
+// Without a replay, a second repair would have no new failure to work from.
+test("onFail: replayAfterFix: false with several retries is refused", () => {
+  expect(() =>
+    bashStep({
+      id: "review",
+      name: "Review",
+      command,
+      blocking: false,
+      onFail: { fix: fixPrompt, retries: 2, replayAfterFix: false },
+    }).build(),
+  ).toThrow(/replayAfterFix: false requires retries: 1/);
+});
+
 test("actionStep: options build the canonical definition", () => {
   const run = async () => "ok";
   const describe = () => "normalise result.json";

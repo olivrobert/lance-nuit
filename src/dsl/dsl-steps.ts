@@ -241,6 +241,7 @@ export abstract class StepBuilder {
     if (policy.fixBackend !== undefined) failure.fix_backend = requiredText(policy.fixBackend, "fixBackend");
     if (policy.resumeSizeThresholdKb != null) failure.resume_size_threshold_kb = policy.resumeSizeThresholdKb;
     if (policy.fixOnlyWhenExtracted !== undefined) failure.fix_only_when_extracted = policy.fixOnlyWhenExtracted;
+    if (policy.replayAfterFix !== undefined) failure.replay_after_fix = policy.replayAfterFix;
     applyEscalate(failure, policy.escalate);
     this.step.on_failure = failure;
     return this;
@@ -305,6 +306,13 @@ function validatePipelineStep(step: PipelineStep): void {
   // the option would sit in the pipeline doing nothing.
   if (step.on_failure?.fix_only_when_extracted && !step.error_extractor) {
     throw new Error(`Step "${step.id}": fixOnlyWhenExtracted requires errorExtractor`);
+  }
+  // Without the replay, nothing checks the repair: letting it open a blocking gate
+  // would ship an unverified fix, and a second repair would work blind on the first.
+  if (step.on_failure?.replay_after_fix === false) {
+    if (step.blocking !== false) throw new Error(`Step "${step.id}": replayAfterFix: false requires blocking: false`);
+    if (step.on_failure.max_retries !== 1)
+      throw new Error(`Step "${step.id}": replayAfterFix: false requires retries: 1`);
   }
   if (step.runner === "pipeline" && !step.orchestration) {
     throw new Error(`Step "${step.id}": orchestration definition is missing`);

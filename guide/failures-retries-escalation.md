@@ -250,6 +250,35 @@ The option requires `errorExtractor` — without one there is no extraction to
 read, and the declaration is refused at load time. A non-blocking step absorbs
 the failure as usual. Omitting the option keeps the default behavior unchanged.
 
+## Repair without replay
+
+By default a successful repair replays the command, and that second verdict
+decides the step. On an advisory check — a non-blocking review whose report is
+read at merge time, while later steps (static analysis, tests) still exercise
+the repaired code — the replay costs a full run for a verdict that changes
+nothing. `replayAfterFix: false` stops after the repair:
+
+```ts
+llmStep({
+  id: "review",
+  name: "Quality constraints",
+  backend: "claude",
+  profile: "reviewer",
+  command: "/review",
+  blocking: false,
+  onFail: { fix: (ctx) => `Fix these violations:\n${ctx.errors}`, resumeSession: "implement", retries: 1, replayAfterFix: false },
+});
+```
+
+The step is settled as an absorbed failure. Its reason is the original one,
+suffixed with `(fix applied, not replayed)`: nothing re-checked the code, so
+reports never read the repair as a verified success. A failed repair keeps the
+original reason unchanged.
+
+The option is refused at load time on a blocking step — an unverified repair
+must never open a gate — and with `retries` other than `1`, since a second
+repair would have no new failure to work from.
+
 ## Capacity escalation
 
 `onFail.escalate` changes only the agent attempt configuration:
