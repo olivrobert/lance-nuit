@@ -5,8 +5,8 @@
 //
 // The tree is the answer to "why did this stop" that no summary can give: the
 // artifact the gate is waiting on, the report a step wrote, the journal of the
-// run. It is built from the EFFECTIVE work-item directory — the worktree copy
-// for a worktree run — because that is the tree the run itself reads.
+// run. It is built from the main clone's work-item directory, even for a
+// worktree run: the worktree only links it, and may already be gone.
 //
 // Reading is deliberately narrow. A path arrives from a browser, so it is
 // resolved under the work-item directory or the run directory and then compared
@@ -88,15 +88,22 @@ function limitFor(kind: FileContentKind): number {
 
 /**
  * Reserved first segment for a run directory that does not live inside the
- * effective work-item directory.
+ * work-item directory.
  *
- * A worktree run reads its artifacts from the worktree copy while its snapshot
- * stays where the run was enumerated, so the two roots can be different trees.
- * The work-item layout has no top-level `run/`, so the prefix names the second
- * root without ever shadowing a real file — and it is used only when the run
- * directory is genuinely outside.
+ * The runner always writes its runs inside the work item — a worktree run too,
+ * since the worktree only links the main clone's work item — so this is a safety
+ * net: a `latest` link repointed by hand out of the tree. The work-item layout
+ * has no top-level `run/`, so the prefix names the second root without ever
+ * shadowing a real file — and it is used only when the run directory is
+ * genuinely outside.
  */
 const RUN_PREFIX = "run";
+
+/** `runDir` is a real path: containment is checked against the real root, or a
+ *  project reached through a symlinked home would look detached from its runs. */
+function runDirOutside(root: string, runDir: string): boolean {
+  return !isPathWithin(realRoot(root) ?? root, runDir);
+}
 
 /** Tree paths are POSIX-style whatever the platform: they travel to a browser
  *  and come back as a query parameter. */
@@ -227,7 +234,7 @@ function gateArtifactPath(workItemDir: string, subject: string): string | undefi
 }
 
 /**
- * Tree of the effective work-item directory of `project/ticket`.
+ * Tree of the work-item directory of `project/ticket`, in the main clone.
  *
  * `artifacts/`, `reports/`, `decisions/` and `runs/<pipeline>/<run>/` come from
  * the walk itself; so does a nested work item, whose runs appear under the
@@ -237,8 +244,7 @@ function gateArtifactPath(workItemDir: string, subject: string): string | undefi
  * one is flagged `defaultOpen`: the gate file for a stop, the run's `state.json`
  * for a failure, which is where the reason of a technical failure is written.
  *
- * A run directory outside the effective work-item directory — the worktree case,
- * where the artifacts moved and the snapshot did not — is attached under `run/`
+ * A run directory outside the work-item directory is attached under `run/`
  * rather than dropped: a failed run whose `state.json` no reader can reach is a
  * failure nobody can diagnose.
  */
@@ -255,7 +261,7 @@ export function readTree(
   const budget: Budget = { left: MAX_ENTRIES };
   const children = walk(root, root, 0, budget);
 
-  const detached = !isPathWithin(root, runDir);
+  const detached = runDirOutside(root, runDir);
   if (detached) {
     children.push({
       kind: "directory",
@@ -271,7 +277,9 @@ export function readTree(
   if (gate) gate.gate = true;
 
   const failed = resolved.status === "FAIL" || resolved.status === "ABORTED";
-  const stateCandidate = detached ? `${RUN_PREFIX}/state.json` : `${treePath(root, runDir)}/state.json`;
+  const stateCandidate = detached
+    ? `${RUN_PREFIX}/state.json`
+    : `${treePath(realRoot(root) ?? root, runDir)}/state.json`;
   const fallback = failed ? findFile(children, stateCandidate) : undefined;
 
   const defaultFile = gate ?? fallback;
@@ -319,9 +327,8 @@ type Located =
 /**
  * Resolve one path of the tree to a real file of the work item.
  *
- * The path is the one the tree gave, relative to the effective work-item
- * directory — or, under the `run/` prefix, to a run directory that sits outside
- * it. Containment is checked twice against the root it resolved under: lexically,
+ * The path is the one the tree gave, relative to the work-item directory — or,
+ * under the `run/` prefix, to a run directory that sits outside it. Containment is checked twice against the root it resolved under: lexically,
  * which answers `..`, then on the real path, which answers a symbolic link
  * pointing out of the tree.
  */
@@ -330,7 +337,7 @@ function locate(projectName: string, ticket: string, relativePath: string, optio
   if (!resolved) return { status: "not-found" };
   if (!isSafeRelativePath(relativePath)) return { status: "denied", reason: "path escapes the work item" };
 
-  const detached = !isPathWithin(resolved.workItemDir, resolved.run.runDir);
+  const detached = runDirOutside(resolved.workItemDir, resolved.run.runDir);
   const underRun = detached && relativePath.startsWith(`${RUN_PREFIX}/`);
   const root = underRun ? resolved.run.runDir : resolved.workItemDir;
   const path = underRun ? relativePath.slice(RUN_PREFIX.length + 1) : relativePath;

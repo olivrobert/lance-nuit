@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { parseRunReport, readReport } from "./report.ts";
 import { TEXT_LIMIT_BYTES } from "./explorer.ts";
 import {
   cleanupTempDirs,
+  linkWorktree,
   makeProject,
   makeTempDir,
   writeArtifact,
@@ -172,13 +173,14 @@ test("readReport: a file past the text cap is not read", () => {
   );
 });
 
-test("readReport: a worktree run reads the worktree copy", () => {
+test("readReport: a worktree run reads the main clone's work item, worktree or not", () => {
   const project = listedProject();
-  const worktree = join(makeTempDir("read-model-worktree-"), "demo-app");
+  const worktree = linkWorktree(project, "DEMO-1");
   passedRun(project, "r-2", { worktree: true, cwd: worktree });
-  writeArtifact(project, "DEMO-1", "report.json", JSON.stringify({ ...VALID, notes: [] }));
-  writeArtifact(worktree, "DEMO-1", "report.json", JSON.stringify(VALID));
+  writeArtifact(project, "DEMO-1", "report.json", JSON.stringify(VALID));
 
+  expect(readReport("demo-app", "DEMO-1")?.report?.notes).toEqual(VALID.notes);
+  rmSync(worktree, { recursive: true, force: true });
   expect(readReport("demo-app", "DEMO-1")?.report?.notes).toEqual(VALID.notes);
 });
 

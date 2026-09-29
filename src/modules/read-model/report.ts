@@ -369,9 +369,8 @@ function readReportText(workItemDir: string): { text: string } | { error: string
 }
 
 /**
- * The report of `project/ticket`'s current run, read from the EFFECTIVE
- * work-item directory — the worktree copy for a worktree run — like every other
- * artifact the dashboard shows. `undefined` when the run cannot be resolved.
+ * The report of `project/ticket`'s current run, read from the main clone's
+ * work-item directory like every other artifact the dashboard shows. `undefined` when the run cannot be resolved.
  */
 export function readReport(
   projectName: string,

@@ -124,8 +124,8 @@ export interface Item {
   branch?: string;
   /** True when the run executed inside a worktree. */
   worktree: boolean;
-  /** Directory whose `artifacts/` and `decisions/` this run reads: the worktree
-   *  copy for a worktree run, the main clone otherwise. */
+  /** Directory whose `artifacts/` and `decisions/` this run reads: always the
+   *  main clone's, which a worktree only links to. */
   effectiveWorkItemDir: string;
   /** Latest dashboard launch for this item, when one exists. An alive launch puts
    *  the item in the `running` group whatever `state.json` still says. */
@@ -142,7 +142,7 @@ export type FileContentKind = "md" | "json" | "png" | "log" | "txt" | "other";
 export interface TreeFile {
   kind: "file";
   name: string;
-  /** Path relative to the effective work-item directory, POSIX-style. */
+  /** Path relative to the work-item directory, POSIX-style. */
   path: string;
   size: number;
   contentKind: FileContentKind;
@@ -163,7 +163,7 @@ export type TreeNode = TreeFile | TreeDirectory;
 
 /** The explorer's view of one work item, rooted at the directory the run reads. */
 export interface WorkItemTree {
-  /** Absolute effective work-item directory. */
+  /** Absolute work-item directory, in the main clone. */
   root: string;
   pipeline: string;
   runId: string;

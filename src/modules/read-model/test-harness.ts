@@ -55,6 +55,18 @@ export function workItemDir(root: string, ticket: string): string {
   return join(root, SPEC_PATH, ticket);
 }
 
+/** A worktree as `--worktree` provisions it: its work item is a link to the main
+ *  clone's, never a copy (`env/worktree.ts`). Returns the worktree path. */
+export function linkWorktree(root: string, ticket: string): string {
+  const worktree = join(makeTempDir("read-model-worktree-"), "demo-app");
+  const shared = workItemDir(root, ticket);
+  mkdirSync(shared, { recursive: true });
+  const link = workItemDir(worktree, ticket);
+  mkdirSync(dirname(link), { recursive: true });
+  symlinkSync(shared, link);
+  return worktree;
+}
+
 export interface RunFixture extends Partial<PersistedRun> {
   runId: string;
 }

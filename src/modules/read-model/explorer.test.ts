@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   IMAGE_LIMIT_BYTES,
@@ -11,6 +11,7 @@ import {
 } from "./explorer.ts";
 import {
   cleanupTempDirs,
+  linkWorktree,
   makeProject,
   makeTempDir,
   workItemDir,
@@ -180,9 +181,8 @@ test("tree: the runs of a nested work item appear under their parent", () => {
   expect(filePaths(tree?.children ?? [])).toEqual(["runs/feature/r-1/state.json", "US-01/runs/lot/r-2/state.json"]);
 });
 
-test("tree: a run directory outside the effective work item is reachable under `run/`", () => {
-  const project = listedProject();
-  const worktree = join(makeTempDir("read-model-worktree-"), "demo-app");
+/** A failed worktree run whose planning output lives in the main clone. */
+function failedWorktreeRun(project: string, worktree: string): void {
   writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
     status: "FAIL",
@@ -191,12 +191,69 @@ test("tree: a run directory outside the effective work item is reachable under `
     cwd: worktree,
     outcome: { phase: "tests", reason: "3 tests failed", logPath: null, resumable: true },
   });
-  writeArtifact(worktree, "DEMO-1", "plan.md", "# plan in the worktree\n");
+  writeArtifact(project, "DEMO-1", "plan.md", "# plan\n");
+  writeWorkItemFile(project, "DEMO-1", join("reports", "audit.json"), '{"ok":true}\n');
+}
+
+test("tree: a worktree run lists the main clone's work item, its run inside", () => {
+  const project = listedProject();
+  const worktree = linkWorktree(project, "DEMO-1");
+  failedWorktreeRun(project, worktree);
 
   const tree = readTree("demo-app", "DEMO-1");
 
-  expect(tree?.root).toBe(workItemDir(worktree, "DEMO-1"));
-  expect(filePaths(tree?.children ?? [])).toEqual(["artifacts/plan.md", "run/state.json"]);
+  expect(tree?.root).toBe(workItemDir(project, "DEMO-1"));
+  expect(filePaths(tree?.children ?? [])).toEqual([
+    "artifacts/plan.md",
+    "reports/audit.json",
+    "runs/feature/r-1/state.json",
+  ]);
+  expect(tree?.defaultPath).toBe("runs/feature/r-1/state.json");
+  expect(readFile("demo-app", "DEMO-1", "artifacts/plan.md")).toMatchObject({ status: "ok", contentKind: "md" });
+});
+
+test("tree: a worktree run whose worktree is gone still lists the main clone's work item", () => {
+  const project = listedProject();
+  const worktree = linkWorktree(project, "DEMO-1");
+  failedWorktreeRun(project, worktree);
+  rmSync(worktree, { recursive: true, force: true });
+
+  const tree = readTree("demo-app", "DEMO-1");
+
+  expect(tree?.root).toBe(workItemDir(project, "DEMO-1"));
+  expect(filePaths(tree?.children ?? [])).toEqual([
+    "artifacts/plan.md",
+    "reports/audit.json",
+    "runs/feature/r-1/state.json",
+  ]);
+  expect(readFile("demo-app", "DEMO-1", "reports/audit.json")).toMatchObject({ status: "ok", contentKind: "json" });
+});
+
+test("tree: a `latest` link pointing out of the work item is reachable under `run/`", () => {
+  const project = listedProject();
+  const outside = join(makeTempDir("read-model-outside-"), "r-1");
+  writeRun(project, "DEMO-1", "feature", { runId: "r-0", status: "PASS", updatedAt: "2026-09-05T07:00:00.000Z" });
+  mkdirSync(outside, { recursive: true });
+  writeFileSync(
+    join(outside, "state.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      name: "feature",
+      pipeline: "feature",
+      ticket: "DEMO-1",
+      steps: [],
+      runId: "r-1",
+      status: "FAIL",
+      updatedAt: "2026-09-05T08:00:00.000Z",
+    }),
+  );
+  const link = join(workItemDir(project, "DEMO-1"), "runs", "feature", "latest");
+  rmSync(link, { force: true });
+  symlinkSync(outside, link);
+
+  const tree = readTree("demo-app", "DEMO-1");
+
+  expect(filePaths(tree?.children ?? [])).toEqual(["runs/feature/r-0/state.json", "run/state.json"]);
   expect(tree?.defaultPath).toBe("run/state.json");
   expect(readFile("demo-app", "DEMO-1", "run/state.json")).toMatchObject({ status: "ok", contentKind: "json" });
   expect(readFile("demo-app", "DEMO-1", "run/../../../etc/passwd").status).toBe("denied");

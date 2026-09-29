@@ -29,7 +29,7 @@ import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
 import { FileWorkItemArtifactStore } from "../../state/stores/file-work-item-artifact-store.js";
 import { latestLaunchByItem } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl } from "./projects.js";
-import { effectiveCwd, latestRuns, statusOf, ticketDirectories } from "./runs.js";
+import { latestRuns, statusOf, ticketDirectories, workItemDirOf } from "./runs.js";
 import type {
   Item,
   ItemApproval,
@@ -178,21 +178,16 @@ function costOf(state: PersistedRun): ItemCost {
  * effective directory: an artifact rewritten since the approval makes the
  * decision stale, which is precisely what the runner will conclude too.
  */
-async function approvalOf(
-  project: ProjectEntry,
-  ticket: string,
-  runCwd: string,
-  subject: string,
-): Promise<ItemApproval | undefined> {
+async function approvalOf(project: ProjectEntry, ticket: string, subject: string): Promise<ItemApproval | undefined> {
   // The subject reaches a file path; an invalid one is dropped rather than
   // joined, so a corrupt snapshot cannot steer the read out of `decisions/`.
   if (!isValidSubjectToken(subject)) return undefined;
 
-  const decision = readDecisionAt(join(runCwd, project.specPath, ticket, "decisions", `${subject}.json`));
+  const decision = readDecisionAt(join(workItemDirOf(project, ticket), "decisions", `${subject}.json`));
   if (!decision) return { subject, state: "absent" };
 
   const store = new FileWorkItemArtifactStore({
-    cwd: runCwd,
+    cwd: project.cwd,
     config: { specPath: project.specPath },
     ticket,
     ticketDir: ticket,
@@ -314,9 +309,8 @@ async function buildItem(
   const { state } = selected;
   const status = statusOf(state);
   const runId = state.runId ?? "";
-  const runCwd = effectiveCwd(project, state);
   const stop = status === "STOPPED" ? stopOf(state) : undefined;
-  const approval = stop?.subject ? await approvalOf(project, ticket, runCwd, stop.subject) : undefined;
+  const approval = stop?.subject ? await approvalOf(project, ticket, stop.subject) : undefined;
   const url = ticketUrl(project, ticket);
   const branch = runId ? branchOf(project, runId, cache) : undefined;
   const key = `${project.name}/${ticket}`;
@@ -325,12 +319,8 @@ async function buildItem(
   // A runner the dashboard just spawned is running before it has written
   // anything: the launch, not the snapshot, is what knows that. A closed run
   // waits on nobody, whatever its status says.
-  const effectiveWorkItemDir = join(runCwd, project.specPath, ticket);
-  // A worktree is removed once its run is merged: the main clone's copy
-  // still holds the ticket.
-  const ticketHead =
-    readTicketHead(effectiveWorkItemDir) ??
-    (runCwd === project.cwd ? undefined : readTicketHead(join(project.cwd, project.specPath, ticket)));
+  const effectiveWorkItemDir = workItemDirOf(project, ticket);
+  const ticketHead = readTicketHead(effectiveWorkItemDir);
   const title = ticketHead === undefined ? undefined : titleOfTicketMarkdown(ticketHead, ticket);
   const group: ItemGroup = launch?.alive ? "running" : closed ? "done" : GROUP_BY_STATUS[status];
 

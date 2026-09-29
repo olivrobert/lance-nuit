@@ -5,6 +5,7 @@ import { writeClosureAt } from "../../state/closure.ts";
 import { listItems, readItem, titleOfTicketMarkdown } from "./items.ts";
 import {
   cleanupTempDirs,
+  linkWorktree,
   makeProject,
   makeTempDir,
   SPEC_PATH,
@@ -217,11 +218,8 @@ test("items: the pending approval is absent, fresh, or stale", async () => {
   expect(stale.approval?.state).toBe("stale");
 });
 
-test("items: a worktree run reads its approval from the worktree copy", async () => {
-  const project = listedProject();
-  const worktree = join(makeTempDir("read-model-worktree-"), "demo-app");
-  mkdirSync(worktree, { recursive: true });
-
+/** A worktree run stopped on the `plan` gate, approved from the main clone. */
+function stoppedWorktreeRun(project: string, worktree: string): void {
   writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
     status: "STOPPED",
@@ -236,16 +234,31 @@ test("items: a worktree run reads its approval from the worktree copy", async ()
       stop: { subject: "plan", kind: "needs-decision", detail: "plan needs approval" },
     },
   });
-  // The main clone holds the artifact the run started from; the approval was
-  // granted inside the worktree, on the copy the run actually reads.
   writeArtifact(project, "DEMO-1", "plan.md", "# plan\n");
-  writeArtifact(worktree, "DEMO-1", "plan.md", "# plan approved in the worktree\n");
-  writeDecision(worktree, "DEMO-1", "plan", "plan.md", "# plan approved in the worktree\n");
+  writeDecision(project, "DEMO-1", "plan", "plan.md", "# plan\n");
+}
+
+test("items: a worktree run reads its approval from the main clone's work item", async () => {
+  const project = listedProject();
+  const worktree = linkWorktree(project, "DEMO-1");
+  stoppedWorktreeRun(project, worktree);
 
   const [item] = await listItems();
 
   expect(item.worktree).toBe(true);
-  expect(item.effectiveWorkItemDir).toBe(join(worktree, SPEC_PATH, "DEMO-1"));
+  expect(item.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-1"));
+  expect(item.approval).toMatchObject({ subject: "plan", state: "fresh" });
+});
+
+test("items: a worktree run whose worktree is gone still reads its approval", async () => {
+  const project = listedProject();
+  const worktree = linkWorktree(project, "DEMO-1");
+  stoppedWorktreeRun(project, worktree);
+  rmSync(worktree, { recursive: true, force: true });
+
+  const [item] = await listItems();
+
+  expect(item.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-1"));
   expect(item.approval).toMatchObject({ subject: "plan", state: "fresh" });
 });
 
@@ -597,10 +610,9 @@ test("items: no title without a heading or without ticket.md, and the item still
   expect(items.every((item) => !("title" in item))).toBe(true);
 });
 
-test("items: a worktree run reads its title from the worktree copy", async () => {
+test("items: a worktree run reads its title from the main clone's work item", async () => {
   const project = listedProject();
-  const worktree = join(makeTempDir("read-model-worktree-"), "demo-app");
-  mkdirSync(worktree, { recursive: true });
+  const worktree = linkWorktree(project, "DEMO-1");
   writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
     status: "PASS",
@@ -609,11 +621,10 @@ test("items: a worktree run reads its title from the worktree copy", async () =>
     cwd: worktree,
   });
   writeArtifact(project, "DEMO-1", "ticket.md", "# Title in the main clone\n");
-  writeArtifact(worktree, "DEMO-1", "ticket.md", "# Title in the worktree\n");
 
   const [item] = await listItems();
 
-  expect(item.title).toBe("Title in the worktree");
+  expect(item.title).toBe("Title in the main clone");
 });
 
 test("items: a worktree run whose worktree is gone reads its title from the main clone", async () => {
