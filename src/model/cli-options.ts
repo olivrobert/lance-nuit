@@ -76,6 +76,8 @@ export interface RunnerArgs {
   inspect: boolean;
   logs: boolean;
   clean: boolean;
+  /** Tear down and remove the ticket worktree, then exit. */
+  worktreeClean: boolean;
   /** Summarize the central run history across runs, then exit. */
   stats: boolean;
   /** With --stats, keep runs started within this duration (`30d`, `12h`). */
@@ -282,6 +284,13 @@ export const FLAGS: FlagSpec[] = [
   },
   { long: "--step", key: "step", kind: "string", desc: "Filter a step for --logs (e.g. quality.tests)." },
   { long: "--clean", key: "clean", kind: "boolean", desc: "Clean logs from old runs; never modify pipeline-history." },
+  {
+    long: "--worktree-clean",
+    key: "worktreeClean",
+    kind: "boolean",
+    hidden: true,
+    desc: "Run the optional teardown hook, then remove the ticket worktree.",
+  },
   {
     long: "--stats",
     key: "stats",

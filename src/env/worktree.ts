@@ -20,12 +20,14 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { runSupervisedCommand } from "../exec/process-runner.js";
 import { log } from "../runtime/logging.js";
+import { acquireRunnerLock, releaseRunnerLock } from "./runlock.js";
 
 /** Number of raw output lines shown when setup fails. */
 const SETUP_FAILURE_TAIL = 20;
 const GIT_ASYNC_TIMEOUT_MS = 120_000;
 const INIT_ASYNC_TIMEOUT_MS = 120_000;
 const SETUP_ASYNC_TIMEOUT_MS = 900_000;
+const TEARDOWN_ASYNC_TIMEOUT_MS = 300_000;
 
 function firstExistingPath(paths: readonly string[]): string | null {
   return paths.find((path) => existsSync(path)) ?? null;
@@ -364,4 +366,72 @@ export async function setupWorktreeAsync(spec: WorktreeSpec, opts: WorktreeSetup
   if ((opts.stack ?? "auto") === "auto") await runSetupScriptAsync(spec, mode, warnings);
   unshareRunDir(spec.path);
   return { reused, warnings };
+}
+
+export interface WorktreeRemovalResult {
+  warnings: string[];
+}
+
+/**
+ * Remove the ticket worktree on demand — never on its own at the end of a run: a
+ * PASS only means the MR is ready for review, and a review may still send work
+ * back into this worktree.
+ *
+ * Order matters. Every refusal (running pipeline, uncommitted work) is checked
+ * BEFORE the teardown hook, so a refused removal leaves the stack running too.
+ * The hook then runs while the worktree still exists, because what it needs to
+ * stop a stack (a compose override, a project name derived from the path) lives
+ * in it; a failed hook keeps the worktree so the removal can simply be retried.
+ * The worktree run lock is held throughout, so no run can start mid-teardown;
+ * `git worktree remove` deletes it together with the directory.
+ */
+export async function removeWorktreeAsync(spec: WorktreeSpec): Promise<WorktreeRemovalResult> {
+  if (!(await isRegisteredWorktreeAsync(spec.mainRepo, spec.path))) {
+    throw new Error(`no worktree registered for this ticket: ${spec.path}`);
+  }
+  const lock = acquireRunnerLock(spec.path, { pid: process.pid, startedAt: new Date().toISOString() });
+  if (!lock.ok) {
+    const pid = lock.holder?.pid ?? lock.reclaiming?.pid;
+    throw new Error(`a runner (pid ${pid}) is using the worktree; wait for it to finish`);
+  }
+  try {
+    await refuseUncommittedWork(spec);
+    await runTeardownScriptAsync(spec);
+    // No --force: git's own refusal is the last guard against losing work.
+    const removed = await gitAsync(spec.mainRepo, ["worktree", "remove", spec.path]);
+    if (!removed.ok) throw new Error(`git worktree remove ${spec.path}: ${removed.output}`);
+  } catch (error) {
+    releaseRunnerLock(spec.path);
+    throw error;
+  }
+  return { warnings: await deleteScaffoldBranchAsync(spec) };
+}
+
+/** Refuse what `git worktree remove` would refuse, but before the teardown hook
+ *  has stopped anything. Ignored files (env copies, overrides) are not work. */
+async function refuseUncommittedWork(spec: WorktreeSpec): Promise<void> {
+  const status = await gitAsync(spec.path, ["status", "--porcelain"]);
+  if (!status.ok) throw new Error(`git status in ${spec.path}: ${status.output}`);
+  if (status.output !== "") {
+    throw new Error(`the worktree has uncommitted changes; commit or discard them first:\n${status.output}`);
+  }
+}
+
+/** Optional project hook that stops what worktree-setup started. */
+async function runTeardownScriptAsync(spec: WorktreeSpec): Promise<void> {
+  const script = projectHookFor(spec, "worktree-teardown.sh");
+  if (!script) return;
+  const r = await runSupervisedCommand("bash", [script, spec.path], {
+    stdio: "inherit",
+    timeoutMs: TEARDOWN_ASYNC_TIMEOUT_MS,
+  });
+  if (r.status !== 0) throw new Error(`project hook worktree-teardown failed (${script}); the worktree is kept`);
+}
+
+/** The scaffold branch is the runner's own; the pipeline's branches are not
+ *  touched. `-d` keeps it when it carries commits no other branch has. */
+async function deleteScaffoldBranchAsync(spec: WorktreeSpec): Promise<string[]> {
+  if (!(await branchExistsAsync(spec.mainRepo, spec.branch))) return [];
+  const r = await gitAsync(spec.mainRepo, ["branch", "-d", spec.branch]);
+  return r.ok ? [] : [`branch ${spec.branch} kept: ${r.output}`];
 }

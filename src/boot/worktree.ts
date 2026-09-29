@@ -75,7 +75,7 @@ export async function bootstrapWorktree(
     }
     process.chdir(spec.path);
     process.env.RUNNER_IN_WORKTREE = "1";
-    log(`  Running in worktree — main clone is free. Clean up after the MR: skill worktree-delete ${spec.dir}`);
+    log(`  Running in worktree — main clone is free. Clean up after the MR: lancenuit worktree clean ${ticket}`);
   }
 
   return { worktreeMode, pipelinePath };

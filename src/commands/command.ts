@@ -18,6 +18,7 @@ import { typecheckCommand } from "./typecheck.js";
 import { typesInstallCommand } from "./types-install.js";
 import { uiCommand } from "./ui.js";
 import type { RunnerCommand } from "./runner-command.js";
+import { worktreeCleanCommand } from "./worktree-clean.js";
 import { wrapperHelpCommand } from "./wrapper-help.js";
 
 export const helpCommand: RunnerCommand = {
@@ -59,4 +60,5 @@ export const COMMANDS: RunnerCommand[] = [
   cleanCommand,
   statsCommand,
   uiCommand,
+  worktreeCleanCommand,
 ];

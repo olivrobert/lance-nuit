@@ -79,6 +79,12 @@ export const WRAPPER_COMMANDS: readonly WrapperCommand[] = [
     desc: "Clean old logs (--logs-only --older-than 30d).",
   },
   {
+    verb: "worktree",
+    flag: "--worktree-clean",
+    usage: "worktree clean <id>",
+    desc: "After the MR: run the optional teardown hook, then remove the ticket worktree (refused on uncommitted work).",
+  },
+  {
     verb: "stats",
     flag: "--stats",
     usage: "stats [-p <name>] [--since 30d] [--failures]",

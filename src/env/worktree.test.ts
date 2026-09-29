@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -16,6 +16,7 @@ import { log } from "../runtime/logging.ts";
 import {
   gitToplevelAsync,
   isLinkedWorktreeAsync,
+  removeWorktreeAsync,
   setupScriptFor,
   setupWorktreeAsync,
   slugifyTicket,
@@ -418,4 +419,81 @@ test("setupWorktreeAsync: existing wt/ branch (deleted worktree) → reattached 
   expect(res.reused).toBe(false);
   const branch = spawnSync("git", ["branch", "--show-current"], { cwd: spec2.path, encoding: "utf-8" });
   expect(branch.stdout.trim()).toBe("wt/proj-9");
+});
+
+/** A repo whose kit ignores its run state, as `lancenuit types install` generates it. */
+function kitRepo(): string {
+  const repo = gitRepo();
+  mkdirSync(join(repo, ".lance-nuit"), { recursive: true });
+  writeFileSync(join(repo, ".lance-nuit", ".gitignore"), "/run/\n/pipeline-history/\n/node_modules/\n");
+  spawnSync("git", ["add", "."], { cwd: repo });
+  spawnSync("git", ["commit", "-qm", "kit"], { cwd: repo });
+  return repo;
+}
+
+/** Untracked teardown hook in the main clone that records the path it received. */
+function teardownHook(repo: string, body = 'echo "$1" > "$(dirname "$0")/teardown.called"'): string {
+  writeFileSync(join(repo, ".lance-nuit", "worktree-teardown.sh"), `${body}\n`);
+  return join(repo, ".lance-nuit", "teardown.called");
+}
+
+test("removeWorktreeAsync: runs the teardown hook, removes the worktree and its scaffold branch", async () => {
+  const repo = kitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  const marker = teardownHook(repo);
+
+  const res = await removeWorktreeAsync(spec);
+
+  expect(res.warnings).toEqual([]);
+  expect(readFileSync(marker, "utf-8").trim()).toBe(spec.path);
+  expect(existsSync(spec.path)).toBe(false);
+  const branch = spawnSync("git", ["branch", "--list", spec.branch], { cwd: repo, encoding: "utf-8" });
+  expect(branch.stdout.trim()).toBe("");
+});
+
+test("removeWorktreeAsync: uncommitted work is refused before the teardown hook runs", async () => {
+  const repo = kitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  const marker = teardownHook(repo);
+  writeFileSync(join(spec.path, "a.txt"), "changed\n");
+
+  await expect(removeWorktreeAsync(spec)).rejects.toThrow(/uncommitted changes/);
+
+  expect(existsSync(marker)).toBe(false);
+  expect(existsSync(spec.path)).toBe(true);
+});
+
+test("removeWorktreeAsync: a failed teardown hook keeps the worktree for a retry", async () => {
+  const repo = kitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  teardownHook(repo, "exit 3");
+
+  await expect(removeWorktreeAsync(spec)).rejects.toThrow(/worktree-teardown failed/);
+  expect(existsSync(spec.path)).toBe(true);
+
+  teardownHook(repo);
+  await removeWorktreeAsync(spec);
+  expect(existsSync(spec.path)).toBe(false);
+});
+
+test("removeWorktreeAsync: a live runner in the worktree blocks the removal", async () => {
+  const repo = kitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  const sleeper = spawn("sleep", ["30"]);
+  writeFileSync(join(spec.path, ".lance-nuit", "run", "runner.lock"), JSON.stringify({ pid: sleeper.pid }));
+  try {
+    await expect(removeWorktreeAsync(spec)).rejects.toThrow(/is using the worktree/);
+    expect(existsSync(spec.path)).toBe(true);
+  } finally {
+    sleeper.kill();
+  }
+});
+
+test("removeWorktreeAsync: an unknown ticket is an error, not a silent success", async () => {
+  const repo = kitRepo();
+  await expect(removeWorktreeAsync(freshSpec(repo, "PROJ-404"))).rejects.toThrow(/no worktree registered/);
 });

@@ -569,6 +569,22 @@ is used. Docker readiness is a separate opt-in `stackPreflight` configuration.
 The worktree root defaults to `~/.lance-nuit/worktrees/<project>/<ticket>` and is
 configurable with `WORKTREES_ROOT`.
 
+A worktree outlives its run: a `PASS` only means the MR is ready for review, and
+a review may send work back into it. Remove it once the MR is merged:
+
+```bash
+lancenuit worktree clean PROJ-28
+```
+
+The command runs from the main clone. It refuses while a runner holds the
+worktree or while it has uncommitted changes, and it checks both before touching
+anything. It then runs the optional `.lance-nuit/worktree-teardown.sh` hook with
+the worktree path — the place to stop what `worktree-setup.sh` started, such as a
+Docker Compose stack and its volumes — and removes the worktree with
+`git worktree remove`, without `--force`. A failed hook keeps the worktree, so the
+command can be retried. The `wt/<ticket>` scaffold branch is deleted with
+`git branch -d`; the branches the pipeline created are left alone.
+
 ## Lockfiles
 
 `bun.lock` is the only repository lockfile. Use `bun install` when dependencies
