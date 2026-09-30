@@ -9,6 +9,7 @@
       "!!.lance-nuit",
       "!!.claude",
       "!!.scratch",
+      "!!.ia",
       "!!src/modules/ui/static/app.js",
       "!!src/modules/ui/static/app.css",
       "!!.dependency-cruiser-known-violations.json",
