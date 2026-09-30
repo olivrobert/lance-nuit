@@ -64,7 +64,7 @@ export function stepCapability(
     }
   }
   const slash = command?.match(/^\s*\/([a-z0-9:-]+)/i);
-  return slash ? { kind: "skill", name: slash[1] } : undefined;
+  return slash ? { kind: "skill", name: slash[1]! } : undefined;
 }
 
 /** Axes imposed by capability frontmatter, which takes precedence over CLI flags.
@@ -336,7 +336,7 @@ export function applyStepOverrides(
   ];
   // Report the first problem: this runs before the first spawn, and the validator
   // already aggregated the full list for the author.
-  if (findings.length > 0) throw new Error(`Invalid configuration (${source}): ${findings[0].message}`);
+  if (findings.length > 0) throw new Error(`Invalid configuration (${source}): ${findings[0]!.message}`);
 
   const applied: ApplyResult["applied"] = [];
   for (const step of pipeline.steps) {

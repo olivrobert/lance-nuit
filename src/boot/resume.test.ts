@@ -87,7 +87,7 @@ test("resume: a guard stop is kept until --budget approves more spend", async ()
   const dir = resolveRunDir("p", "T-3", undefined, true, ctx);
   const run = await loadOrCreateRun(path, "T-3", undefined, undefined, dir, false, undefined, ctx);
   run.budget_exceeded = true;
-  updateStep(run, run.steps[0], "failed", "process killed: budget exceeded");
+  updateStep(run, run.steps[0]!, "failed", "process killed: budget exceeded");
   expect(readRunSnapshot(join(dir, "state.json"))?.budget_exceeded).toBe(true);
 
   // A plain resume inherits the stop: the ledger may read the ceiling as free room.
@@ -175,7 +175,7 @@ test("resume: an attempt priced in the journal but missing from the snapshot sti
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-4", undefined, true, ctx);
   const run = await loadOrCreateRun(path, "T-4", undefined, undefined, dir, false, undefined, ctx);
-  updateStep(run, run.steps[0], "running");
+  updateStep(run, run.steps[0]!, "running");
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
   // `finishAttempt` appends the finish event, then writes the snapshot. Die in between.
   appendRunEvent(run, "step.attempt.finished", {
@@ -212,7 +212,7 @@ test("resume: the snapshot total wins when it already covers the journaled attem
     logPath: "steps/a/1.log",
   });
   run.steps[0]!.control = { duration_ms: 5, total_cost_usd: 1.5, model: "m" };
-  updateStep(run, run.steps[0], "done");
+  updateStep(run, run.steps[0]!, "done");
 
   const resumed = await loadOrCreateRun(path, "T-5", undefined, undefined, dir, false, undefined, ctx);
   expect(resumed.steps[0]!.control).toEqual({ duration_ms: 5, total_cost_usd: 1.5, model: "m" });
@@ -224,7 +224,7 @@ test("resume: a fix pass left running by a crash is closed as failed and unprice
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6", undefined, true, ctx);
   const run = await loadOrCreateRun(path, "T-6", undefined, undefined, dir, false, undefined, ctx);
-  updateStep(run, run.steps[0], "running");
+  updateStep(run, run.steps[0]!, "running");
   // A priced step attempt, then a fix pass that never reported: the runner died.
   run.steps[0]!.control = { duration_ms: 5, total_cost_usd: 1, model: "m" };
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
@@ -556,7 +556,7 @@ test("invariant: a resume over an unreadable journal fails instead of forgetting
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-9", undefined, true, ctx);
   const run = await loadOrCreateRun(path, "T-9", undefined, undefined, dir, false, undefined, ctx);
-  updateStep(run, run.steps[0], "running");
+  updateStep(run, run.steps[0]!, "running");
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
   appendRunEvent(run, "step.attempt.finished", {
     stepId: "a",

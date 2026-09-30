@@ -374,7 +374,7 @@ test("AUDIT #1: validates the contract", async () => {
     undefined,
     buildPipelineContext(commandRegistries()),
   );
-  expect(run.steps[0].errors).toBe("boom: assertion failed");
+  expect(run.steps[0]!.errors).toBe("boom: assertion failed");
 
   // `aborted` describes the previous run's termination, not a durable state. If
   // rehydrated unchanged, isAborted() (step-loop) would be true on the first step
@@ -761,15 +761,15 @@ function makeRun(dir: string): Run {
 test("stepLogPath: validates the contract", () => {
   const dir = mkdtempSync(join(tmpdir(), "steplog-"));
   const run = makeRun(dir);
-  expect(stepLogPath(run, run.steps[0])).toBe(join(dir, "steps", "triage", "attempt-001", "output.log"));
-  expect(stepLogPath(run, run.steps[2])).toBe(join(dir, "steps", "commit", "attempt-001", "output.log"));
+  expect(stepLogPath(run, run.steps[0]!)).toBe(join(dir, "steps", "triage", "attempt-001", "output.log"));
+  expect(stepLogPath(run, run.steps[2]!)).toBe(join(dir, "steps", "commit", "attempt-001", "output.log"));
   expect(existsSync(join(dir, "steps", "triage", "attempt-001"))).toBe(true);
 });
 
 test("findStepLog: validates the contract", () => {
   const dir = mkdtempSync(join(tmpdir(), "steplog-find-"));
   const run = makeRun(dir);
-  const p = stepLogPath(run, run.steps[1]);
+  const p = stepLogPath(run, run.steps[1]!);
   writeFileSync(p, "log spec");
   expect(findStepLog(dir, "feat", "spec")).toBe(p);
 });

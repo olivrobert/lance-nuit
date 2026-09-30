@@ -161,7 +161,7 @@ test("run-state-store: validates the integration contract", async () => {
       steps: [{ id: "inspect", status: "pending" }],
     },
   });
-  expect(store.loadLatest("fixture")).toBe(store.calls.saveAt[0]?.snapshot);
+  expect(store.loadLatest("fixture")).toBe(store.calls.saveAt[0]!.snapshot);
   expect(existsSync(join(runDir, "state.json"))).toBe(false);
 
   const resumed = await loadOrCreateRun(

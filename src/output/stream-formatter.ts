@@ -176,6 +176,9 @@ if (!streamFile) {
   rl.on("close", () => process.exit(0));
 } else {
   // File mode: follow the file with fs.watch (inotify) and incremental reads.
+  // `read` is a hoisted declaration, so the `!streamFile` narrowing above does
+  // not reach it: a local bound inside this branch carries the type.
+  const file = streamFile;
   let offset = 0;
   let leftover = "";
   let reading = false;
@@ -189,7 +192,7 @@ if (!streamFile) {
     reading = true;
     let size = 0;
     try {
-      size = statSync(streamFile).size;
+      size = statSync(file).size;
     } catch {
       reading = false;
       return;
@@ -206,7 +209,7 @@ if (!streamFile) {
       }
       return;
     }
-    const stream = createReadStream(streamFile, { start: offset, end: size - 1, encoding: "utf-8" });
+    const stream = createReadStream(file, { start: offset, end: size - 1, encoding: "utf-8" });
     let chunk = "";
     stream.on("data", (c) => {
       chunk += c;
@@ -229,11 +232,11 @@ if (!streamFile) {
   }
 
   // Initial flush
-  if (existsSync(streamFile)) read();
+  if (existsSync(file)) read();
 
   // Watch through inotify (reactive).
   try {
-    watch(streamFile, () => read());
+    watch(file, () => read());
   } catch {
     // Fall back to polling if watch fails.
     setInterval(read, 300);

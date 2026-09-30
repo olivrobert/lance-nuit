@@ -26,7 +26,8 @@ export function isForkedSlashCommand(
   if (resolver) return resolver(prompt, roots);
   const match = prompt.trimStart().match(/^\/([\w:-]+)/);
   if (!match) return false;
-  const skill = match[1].includes(":") ? match[1] : `lance-nuit:${match[1]}`;
+  const name = match[1]!;
+  const skill = name.includes(":") ? name : `lance-nuit:${name}`;
   return isForked(capabilityAxes("skill", skill, roots));
 }
 export interface ClaudeArgsOptions {

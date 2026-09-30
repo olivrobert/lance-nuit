@@ -59,7 +59,7 @@ export function parseJsonReport(
   for (let i = candidates.length - 1; i >= 0; i--) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(candidates[i]);
+      parsed = JSON.parse(candidates[i]!);
     } catch {
       continue;
     }

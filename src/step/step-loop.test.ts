@@ -673,8 +673,8 @@ test("input skip: validates the contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: true }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.failed).toBe(false);
-  expect(steps[0].status).toBe("skipped");
-  expect(steps[1].status).toBe("done");
+  expect(steps[0]!.status).toBe("skipped");
+  expect(steps[1]!.status).toBe("done");
   expect(calls.ids).toEqual(["b"]);
 });
 
@@ -699,8 +699,8 @@ test("step-loop: validates the integration contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: true }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
   expect(out.failed).toBe(false);
-  expect(steps[0].status).toBe("done");
-  expect(steps[0].control?.total_cost_usd).toBe(5.4);
+  expect(steps[0]!.status).toBe("done");
+  expect(steps[0]!.control?.total_cost_usd).toBe(5.4);
   expect(calls.ids).toEqual(["b"]);
 });
 
@@ -736,7 +736,7 @@ test("input skip without control: validates the contract", async () => {
   const run = makeRun(steps);
   const { deps } = fakeDeps([]);
   await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
-  expect(steps[0].status).toBe("skipped");
+  expect(steps[0]!.status).toBe("skipped");
 });
 
 test("input stop: validates the contract", async () => {
@@ -748,7 +748,7 @@ test("input stop: validates the contract", async () => {
   expect(out.failed).toBe(false);
   expect(run.stopped_reason).toBeTruthy();
   // A clean stop preserves the work left to do, so the run stays resumable.
-  expect(steps[1].status).toBe("pending");
+  expect(steps[1]!.status).toBe("pending");
   expect(isPersistedRunResumable(readRunSnapshot(join(run.run_dir, "state.json")))).toBe(true);
 });
 
@@ -763,7 +763,7 @@ test("input TS skip: validates the contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: true }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.failed).toBe(false);
-  expect(steps[0].status).toBe("skipped");
+  expect(steps[0]!.status).toBe("skipped");
   expect(calls.ids).toEqual(["b"]);
 });
 
@@ -805,7 +805,7 @@ test("input TS that throw: validates the contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: true }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.failed).toBe(false);
-  expect(steps[0].status).toBe("skipped");
+  expect(steps[0]!.status).toBe("skipped");
   expect(calls.ids).toEqual(["b"]);
 });
 
@@ -815,7 +815,7 @@ test("step-loop: validates the integration contract", async () => {
   const { deps, calls } = fakeDeps();
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.failed).toBe(true);
-  expect(steps[0].status).toBe("failed");
+  expect(steps[0]!.status).toBe("failed");
   expect(calls.exec).toBe(0);
 });
 
@@ -826,8 +826,8 @@ test("step-loop: validates the integration contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: false }, { ok: true }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.failed).toBe(false);
-  expect(steps[0].status).toBe("done");
-  expect(steps[0].retries).toBe(1);
+  expect(steps[0]!.status).toBe("done");
+  expect(steps[0]!.retries).toBe(1);
   expect(calls.exec).toBe(2);
 });
 
@@ -837,8 +837,8 @@ test("step-loop: validates the integration contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: false }, { ok: false }, { ok: false }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.failed).toBe(true);
-  expect(steps[0].status).toBe("failed");
-  expect(steps[0].retries).toBe(2);
+  expect(steps[0]!.status).toBe("failed");
+  expect(steps[0]!.retries).toBe(2);
   expect(calls.exec).toBe(3); // 1 initial + 2 reruns
 });
 
@@ -849,8 +849,8 @@ test("step-loop: validates the integration contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 2 } }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.budgetExceeded).toBe(true);
-  expect(steps[0].status).toBe("done");
-  expect(steps[1].status).toBe("pending");
+  expect(steps[0]!.status).toBe("done");
+  expect(steps[1]!.status).toBe("pending");
   expect(calls.ids).toEqual(["a"]);
   // The already-paid step must not be replayed on the next invocation.
   expect(isPersistedRunResumable(readRunSnapshot(join(run.run_dir, "state.json")))).toBe(true);
@@ -908,7 +908,7 @@ test("step-loop: a live guard kill is a durable budget stop, not a replayable fa
   const again = await executeRunSteps(resumed, undefined, undefined, { resuming: true }, second.deps);
   expect(again.budgetExceeded).toBe(true);
   expect(second.calls.exec).toBe(0);
-  expect(resumedSteps[1].status).toBe("pending");
+  expect(resumedSteps[1]!.status).toBe("pending");
   // A new generation decides again and journals again — one fact per stop, and
   // this one rests on the flag the previous kill left behind.
   const resumedEvents = readRunEvents(resumed.run_dir).filter((event) => event.type === "run.budget.exceeded");
@@ -949,8 +949,8 @@ test("preflight KO: validates the contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: true }, { ok: true }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.failed).toBe(true);
-  expect(steps[0].status).toBe("failed");
-  expect(steps[0].errors).toContain("preflight");
+  expect(steps[0]!.status).toBe("failed");
+  expect(steps[0]!.errors).toContain("preflight");
   expect(calls.ids).toEqual([]);
 });
 
@@ -960,7 +960,7 @@ test("preflight KO on step non blocking: validates the contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: true }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.failed).toBe(false);
-  expect(steps[0].status).toBe("done");
+  expect(steps[0]!.status).toBe("done");
   expect(calls.ids).toEqual(["next"]);
 });
 
@@ -984,7 +984,7 @@ test("step-loop: validates the integration contract", async () => {
   const { deps } = fakeDeps();
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
   expect(out.failed).toBe(false);
-  expect(steps[0].status).toBe("skipped");
+  expect(steps[0]!.status).toBe("skipped");
 });
 
 test("step-loop: validates the integration contract", async () => {
@@ -1031,7 +1031,7 @@ test("step-loop: validates the integration contract", async () => {
 
   expect(fixCalled).toBe(false);
   expect(out.stopped).toBe(false);
-  expect(steps[0].status).toBe("done");
+  expect(steps[0]!.status).toBe("done");
   expect(calls.ids).toEqual(["visual", "next"]);
 });
 
@@ -1059,7 +1059,7 @@ test("step-loop: validates the integration contract", async () => {
   const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
 
   expect(out.failed).toBe(true);
-  expect(steps[0].status).toBe("failed");
+  expect(steps[0]!.status).toBe("failed");
 });
 
 test("check non blocking: validates the contract", async () => {
@@ -1072,8 +1072,8 @@ test("check non blocking: validates the contract", async () => {
   expect(out.failed).toBe(false);
   expect(calls.ids).toEqual(["warn", "next"]);
   expect(steps[0]).toMatchObject({ status: "done", errors: "lint facultatif" });
-  expect(steps[0].def.blocking).toBe(false);
-  expect(steps[1].status).toBe("done");
+  expect(steps[0]!.def.blocking).toBe(false);
+  expect(steps[1]!.status).toBe("done");
 });
 
 test("step-loop: validates the integration contract", async () => {
@@ -1345,10 +1345,10 @@ test("step-loop: a run resumed after an interruption replays the aborted step an
   expect(outcome.failed).toBe(false);
   // The paid step is neither replayed nor repaid; the interrupted one restarts.
   expect(calls.ids).toEqual(["interrupted", "never-started"]);
-  expect(steps[0].status).toBe("done");
-  expect(steps[0].attempts).toHaveLength(0);
+  expect(steps[0]!.status).toBe("done");
+  expect(steps[0]!.attempts).toHaveLength(0);
   // The replay opens a second attempt rather than reopening the aborted one.
-  expect(steps[1].attempts?.map((attempt) => attempt.status)).toEqual(["aborted", "done"]);
+  expect(steps[1]!.attempts?.map((attempt) => attempt.status)).toEqual(["aborted", "done"]);
 });
 
 test("executeRunSteps: the persisted authorization feeds the ledger and the latch survives it", async () => {
