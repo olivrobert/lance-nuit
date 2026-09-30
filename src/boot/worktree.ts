@@ -11,7 +11,13 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadPipelineConfig } from "../env/config.js";
 import { resolveTicketDir } from "../env/tickets.js";
-import { gitToplevelAsync, isLinkedWorktreeAsync, setupWorktreeAsync, worktreeSpecFor } from "../env/worktree.js";
+import {
+  gitToplevelAsync,
+  isLinkedWorktreeAsync,
+  setupWorktreeAsync,
+  type WorktreeSpec,
+  worktreeSpecFor,
+} from "../env/worktree.js";
 import { errorMessage } from "../lib/errors.js";
 import { log } from "../runtime/logging.js";
 import type { BootState, BootStep } from "./boot-state.js";
@@ -24,13 +30,15 @@ export interface WorktreeBootstrapArgs {
   pipelinePath?: string;
 }
 
-/** Set up the worktree if needed and chdir into it. Returns the effective mode
- * and a pipeline path resolved before chdir when necessary. */
+/** Set up the worktree if needed and chdir into it. Returns the effective mode,
+ * a pipeline path resolved before chdir when necessary, and the worktree this
+ * call entered (absent when a parent already did). */
 export async function bootstrapWorktree(
   args: WorktreeBootstrapArgs,
-): Promise<{ worktreeMode: boolean; pipelinePath?: string }> {
+): Promise<{ worktreeMode: boolean; pipelinePath?: string; entered?: WorktreeSpec }> {
   const { worktree, scan, ticket, baseBranch } = args;
   let pipelinePath = args.pipelinePath;
+  let entered: WorktreeSpec | undefined;
 
   const worktreeMode = worktree || process.env.RUNNER_IN_WORKTREE === "1";
   if (worktree && process.env.RUNNER_IN_WORKTREE !== "1") {
@@ -75,10 +83,11 @@ export async function bootstrapWorktree(
     }
     process.chdir(spec.path);
     process.env.RUNNER_IN_WORKTREE = "1";
+    entered = spec;
     log(`  Running in worktree — main clone is free. Clean up after the MR: lancenuit worktree clean ${ticket}`);
   }
 
-  return { worktreeMode, pipelinePath };
+  return { worktreeMode, pipelinePath, ...(entered ? { entered } : {}) };
 }
 
 export const worktreeStep: BootStep = {
@@ -88,13 +97,13 @@ export const worktreeStep: BootStep = {
   // inherits an already prepared cwd.
   applies: () => true,
   async run(s: BootState): Promise<Partial<BootState>> {
-    const { worktreeMode, pipelinePath } = await bootstrapWorktree({
+    const { worktreeMode, pipelinePath, entered } = await bootstrapWorktree({
       worktree: s.args.worktree,
       scan: s.args.scan,
       ticket: s.args.ticket,
       baseBranch: s.args.baseBranch,
       pipelinePath: s.pipelinePath,
     });
-    return { worktreeMode, pipelinePath, cwd: process.cwd() };
+    return { worktreeMode, pipelinePath, cwd: process.cwd(), ...(entered ? { enteredWorktree: entered } : {}) };
   },
 };

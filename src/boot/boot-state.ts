@@ -6,6 +6,7 @@
 
 import type { RunnerArgs } from "../model/cli-options.js";
 import type { PipelineConfig } from "../env/config.js";
+import type { WorktreeSpec } from "../env/worktree.js";
 import type { PipelineContext } from "../model/context.js";
 import type { RunnerRegistries } from "./extensions.js";
 
@@ -23,6 +24,9 @@ export interface BootState {
   registries?: RunnerRegistries;
   context?: PipelineContext;
   worktreeMode: boolean;
+  /** Set only by the process that entered the worktree. A child inherits a
+   *  worktree already made ready and must not replay its hooks. */
+  enteredWorktree?: WorktreeSpec;
 }
 
 /** Completed boot state with fields guaranteed by the registry narrowed. */

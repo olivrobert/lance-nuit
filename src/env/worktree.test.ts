@@ -17,6 +17,7 @@ import {
   gitToplevelAsync,
   isLinkedWorktreeAsync,
   removeWorktreeAsync,
+  runReadyHookAsync,
   setupScriptFor,
   setupWorktreeAsync,
   slugifyTicket,
@@ -496,4 +497,37 @@ test("removeWorktreeAsync: a live runner in the worktree blocks the removal", as
 test("removeWorktreeAsync: an unknown ticket is an error, not a silent success", async () => {
   const repo = kitRepo();
   await expect(removeWorktreeAsync(freshSpec(repo, "PROJ-404"))).rejects.toThrow(/no worktree registered/);
+});
+
+/** Untracked ready hook in the main clone: the lookup falls back to it. */
+function readyHook(repo: string, body: string): void {
+  mkdirSync(join(repo, ".lance-nuit"), { recursive: true });
+  writeFileSync(join(repo, ".lance-nuit", "worktree-ready.sh"), `${body}\n`);
+}
+
+test("runReadyHookAsync: without a hook, nothing runs", async () => {
+  const repo = gitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  await runReadyHookAsync(spec);
+});
+
+test("runReadyHookAsync: the main-clone hook receives the worktree path", async () => {
+  const repo = gitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  readyHook(repo, 'echo "$1" > "$(dirname "$0")/ready.called"');
+
+  await runReadyHookAsync(spec);
+
+  expect(readFileSync(join(repo, ".lance-nuit", "ready.called"), "utf-8").trim()).toBe(spec.path);
+});
+
+test("runReadyHookAsync: a failure throws with the tail of the hook output", async () => {
+  const repo = gitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  readyHook(repo, "echo 'composer: lock file out of date'\nexit 4");
+
+  await expect(runReadyHookAsync(spec)).rejects.toThrow(/worktree-ready failed[\s\S]*lock file out of date/);
 });

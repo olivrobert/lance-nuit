@@ -566,6 +566,26 @@ The runner does not provide a universal application stack. A project can define
 `.lance-nuit/worktree-setup-light.sh` is preferred; otherwise the full setup hook
 is used. Docker readiness is a separate opt-in `stackPreflight` configuration.
 
+Hooks run in this order, each with the worktree path as its only argument, and
+each is looked up in the worktree first, then in the main clone:
+
+| Hook | When | On failure |
+|---|---|---|
+| `worktree-init.sh` | worktree created or reused, `full` mode only | warning, run continues |
+| `worktree-setup.sh` / `worktree-setup-light.sh` | before the lock and the stack preflight | warning, run continues |
+| `worktree-ready.sh` | after the stack preflight, before the first step | run stops |
+| `worktree-teardown.sh` | `lancenuit worktree clean` | worktree kept |
+
+`worktree-setup.sh` runs before any service exists: it writes what the stack
+needs to start (ports, `.env.local`, a Compose override). `worktree-ready.sh` is
+the place for what needs running services — dependency installs, a database
+reset — so a project does not have to start its own stack from the setup hook
+or hide that work in a pipeline step. It runs on every entry into the worktree,
+resumes included, so keep it idempotent. Only the runner that entered the
+worktree runs it; child runners inherit a ready worktree. Setup and ready hooks
+show only their marker lines (`→`, `⚠`, `✓`, `✗`) live and print the last lines
+of their output when they fail.
+
 The worktree root defaults to `~/.lance-nuit/worktrees/<project>/<ticket>` and is
 configurable with `WORKTREES_ROOT`.
 

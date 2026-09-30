@@ -273,6 +273,8 @@ parseRunnerArgs()
           config         project/user configuration loading
           context        cwd, ticket, paths, stores, and runner directory
           lock           stale-safe lock for the current project cwd
+          stack          optional Docker readiness preflight
+          worktree-ready optional project hook once the stack is ready
   |
   +--> loadPipelineDefinition() once
   +--> selectDispatch()

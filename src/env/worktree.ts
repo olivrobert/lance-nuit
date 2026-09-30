@@ -27,6 +27,8 @@ const SETUP_FAILURE_TAIL = 20;
 const GIT_ASYNC_TIMEOUT_MS = 120_000;
 const INIT_ASYNC_TIMEOUT_MS = 120_000;
 const SETUP_ASYNC_TIMEOUT_MS = 900_000;
+// Dependency installs and a database reset run here, which outlast a setup hook.
+const READY_ASYNC_TIMEOUT_MS = 1_800_000;
 const TEARDOWN_ASYNC_TIMEOUT_MS = 300_000;
 
 function firstExistingPath(paths: readonly string[]): string | null {
@@ -330,6 +332,23 @@ export function setupScriptFor(worktreePath: string, mode: WorktreeMode = "full"
   return firstExistingPath(setupHookNames(mode).map((name) => join(worktreePath, ".lance-nuit", name)));
 }
 
+/** Run a hook through SETUP_PIPE; on failure, return the tail of its raw output. */
+async function runPipedHookAsync(
+  label: string,
+  script: string,
+  spec: WorktreeSpec,
+  timeoutMs: number,
+): Promise<{ ok: boolean; tail: string[] }> {
+  const logFile = join(tmpdir(), `${label}-${process.pid}.log`);
+  const r = await runSupervisedCommand("bash", ["-c", SETUP_PIPE, label, script, spec.path, logFile], {
+    stdio: "inherit",
+    timeoutMs,
+  });
+  const raw = r.status !== 0 && existsSync(logFile) ? readFileSync(logFile, "utf-8") : "";
+  if (existsSync(logFile)) unlinkSync(logFile);
+  return { ok: r.status === 0, tail: tailLines(raw, SETUP_FAILURE_TAIL) };
+}
+
 /** Run the optional setup hook without probing or starting a stack. */
 async function runSetupScriptAsync(spec: WorktreeSpec, mode: WorktreeMode, warnings: string[]): Promise<void> {
   const script =
@@ -340,17 +359,31 @@ async function runSetupScriptAsync(spec: WorktreeSpec, mode: WorktreeMode, warni
         .filter((path) => path !== null),
     );
   if (!script) return;
-  const logFile = join(tmpdir(), `worktree-setup-${process.pid}.log`);
-  const r = await runSupervisedCommand("bash", ["-c", SETUP_PIPE, "worktree-setup", script, spec.path, logFile], {
-    stdio: "inherit",
-    timeoutMs: SETUP_ASYNC_TIMEOUT_MS,
-  });
-  if (r.status !== 0) {
+  const r = await runPipedHookAsync("worktree-setup", script, spec, SETUP_ASYNC_TIMEOUT_MS);
+  if (!r.ok) {
     warnings.push(`project hook worktree-setup failed (${script})`);
-    const raw = existsSync(logFile) ? readFileSync(logFile, "utf-8") : "";
-    for (const line of tailLines(raw, SETUP_FAILURE_TAIL)) log(`  │ ${line}`);
+    for (const line of r.tail) log(`  │ ${line}`);
   }
-  if (existsSync(logFile)) unlinkSync(logFile);
+}
+
+/**
+ * Optional project hook that finishes preparing the worktree once the stack
+ * preflight has passed: dependency installs, a database reset, anything that
+ * needs running services. The setup hook runs before the stack exists, so it
+ * cannot do this without starting the stack itself.
+ *
+ * It runs on every entry into the worktree, resumes included, so it must be
+ * idempotent. A failure throws: every step after it would run against a
+ * half-prepared worktree and fail further from the cause.
+ */
+export async function runReadyHookAsync(spec: WorktreeSpec): Promise<void> {
+  const script = projectHookFor(spec, "worktree-ready.sh");
+  if (!script) return;
+  const r = await runPipedHookAsync("worktree-ready", script, spec, READY_ASYNC_TIMEOUT_MS);
+  if (!r.ok) {
+    const tail = r.tail.map((line) => `\n  │ ${line}`).join("");
+    throw new Error(`project hook worktree-ready failed (${script})${tail}`);
+  }
 }
 
 /**
