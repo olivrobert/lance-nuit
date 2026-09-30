@@ -17,6 +17,7 @@ import { cx } from "../lib/cx.js";
 import { freshnessOf, updatedLabel } from "../lib/freshness.js";
 import { useUiSelector } from "../store/store.js";
 import { useNotificationPermission } from "../store/useAttentionNotifications.js";
+import { useInboxHref } from "../store/useInboxLocation.js";
 import { useRoute } from "../store/useRoute.js";
 import styles from "./Banner.module.css";
 
@@ -80,9 +81,10 @@ function NotifyToggle(): JSX.Element | null {
  *  from its item, never from here. */
 function Nav(): JSX.Element {
   const route = useRoute();
+  const inboxHref = useInboxHref();
   return (
     <nav className={styles.nav}>
-      <a href="#/" className={cx(route.view === "inbox" && styles.current)}>
+      <a href={inboxHref} className={cx(route.view === "inbox" && styles.current)}>
         Inbox
       </a>
       <a href="#/stats" className={cx(route.view === "stats" && styles.current)}>

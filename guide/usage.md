@@ -214,6 +214,14 @@ ignored while typing in a field, while a dialog is open, on the terminal
 screen, and with a modifier key. Outside the list, in the sheet or a file view,
 the arrows keep scrolling the page; only `j` and `k` move the selection there.
 
+The address bar follows the project chip and the open item, so a reload or a
+pasted link lands on the same place: `#/projects/<project>` for a chip,
+`#/projects/<project>/tickets/<ticket>` for an item under it, and
+`#/tickets/<project>/<ticket>` for an item with every project shown. Changing
+project adds a browser history entry, so **Back** returns to the previous one;
+moving from item to item does not. A link to a project the dashboard no longer
+lists opens every project instead.
+
 A run waiting for a decision opens with its question above the tabs: the
 reason it stopped, the approval to give when the step asks for one, and
 **Answer on the ticket instead** to reply without approving.

@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Item } from "../api/types.js";
 import { newlyWaiting, waitingKeys } from "../lib/inbox.js";
 import { reasonOf } from "../lib/items.js";
-import { actions, useUiSelector } from "./store.js";
+import { useUiSelector } from "./store.js";
 import { navigate } from "./useRoute.js";
 
 /** `unsupported` covers both a browser without the API and a page served over
@@ -39,9 +39,7 @@ function announce(item: Item): void {
   const notification = new Notification(title, { body: `${item.project.name} · ${reasonOf(item)}`, tag: item.key });
   notification.onclick = () => {
     window.focus();
-    navigate({ view: "inbox" });
-    actions.setFilter(null);
-    actions.select(item.key);
+    navigate({ view: "inbox", project: null, item: item.key });
     notification.close();
   };
 }

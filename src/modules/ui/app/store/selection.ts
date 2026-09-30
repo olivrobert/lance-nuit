@@ -6,6 +6,7 @@
 // variable, not rendered state, so no repaint can make it lie.
 
 import { visibleItems } from "../lib/inbox.js";
+import type { ProjectView } from "../api/types.js";
 import { isWaiting } from "../lib/items.js";
 import type { UiState } from "./state.js";
 
@@ -27,6 +28,13 @@ export function selectionVisible(state: UiState): boolean {
   return visibleItems(state.items, { filter: state.filter, query: state.query }).some(
     (item) => item.key === state.selected,
   );
+}
+
+/** The chip, if the server lists its project. A chip on a project it does not
+ *  list — a stale link, a project removed since — would show an empty inbox that
+ *  reads as "nothing to review", so it falls back to every project. */
+export function knownFilter(filter: string | null, projects: readonly ProjectView[]): string | null {
+  return filter !== null && projects.some((project) => project.name === filter) ? filter : null;
 }
 
 export function createSelection(): Selection {

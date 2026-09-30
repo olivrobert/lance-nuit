@@ -129,6 +129,10 @@ export interface UiActions {
   refresh(force?: boolean): Promise<void>;
   chooseUser(name: string): Promise<void>;
   setFilter(name: string | null): void;
+  /** Bring the inbox to the chip and item an address names. `item: null` keeps
+   *  the open item while the chip still shows it. A no-op when the inbox is
+   *  already there, so the store's own echo through the URL costs nothing. */
+  showInbox(project: string | null, item: string | null): void;
   setQuery(text: string): void;
   select(key: string): void;
   setSheetTab(tab: RequestedSheetTab): void;

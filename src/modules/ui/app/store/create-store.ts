@@ -38,7 +38,7 @@ import type { Item, RequestedSheetTab, VerbAction } from "../api/types.js";
 import { createCore } from "./core.js";
 import { createDetailLoader } from "./detail-loader.js";
 import { createRefresh } from "./refresh.js";
-import { createSelection, selectionVisible } from "./selection.js";
+import { createSelection, knownFilter, selectionVisible } from "./selection.js";
 import { INITIAL, SEARCH_DEBOUNCE_MS, type UiActions, type UiApi, type UiStore } from "./state.js";
 import { createToasts } from "./toasts.js";
 
@@ -76,6 +76,20 @@ export function createUiStore(api: UiApi): UiStore {
       if (!selectionVisible(core.state)) core.stage(selection.pickFirst(core.state));
       core.commit(true);
       if (!core.state.detail) reloadDetail();
+    },
+
+    showInbox(address: string | null, item: string | null): void {
+      const state = core.state;
+      // Before the first read the projects are unknown; that read checks the chip.
+      const project = state.loaded ? knownFilter(address, state.projects) : address;
+      if (state.filter === project && (item === null || state.selected === item)) return;
+      core.stage({ filter: project });
+      if (item !== null && item !== state.selected) core.stage({ selected: item, ...selection.cleared() });
+      else if (!selectionVisible(core.state)) core.stage(selection.pickFirst(core.state));
+      // The first read loads the sheet of whatever was staged here.
+      if (!state.loaded) return;
+      core.commit(true);
+      reloadDetail();
     },
 
     /**

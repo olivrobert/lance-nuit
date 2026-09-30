@@ -25,6 +25,7 @@ import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import { postTerminalInput, postTerminalResize, terminalStreamUrl } from "../../api/client.js";
 import { clampSize, createInputBatcher, decodeDataEvent } from "../../lib/terminal-io.js";
+import { useInboxHref } from "../../store/useInboxLocation.js";
 import styles from "./Terminal.module.css";
 
 /** Keystrokes arriving within this window leave in one POST. */
@@ -53,6 +54,7 @@ export interface TerminalPaneProps {
 
 export function TerminalPane({ id, onEnded }: TerminalPaneProps): JSX.Element {
   const host = useRef<HTMLDivElement>(null);
+  const inboxHref = useInboxHref();
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<Status>("connecting");
   const [lostReason, setLostReason] = useState("");
@@ -185,7 +187,7 @@ export function TerminalPane({ id, onEnded }: TerminalPaneProps): JSX.Element {
       {status === "ended" ? (
         <p className={`${styles.notice} ${styles.ended}`} role="status">
           {"Session ended. "}
-          <a href="#/">Back to the inbox</a>
+          <a href={inboxHref}>Back to the inbox</a>
         </p>
       ) : null}
       <div ref={host} className={styles.xterm} />
