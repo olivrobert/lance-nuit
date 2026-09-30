@@ -368,7 +368,9 @@ increase effort before changing model. See
 
 If `stackPreflight` is configured, Docker readiness has its own budget, outside
 step timeouts. Its default readiness window is 300 seconds; `startCommand` and
-`readinessTimeoutMs` can be changed in `.lance-nuit/config.json`.
+`readinessTimeoutMs` can be changed in `.lance-nuit/config.json`. The
+`worktree-ready.sh` hook that follows it also runs before the first step, outside
+step timeouts, with a fixed 30-minute limit.
 
 ## Informational output-token signal
 

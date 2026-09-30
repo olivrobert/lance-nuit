@@ -7,7 +7,7 @@
 //     ↓
 //   COMMANDS[]   launch no pipeline (--help, --lint-config)
 //     ↓
-//   BOOT[]       worktree -> pipeline -> config/context -> lock
+//   BOOT[]       worktree -> pipeline -> config/context -> lock -> stack -> worktree-ready
 //     ↓
 //   loadPipelineDefinition        once per process
 //     ↓

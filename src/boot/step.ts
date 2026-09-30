@@ -14,6 +14,7 @@ import { lockStep } from "./lock.js";
 import { pipelinePathStep } from "./pipeline-path.js";
 import { stackStep } from "./stack.js";
 import { worktreeStep } from "./worktree.js";
+import { worktreeReadyStep } from "./worktree-ready.js";
 
 /**
  * ORDER IS THE CONTRACT:
@@ -22,7 +23,9 @@ import { worktreeStep } from "./worktree.js";
  *  3. config        — freezes config and context once cwd is final;
  *  4. lock          — is scoped to cwd;
  *  5. stack         — runs Docker preflight after the lock and before steps,
- *                     keeping its wait outside step timeouts.
+ *                     keeping its wait outside step timeouts;
+ *  6. worktree-ready — runs the project hook that needs the services the
+ *                     preflight has just made ready.
  *
  * Intentionally outside the registry:
  *  - the clean-tree guard (boot/gitguard.ts), which depends on `resuming`, then
@@ -30,7 +33,7 @@ import { worktreeStep } from "./worktree.js";
  *  - the live feed (entry/feed.ts), which depends on `run.run_dir` from
  *    `loadOrCreateRun`.
  */
-export const BOOT: BootStep[] = [worktreeStep, pipelinePathStep, configStep, lockStep, stackStep];
+export const BOOT: BootStep[] = [worktreeStep, pipelinePathStep, configStep, lockStep, stackStep, worktreeReadyStep];
 
 export async function runBoot(initial: BootState): Promise<BootedState> {
   let state = initial;
