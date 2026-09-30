@@ -57,7 +57,7 @@ export function formatElapsed(durationMs: number): string {
  */
 export function renderStatusLine(state: StatusLineState, elapsedMs: number, frame: number, width = 0): string {
   const warn = state.pct != null && state.pct >= CONTEXT_WARN_PCT;
-  const icon = warn ? yellow("⚠") : cyan(FRAMES[frame % FRAMES.length]);
+  const icon = warn ? yellow("⚠") : cyan(FRAMES[frame % FRAMES.length]!);
   const share = state.pct != null ? formatContextShare(state.pct) : undefined;
   const tail = [formatElapsed(elapsedMs), ...(share && !warn ? [share] : [])].join(" · ");
   const label = clip(state.activity ?? state.step, width - visibleLength(`│  ${icon} ${tail} · `) - 1);

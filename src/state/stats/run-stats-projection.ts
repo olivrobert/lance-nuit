@@ -200,13 +200,11 @@ export function projectStepStats(
   addTokens(aggregate.totals, tokens);
 
   if (step.profile) {
-    aggregate.profiles[step.profile] ??= { steps: 0, tokens: zeroTokens() };
-    aggregate.profiles[step.profile].steps += 1;
-    addTokens(aggregate.profiles[step.profile].tokens, tokens);
-    if (step.control?.total_cost_usd != null) {
-      aggregate.profiles[step.profile].costUsd =
-        (aggregate.profiles[step.profile].costUsd ?? 0) + step.control.total_cost_usd;
-    }
+    const profile = aggregate.profiles[step.profile] ?? { steps: 0, tokens: zeroTokens() };
+    aggregate.profiles[step.profile] = profile;
+    profile.steps += 1;
+    addTokens(profile.tokens, tokens);
+    if (step.control?.total_cost_usd != null) profile.costUsd = (profile.costUsd ?? 0) + step.control.total_cost_usd;
   }
 
   const attemptsWithModel = (step.attempts ?? []).filter((attempt) => !!attempt.control?.model);

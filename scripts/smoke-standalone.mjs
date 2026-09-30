@@ -183,7 +183,11 @@ function main() {
   makeForbiddenExecutables();
   initializeRepository();
   writePipeline();
-  checked("git", ["add", ".lance-nuit/pipelines/smoke-standalone.ts", ".lance-nuit/.gitignore"], { cwd: repo });
+  // Forced: the machine's global excludes commonly ignore `.lance-nuit/`, and a plain
+  // add would then refuse the paths this smoke test has to commit.
+  checked("git", ["add", "--force", ".lance-nuit/pipelines/smoke-standalone.ts", ".lance-nuit/.gitignore"], {
+    cwd: repo,
+  });
   checked("git", ["commit", "--quiet", "-m", "add smoke pipeline"], { cwd: repo });
 
   const env = {

@@ -53,7 +53,7 @@ function sampleRun(): Run {
     status: "FAIL",
     outcome: {
       phase: "audit",
-      reason: steps[2].errors!,
+      reason: steps[2]!.errors!,
       logPath: "steps/audit/attempt-001/output.log",
       resumable: true,
       failKind: "verdict",
@@ -92,7 +92,7 @@ test("context share needs both an occupancy and a window", () => {
 
 test("context share is reported per step, never on the run total", () => {
   const run = sampleRun();
-  run.steps[2].control = {
+  run.steps[2]!.control = {
     duration_ms: 125_000,
     total_cost_usd: 2.5,
     last_turn_context_tokens: 84_000,
@@ -140,7 +140,7 @@ test("a technical failure reads red and a verdict reads yellow", () => {
   expect(verdict).toContain("\x1b[33m! ACTION REQUIRED\x1b[0m");
 
   const broken = sampleRun();
-  broken.steps[2].fail_kind = "technical";
+  broken.steps[2]!.fail_kind = "technical";
   broken.outcome!.failKind = "technical";
   expect(renderConsoleReport(buildRunReport(broken, outcome), { cwd: "/project" })).toContain(
     "\x1b[31m✗ FAILURE\x1b[0m",
@@ -187,7 +187,7 @@ test("reporter writes to an injected destination", () => {
 test("an unpriced attempt turns the budget line into a warning", () => {
   const run = sampleRun();
   run.max_cost_usd = 20;
-  run.steps[0].control = { duration_ms: 1_000, cost_unknown: true };
+  run.steps[0]!.control = { duration_ms: 1_000, cost_unknown: true };
   const report = buildRunReport(run, { ...outcome, cumulativeCost: 12.34 });
 
   expect(report.budget).toMatchObject({ spent: 12.34, limit: 20, costUnknown: true });
@@ -200,9 +200,9 @@ function abortedRun(): Run {
   const run = sampleRun();
   run.status = "FAIL";
   run.aborted = true;
-  run.steps[2].status = "aborted";
-  run.steps[2].fail_kind = undefined;
-  run.steps[2].session = { provider: "claude", id: "af14fefd-3354-439e-a6aa-d641d350cd73", resumable: true };
+  run.steps[2]!.status = "aborted";
+  run.steps[2]!.fail_kind = undefined;
+  run.steps[2]!.session = { provider: "claude", id: "af14fefd-3354-439e-a6aa-d641d350cd73", resumable: true };
   run.outcome = {
     phase: "audit",
     reason: "SIGTERM: run interrupted manually",
@@ -231,7 +231,7 @@ test("an interrupted run says its resume command is for reading, not for the rer
 
 test("a failed run keeps its bare resume command", () => {
   const run = sampleRun();
-  run.steps[2].session = { provider: "claude", id: "af14fefd-3354-439e-a6aa-d641d350cd73", resumable: true };
+  run.steps[2]!.session = { provider: "claude", id: "af14fefd-3354-439e-a6aa-d641d350cd73", resumable: true };
   const report = buildRunReport(run, outcome);
 
   expect(report.resumptions[0]).toMatchObject({ nature: "resume" });

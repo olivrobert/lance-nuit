@@ -19,7 +19,7 @@ export function promptTemplate<const K extends readonly string[]>(
   } catch {
     throw new Error(`Prompt "${name}": file not found (${path})`);
   }
-  const found = new Set([...raw.matchAll(PLACEHOLDER_RE)].map((match) => match[1]));
+  const found = new Set([...raw.matchAll(PLACEHOLDER_RE)].map((match) => match[1]!));
   const declared = new Set<string>(keys);
   const undeclared = [...found].filter((key) => !declared.has(key));
   const unused = [...declared].filter((key) => !found.has(key));

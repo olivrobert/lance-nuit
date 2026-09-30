@@ -39,7 +39,7 @@ export class ResumeSessionValidator implements PipelineValidationRule {
     const targetIndex = steps.findIndex((candidate) => candidate.id === target);
     if (targetIndex === -1) return "no step with this id";
     if (target === step.id) return "cannot resume its own session";
-    if (backendSpecForStep(steps[targetIndex]) === undefined) {
+    if (backendSpecForStep(steps[targetIndex]!) === undefined) {
       return `step "${target}" is not an agent step, it has no session`;
     }
     if (targetIndex > index) return `step "${target}" runs after "${step.id}": its session does not exist yet`;

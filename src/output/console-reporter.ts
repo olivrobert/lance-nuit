@@ -93,7 +93,7 @@ function paintMetrics(parts: string[], highlight?: string): string {
   // the escapes for the same result.
   return [
     before.length > 0 ? dim(`${before.join(" · ")} · `) : "",
-    yellow(parts[at]),
+    yellow(parts[at]!),
     after.length > 0 ? dim(` · ${after.join(" · ")}`) : "",
   ].join("");
 }
