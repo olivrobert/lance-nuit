@@ -34,7 +34,7 @@ export function resolveTicketDir(
   // Slug sub-US: <parent>-NN → <parent>/US-NN, guarded by the filesystem to
   // distinguish a real sub-US from a flat ticket ending in -NN.
   const s = ticket.match(/^(.+)-(\d{2,})$/);
-  if (s && existsSync(join(workItemsRoot, s[1], `US-${s[2]}`))) return `${s[1]}/US-${s[2]}`;
+  if (s && existsSync(join(workItemsRoot, s[1]!, `US-${s[2]}`))) return `${s[1]}/US-${s[2]}`;
 
   return ticket;
 }

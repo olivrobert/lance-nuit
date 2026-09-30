@@ -3,6 +3,7 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,
     "target": "es2022",
     "noEmit": true,
@@ -18,6 +19,8 @@
   // The dashboard front end compiles for a browser, not for Node: it has its
   // own project (`tsconfig.ui.json`) with the DOM library and the JSX
   // transform. This project declares no `include`, so without this line it
-  // would pick those `.tsx` files up and typecheck them without a DOM.
-  "exclude": ["node_modules", "src/modules/ui/app"]
+  // would pick those `.tsx` files up and typecheck them without a DOM. `dist` is
+  // named for the same reason: a stale `.ts` left in the build output would
+  // otherwise be typechecked as a source.
+  "exclude": ["node_modules", "dist", "src/modules/ui/app"]
 }

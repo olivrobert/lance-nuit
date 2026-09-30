@@ -29,8 +29,8 @@ test("ProfileCoherenceValidator: reports a finding for an unavailable role", () 
 
   expect(report.ok).toBe(false);
   expect(report.errors).toHaveLength(1);
-  expect(report.errors[0].rule).toBe("profile-coherence");
-  expect(report.errors[0].message).toMatch(/planner.*codex/);
+  expect(report.errors[0]!.rule).toBe("profile-coherence");
+  expect(report.errors[0]!.message).toMatch(/planner.*codex/);
 });
 
 test("ProfileCoherenceValidator: accepts a policy added by configuration", () => {

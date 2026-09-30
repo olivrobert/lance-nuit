@@ -39,8 +39,8 @@ function onlyError(p: ReturnType<typeof gatePipeline>): string {
   const report = validate(p);
   expect(report.ok).toBe(false);
   expect(report.errors).toHaveLength(1);
-  expect(report.errors[0].rule).toBe("resume-session");
-  return report.errors[0].message;
+  expect(report.errors[0]!.rule).toBe("resume-session");
+  return report.errors[0]!.message;
 }
 
 test("accepts resumeSession naming an earlier agent step", () => {

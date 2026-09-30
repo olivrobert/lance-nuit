@@ -86,8 +86,8 @@ test("profile config: retunes the role's Claude axes", () => {
     () => ({}),
     REGISTRY,
   );
-  expect(built.steps[0].backend).toEqual({ id: "claude", options: { model: "opus[1m]", effort: "low" } });
-  expect(built.steps[1].backend).toEqual({ id: "claude", options: { model: "opus[1m]", effort: "low" } });
+  expect(built.steps[0]!.backend).toEqual({ id: "claude", options: { model: "opus[1m]", effort: "low" } });
+  expect(built.steps[1]!.backend).toEqual({ id: "claude", options: { model: "opus[1m]", effort: "low" } });
 });
 
 test("agent profile: materializes Codex axes without injecting the Claude model", () => {
@@ -97,7 +97,7 @@ test("agent profile: materializes Codex axes without injecting the Claude model"
 
   applyProfileOverrides(built, {}, () => ({}), REGISTRY);
 
-  expect(built.steps[0].backend).toEqual({
+  expect(built.steps[0]!.backend).toEqual({
     id: "codex",
     options: { model: "gpt-5.6-luna", effort: "medium" },
   });
@@ -115,7 +115,7 @@ test("profile config: provider-specific axes retune Codex", () => {
     REGISTRY,
   );
 
-  expect(built.steps[0].backend).toEqual({
+  expect(built.steps[0]!.backend).toEqual({
     id: "codex",
     options: { model: "gpt-5-codex", effort: "high" },
   });
@@ -140,7 +140,7 @@ test("agent profile: backend technical options are preserved", () => {
 
   applyProfileOverrides(built, {}, () => ({}), REGISTRY);
 
-  expect(built.steps[0].backend).toEqual({
+  expect(built.steps[0]!.backend).toEqual({
     id: "codex",
     options: {
       sandbox: CODEX_SANDBOX.WORKSPACE_WRITE,
@@ -160,7 +160,7 @@ test("profile config: an imposed axis is locally ignored like a wildcard", () =>
     () => ({ model: "haiku" }),
     REGISTRY,
   );
-  expect(built.steps[0].backend).toEqual({ id: "claude", options: { effort: "high" } });
+  expect(built.steps[0]!.backend).toEqual({ id: "claude", options: { effort: "high" } });
 });
 
 test("profile config: invalid name, axis, and effort are rejected", () => {
@@ -205,8 +205,8 @@ test("fixProfile: a bash step's fix borrows the role regime through the default 
 
   // A bash step has no backend: fix axes are resolved for the default provider
   // and merged into the options read by the fix loop.
-  expect(built.steps[0].backend).toBeUndefined();
-  expect(built.steps[0].on_failure?.backend_options).toEqual({
+  expect(built.steps[0]!.backend).toBeUndefined();
+  expect(built.steps[0]!.on_failure?.backend_options).toEqual({
     tools: ["Read", "Edit"],
     model: "opus[1m]",
     effort: "medium",
@@ -232,9 +232,9 @@ test("fixBackend: a bash step's fix borrows the role regime through the named ba
     )
     .build();
 
-  expect(built.steps[0].backend).toBeUndefined();
-  expect(built.steps[0].on_failure?.fix_backend).toBe("codex");
-  expect(built.steps[0].on_failure?.backend_options).toBeUndefined();
+  expect(built.steps[0]!.backend).toBeUndefined();
+  expect(built.steps[0]!.on_failure?.fix_backend).toBe("codex");
+  expect(built.steps[0]!.on_failure?.backend_options).toBeUndefined();
 
   applyProfileOverrides(
     built,
@@ -243,7 +243,7 @@ test("fixBackend: a bash step's fix borrows the role regime through the named ba
     REGISTRY,
   );
 
-  expect(built.steps[0].on_failure?.backend_options).toEqual({ model: CODEX_MODEL.GPT_5_6_LUNA, effort: "high" });
+  expect(built.steps[0]!.on_failure?.backend_options).toEqual({ model: CODEX_MODEL.GPT_5_6_LUNA, effort: "high" });
 });
 
 test("fixBackend: the fix profile must have a policy for the named backend", () => {
@@ -286,7 +286,7 @@ test("mechanicalFix on Codex: the fix inherits the step's sandbox", () => {
 
   applyProfileOverrides(built, {}, () => ({}), REGISTRY);
 
-  expect(built.steps[0].on_failure?.backend_options).toEqual({
+  expect(built.steps[0]!.on_failure?.backend_options).toEqual({
     sandbox: CODEX_SANDBOX.WORKSPACE_WRITE,
     model: CODEX_MODEL.GPT_5_6_LUNA,
     effort: "medium",
@@ -318,7 +318,7 @@ test("fix options: an explicit fix policy wins over the step's options", () => {
 
   applyProfileOverrides(built, {}, () => ({}), REGISTRY);
 
-  expect(built.steps[0].on_failure?.backend_options).toEqual({
+  expect(built.steps[0]!.on_failure?.backend_options).toEqual({
     sandbox: CODEX_SANDBOX.READ_ONLY,
     model: CODEX_MODEL.GPT_5_6_LUNA,
     effort: "medium",

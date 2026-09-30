@@ -50,8 +50,8 @@ test("refuses escalate.model on a resumed bash fix when the resumed step runs on
 
   expect(report.ok).toBe(false);
   expect(report.errors).toHaveLength(1);
-  expect(report.errors[0].rule).toBe("resumed-fix-escalation");
-  expect(report.errors[0].message).toMatch(
+  expect(report.errors[0]!.rule).toBe("resumed-fix-escalation");
+  expect(report.errors[0]!.message).toMatch(
     /"verify".*opus\[1m\].*resumes the session of "implement" on codex.*Drop escalate.model or resumeSession/,
   );
 });

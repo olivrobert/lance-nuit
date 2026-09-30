@@ -98,10 +98,10 @@ export function parseFrontmatterAxes(content: string): { model?: string; effort?
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return {};
   const axes: { model?: string; effort?: string; context?: string } = {};
-  for (const line of match[1].split(/\r?\n/)) {
+  for (const line of match[1]!.split(/\r?\n/)) {
     const kv = line.match(/^(model|effort|context)\s*:\s*(.+?)\s*$/);
     if (!kv) continue;
-    const value = kv[2].replace(/^["']|["']$/g, "").trim();
+    const value = kv[2]!.replace(/^["']|["']$/g, "").trim();
     if (value) axes[kv[1] as ParsedKey] = value;
   }
   return axes;

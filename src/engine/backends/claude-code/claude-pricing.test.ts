@@ -3,15 +3,15 @@ import type { ProjectPricing } from "../../../contracts/pricing.js";
 import { computeCostUsd, contextWindow, DEFAULT_CONTEXT_WINDOW, MODEL_PRICING, pricingForModel } from "./pricing.js";
 
 test("pricingForModel matches the model by substring (case-insensitive)", () => {
-  expect(pricingForModel("claude-sonnet-4-6")).toBe(MODEL_PRICING.sonnet);
-  expect(pricingForModel("CLAUDE-SONNET-4-6")).toBe(MODEL_PRICING.sonnet);
-  expect(pricingForModel("claude-opus-4-8")).toBe(MODEL_PRICING.opus);
-  expect(pricingForModel("claude-haiku-4-5")).toBe(MODEL_PRICING.haiku);
+  expect(pricingForModel("claude-sonnet-4-6")).toBe(MODEL_PRICING.sonnet!);
+  expect(pricingForModel("CLAUDE-SONNET-4-6")).toBe(MODEL_PRICING.sonnet!);
+  expect(pricingForModel("claude-opus-4-8")).toBe(MODEL_PRICING.opus!);
+  expect(pricingForModel("claude-haiku-4-5")).toBe(MODEL_PRICING.haiku!);
 });
 
 test("pricingForModel default = opus (most expensive) when unknown/absent", () => {
-  expect(pricingForModel(undefined)).toBe(MODEL_PRICING.opus);
-  expect(pricingForModel("gpt-4")).toBe(MODEL_PRICING.opus);
+  expect(pricingForModel(undefined)).toBe(MODEL_PRICING.opus!);
+  expect(pricingForModel("gpt-4")).toBe(MODEL_PRICING.opus!);
 });
 
 test("pricingForModel: project pricing.json has priority (exact key then substring)", () => {
@@ -28,21 +28,21 @@ test("pricingForModel: project pricing.json has priority (exact key then substri
 
 test("pricingForModel: model absent from project pricing.json → hardcoded rates", () => {
   const table = { _currency: "$", "claude-opus-4-8": { in: 6, out: 30, cacheRead: 0.6, cacheWrite: 7.5 } };
-  expect(pricingForModel("claude-sonnet-4-6", table)).toBe(MODEL_PRICING.sonnet);
+  expect(pricingForModel("claude-sonnet-4-6", table)).toBe(MODEL_PRICING.sonnet!);
 });
 
 test("pricingForModel: non-USD pricing.json ignored (budget/estimate is in USD)", () => {
   const table = { _currency: "€", "claude-opus-4-8": { in: 6, out: 30, cacheRead: 0.6, cacheWrite: 7.5 } };
-  expect(pricingForModel("claude-opus-4-8", table)).toBe(MODEL_PRICING.opus);
+  expect(pricingForModel("claude-opus-4-8", table)).toBe(MODEL_PRICING.opus!);
 });
 
 test("pricingForModel ignores malformed, negative, and non-finite project rates", () => {
   const malformed = { _currency: "$", opus: 1 } as unknown as ProjectPricing;
   const negative = { _currency: "$", opus: { in: -2 } } as ProjectPricing;
   const nonFinite = { _currency: "$", opus: { out: Number.NaN } } as ProjectPricing;
-  expect(pricingForModel("opus", malformed)).toBe(MODEL_PRICING.opus);
-  expect(pricingForModel("opus", negative)).toBe(MODEL_PRICING.opus);
-  expect(pricingForModel("opus", nonFinite)).toBe(MODEL_PRICING.opus);
+  expect(pricingForModel("opus", malformed)).toBe(MODEL_PRICING.opus!);
+  expect(pricingForModel("opus", negative)).toBe(MODEL_PRICING.opus!);
+  expect(pricingForModel("opus", nonFinite)).toBe(MODEL_PRICING.opus!);
 });
 
 test("computeCostUsd applies cache-aware pricing ($/1M)", () => {

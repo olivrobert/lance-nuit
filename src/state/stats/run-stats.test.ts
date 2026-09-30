@@ -76,10 +76,10 @@ test("buildRunStatsEntry: validates the contract", () => {
     costUsd: 2.1,
     tokens: { in: 50, out: 30_000, cacheRead: 400_000, cacheWrite: 60_000 },
   });
-  expect(e.phases.checks.fixLoops).toBe(0); // No attempt fact: retries alone is not enough.
+  expect(e.phases.checks!.fixLoops).toBe(0); // No attempt fact: retries alone is not enough.
   expect(e.totals).toEqual({ in: 60, out: 35_000, cacheRead: 500_000, cacheWrite: 70_000 });
-  expect(e.models["claude-opus-4-8"].out).toBe(30_000);
-  expect(e.models["claude-sonnet-4-6"].out).toBe(5_000);
+  expect(e.models["claude-opus-4-8"]!.out).toBe(30_000);
+  expect(e.models["claude-sonnet-4-6"]!.out).toBe(5_000);
   expect(e.costUsd).toBeCloseTo(2.5, 10);
   expect(e.profiles).toEqual({
     coder: {
@@ -138,14 +138,14 @@ test("buildRunStatsEntry: validates the contract", () => {
 
 test("buildRunStatsEntry: validates the contract", () => {
   const run = fakeRun();
-  run.steps[1].status = "done";
-  run.steps[2].status = "skipped";
+  run.steps[1]!.status = "done";
+  run.steps[2]!.status = "skipped";
   expect(buildRunStatsEntry(run).status).toBe("PASS");
   expect(buildRunStatsEntry(run).failPhase).toBeNull();
 
   const stopped = fakeRun({ stopped_reason: "triage → escalade" });
-  stopped.steps[1].status = "skipped";
-  stopped.steps[2].status = "skipped";
+  stopped.steps[1]!.status = "skipped";
+  stopped.steps[2]!.status = "skipped";
   expect(buildRunStatsEntry(stopped).status).toBe("STOPPED");
 
   expect(buildRunStatsEntry(fakeRun({ aborted: true })).status).toBe("ABORTED");
@@ -293,7 +293,7 @@ test("run-stats: validates the integration contract", () => {
   });
   const entry = buildRunStatsEntry(run);
   expect(entry.fixEvents).toHaveLength(2); // Two actual failed check attempts.
-  expect(entry.phases.checks.fixLoops).toBe(1); // One actual fix pass (attempt 2).
+  expect(entry.phases.checks!.fixLoops).toBe(1); // One actual fix pass (attempt 2).
   const [e1, e2] = entry.fixEvents as Array<{
     kind: string;
     phase: string;
@@ -309,8 +309,8 @@ test("run-stats: validates the integration contract", () => {
     contract: "checks",
     logPath: "steps/checks/attempt-002/output.log",
   });
-  expect(e2.details).toContain("Static analysis: 3 errors");
-  expect((e2.details as string).length).toBeLessThanOrEqual(300);
+  expect(e2!.details).toContain("Static analysis: 3 errors");
+  expect((e2!.details as string).length).toBeLessThanOrEqual(300);
 });
 
 test("run-stats: validates the integration contract", () => {
@@ -334,7 +334,7 @@ test("run-stats: validates the integration contract", () => {
   appendRunEvent(run, "step.attempt.finished", { stepId: "checks", attempt: 2, kind: "fix", status: "done" });
 
   const entry = buildRunStatsEntry(run);
-  expect(entry.phases.checks.fixLoops).toBe(1);
+  expect(entry.phases.checks!.fixLoops).toBe(1);
   expect(entry.fixEvents).toMatchObject([{ kind: "fail", phase: "checks", iter: 1, contract: "checks" }]);
 });
 
