@@ -197,8 +197,43 @@ test("diagnoseRunJournals reports what the journal contract kept, refused and ig
   // The counters are reachable from `--inspect`, not only from the API: a reader
   // told about them in the guide must have a command that prints them.
   const inspected = inspectTicket(context, "PROJ-1", undefined, { stateStore });
-  expect(inspected).toContain("journal: 1 known, 1 unknown, 1 invalid, 1 skipped");
+  expect(inspected).toContain("journal: 1 event, 1 invalid, 1 skipped (1 live-feed line ignored)");
   expect(inspected).toContain("refused: step.attempt.started ×1 —");
+});
+
+test("inspectTicket reports a healthy journal as ok, with the live feed as ignored lines", () => {
+  const runDir = mkdtempSync(join(tmpdir(), "diagnose-journal-healthy-"));
+  writeFileSync(
+    join(runDir, "events.jsonl"),
+    [
+      JSON.stringify({ ts: "2026-07-01T00:00:00.000Z", type: "run.started", pipeline: "feature", ticket: "PROJ-1" }),
+      JSON.stringify({ ts: "2026-07-01T00:00:00.500Z", type: "run.started", pipeline: "feature", ticket: "PROJ-1" }),
+      JSON.stringify({ ts: "2026-07-01T00:00:01.000Z", type: "step.started", index: 1, total: 1 }),
+      JSON.stringify({ ts: "2026-07-01T00:00:02.000Z", type: "step.started", index: 1, total: 1 }),
+      "",
+    ].join("\n"),
+  );
+  const stateStore = new FakeStateStore([
+    { state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z"), runDir },
+  ]);
+
+  const inspected = inspectTicket(context, "PROJ-1", undefined, { stateStore });
+  expect(inspected).toContain("journal: 2 events, ok (2 live-feed lines ignored)\n");
+  expect(inspected).not.toContain("refused:");
+});
+
+test("inspectTicket omits the ignored lines when the journal holds no live feed", () => {
+  const runDir = mkdtempSync(join(tmpdir(), "diagnose-journal-no-feed-"));
+  writeFileSync(
+    join(runDir, "events.jsonl"),
+    JSON.stringify({ ts: "2026-07-01T00:00:00.000Z", type: "run.started", pipeline: "feature", ticket: "PROJ-1" }) +
+      "\n",
+  );
+  const stateStore = new FakeStateStore([
+    { state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z"), runDir },
+  ]);
+
+  expect(inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("journal: 1 event, ok\n");
 });
 
 test("inspectTicket says so when a run has no readable journal", () => {
