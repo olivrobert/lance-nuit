@@ -4,8 +4,8 @@ import { CODEX_MODEL } from "./types.js";
 
 test("Codex pricing exposes the same model-table contract as Claude", () => {
   expect(CODEX_MODEL_PRICING).toBe(MODEL_PRICING);
-  expect(pricingForModel(CODEX_MODEL.GPT_5_CODEX, null)).toBe(MODEL_PRICING[CODEX_MODEL.GPT_5_CODEX]);
-  expect(pricingForModel("GPT-5.6-LUNA", null)).toBe(MODEL_PRICING[CODEX_MODEL.GPT_5_6_LUNA]);
+  expect(pricingForModel(CODEX_MODEL.GPT_5_CODEX, null)).toBe(MODEL_PRICING[CODEX_MODEL.GPT_5_CODEX]!);
+  expect(pricingForModel("GPT-5.6-LUNA", null)).toBe(MODEL_PRICING[CODEX_MODEL.GPT_5_6_LUNA]!);
 });
 
 test("Codex pricing does not bill an unknown model with another model's rate", () => {
@@ -26,7 +26,7 @@ test("Codex project pricing has priority and keeps the shared USD rules", () => 
     cache_write_1h: 0.5,
   });
   expect(pricingForModel(CODEX_MODEL.GPT_5_6_LUNA, { ...table, _currency: "€" })).toBe(
-    MODEL_PRICING[CODEX_MODEL.GPT_5_6_LUNA],
+    MODEL_PRICING[CODEX_MODEL.GPT_5_6_LUNA]!,
   );
 });
 

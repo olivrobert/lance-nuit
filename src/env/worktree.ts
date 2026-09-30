@@ -198,7 +198,7 @@ function unshareRunDir(worktreePath: string): void {
  * A sub-US (`PROJ-59/US-01`) links its parent, whose artifacts it reads. */
 function sharedItemRoot(ticketDir: string): string {
   const subUs = ticketDir.match(/^(.+)\/US-\d{2,}$/);
-  return subUs ? subUs[1] : ticketDir;
+  return subUs ? subUs[1]! : ticketDir;
 }
 
 /** Whether a real worktree directory holds nothing the main clone lacks: only links,

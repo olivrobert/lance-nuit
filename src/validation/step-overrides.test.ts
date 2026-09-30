@@ -101,8 +101,8 @@ test("applyStepOverrides: validates the contract", () => {
     CONTEXT,
   );
   const [one, two] = pipeline.steps;
-  expect(one.backend?.options).toEqual({ model: "sonnet", effort: "low" });
-  expect(two.backend?.options).toEqual({ model: "opus", effort: "max" });
+  expect(one!.backend?.options).toEqual({ model: "sonnet", effort: "low" });
+  expect(two!.backend?.options).toEqual({ model: "opus", effort: "max" });
 });
 
 test("resolveEffectiveAxes: validates the contract", () => {
@@ -137,7 +137,7 @@ test("applyStepOverrides: validates the contract", () => {
 test("applyStepOverrides: validates the contract", () => {
   const pipeline = pipelineOf(claudeStep("one"));
   applyStepOverrides(pipeline, parseStepOverrides({ "other:step": { model: "opus" } }), CONFIG, CONTEXT);
-  expect(pipeline.steps[0].backend?.options).toBeUndefined();
+  expect(pipeline.steps[0]!.backend?.options).toBeUndefined();
 });
 
 test("applyStepOverrides: validates the contract", () => {
@@ -159,7 +159,7 @@ test("applyStepOverrides: validates the contract", () => {
     CONFIG,
     CONTEXT,
   );
-  expect(pipeline.steps[0].backend).toEqual({ id: "codex", options: { model: CODEX_MODEL.GPT_5_CODEX } });
+  expect(pipeline.steps[0]!.backend).toEqual({ id: "codex", options: { model: CODEX_MODEL.GPT_5_CODEX } });
   const effortStep = llmStep(
     { id: "codex", name: "Codex", backend: "codex", profile: "coder", command: "x" },
     REGISTRY,
@@ -208,7 +208,7 @@ test("checkStepOverrides: a generic key is judged like an exact one", () => {
     registry: effortOnlyRegistry(),
   });
   expect(findings).toHaveLength(1);
-  expect(findings[0].message).toMatch(/steps\["\*"\]\.model: axis is not supported by backend "effort-only"/);
+  expect(findings[0]!.message).toMatch(/steps\["\*"\]\.model: axis is not supported by backend "effort-only"/);
 });
 
 test("checkStepOverrides: one generic key reaching N steps reports once", () => {
@@ -275,7 +275,7 @@ test("applyStepOverrides: validates the contract", () => {
   const context = projectWithSkill("probe", "effort: medium\n");
   const pipeline = pipelineOf(claudeStep("s", { command: "/probe arg" }));
   applyStepOverrides(pipeline, parseStepOverrides({ "demo:s": { model: "opus" } }), CONFIG, context);
-  expect(pipeline.steps[0].backend?.options).toEqual({ model: "opus" });
+  expect(pipeline.steps[0]!.backend?.options).toEqual({ model: "opus" });
 
   expect(() =>
     applyStepOverrides(pipeline, parseStepOverrides({ "demo:s": { effort: "max" } }), CONFIG, context),
@@ -288,14 +288,14 @@ test("applyStepOverrides: validates the contract", () => {
   applyStepOverrides(pipeline, parseStepOverrides({ "*": { model: "opus", effort: "high" } }), CONFIG, context);
   // Free effort -> applied; imposed model -> absent, so options do not lie about
   // the model actually used.
-  expect(pipeline.steps[0].backend?.options).toEqual({ effort: "high" });
+  expect(pipeline.steps[0]!.backend?.options).toEqual({ effort: "high" });
 });
 
 test("applyStepOverrides: validates the contract", () => {
   const context = projectWithSkill("probe", "model: sonnet\n");
   const pipeline = pipelineOf(claudeStep("s", { command: "/absente arg" }));
   applyStepOverrides(pipeline, parseStepOverrides({ "demo:s": { model: "opus" } }), CONFIG, context);
-  expect(pipeline.steps[0].backend?.options).toEqual({ model: "opus" });
+  expect(pipeline.steps[0]!.backend?.options).toEqual({ model: "opus" });
 });
 
 test("imposedAxes: validates the contract", () => {
@@ -310,7 +310,7 @@ test("applyStepOverrides: validates the contract", () => {
   const context = projectWithSkill("probe", "model: opus\neffort: high\ncontext: fork\n");
   const pipeline = pipelineOf(claudeStep("s", { command: "/probe arg" }));
   applyStepOverrides(pipeline, parseStepOverrides({ "demo:s": { model: "sonnet", effort: "low" } }), CONFIG, context);
-  expect(pipeline.steps[0].backend?.options).toEqual({ model: "sonnet", effort: "low" });
+  expect(pipeline.steps[0]!.backend?.options).toEqual({ model: "sonnet", effort: "low" });
 });
 
 test("parseFrontmatterAxes: validates the contract", () => {

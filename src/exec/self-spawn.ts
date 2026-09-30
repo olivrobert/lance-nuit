@@ -30,7 +30,7 @@ export function selfSpawnRunner(
   // The interpreter that reached this line can already load the entry point, so
   // reusing it needs no lookup and no loader flag.
   const cmd = process.execPath;
-  const cmdArgs = [process.argv[1], ...args];
+  const cmdArgs = [process.argv[1]!, ...args];
   const env = { ...process.env, ...extraEnv };
   delete env.RUNNER_LIVE_FEED;
   const supervised = spawnSupervisedProcess(cmd, cmdArgs, {

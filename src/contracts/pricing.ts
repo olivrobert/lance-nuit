@@ -96,7 +96,7 @@ export function resolveModelPricing(
   }
   if (model) {
     const key = matchingPricingKey(model, Object.keys(table));
-    if (key) return table[key];
+    if (key) return table[key] ?? null;
   }
   return fallbackKey ? (table[fallbackKey] ?? null) : null;
 }

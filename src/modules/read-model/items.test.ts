@@ -82,17 +82,17 @@ test("items: identity, cost, and the effective directory of a run in the main cl
 
   const [item] = await listItems();
 
-  expect(item.ticket).toBe("DEMO-7");
-  expect(item.pipeline).toBe("feature");
-  expect(item.runId).toBe("r-1");
-  expect(item.status).toBe("RUNNING");
-  expect(item.cost).toEqual({ usd: 1.25, estimated: true });
-  expect(item.updatedAt).toBe("2026-09-05T08:00:00.000Z");
-  expect(item.worktree).toBe(false);
-  expect(item.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-7"));
-  expect(item.project).toEqual({ name: "demo-app", cwd: project, provider: "jira" });
-  expect(item.branch).toBeUndefined();
-  expect(item.launch).toBeUndefined();
+  expect(item!.ticket).toBe("DEMO-7");
+  expect(item!.pipeline).toBe("feature");
+  expect(item!.runId).toBe("r-1");
+  expect(item!.status).toBe("RUNNING");
+  expect(item!.cost).toEqual({ usd: 1.25, estimated: true });
+  expect(item!.updatedAt).toBe("2026-09-05T08:00:00.000Z");
+  expect(item!.worktree).toBe(false);
+  expect(item!.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-7"));
+  expect(item!.project).toEqual({ name: "demo-app", cwd: project, provider: "jira" });
+  expect(item!.branch).toBeUndefined();
+  expect(item!.launch).toBeUndefined();
 });
 
 test("items: a run with no reported cost is not read as free", async () => {
@@ -101,7 +101,7 @@ test("items: a run with no reported cost is not read as free", async () => {
 
   const [item] = await listItems();
 
-  expect(item.cost).toEqual({ estimated: false });
+  expect(item!.cost).toEqual({ estimated: false });
 });
 
 test("items: a stop carries its subject and kind, an older run only its raw reason", async () => {
@@ -127,9 +127,9 @@ test("items: a stop carries its subject and kind, an older run only its raw reas
 
   const [current, older] = await listItems();
 
-  expect(current.stop).toEqual({ subject: "plan", kind: "needs-decision", detail: "plan needs approval" });
-  expect(older.stop).toEqual({ detail: "escalated: blocked on a missing credential" });
-  expect(older.approval).toBeUndefined();
+  expect(current!.stop).toEqual({ subject: "plan", kind: "needs-decision", detail: "plan needs approval" });
+  expect(older!.stop).toEqual({ detail: "escalated: blocked on a missing credential" });
+  expect(older!.approval).toBeUndefined();
 });
 
 test("items: a failure exposes its phase, reason, fail kind and fail cause", async () => {
@@ -208,14 +208,14 @@ test("items: the pending approval is absent, fresh, or stale", async () => {
 
   const [absent, fresh, stale] = await listItems();
 
-  expect(absent.approval).toEqual({ subject: "plan", state: "absent" });
-  expect(fresh.approval).toEqual({
+  expect(absent!.approval).toEqual({ subject: "plan", state: "absent" });
+  expect(fresh!.approval).toEqual({
     subject: "plan",
     state: "fresh",
     decidedAt: "2026-09-05T08:00:00.000Z",
     decidedBy: "Olivier",
   });
-  expect(stale.approval?.state).toBe("stale");
+  expect(stale!.approval?.state).toBe("stale");
 });
 
 /** A worktree run stopped on the `plan` gate, approved from the main clone. */
@@ -245,9 +245,9 @@ test("items: a worktree run reads its approval from the main clone's work item",
 
   const [item] = await listItems();
 
-  expect(item.worktree).toBe(true);
-  expect(item.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-1"));
-  expect(item.approval).toMatchObject({ subject: "plan", state: "fresh" });
+  expect(item!.worktree).toBe(true);
+  expect(item!.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-1"));
+  expect(item!.approval).toMatchObject({ subject: "plan", state: "fresh" });
 });
 
 test("items: a worktree run whose worktree is gone still reads its approval", async () => {
@@ -258,8 +258,8 @@ test("items: a worktree run whose worktree is gone still reads its approval", as
 
   const [item] = await listItems();
 
-  expect(item.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-1"));
-  expect(item.approval).toMatchObject({ subject: "plan", state: "fresh" });
+  expect(item!.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-1"));
+  expect(item!.approval).toMatchObject({ subject: "plan", state: "fresh" });
 });
 
 test("items: a ticket that ran on two pipelines yields one item, the most recent run", async () => {
@@ -270,8 +270,8 @@ test("items: a ticket that ran on two pipelines yields one item, the most recent
   const items = await listItems();
 
   expect(items).toHaveLength(1);
-  expect(items[0].pipeline).toBe("quality");
-  expect(items[0].runId).toBe("r-new");
+  expect(items[0]!.pipeline).toBe("quality");
+  expect(items[0]!.runId).toBe("r-new");
 });
 
 test("items: a nested work item is shown through its parent, never as an item", async () => {
@@ -298,7 +298,7 @@ test("items: the branch comes from the central history, matched on the run id", 
 
   const [item] = await listItems();
 
-  expect(item.branch).toBe("feature/DEMO-1");
+  expect(item!.branch).toBe("feature/DEMO-1");
 });
 
 test("items: a project whose path disappeared contributes nothing and stops nothing", async () => {
@@ -382,17 +382,17 @@ test("items: an accounting stop is reported apart from a budget stop, with a low
 
   const [latched, derived, budget] = await listItems();
 
-  expect(latched.costUnaccounted).toBe(true);
-  expect(latched.budgetExceeded).toBeUndefined();
+  expect(latched!.costUnaccounted).toBe(true);
+  expect(latched!.budgetExceeded).toBeUndefined();
   // `0` is exactly the figure a reader must not be shown bare.
-  expect(latched.cost).toEqual({ usd: 0, estimated: false, unknown: true });
+  expect(latched!.cost).toEqual({ usd: 0, estimated: false, unknown: true });
 
-  expect(derived.costUnaccounted).toBe(true);
-  expect(derived.cost).toEqual({ usd: 1.25, estimated: false, unknown: true });
+  expect(derived!.costUnaccounted).toBe(true);
+  expect(derived!.cost).toEqual({ usd: 1.25, estimated: false, unknown: true });
 
-  expect(budget.budgetExceeded).toBe(true);
-  expect(budget.costUnaccounted).toBeUndefined();
-  expect(budget.cost.unknown).toBeUndefined();
+  expect(budget!.budgetExceeded).toBe(true);
+  expect(budget!.costUnaccounted).toBeUndefined();
+  expect(budget!.cost.unknown).toBeUndefined();
 });
 
 test("items: a run nothing was withheld from keeps its lower bound and gets no accounting banner", async () => {
@@ -444,13 +444,13 @@ test("items: a run nothing was withheld from keeps its lower bound and gets no a
 
   const [uncapped, authorized, finished] = await listItems();
 
-  expect(uncapped.costUnaccounted).toBeUndefined();
-  expect(authorized.costUnaccounted).toBeUndefined();
-  expect(finished.costUnaccounted).toBeUndefined();
+  expect(uncapped!.costUnaccounted).toBeUndefined();
+  expect(authorized!.costUnaccounted).toBeUndefined();
+  expect(finished!.costUnaccounted).toBeUndefined();
   // The `≥` marker is a property of the figure and survives all three.
-  expect(uncapped.cost.unknown).toBe(true);
-  expect(authorized.cost.unknown).toBe(true);
-  expect(finished.cost.unknown).toBe(true);
+  expect(uncapped!.cost.unknown).toBe(true);
+  expect(authorized!.cost.unknown).toBe(true);
+  expect(finished!.cost.unknown).toBe(true);
 });
 
 test("items: the typed stop kind decides which banner a run gets, over the flags and the sentence", async () => {
@@ -527,16 +527,16 @@ test("items: the typed stop kind decides which banner a run gets, over the flags
 
   const [kill, both, cost] = await listItems();
 
-  expect(kill.budgetExceeded).toBe(true);
-  expect(kill.costUnaccounted).toBeUndefined();
+  expect(kill!.budgetExceeded).toBe(true);
+  expect(kill!.costUnaccounted).toBeUndefined();
 
-  expect(both.budgetExceeded).toBe(true);
-  expect(both.costUnaccounted).toBeUndefined();
+  expect(both!.budgetExceeded).toBe(true);
+  expect(both!.costUnaccounted).toBeUndefined();
   // The `≥` is untouched: the total really is a lower bound, whatever ended the run.
-  expect(both.cost.unknown).toBe(true);
+  expect(both!.cost.unknown).toBe(true);
 
-  expect(cost.costUnaccounted).toBe(true);
-  expect(cost.budgetExceeded).toBeUndefined();
+  expect(cost!.costUnaccounted).toBe(true);
+  expect(cost!.budgetExceeded).toBeUndefined();
 });
 
 test("items: a closed failure is done, keeps its status, and reopens when the run moves", async () => {
@@ -580,7 +580,7 @@ test("items: the title is the first heading of ticket.md", async () => {
 
   const [item] = await listItems();
 
-  expect(item.title).toBe("Fix the login redirect");
+  expect(item!.title).toBe("Fix the login redirect");
 });
 
 test("items: the title skips the front matter of ticket.md", async () => {
@@ -595,7 +595,7 @@ test("items: the title skips the front matter of ticket.md", async () => {
 
   const [item] = await listItems();
 
-  expect(item.title).toBe("Export invoices as CSV");
+  expect(item!.title).toBe("Export invoices as CSV");
 });
 
 test("items: no title without a heading or without ticket.md, and the item still loads", async () => {
@@ -624,7 +624,7 @@ test("items: a worktree run reads its title from the main clone's work item", as
 
   const [item] = await listItems();
 
-  expect(item.title).toBe("Title in the main clone");
+  expect(item!.title).toBe("Title in the main clone");
 });
 
 test("items: a worktree run whose worktree is gone reads its title from the main clone", async () => {
@@ -641,7 +641,7 @@ test("items: a worktree run whose worktree is gone reads its title from the main
 
   const [item] = await listItems();
 
-  expect(item.title).toBe("Title in the main clone");
+  expect(item!.title).toBe("Title in the main clone");
 });
 
 test("items: the title read stays bounded to the head of a long ticket.md", async () => {

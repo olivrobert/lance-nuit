@@ -43,15 +43,15 @@ test("refuses an unregistered fixBackend", () => {
 
   expect(report.ok).toBe(false);
   expect(report.errors).toHaveLength(1);
-  expect(report.errors[0].rule).toBe("fix-backend");
-  expect(report.errors[0].message).toMatch(/"verify".*"gemini" is not a registered backend.*claude/);
+  expect(report.errors[0]!.rule).toBe("fix-backend");
+  expect(report.errors[0]!.message).toMatch(/"verify".*"gemini" is not a registered backend.*claude/);
 });
 
 test("refuses fixBackend with resumeSession", () => {
   const report = validate(gatePipeline({ ...FRESH_ON_CODEX, resumeSession: "implement" }));
   expect(report.ok).toBe(false);
   expect(report.errors).toHaveLength(1);
-  expect(report.errors[0].message).toMatch(
+  expect(report.errors[0]!.message).toMatch(
     /"verify".*"codex" cannot apply with resumeSession.*Drop fixBackend or resumeSession/,
   );
 });

@@ -38,13 +38,13 @@ test("projects: name comes from the path, provider and key from the project conf
 
   const [entry] = readProjects();
 
-  expect(entry.name).toBe("demo-app");
-  expect(entry.cwd).toBe(project);
-  expect(entry.provider).toBe("jira");
-  expect(entry.key).toBe("FOOD");
-  expect(entry.specPath).toBe(".lance-nuit/work-items");
-  expect(entry.found).toBe(true);
-  expect(ticketUrl(entry, "DEMO-123")).toBe("https://jira.example/browse/DEMO-123");
+  expect(entry!.name).toBe("demo-app");
+  expect(entry!.cwd).toBe(project);
+  expect(entry!.provider).toBe("jira");
+  expect(entry!.key).toBe("FOOD");
+  expect(entry!.specPath).toBe(".lance-nuit/work-items");
+  expect(entry!.found).toBe(true);
+  expect(ticketUrl(entry!, "DEMO-123")).toBe("https://jira.example/browse/DEMO-123");
 });
 
 test("projects: a path that disappeared stays listed and is reported as not found", () => {
@@ -75,6 +75,6 @@ test("projects: a project without a base URL exposes no ticket URL", () => {
 
   const [entry] = readProjects();
 
-  expect(entry.ticketBaseUrl).toBeUndefined();
-  expect(ticketUrl(entry, "DEMO-1")).toBeUndefined();
+  expect(entry!.ticketBaseUrl).toBeUndefined();
+  expect(ticketUrl(entry!, "DEMO-1")).toBeUndefined();
 });

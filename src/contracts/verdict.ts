@@ -60,7 +60,7 @@ export function extractVerdictDetails(text: string): VerdictDetails {
   const match = matches.at(-1);
   if (!match) return { verdict: null };
   try {
-    return verdictFromObject(JSON.parse(match[1]));
+    return verdictFromObject(JSON.parse(match[1]!));
   } catch {
     return { verdict: null, invalidReason: "unreadable JSON" };
   }

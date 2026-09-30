@@ -21,7 +21,7 @@ interface WithHeader {
   size: number;
 }
 
-function Header({ file, headerClass }: { file: WithHeader; headerClass: string }): JSX.Element {
+function Header({ file, headerClass }: { file: WithHeader; headerClass: string | undefined }): JSX.Element {
   const actions = useActions();
   return (
     <div className={headerClass}>
@@ -35,7 +35,7 @@ function Header({ file, headerClass }: { file: WithHeader; headerClass: string }
   );
 }
 
-export function FileView({ headerClass }: { headerClass: string }): JSX.Element {
+export function FileView({ headerClass }: { headerClass: string | undefined }): JSX.Element {
   const filePath = useUiSelector((state) => state.filePath);
   const file = useUiSelector((state) => state.file);
 
