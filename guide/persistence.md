@@ -323,10 +323,12 @@ going, with those facts lost for a later resume (see
 [Interruption windows](#interruption-windows) for what the snapshot still
 guarantees in that case).
 
-`--inspect` prints the four counters for every run it lists, and names the
-refused types when there are any; a journal it cannot read is printed as
-`journal: unreadable` with the reason. `unknown` is expected and large. `invalid` is
-the number that matters: on a `step.attempt.*` it means the attempt is missing
+`--inspect` prints one journal line for every run it lists, such as
+`journal: 110 events, ok (911 live-feed lines ignored)`: the `known` events, then
+`invalid` and `skipped` only when they are non-zero (`ok` when both are zero), and
+the `unknown` lines as ignored live feed, since they are expected and large. It
+names the refused types when there are any; a journal it cannot read is printed
+as `journal: unreadable` with the reason. `invalid` is the number that matters: on a `step.attempt.*` it means the attempt is missing
 from the projections a resume rebuilds. The concrete loss is accounting, not log
 paths — `nextAttemptLogPath` also seeds from the step's `last_attempt`, so
 numbering does not silently restart at 1 — but a closed attempt is journaled

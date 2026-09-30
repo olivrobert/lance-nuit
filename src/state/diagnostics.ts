@@ -137,15 +137,25 @@ function outcomeLine(state: PersistedRun): string {
   return `outcome: ${outcome.phase ?? "run"}${reason}${log}${outcome.resumable ? " (resumable)" : ""}`;
 }
 
-/** Journal health, on one line of `--inspect`. `unknown` is expected to dominate
- *  — the file is also the live feed — so the line exists mainly to surface
- *  `invalid`, the only count that means a recorded fact was lost. */
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+/** Journal health, on one line of `--inspect`. Uncontracted lines (the `unknown`
+ *  count) are the live feed sharing the file, so they are reported as ignored
+ *  rather than as a count a reader would take for an anomaly. `invalid` and
+ *  `skipped` only appear when non-zero, so that `invalid` — the only count that
+ *  means a recorded fact was lost — stands out; `ok` says both are zero. */
 function journalLine(record: RunRecord): string {
   const journal = diagnoseRunJournal(record);
   if (journal.readError !== undefined) return `journal: unreadable — ${journal.readError.split("\n", 1)[0]}`;
   if (journal.known + journal.unknown + journal.invalid + journal.skipped === 0) return "journal: —";
-  const counts =
-    `${journal.known} known, ${journal.unknown} unknown, ` + `${journal.invalid} invalid, ${journal.skipped} skipped`;
+  const parts = [plural(journal.known, "event")];
+  if (journal.invalid > 0) parts.push(`${journal.invalid} invalid`);
+  if (journal.skipped > 0) parts.push(`${journal.skipped} skipped`);
+  if (journal.invalid === 0 && journal.skipped === 0) parts.push("ok");
+  const ignored = journal.unknown > 0 ? ` (${plural(journal.unknown, "live-feed line")} ignored)` : "";
+  const counts = `${parts.join(", ")}${ignored}`;
   if (journal.invalid === 0) return `journal: ${counts}`;
   const refused = Object.entries(journal.invalidByType)
     .map(([type, { count, reason }]) => `${type} ×${count} — ${reason.split("\n", 1)[0]}`)
