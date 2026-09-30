@@ -28,6 +28,7 @@ import { cx } from "./lib/cx.js";
 import { waitingCount } from "./lib/inbox.js";
 import { POLL_MS, useActions, useUiState } from "./store/store.js";
 import { useAttentionNotifications } from "./store/useAttentionNotifications.js";
+import { useInboxLocation } from "./store/useInboxLocation.js";
 import { useListKeyboard } from "./store/useListKeyboard.js";
 import { usePolling } from "./store/usePolling.js";
 import { useRoute } from "./store/useRoute.js";
@@ -80,6 +81,7 @@ function useDocumentTitle(count: number): void {
 export function App(): JSX.Element | null {
   const state = useUiState();
   const route = useRoute();
+  useInboxLocation(route.view === "inbox");
   usePolling();
   useAttentionNotifications();
   useListKeyboard(route.view === "inbox" && state.user !== null);

@@ -9,7 +9,7 @@
 
 import type { StoreCore } from "./core.js";
 import type { DetailLoader } from "./detail-loader.js";
-import type { Selection } from "./selection.js";
+import { knownFilter, type Selection } from "./selection.js";
 import type { UiApi } from "./state.js";
 
 /** Read everything again; `force` commits even when nothing moved, which is
@@ -58,8 +58,10 @@ export function createRefresh(core: StoreCore, api: UiApi, selection: Selection,
       core.commit(force);
       return;
     }
+    const knownProjects = projects.body.projects ?? [];
     core.stage({
-      projects: projects.body.projects ?? [],
+      filter: knownFilter(core.state.filter, knownProjects),
+      projects: knownProjects,
       items: items.body.items ?? [],
       refreshedAt: Date.now(),
       refreshError: null,

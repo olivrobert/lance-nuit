@@ -5,7 +5,8 @@
 // nothing in the store needs to know which screen is up — the poll keeps
 // running under the terminal so the inbox is fresh when the reader comes back.
 // So it is read here, through `useSyncExternalStore` on `hashchange`, and never
-// copied into the store where the two could disagree.
+// copied into the store where the two could disagree. The inbox's chip and open
+// item are the exception, and `useInboxLocation.ts` alone carries them across.
 
 import { useSyncExternalStore } from "react";
 import { formatRoute, parseRoute, type Route } from "../lib/route.js";

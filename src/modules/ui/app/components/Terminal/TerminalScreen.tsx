@@ -19,6 +19,7 @@ import { fetchTerminal, killTerminal } from "../../api/client.js";
 import type { TerminalInfo } from "../../api/types.js";
 import { fmtDate } from "../../lib/format.js";
 import { useActions } from "../../store/store.js";
+import { useInboxHref } from "../../store/useInboxLocation.js";
 import styles from "./Terminal.module.css";
 import { TerminalPane } from "./TerminalPane.js";
 
@@ -51,6 +52,7 @@ function useTerminalInfo(id: string): Loaded {
 
 function Header({ terminal, ended }: { terminal: TerminalInfo; ended: boolean }): JSX.Element {
   const actions = useActions();
+  const inboxHref = useInboxHref();
   const [killing, setKilling] = useState(false);
 
   const kill = async (): Promise<void> => {
@@ -72,7 +74,7 @@ function Header({ terminal, ended }: { terminal: TerminalInfo; ended: boolean })
   return (
     <header className={styles.header}>
       <div className={styles.identity}>
-        <a href="#/" className={styles.back}>
+        <a href={inboxHref} className={styles.back}>
           ← Inbox
         </a>
         <span className={styles.project}>{terminal.project}</span>
@@ -102,6 +104,7 @@ function Header({ terminal, ended }: { terminal: TerminalInfo; ended: boolean })
 
 export function TerminalScreen({ id }: { id: string }): JSX.Element {
   const loaded = useTerminalInfo(id);
+  const inboxHref = useInboxHref();
   const [ended, setEnded] = useState(false);
 
   if (loaded.status === "loading") {
@@ -116,7 +119,7 @@ export function TerminalScreen({ id }: { id: string }): JSX.Element {
       <main className={styles.screen}>
         <div className={styles.message}>
           <p>{`No terminal session ${id}.${loaded.error ? ` (${loaded.error})` : " It may have ended."}`}</p>
-          <a href="#/">Back to the inbox</a>
+          <a href={inboxHref}>Back to the inbox</a>
         </div>
       </main>
     );

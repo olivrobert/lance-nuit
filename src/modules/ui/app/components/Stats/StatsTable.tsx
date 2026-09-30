@@ -10,7 +10,7 @@ import type { StatsRun, StatsTicket } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
 import { fmtCost, fmtDate, fmtDuration, shortRunId } from "../../lib/format.js";
 import { nextSort, type StatsColumn, type StatsSort, spanMs } from "../../lib/stats.js";
-import { useActions, useUiSelector } from "../../store/store.js";
+import { useUiSelector } from "../../store/store.js";
 import { navigate } from "../../store/useRoute.js";
 import styles from "./Stats.module.css";
 
@@ -65,16 +65,12 @@ function Header({ sort, onSort }: { sort: StatsSort; onSort: (sort: StatsSort) =
  *  tracker when the project declares one, else plain text. */
 function TicketCell({ ticket }: { ticket: StatsTicket }): JSX.Element {
   const inInbox = useUiSelector((state) => state.items.some((item) => item.key === ticket.key));
-  const actions = useActions();
   if (inInbox) {
     return (
       <button
         type="button"
         className={styles.link}
-        onClick={() => {
-          actions.select(ticket.key);
-          navigate({ view: "inbox" });
-        }}
+        onClick={() => navigate({ view: "inbox", project: null, item: ticket.key })}
       >
         {ticket.ticket}
       </button>

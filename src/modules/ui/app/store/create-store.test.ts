@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { ApiResult } from "../api/client.js";
-import type { Item, ItemDetail, VerbAction } from "../api/types.js";
+import type { Item, ItemDetail, ProjectView, VerbAction } from "../api/types.js";
 import { createUiStore, type UiApi } from "./create-store.js";
 
 function makeItem(ticket: string, overrides: Partial<Item> = {}): Item {
@@ -48,6 +48,7 @@ interface Call {
 interface Scenario {
   user?: string | null;
   items?: Item[];
+  projects?: ProjectView[];
   details?: Record<string, ItemDetail>;
 }
 
@@ -77,7 +78,7 @@ function fakeApi(scenario: Scenario = {}) {
   const api: UiApi = {
     fetchMe: () => answer("fetchMe", [], { user, users }),
     chooseUser: (name) => answer("chooseUser", [name], { user: name, users }),
-    fetchProjects: () => answer("fetchProjects", [], { projects: [] }),
+    fetchProjects: () => answer("fetchProjects", [], { projects: scenario.projects ?? [] }),
     fetchItems: () => answer("fetchItems", [], { items: scenario.items ?? [] }),
     fetchItemDetail: (project, ticket) => {
       const detail = scenario.details?.[`${project}/${ticket}`];
@@ -303,5 +304,71 @@ describe("a refresh that fails", () => {
     });
     await store.actions.refresh();
     expect(store.getSnapshot()).toMatchObject({ refreshError: "Failed to fetch", loaded: false });
+  });
+});
+
+describe("an address brought to the inbox", () => {
+  const WEB: ProjectView = {
+    name: "web",
+    cwd: "/srv/web",
+    provider: "local",
+    specPath: "/srv/web/.lance-nuit",
+    found: true,
+  };
+  const C = makeItem("C", { key: "api/C", project: { name: "api", cwd: "/srv/api", provider: "local" } });
+  const API: ProjectView = {
+    name: "api",
+    cwd: "/srv/api",
+    provider: "local",
+    specPath: "/srv/api/.lance-nuit",
+    found: true,
+  };
+
+  test("before the first read, is what that read opens instead of the first item", async () => {
+    const fake = fakeApi({ items: [A, B, C], projects: [WEB, API], details: DETAILS });
+    const store = createUiStore(fake.api);
+    store.actions.showInbox("web", "web/B");
+    expect(fake.names()).toEqual([]);
+
+    await store.actions.refresh();
+    expect(store.getSnapshot()).toMatchObject({ filter: "web", selected: "web/B" });
+    expect(fake.of("fetchItemDetail").map((call) => call.args)).toEqual([["web", "B"]]);
+  });
+
+  test("a chip alone keeps the open item it still shows, and re-picks one it hides", async () => {
+    const fake = fakeApi({ items: [A, B, C], projects: [WEB, API], details: DETAILS });
+    const store = createUiStore(fake.api);
+    await store.actions.refresh();
+    store.actions.select("web/B");
+
+    store.actions.showInbox("web", null);
+    expect(store.getSnapshot()).toMatchObject({ filter: "web", selected: "web/B" });
+    store.actions.showInbox("api", null);
+    expect(store.getSnapshot()).toMatchObject({ filter: "api", selected: "api/C" });
+  });
+
+  test("the address the store already shows repaints nothing", async () => {
+    const fake = fakeApi({ items: [A, B], projects: [WEB], details: DETAILS });
+    const store = createUiStore(fake.api);
+    await store.actions.refresh();
+    let repaints = 0;
+    store.subscribe(() => {
+      repaints += 1;
+    });
+    store.actions.showInbox(null, "web/A");
+    store.actions.showInbox(null, null);
+    expect(repaints).toBe(0);
+  });
+
+  test("a chip on a project the server no longer lists falls back to every project", async () => {
+    const fake = fakeApi({ items: [A], projects: [WEB], details: DETAILS });
+    const store = createUiStore(fake.api);
+    store.actions.showInbox("gone", null);
+    await store.actions.refresh();
+    expect(store.getSnapshot()).toMatchObject({ filter: null, selected: "web/A" });
+
+    store.actions.showInbox("web", null);
+    store.actions.showInbox("gone", null);
+    expect(store.getSnapshot()).toMatchObject({ filter: null, selected: "web/A" });
   });
 });
