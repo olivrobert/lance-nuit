@@ -15,6 +15,7 @@ export default [
       "coverage/**",
       ".lance-nuit/**",
       ".scratch/**",
+      ".ia/**",
       "node_modules/**",
       "src/modules/ui/static/app.js",
     ],

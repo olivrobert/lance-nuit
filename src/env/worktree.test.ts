@@ -309,8 +309,11 @@ test("setupWorktreeAsync: pipelines tracked by Git → the checkout is left alon
   mkdirSync(tracked, { recursive: true });
   writeFileSync(join(tracked, "nightly.ts"), "export default () => ({});\n");
   const git = (...args: string[]) => spawnSync("git", args, { cwd: repo });
-  git("add", "-A");
+  // Forced: the machine's global excludes commonly ignore `.lance-nuit/`, and a plain
+  // add would then leave the pipelines untracked — the case this test is not about.
+  git("add", "--force", tracked);
   git("commit", "-qm", "pipelines");
+  expect(spawnSync("git", ["ls-files", tracked], { cwd: repo, encoding: "utf-8" }).stdout).toContain("nightly.ts");
 
   const warnings: string[] = [];
   const original = log.warn;

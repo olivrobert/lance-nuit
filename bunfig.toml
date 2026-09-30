@@ -1,2 +1,2 @@
 [test]
-preload = ["./tests/isolate-kit-home.ts", "./tests/ensure-ui-bundle.ts"]
+preload = ["./tests/isolate-kit-home.ts", "./tests/isolate-actor.ts", "./tests/ensure-ui-bundle.ts"]
