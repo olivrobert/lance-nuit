@@ -8,7 +8,7 @@
 // visible in the explorer (ticket 03).
 //
 // Every read goes through the state layer's own readers and ports
-// (`RunStateStore`, `WorkItemArtifactStore`, `readDecisionAt`, `sha256Text`):
+// (`RunStateStore`, `WorkItemArtifactStore`, `readDecisionAt`, `approvalFreshness`):
 // this module composes them, it never parses `state.json` itself. Nothing is
 // cached across calls — a per-call cache is enough for a few dozen work items
 // per project, and a persistent one would show a stale morning box.
@@ -20,8 +20,7 @@ import { createArtifactRef } from "../../model/artifact-ports.js";
 import type { PersistedRun } from "../../model/persisted.js";
 import { isClosableStatus, isClosureCurrent, readClosureAt } from "../../state/closure.js";
 import { runProvesUnpricedSpend } from "../../state/cost-accounting.js";
-import { isValidSubjectToken, readDecisionAt } from "../../state/decisions.js";
-import { sha256Text } from "../../state/hash.js";
+import { approvalFreshness, isValidSubjectToken, readDecisionAt } from "../../state/decisions.js";
 import { hasUnfinishedWork } from "../../state/run-predicates.js";
 import type { HistoryEntry } from "../../state/stats/history-reader.js";
 import { readHistory } from "../../state/stats/history-reader.js";
@@ -199,10 +198,12 @@ async function approvalOf(project: ProjectEntry, ticket: string, subject: string
     // An artifact that cannot be read can no longer prove the approval fresh.
     body = undefined;
   }
-  const fresh = body !== undefined && sha256Text(body) === decision.artifactSha256;
+  // `absent` here is a decision nobody approved (`rejected`): no approval holds.
+  const freshness = approvalFreshness(decision, body);
+  if (freshness === "absent") return { subject, state: "absent" };
   return {
     subject,
-    state: fresh ? "fresh" : "stale",
+    state: freshness,
     decidedAt: decision.decidedAt,
     decidedBy: decision.decidedBy,
   };

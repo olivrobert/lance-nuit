@@ -9,7 +9,7 @@ import { inspectCommand } from "./diagnostics.js";
  * so it must survive `lancenuit inspect PROJ-1 > file` and a pipe into `grep`.
  * stderr stays reserved for the execution log (runtime/logging.ts).
  */
-test("inspect: the report goes to stdout, not to stderr", () => {
+test("inspect: the report goes to stdout, not to stderr", async () => {
   const out: string[] = [];
   const err: string[] = [];
   const stdout = spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
@@ -22,9 +22,9 @@ test("inspect: the report goes to stdout, not to stderr", () => {
   });
   const cwd = process.cwd();
   process.chdir(mkdtempSync(`${tmpdir()}/lancenuit-inspect-`));
-  let code: number | Promise<number>;
+  let code: number;
   try {
-    code = inspectCommand.run({ ticket: "PROJ-1" } as RunnerArgs);
+    code = await inspectCommand.run({ ticket: "PROJ-1" } as RunnerArgs);
   } finally {
     process.chdir(cwd);
     stdout.mockRestore();

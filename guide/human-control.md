@@ -145,6 +145,22 @@ the gate stops again. Subjects use only `A-Z`, `a-z`, digits, underscore, and `-
 The subject must be declared by the selected pipeline, and approval always names
 that pipeline with `--pipeline`.
 
+### Approving the same gate twice
+
+The same gate is often lifted from more than one place: the dashboard, an agent
+driving the runner, a terminal. Approval is idempotent so that order does not
+matter:
+
+- Approving an artifact that a decision already covers keeps that decision, its
+  author and date included, and says so instead of writing it again. An `applied`
+  decision stays `applied`.
+- `run --approve <subject>` on a run that another runner is already resuming
+  records nothing new and starts no second run.
+- `lancenuit inspect <ticket>` prints, for a stopped run, the state of the
+  approval it waits on: `none recorded`, `current` (resume without `--approve`),
+  or `stale` (the artifact changed since). The dashboard reads the same rule:
+  once the approval is current it offers **Rerun** rather than another approval.
+
 ### Who approved
 
 A decision records its author in `decidedBy`. It is `"human"` when nothing else

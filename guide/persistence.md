@@ -365,7 +365,7 @@ kept and read on what it still says.
 | `pipeline.child.started` | a composed child is launched |
 | `pipeline.child.finished` | a composed child is settled |
 | `pipeline.child.cost.reconciled` | a child's spend is posted to the parent's ledger |
-| `decision.recorded` | an approval was consumed at boot |
+| `decision.recorded` | `--approve` wrote a new approval at boot (a repeated approval of the same artifact is not journaled) |
 
 ## Scan records
 
