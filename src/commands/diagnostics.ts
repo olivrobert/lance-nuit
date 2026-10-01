@@ -31,13 +31,14 @@ export const inspectCommand: RunnerCommand = {
   flag: "--inspect",
   key: "inspect",
   desc: "Display a ticket's run state and steps.",
-  run(args: InspectArgs): number {
+  async run(args: InspectArgs): Promise<number> {
     if (!isValidTicket(args.ticket)) {
       log("--inspect requires a valid ticket.");
       return 1;
     }
     const context = contextFor(args.ticket);
-    process.stdout.write(`${inspectTicket(context, args.ticket, args.runId, storesFor(context, args.ticket))}\n`);
+    const report = await inspectTicket(context, args.ticket, args.runId, storesFor(context, args.ticket));
+    process.stdout.write(`${report}\n`);
     return 0;
   },
 };

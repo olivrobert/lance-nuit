@@ -12,6 +12,7 @@ import type { RunJournalCounts } from "../model/journal.js";
 import type { PersistedRun } from "../model/persisted.js";
 import { createRunRef, type RunLogStore, type RunStateSnapshot, type RunStateStore } from "../model/storage-ports.js";
 import { errorMessage } from "../lib/errors.js";
+import { approvalStatus, isValidSubjectToken } from "./decisions.js";
 import { readRunJournal, type RunJournalReport } from "./run-journal.js";
 import { matchesStepSelector } from "./run-timeline.js";
 import { FileRunLogStore } from "./stores/file-run-log-store.js";
@@ -163,7 +164,25 @@ function journalLine(record: RunRecord): string {
   return `journal: ${counts}\n  refused: ${refused}`;
 }
 
-export function formatRunRecord(record: RunRecord): string {
+/**
+ * The approval a stopped run waits on, judged as its gate will judge it on resume.
+ *
+ * An approval granted elsewhere (the dashboard, another terminal) does not change
+ * the run's status: only this line tells whoever reads `--inspect` that the gate
+ * is already lifted and the run only needs resuming.
+ */
+async function approvalLine(context: PipelineContext, state: PersistedRun): Promise<string | undefined> {
+  const subject = statusLabel(state) === "STOPPED" ? state.outcome?.stop?.subject : undefined;
+  if (!subject || !isValidSubjectToken(subject) || !context.paths.decisionsDir) return undefined;
+  const { freshness, decision } = await approvalStatus(context, subject);
+  if (freshness === "absent" || !decision) return `approval: ${subject} — none recorded`;
+  const by = `${decision.decidedBy} on ${decision.decidedAt}`;
+  return freshness === "fresh"
+    ? `approval: ${subject} — current, by ${by}; resume the run without --approve`
+    : `approval: ${subject} — stale, the artifact changed since ${by} approved it`;
+}
+
+export function formatRunRecord(record: RunRecord, approval?: string): string {
   const state = record.state;
   const lines = [
     `Run ${record.runId}`,
@@ -173,6 +192,7 @@ export function formatRunRecord(record: RunRecord): string {
     `created: ${state.createdAt ?? "—"}`,
     `updated: ${state.updatedAt ?? "—"}`,
     outcomeLine(state),
+    ...(approval ? [approval] : []),
     journalLine(record),
     "steps:",
   ];
@@ -199,8 +219,8 @@ function formatChildLine(record: RunRecord): string {
 /** Render a run followed by its sub-run tree, one indented line per child. A
  * `forEachPipeline` run spawns one child per item; listing them here is the only
  * way to see the whole run without grepping `parentRunId` in the snapshots. */
-function formatRunTree(record: RunRecord, records: RunRecord[]): string {
-  const lines = [formatRunRecord(record)];
+async function formatRunTree(context: PipelineContext, record: RunRecord, records: RunRecord[]): Promise<string> {
+  const lines = [formatRunRecord(record, await approvalLine(context, record.state))];
   const render = (parent: RunRecord, depth: number) => {
     const children = childrenOf(parent, records);
     if (depth === 1 && children.length > 0) lines.push("children:");
@@ -213,24 +233,25 @@ function formatRunTree(record: RunRecord, records: RunRecord[]): string {
   return lines.join("\n");
 }
 
-export function inspectTicket(
+export async function inspectTicket(
   context: PipelineContext,
   ticket: string,
   runId?: string,
   options?: DiagnosticsOptions,
-): string {
+): Promise<string> {
   const { stateStore, records } = recordsFor(context, ticket, options);
   if (records.length === 0) return `No run found for ${ticket}.`;
   const selected = runId ? selectRunRecord(records, runId) : undefined;
   if (runId && !selected) return `Run ${runId} not found for ${ticket}.`;
-  if (selected) return formatRunTree(selected, records);
+  if (selected) return formatRunTree(context, selected, records);
   // A child run belongs to the tree of its parent; only orphans (parent snapshot
   // gone) compete for the "latest per pipeline" slots.
   const knownRunIds = new Set(records.map((record) => record.runId));
   const topLevel = records.filter((record) => !record.state.parentRunId || !knownRunIds.has(record.state.parentRunId));
-  return latestPerPipeline(topLevel, stateStore, ticket)
-    .map((record) => formatRunTree(record, records))
-    .join("\n\n");
+  const trees = await Promise.all(
+    latestPerPipeline(topLevel, stateStore, ticket).map((record) => formatRunTree(context, record, records)),
+  );
+  return trees.join("\n\n");
 }
 
 /** Check both the lexical path and the actual target of a local log. An

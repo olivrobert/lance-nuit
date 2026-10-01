@@ -12,7 +12,7 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import { log } from "../runtime/logging.js";
 import { recordApproval } from "../state/decisions.js";
-import { resolveApprovalArtifact } from "./approval-subject.js";
+import { describeRecordedApproval, resolveApprovalArtifact } from "./approval-subject.js";
 import type { RunnerCommand } from "./runner-command.js";
 import { pipelineNotFoundError } from "./pipeline-reference.js";
 import { commandRegistries } from "./registries.js";
@@ -56,10 +56,7 @@ export const approvalCommand: RunnerCommand = {
     }
     try {
       const artifact = resolveApprovalArtifact(pipelineDef, args.approve);
-      const decision = await recordApproval(context, args.approve, artifact);
-      log(
-        `Decision ${decision.subject}=approved written to ${context.paths.decisionsDir}/${decision.subject}.json (SHA-256 ${decision.artifactSha256}).`,
-      );
+      log(describeRecordedApproval(await recordApproval(context, args.approve, artifact), context.paths.decisionsDir));
       return 0;
     } catch (error) {
       log(errorMessage(error));

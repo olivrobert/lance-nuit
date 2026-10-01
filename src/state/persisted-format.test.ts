@@ -353,7 +353,7 @@ test("persisted format: validates the contract", async () => {
     });
   writeFileSync(ctx.paths.artifact("lots.json"), lotsBody("LOT-02"));
 
-  const decision = await recordApproval(ctx, "lots", lotsArtifact);
+  const { decision } = await recordApproval(ctx, "lots", lotsArtifact);
   expect(decision.artifact).toBe("artifacts/lots.json");
   expect(decision.artifactSha256).toMatch(/^[a-f0-9]{64}$/);
   expect(readDecision(ctx, "lots")?.decision).toBe("approved");
@@ -392,7 +392,7 @@ test("persisted format: validates the contract", async () => {
   for (const { subject, artifact, value } of cases) {
     const name = artifact.name;
     artifacts.put(name, value);
-    const decision = await recordApproval(storeCtx, subject, artifact);
+    const { decision } = await recordApproval(storeCtx, subject, artifact);
     expect(decision.artifactSha256).toBe(createHash("sha256").update(value).digest("hex"));
     expect(existsSync(storeCtx.paths.artifact(name))).toBe(false);
     expect(await decisionMatchesArtifact(storeCtx, subject, artifact)).toBe(true);
@@ -473,7 +473,7 @@ test("persisted format: validates the contract", async () => {
   expect(await decisionMatchesArtifact(ctx, "assumptions", assumptionsArtifact)).toBe(false);
 });
 
-test("persisted format: validates the contract", () => {
+test("persisted format: validates the contract", async () => {
   const root = mkdtempSync(join("/tmp", "pipeline-state-stats-"));
   const ctx = contextFor(root);
   mkdirSync(ctx.paths.artifactsDir!, { recursive: true });
@@ -498,7 +498,7 @@ test("persisted format: validates the contract", () => {
   expect(centralPath).toBe(join(root, ".lance-nuit/pipeline-history/runs.jsonl"));
   expect(readFileSync(centralPath!, "utf-8").trim().split("\n")).toHaveLength(1);
   expect(existsSync(join(root, ".lance-nuit/work-items/PROJ-1/run-stats"))).toBe(false);
-  expect(inspectTicket(ctx, "PROJ-1")).toContain(`Run ${run.runId}`);
+  expect(await inspectTicket(ctx, "PROJ-1")).toContain(`Run ${run.runId}`);
   expect(logsForTicket(ctx, "PROJ-1", "quality.tests")).toContain("tests passed");
 
   run.status = "FAIL";
