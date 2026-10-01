@@ -3,9 +3,9 @@
 // The verbs themselves are decided by the server, which sends with every item
 // the closed set it accepts (spec 5.1); this component only draws them and asks
 // the two questions that must be answered before a verb is posted. Those two
-// questions live HERE and not in the store on purpose: `confirm` and `prompt`
-// are a property of the browser, and the store — which the poll also drives —
-// must stay callable without one. The store receives an amount already resolved.
+// questions live HERE and not in the mutation on purpose: `confirm` and
+// `prompt` are a property of the browser, and the mutation receives an amount
+// already resolved.
 //
 // A delivered run with a report (`deliveryActions`) leads with what the report
 // delivered instead: its merge request as the primary link and a copy button for
@@ -18,11 +18,9 @@ import type { JSX } from "react";
 import type { Item, RunReport, VerbAction } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
 import { deliveryActions } from "../../lib/sheet.js";
-import type { UiState } from "../../store/store.js";
-import { actions, useUiSelector } from "../../store/store.js";
+import { usePendingVerb, useRunVerb } from "../../api/mutations.js";
+import { copy, toast } from "../../store/ui-store.js";
 import styles from "./Actions.module.css";
-
-const selectPending = (state: UiState): string | null => state.pending;
 
 /** Ask before abandoning or closing a run, and ask for the amount a budget verb needs.
  *  Returns the options to post with, or `null` when the reader backed out. */
@@ -44,7 +42,7 @@ function askFor(item: Item, verb: VerbAction): { budget?: number } | null {
     if (answer === null) return null;
     const amount = Number(answer.replace(",", ".").trim());
     if (!Number.isFinite(amount) || amount <= 0) {
-      actions.toast("Invalid amount.");
+      toast("Invalid amount.");
       return null;
     }
     return { budget: amount };
@@ -62,7 +60,8 @@ export interface ActionsProps {
 }
 
 export function Actions({ item, report, className }: ActionsProps): JSX.Element | null {
-  const pending = useUiSelector(selectPending);
+  const pending = usePendingVerb();
+  const runVerb = useRunVerb();
   const { busy, verbs } = item;
   const delivery = deliveryActions(item, report);
   if (verbs.length === 0 && !delivery) return null;
@@ -70,7 +69,7 @@ export function Actions({ item, report, className }: ActionsProps): JSX.Element 
   const run = (verb: VerbAction): void => {
     const options = askFor(item, verb);
     if (options === null) return;
-    void actions.runVerb(item, verb, options);
+    runVerb({ item, verb, ...options });
   };
 
   const button = (verb: VerbAction): JSX.Element => (
@@ -93,7 +92,7 @@ export function Actions({ item, report, className }: ActionsProps): JSX.Element 
 
   const primary = delivery ? undefined : verbs.find((verb) => verb.primary);
   const secondary = verbs.filter((verb) => verb !== primary);
-  const copy = delivery?.copy;
+  const copyable = delivery?.copy;
 
   return (
     <div className={cx(styles.actions, className)}>
@@ -102,9 +101,9 @@ export function Actions({ item, report, className }: ActionsProps): JSX.Element 
           {`${delivery.link.label} ↗`}
         </a>
       ) : null}
-      {copy ? (
-        <button type="button" title={copy.value} onClick={() => void actions.copy(copy.value)}>
-          {copy.label} <span className={styles.copyValue}>{copy.value}</span>
+      {copyable ? (
+        <button type="button" title={copyable.value} onClick={() => void copy(copyable.value)}>
+          {copyable.label} <span className={styles.copyValue}>{copyable.value}</span>
         </button>
       ) : null}
       {primary ? button(primary) : null}
