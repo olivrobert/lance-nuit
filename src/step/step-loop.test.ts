@@ -1152,6 +1152,20 @@ test("resume: a done step with fresh declared inputs is re-admitted at zero cost
   expect(skipped).toMatchObject({ stepId: "spec", reason: "outputs up to date with declared inputs" });
 });
 
+test("resume: a step requeued by --start-at runs even when its declared outputs are fresh", async () => {
+  // Freshness does not track the repository tree: after a manual fix, outputs
+  // matching their inputs say nothing about whether the step still holds.
+  const { ctx } = artifactContext({ "ticket.md": "one", "spec.md": "written" });
+  const step = derivedStep({ status: "pending", replay: true, control: { duration_ms: 1 } });
+  const run = makeRun([step]);
+  await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
+
+  const { deps, calls } = fakeDeps();
+  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+
+  expect(calls.ids).toEqual(["spec"]);
+});
+
 test("resume: a done step whose declared input changed is replayed", async () => {
   const { ctx } = artifactContext({ "ticket.md": "answered", "spec.md": "written" });
   const step = derivedStep({ status: "done", control: { duration_ms: 1 } });

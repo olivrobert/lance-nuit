@@ -62,11 +62,18 @@ function lastStatusEvents(events: readonly RunJournalEvent[]): Map<string, StepS
  * The rest of the step state is left untouched, except the fields the same event
  * carries and the snapshot could not have received either: the finish instant, the
  * failure reason, and the fail cause.
+ *
+ * A step `--start-at` requeued is the exception: it is `pending` with `replay`,
+ * and the terminal event the journal holds is the pass the operator asked to
+ * replay, so it must not win. Once the replay is running, a terminal event is
+ * the replay's own and closes the step like any other; the closed step then
+ * drops `replay`, as `updateStep` would have.
  */
 function reconcileStepStatus(state: PersistedStepState, event: StepStatusEvent | undefined): PersistedStepState {
   if (!event) return state;
+  if (state.replay === true && state.status === "pending") return state;
   if (!UNFINISHED_STEP_STATUSES.has(state.status) || !TERMINAL_STEP_STATUSES.has(event.status)) return state;
-  return {
+  const reconciled: PersistedStepState = {
     ...state,
     status: event.status,
     // `updateStep` stamps the finish when it applies the status, so the event's
@@ -77,6 +84,8 @@ function reconcileStepStatus(state: PersistedStepState, event: StepStatusEvent |
     errors: state.errors ?? (event.status === "failed" ? event.reason : undefined),
     fail_cause: state.fail_cause ?? event.failCause,
   };
+  if (event.status === "done" || event.status === "skipped") delete reconciled.replay;
+  return reconciled;
 }
 
 /**
