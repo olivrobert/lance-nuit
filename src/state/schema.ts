@@ -108,6 +108,7 @@ export const StepUsageSchema = z.looseObject({
 
 export const RunStopStateSchema = z.looseObject({
   subject: z.string().optional(),
+  artifact: z.string().optional(),
   kind: z.enum(STOP_KINDS).optional(),
   detail: z.string(),
 });
