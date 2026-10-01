@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { textArtifact } from "../dsl/artifact.js";
 import type { PersistedRun } from "../model/persisted.js";
 import {
   createLogRef,
@@ -12,6 +13,7 @@ import {
 } from "../model/storage-ports.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { diagnoseRunJournals, inspectTicket, logsForTicket } from "./diagnostics.js";
+import { recordApproval } from "./decisions.js";
 
 function snapshot(runId: string, pipeline: string, updatedAt: string): PersistedRun {
   return {
@@ -79,14 +81,14 @@ class FakeLogStore implements RunLogStore {
 
 const context = buildPipelineContext({ cwd: "/virtual/no-filesystem", ticket: "PROJ-1" });
 
-test("diagnostics: validates the integration contract", () => {
+test("diagnostics: validates the integration contract", async () => {
   const stateStore = new FakeStateStore([
     { state: snapshot("feature-old", "feature", "2026-07-01T00:00:00.000Z") },
     { state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z") },
     { state: snapshot("quality-latest", "quality", "2026-07-02T00:00:00.000Z") },
   ]);
 
-  const output = inspectTicket(context, "PROJ-1", undefined, { stateStore });
+  const output = await inspectTicket(context, "PROJ-1", undefined, { stateStore });
 
   expect(output).toContain("Run feature-latest");
   expect(output).toContain("Run quality-latest");
@@ -94,7 +96,7 @@ test("diagnostics: validates the integration contract", () => {
   expect(stateStore.latestCalls.map(({ pipeline }) => pipeline)).toEqual(["feature", "quality"]);
 });
 
-test("inspectTicket lists child runs under their parent instead of as standalone latest runs", () => {
+test("inspectTicket lists child runs under their parent instead of as standalone latest runs", async () => {
   const child = (runId: string, updatedAt: string, lotId: string, title: string): PersistedRun => ({
     ...snapshot(runId, "implement-lot", updatedAt),
     parentRunId: "plan-latest",
@@ -112,7 +114,7 @@ test("inspectTicket lists child runs under their parent instead of as standalone
     },
   ]);
 
-  const output = inspectTicket(context, "PROJ-1", undefined, { stateStore });
+  const output = await inspectTicket(context, "PROJ-1", undefined, { stateStore });
 
   const lines = output.split("\n");
   expect(lines[0]).toBe("Run plan-latest");
@@ -124,11 +126,11 @@ test("inspectTicket lists child runs under their parent instead of as standalone
   expect(stateStore.latestCalls.map(({ pipeline }) => pipeline)).toEqual(["implement-plan"]);
 });
 
-test("inspectTicket keeps an orphan child run (parent snapshot gone) as a top-level run", () => {
+test("inspectTicket keeps an orphan child run (parent snapshot gone) as a top-level run", async () => {
   const stateStore = new FakeStateStore([
     { state: { ...snapshot("lot-orphan", "implement-lot", "2026-07-03T00:00:00.000Z"), parentRunId: "vanished" } },
   ]);
-  expect(inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("Run lot-orphan");
+  expect(await inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("Run lot-orphan");
 });
 
 test("logsForTicket reads logs through the fake store: validates the contract", () => {
@@ -162,7 +164,7 @@ test("logsForTicket rejects symlinks outside the run directory: validates the co
   expect(output).not.toContain("secret hors run");
 });
 
-test("diagnoseRunJournals reports what the journal contract kept, refused and ignored", () => {
+test("diagnoseRunJournals reports what the journal contract kept, refused and ignored", async () => {
   const runDir = mkdtempSync(join(tmpdir(), "diagnose-journal-"));
   writeFileSync(
     join(runDir, "events.jsonl"),
@@ -196,12 +198,12 @@ test("diagnoseRunJournals reports what the journal contract kept, refused and ig
 
   // The counters are reachable from `--inspect`, not only from the API: a reader
   // told about them in the guide must have a command that prints them.
-  const inspected = inspectTicket(context, "PROJ-1", undefined, { stateStore });
+  const inspected = await inspectTicket(context, "PROJ-1", undefined, { stateStore });
   expect(inspected).toContain("journal: 1 event, 1 invalid, 1 skipped (1 live-feed line ignored)");
   expect(inspected).toContain("refused: step.attempt.started ×1 —");
 });
 
-test("inspectTicket reports a healthy journal as ok, with the live feed as ignored lines", () => {
+test("inspectTicket reports a healthy journal as ok, with the live feed as ignored lines", async () => {
   const runDir = mkdtempSync(join(tmpdir(), "diagnose-journal-healthy-"));
   writeFileSync(
     join(runDir, "events.jsonl"),
@@ -217,12 +219,12 @@ test("inspectTicket reports a healthy journal as ok, with the live feed as ignor
     { state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z"), runDir },
   ]);
 
-  const inspected = inspectTicket(context, "PROJ-1", undefined, { stateStore });
+  const inspected = await inspectTicket(context, "PROJ-1", undefined, { stateStore });
   expect(inspected).toContain("journal: 2 events, ok (2 live-feed lines ignored)\n");
   expect(inspected).not.toContain("refused:");
 });
 
-test("inspectTicket omits the ignored lines when the journal holds no live feed", () => {
+test("inspectTicket omits the ignored lines when the journal holds no live feed", async () => {
   const runDir = mkdtempSync(join(tmpdir(), "diagnose-journal-no-feed-"));
   writeFileSync(
     join(runDir, "events.jsonl"),
@@ -233,16 +235,16 @@ test("inspectTicket omits the ignored lines when the journal holds no live feed"
     { state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z"), runDir },
   ]);
 
-  expect(inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("journal: 1 event, ok\n");
+  expect(await inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("journal: 1 event, ok\n");
 });
 
-test("inspectTicket says so when a run has no readable journal", () => {
+test("inspectTicket says so when a run has no readable journal", async () => {
   const stateStore = new FakeStateStore([{ state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z") }]);
 
-  expect(inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("journal: —");
+  expect(await inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("journal: —");
 });
 
-test("inspectTicket names an unreadable journal instead of counting it as empty", () => {
+test("inspectTicket names an unreadable journal instead of counting it as empty", async () => {
   const runDir = mkdtempSync(join(tmpdir(), "diagnose-journal-unreadable-"));
   mkdirSync(join(runDir, "events.jsonl"));
   const stateStore = new FakeStateStore([
@@ -253,7 +255,41 @@ test("inspectTicket names an unreadable journal instead of counting it as empty"
   expect(diagnostic?.readError).toMatch(/EISDIR/);
   expect(diagnostic).toMatchObject({ known: 0, unknown: 0, invalid: 0, skipped: 0 });
 
-  const inspected = inspectTicket(context, "PROJ-1", undefined, { stateStore });
+  const inspected = await inspectTicket(context, "PROJ-1", undefined, { stateStore });
   expect(inspected).toContain("journal: unreadable — ");
   expect(inspected).not.toContain("journal: —");
+});
+
+test("inspectTicket tells whether the gate a stopped run waits on is already approved", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "inspect-approval-"));
+  const base = buildPipelineContext();
+  const ctx = buildPipelineContext({
+    cwd,
+    ticket: "PROJ-1",
+    config: { ...base.config, specPath: ".lance-nuit/work-items" },
+  });
+  const plan = textArtifact("plan.md");
+  mkdirSync(ctx.paths.artifactsDir!, { recursive: true });
+  writeFileSync(ctx.paths.artifact("plan.md"), "# Plan\n");
+  const stopped: PersistedRun = {
+    ...snapshot("feature-stopped", "feature", "2026-07-03T00:00:00.000Z"),
+    status: "STOPPED",
+    outcome: {
+      phase: "plan-gate",
+      reason: "escalated: plan",
+      logPath: null,
+      resumable: true,
+      stop: { subject: "plan", detail: "plan" },
+    },
+  };
+  const stateStore = new FakeStateStore([{ state: stopped }]);
+  const inspect = () => inspectTicket(ctx, "PROJ-1", undefined, { stateStore });
+
+  expect(await inspect()).toContain("approval: plan — none recorded\n");
+
+  await recordApproval(ctx, "plan", plan);
+  expect(await inspect()).toMatch(/approval: plan — current, by human on .+; resume the run without --approve\n/);
+
+  writeFileSync(ctx.paths.artifact("plan.md"), "# Plan v2\n");
+  expect(await inspect()).toMatch(/approval: plan — stale, the artifact changed since human on .+ approved it\n/);
 });
