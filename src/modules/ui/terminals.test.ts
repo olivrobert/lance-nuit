@@ -1,15 +1,20 @@
 import { afterEach, expect, test } from "bun:test";
+import { join } from "node:path";
 import { createDefaultWorkItemGatewayRegistry } from "../work-item/registry.ts";
 import { cleanupTempDirs, makeProject } from "../read-model/test-harness.js";
-import type { Item, ProjectEntry } from "../read-model/index.js";
+import type { CoderSessionRead, Item, ProjectEntry } from "../read-model/index.js";
 import { ViewerRegistry } from "./terminal-viewers.js";
 import {
   hasClaudeCli,
   isSessionId,
   listTerminals,
+  type OpenSessionDeps,
+  openCoderSession,
   operatorCommand,
   type PaneCommandBuilder,
   paneShell,
+  resumeCoderCommand,
+  type SessionCommandBuilder,
   sessionName,
   shellJoin,
   shellQuote,
@@ -98,6 +103,7 @@ test("start: the session runs the shell in the project, then the command is type
     ok: true,
     terminal: {
       id: "ln-demo-app-PROJ-12",
+      kind: "run",
       project: "demo-app",
       ticket: "PROJ-12",
       pipeline: "feature",
@@ -248,4 +254,97 @@ test("viewers: a client that ends on its own leaves the registry, and closeAll d
   registry.closeAll();
   expect(registry.size).toBe(0);
   expect(attach.clients[1]?.closed).toBe(true);
+});
+
+const echoSession: SessionCommandBuilder = (session) => ({ ok: true, words: ["echo", `resume ${session.sessionId}`] });
+
+function coderSession(cwd: string, overrides: Partial<CoderSessionRead> = {}): CoderSessionRead {
+  return {
+    pipeline: "feature",
+    runId: "r-1",
+    status: "FAIL",
+    stepId: "code",
+    provider: "claude",
+    sessionId: "0b5f7c3e-1111-4222-8333-444455556666",
+    cwd,
+    worktree: true,
+    ...overrides,
+  };
+}
+
+function sessionDeps(server: FakeTmuxServer, overrides: Partial<OpenSessionDeps> = {}): OpenSessionDeps {
+  return {
+    tmux: server.tmux(),
+    findSession: (entry) => coderSession(entry.cwd),
+    findItem: async () => undefined,
+    sessionCommand: echoSession,
+    shell: "/bin/bash",
+    now: () => new Date("2026-09-24T08:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+test("session: the coder session opens in the run's directory, beside the run terminal", async () => {
+  const server = new FakeTmuxServer();
+  const entry = project();
+  await startRun(request(entry), deps(server));
+  const opened = await openCoderSession({ project: entry, ticket: "PROJ-12", by: "Olivier" }, sessionDeps(server));
+
+  expect(opened).toEqual({
+    ok: true,
+    terminal: {
+      id: "ln-demo-app-PROJ-12__coder",
+      kind: "session",
+      project: "demo-app",
+      ticket: "PROJ-12",
+      pipeline: "feature",
+      worktree: true,
+      by: "Olivier",
+      createdAt: "2026-09-24T08:00:00.000Z",
+      command: "echo 'resume 0b5f7c3e-1111-4222-8333-444455556666'",
+      attach: "tmux -L fake attach -t ln-demo-app-PROJ-12__coder",
+    },
+  });
+  expect(server.sessions.get("ln-demo-app-PROJ-12__coder")?.cwd).toBe(entry.cwd);
+  const kinds = (await listTerminals(server.tmux()))?.map((terminal) => [terminal.id, terminal.kind]);
+  expect(kinds).toEqual([
+    ["ln-demo-app-PROJ-12", "run"],
+    ["ln-demo-app-PROJ-12__coder", "session"],
+  ]);
+
+  const again = await openCoderSession({ project: entry, ticket: "PROJ-12", by: "Olivier" }, sessionDeps(server));
+  expect(again.ok ? undefined : again.status).toBe(409);
+  expect(again.ok ? undefined : again.terminal?.id).toBe("ln-demo-app-PROJ-12__coder");
+});
+
+test("session: refused without a session, while the run runs, and once its directory is gone", async () => {
+  const server = new FakeTmuxServer();
+  const entry = project();
+  const open = (overrides: Partial<OpenSessionDeps>) =>
+    openCoderSession({ project: entry, ticket: "PROJ-12", by: "Olivier" }, sessionDeps(server, overrides));
+  const statusOf = (result: Awaited<ReturnType<typeof open>>) => (result.ok ? 201 : result.status);
+
+  expect(statusOf(await openCoderSession({ project: entry, ticket: "", by: "Olivier" }, sessionDeps(server)))).toBe(
+    400,
+  );
+  expect(statusOf(await open({ findSession: () => undefined }))).toBe(404);
+  expect(statusOf(await open({ findSession: () => coderSession(entry.cwd, { status: "RUNNING" }) }))).toBe(409);
+  const launched = { status: "FAIL", launch: { alive: true } } as unknown as Item;
+  expect(statusOf(await open({ findItem: async () => launched }))).toBe(409);
+  const gone = await open({ findSession: () => coderSession(join(entry.cwd, "removed-worktree")) });
+  expect(gone.ok ? "" : gone.reason).toContain("no longer exists");
+  expect(statusOf(await open({ sessionCommand: () => ({ ok: false, status: 503, reason: "no claude" }) }))).toBe(503);
+  expect(server.sessions.size).toBe(0);
+});
+
+test("session command: a forked Claude resume, and nothing for another provider or a bad id", () => {
+  const id = "0b5f7c3e-1111-4222-8333-444455556666";
+  expect(resumeCoderCommand({ provider: "codex", sessionId: id })).toMatchObject({ ok: false, status: 409 });
+  expect(resumeCoderCommand({ provider: "claude", sessionId: "x; rm -rf /" })).toMatchObject({ ok: false });
+  const built = resumeCoderCommand({ provider: "claude", sessionId: id });
+  if (!hasClaudeCli()) {
+    expect(built).toEqual({ ok: false, status: 503, reason: "claude CLI not found" });
+    return;
+  }
+  expect(built).toEqual({ ok: true, words: ["claude", "--resume", id, "--fork-session"] });
 });

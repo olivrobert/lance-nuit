@@ -13,7 +13,9 @@ import type { Item } from "../../api/types.js";
 export function TerminalLink({ item, className }: { item: Item; className?: string }): JSX.Element | null {
   const navigate = useNavigate();
   const terminals = useQuery(terminalsQuery).data;
-  const id = terminals?.find((entry) => entry.project === item.project.name && entry.ticket === item.ticket)?.id;
+  const id = terminals?.find(
+    (entry) => entry.kind === "run" && entry.project === item.project.name && entry.ticket === item.ticket,
+  )?.id;
 
   if (!id) return null;
   return (

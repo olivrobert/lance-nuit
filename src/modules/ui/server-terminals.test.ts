@@ -6,7 +6,7 @@ import { createDefaultWorkItemGatewayRegistry } from "../work-item/registry.ts";
 import { cleanupTempDirs, makeProject, makeTempDir, writeProjectsFile, writeRun } from "../read-model/test-harness.js";
 import { USER_COOKIE } from "./cookies.js";
 import { type RunningUiServer, startUiServer, type UiServerOptions } from "./server.js";
-import type { PaneCommandBuilder } from "./terminals.js";
+import type { PaneCommandBuilder, SessionCommandBuilder } from "./terminals.js";
 import { FakeAttach, FakeTmuxServer } from "./test-harness.js";
 import { Tmux } from "./tmux.js";
 
@@ -22,6 +22,8 @@ afterEach(async () => {
 });
 
 const echoCommand: PaneCommandBuilder = (run) => ({ ok: true, words: ["echo", `marker-${run.ticket}`] });
+
+const echoSession: SessionCommandBuilder = (session) => ({ ok: true, words: ["echo", `resume-${session.sessionId}`] });
 
 const as = (user: string) => ({ Cookie: `${USER_COOKIE}=${user}`, "Content-Type": "application/json" });
 
@@ -49,6 +51,7 @@ async function fixture(options: Partial<UiServerOptions> = {}): Promise<Fixture>
     tmux: tmux.tmux(),
     attach: attach.spawner,
     paneCommand: echoCommand,
+    sessionCommand: echoSession,
     listPipelines: () => ["default", "feature"],
     ...options,
   });
@@ -297,4 +300,44 @@ test.skipIf(!hasTmux)("real tmux: the command runs in the pane and the viewer ca
 
   const actor = spawnSync("tmux", ["-L", socket, "show-environment", "-t", "=ln-demo-app-PROJ-12", "LANCENUIT_ACTOR"]);
   expect(actor.stdout.toString().trim()).toBe("LANCENUIT_ACTOR=Olivier");
+});
+
+function openSession(url: (path: string) => string, body: Record<string, unknown> = {}, user = "Olivier") {
+  return fetch(url("/api/sessions"), {
+    method: "POST",
+    headers: as(user),
+    body: JSON.stringify({ project: "demo-app", ticket: "PROJ-12", ...body }),
+  });
+}
+
+test("sessions: the coder session opens in the run's directory, 409 while running, 404 without one", async () => {
+  const { url, tmux, project } = await fixture();
+  const coder = { provider: "claude", id: "0b5f7c3e-1111-4222-8333-444455556666", resumable: true };
+  writeRun(project, "PROJ-12", "feature", {
+    runId: "r-1",
+    status: "FAIL",
+    steps: [{ id: "code", status: "failed", retries: 0, profile: "coder", session: coder }],
+  });
+  writeRun(project, "PROJ-7", "feature", {
+    runId: "r-2",
+    status: "RUNNING",
+    steps: [{ id: "code", status: "running", retries: 0, profile: "coder", session: coder }],
+  });
+  writeRun(project, "PROJ-8", "feature", { runId: "r-3", status: "FAIL", steps: [] });
+
+  expect((await openSession(url, {}, "Stranger")).status).toBe(403);
+  expect((await openSession(url, { project: "nope" })).status).toBe(404);
+  expect((await openSession(url, { ticket: "PROJ-8" })).status).toBe(404);
+  expect((await openSession(url, { ticket: "PROJ-7" })).status).toBe(409);
+
+  const created = await openSession(url);
+  expect(created.status).toBe(201);
+  const { terminal } = (await created.json()) as { terminal: Record<string, unknown> };
+  expect(terminal).toMatchObject({
+    id: "ln-demo-app-PROJ-12__coder",
+    kind: "session",
+    pipeline: "feature",
+    command: `echo resume-${coder.id}`,
+  });
+  expect(tmux.sessions.get("ln-demo-app-PROJ-12__coder")?.cwd).toBe(project);
 });
