@@ -15,10 +15,10 @@
 // typed prefix is not the one the project's provider declares: launching a `FOOD-` ticket from the
 // wrong project is the one mistake this form exists to make hard.
 //
-// Why the state is local and not in the store: the answers, the pipeline list
-// and the pending flag belong to one opening of this form, are read by nothing
-// else, and are thrown away when it closes. The fifteen second poll never
-// repaints them, so the store's reasons for owning state do not apply.
+// The answers and the pending flag are local state: they belong to one opening
+// of this form, are read by nothing else, and are thrown away when it closes.
+// The pipeline list is a query, keyed by project, so an answer for a project the
+// reader already switched away from never lands on the new one.
 //
 // The native `<dialog>` element, opened with `showModal()`, gives the focus
 // trap, the inert background and the Escape key for free, and focuses the first
@@ -27,12 +27,14 @@
 // unmounting it: calling `close()` from an effect cleanup would fire a `close`
 // event under Strict Mode's double mount and shut the dialog it just opened.
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import type { FormEvent, JSX } from "react";
 import { useEffect, useRef, useState } from "react";
-import { fetchPipelines, postRun } from "../api/client.js";
+import { postRun } from "../api/client.js";
+import { keys, pipelinesQuery } from "../api/queries.js";
 import type { ProjectView } from "../api/types.js";
 import { ticketPlaceholder, ticketPrefixMismatch } from "../lib/ticket.js";
-import { navigate } from "../store/useRoute.js";
 import styles from "./LaunchRunDialog.module.css";
 
 export interface LaunchRunDialogProps {
@@ -43,62 +45,26 @@ export interface LaunchRunDialogProps {
   onClose(): void;
 }
 
-/** The pipeline list of the chosen project, as the select shows it. */
-type Pipelines =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "ok"; names: string[] }
-  | { status: "error"; error: string };
-
 /** The pipeline preselected in a fresh list: `default` when the project has one. */
 function preferredPipeline(names: readonly string[]): string {
   return names.includes("default") ? "default" : (names[0] ?? "");
 }
 
-/** Load the pipelines of one project, dropping an answer for a project the
- *  reader already switched away from. */
-function usePipelines(project: string, onLoaded: (names: string[]) => void): Pipelines {
-  const [pipelines, setPipelines] = useState<Pipelines>({ status: "idle" });
-  const loaded = useRef(onLoaded);
-  loaded.current = onLoaded;
-
-  useEffect(() => {
-    if (!project) {
-      setPipelines({ status: "idle" });
-      return;
-    }
-    let current = true;
-    setPipelines({ status: "loading" });
-    fetchPipelines(project)
-      .then((result) => {
-        if (!current) return;
-        if (!result.ok || !Array.isArray(result.body.pipelines)) {
-          setPipelines({ status: "error", error: result.body.error ?? `error ${result.status}` });
-          return;
-        }
-        setPipelines({ status: "ok", names: result.body.pipelines });
-        loaded.current(result.body.pipelines);
-      })
-      .catch((error: unknown) => {
-        if (current) setPipelines({ status: "error", error: String(error) });
-      });
-    return () => {
-      current = false;
-    };
-  }, [project]);
-
-  return pipelines;
-}
-
 export function LaunchRunDialog({ projects, locked, onClose }: LaunchRunDialogProps): JSX.Element {
   const dialog = useRef<HTMLDialogElement>(null);
+  const client = useQueryClient();
+  const navigate = useNavigate();
   const [projectName, setProjectName] = useState(locked ?? "");
   const [ticket, setTicket] = useState("");
-  const [pipeline, setPipeline] = useState("");
+  const [picked, setPicked] = useState("");
   const [worktree, setWorktree] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pipelines = usePipelines(projectName, (names) => setPipeline(preferredPipeline(names)));
+  const pipelines = useQuery({ ...pipelinesQuery(projectName), enabled: projectName !== "" });
+  const names = pipelines.data;
+  // The reader's pick while the list still holds it, else the preferred one: a
+  // fresh list preselects without an effect writing the state back.
+  const pipeline = names ? (names.includes(picked) ? picked : preferredPipeline(names)) : "";
 
   // The element that opened the dialog, captured on the first render. A dialog
   // removed from the page while open does not hand the focus back by itself.
@@ -115,11 +81,11 @@ export function LaunchRunDialog({ projects, locked, onClose }: LaunchRunDialogPr
 
   const project = projects.find((entry) => entry.name === projectName);
   const mismatch = ticketPrefixMismatch(ticket, project?.ticketPrefix);
-  const ready = Boolean(project) && ticket.trim() !== "" && pipelines.status === "ok" && pipeline !== "" && !pending;
+  const ready = Boolean(project) && ticket.trim() !== "" && pipeline !== "" && !pending;
 
   const chooseProject = (name: string): void => {
     setProjectName(name);
-    setPipeline("");
+    setPicked("");
     setError(null);
   };
 
@@ -134,11 +100,12 @@ export function LaunchRunDialog({ projects, locked, onClose }: LaunchRunDialogPr
       // 201 is a new session; 409 with a terminal is the session already running
       // for this ticket, which is exactly where the reader wants to be.
       if ((result.status === 201 || result.status === 409) && terminal?.id) {
+        void client.invalidateQueries({ queryKey: keys.terminals });
         onClose();
-        navigate({ view: "terminal", id: terminal.id });
+        void navigate({ to: "/terminal/$id", params: { id: terminal.id } });
         return;
       }
-      setError(result.body.error ?? `The server refused the launch (error ${result.status}).`);
+      setError(result.ok ? "The server answered without a session." : result.error);
     } catch (failure) {
       setError(`The launch request failed: ${failure}`);
     } finally {
@@ -204,26 +171,24 @@ export function LaunchRunDialog({ projects, locked, onClose }: LaunchRunDialogPr
           <select
             required
             value={pipeline}
-            disabled={pipelines.status !== "ok" || pipelines.names.length === 0}
-            onChange={(event) => setPipeline(event.target.value)}
+            disabled={!names || names.length === 0}
+            onChange={(event) => setPicked(event.target.value)}
           >
-            {pipelines.status === "ok" ? (
-              pipelines.names.map((name) => (
+            {names ? (
+              names.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>
               ))
             ) : (
-              <option value="">{pipelines.status === "loading" ? "Loading…" : "—"}</option>
+              <option value="">{pipelines.isFetching ? "Loading…" : "—"}</option>
             )}
           </select>
         </label>
-        {pipelines.status === "error" ? (
-          <p className={styles.error}>{`Pipelines could not be read: ${pipelines.error}`}</p>
+        {pipelines.error ? (
+          <p className={styles.error}>{`Pipelines could not be read: ${pipelines.error.message}`}</p>
         ) : null}
-        {pipelines.status === "ok" && pipelines.names.length === 0 ? (
-          <p className={styles.error}>This project declares no pipeline.</p>
-        ) : null}
+        {names?.length === 0 ? <p className={styles.error}>This project declares no pipeline.</p> : null}
 
         <label className={styles.check}>
           <input type="checkbox" checked={worktree} onChange={(event) => setWorktree(event.target.checked)} />

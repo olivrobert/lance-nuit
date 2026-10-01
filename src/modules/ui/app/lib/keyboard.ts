@@ -1,6 +1,6 @@
 // The list's single-key shortcuts, as pure rules.
 //
-// `useListKeyboard` owns the listener, the DOM lookups and the store calls; what
+// `useListKeyboard` owns the listener, the DOM lookups and the navigation; what
 // is decided here is which key means what, where the selection lands, and when
 // a key press belongs to something else (a field being typed in, a dialog, a
 // chord with a modifier). Kept apart from the hook so it is testable without a

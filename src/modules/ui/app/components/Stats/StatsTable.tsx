@@ -4,14 +4,16 @@
 // Sorting is the parent's state — the header only reports which column was
 // clicked — so the order survives a refresh of the data.
 
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import type { JSX } from "react";
 import { Fragment, useState } from "react";
+import { itemsQuery } from "../../api/queries.js";
 import type { StatsRun, StatsTicket } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
 import { fmtCost, fmtDate, fmtDuration, shortRunId } from "../../lib/format.js";
 import { nextSort, type StatsColumn, type StatsSort, spanMs } from "../../lib/stats.js";
-import { useUiSelector } from "../../store/store.js";
-import { navigate } from "../../store/useRoute.js";
+import { inboxTarget } from "../../lib/inbox-address.js";
 import styles from "./Stats.module.css";
 
 const COLUMNS: ReadonlyArray<{ column: StatsColumn; label: string; numeric?: true; title?: string }> = [
@@ -64,13 +66,15 @@ function Header({ sort, onSort }: { sort: StatsSort; onSort: (sort: StatsSort) =
 /** The ticket id: opens the inbox on it when the inbox has it, else the
  *  tracker when the project declares one, else plain text. */
 function TicketCell({ ticket }: { ticket: StatsTicket }): JSX.Element {
-  const inInbox = useUiSelector((state) => state.items.some((item) => item.key === ticket.key));
+  const navigate = useNavigate();
+  const { data: items } = useQuery(itemsQuery);
+  const inInbox = items?.some((item) => item.key === ticket.key) ?? false;
   if (inInbox) {
     return (
       <button
         type="button"
         className={styles.link}
-        onClick={() => navigate({ view: "inbox", project: null, item: ticket.key })}
+        onClick={() => void navigate(inboxTarget({ chip: null, item: ticket.key }))}
       >
         {ticket.ticket}
       </button>

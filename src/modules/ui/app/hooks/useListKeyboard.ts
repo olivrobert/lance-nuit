@@ -6,12 +6,12 @@
 // `lib/keyboard.ts`. This hook owns what only the browser has: the listener,
 // the rows actually on screen — read from the DOM, because only the DOM knows
 // which `<details>` the reader closed — and the scroll that keeps the selected
-// row in view. It is mounted once, by `App`, and told whether the inbox is the
-// screen shown: on the terminal screen every key belongs to the shell.
+// row in view. It is mounted by `InboxScreen`, so on any other screen — the
+// terminal first — every key belongs to that screen.
 
 import { useEffect } from "react";
 import { ignoresKey, listKeyOf, stepSelection } from "../lib/keyboard.js";
-import { actions, useUiSelector } from "./store.js";
+import { setQuery } from "../store/ui-store.js";
 
 const SEARCH = "[data-list-search]";
 const LIST = "[data-item-list]";
@@ -37,16 +37,14 @@ function focusRow(key: string | null): boolean {
   return true;
 }
 
-export function useListKeyboard(inbox: boolean): void {
-  const selected = useUiSelector((state) => state.selected);
-
+export function useListKeyboard(selected: string | null, onSelect: (key: string) => void): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       const target = event.target instanceof HTMLElement ? event.target : null;
 
-      if (event.key === "Escape" && inbox && target?.matches(SEARCH)) {
+      if (event.key === "Escape" && target?.matches(SEARCH)) {
         event.preventDefault();
-        actions.setQuery("");
+        setQuery("");
         target.blur();
         // After the list re-rendered without the query: the selected row may
         // only exist again then. Without one on screen, the first row takes focus.
@@ -68,7 +66,7 @@ export function useListKeyboard(inbox: boolean): void {
           target === document.documentElement ||
           target.closest(LIST) !== null,
         dialogOpen: document.querySelector("dialog[open]") !== null,
-        inbox,
+        inbox: true,
         altKey: event.altKey,
         ctrlKey: event.ctrlKey,
         metaKey: event.metaKey,
@@ -82,11 +80,11 @@ export function useListKeyboard(inbox: boolean): void {
       }
       const next = stepSelection(visibleRowKeys(), selected, intent);
       if (!next) return;
-      if (next !== selected) actions.select(next);
+      if (next !== selected) onSelect(next);
       focusRow(next);
     };
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [inbox, selected]);
+  }, [selected, onSelect]);
 }

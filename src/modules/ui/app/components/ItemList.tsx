@@ -12,16 +12,18 @@
 //
 // Rows carry `data-row-key` and the list `data-item-list`: `useListKeyboard`
 // walks them to move the selection, so the DOM order is the keyboard order.
+//
+// The rows and the selection are the inbox's, handed down by `InboxScreen`:
+// the list draws them and reports a click, it never decides what is selected.
 
 import type { CSSProperties, JSX } from "react";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Item } from "../api/types.js";
 import { cx } from "../lib/cx.js";
-import { visibleItems } from "../lib/inbox.js";
 import { rowShowsTag, rowTime, timeline, type TimelineSection, type TimelineSectionId } from "../lib/inbox-timeline.js";
 import { reasonOf } from "../lib/items.js";
 import { fmtCost } from "../lib/format.js";
-import { useActions, useUiSelector } from "../store/store.js";
+import { setQuery } from "../store/ui-store.js";
 import styles from "./ItemList.module.css";
 import { ProjectBadge } from "./ProjectBadge.js";
 import { StatusTag } from "./StatusTag.js";
@@ -32,14 +34,15 @@ function ItemRow({
   now,
   showProject,
   selected,
+  onSelect,
 }: {
   item: Item;
   sectionId: TimelineSectionId;
   now: Date;
   showProject: boolean;
   selected: boolean;
+  onSelect(key: string): void;
 }): JSX.Element {
-  const actions = useActions();
   const meta = [item.title ? item.ticket : null, item.pipeline, rowTime(item, sectionId, now)];
   if (item.worktree) meta.push("worktree");
   return (
@@ -48,7 +51,7 @@ function ItemRow({
       className={cx(styles.it, styles[item.group], selected && styles.sel)}
       aria-current={selected ? "true" : undefined}
       data-row-key={item.key}
-      onClick={() => actions.select(item.key)}
+      onClick={() => onSelect(item.key)}
     >
       <span className={styles.t}>
         {showProject ? <ProjectBadge name={item.project.name} /> : null}
@@ -96,13 +99,22 @@ function SectionHead({ section }: { section: TimelineSection }): JSX.Element {
   );
 }
 
-function EmptyList({ total, query, filter }: { total: number; query: string; filter: string | null }): JSX.Element {
-  const actions = useActions();
+function EmptyList({
+  total,
+  query,
+  filter,
+  onShowAll,
+}: {
+  total: number;
+  query: string;
+  filter: string | null;
+  onShowAll(): void;
+}): JSX.Element {
   if (query.trim()) {
     return (
       <div className={styles.empty}>
         <p>{`No run matches “${query.trim()}”.`}</p>
-        <button type="button" onClick={() => actions.setQuery("")}>
+        <button type="button" onClick={() => setQuery("")}>
           Clear search
         </button>
       </div>
@@ -112,7 +124,7 @@ function EmptyList({ total, query, filter }: { total: number; query: string; fil
     return (
       <div className={styles.empty}>
         <p>{`No run in ${filter}.`}</p>
-        <button type="button" onClick={() => actions.setFilter(null)}>
+        <button type="button" onClick={onShowAll}>
           Show every project
         </button>
       </div>
@@ -129,9 +141,8 @@ function useHeadHeight(): [(element: HTMLElement | null) => void, number] {
   const [head, setHead] = useState<HTMLElement | null>(null);
   const [height, setHeight] = useState(0);
   useLayoutEffect(() => {
-    if (!head) return;
-    setHeight(head.offsetHeight);
-    if (typeof ResizeObserver === "undefined") return;
+    // The observer reports the first size itself, before the next paint.
+    if (!head || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => setHeight(head.offsetHeight));
     observer.observe(head);
     return () => observer.disconnect();
@@ -139,15 +150,22 @@ function useHeadHeight(): [(element: HTMLElement | null) => void, number] {
   return [setHead, height];
 }
 
-export function ItemList(): JSX.Element {
-  const items = useUiSelector((state) => state.items);
-  const filter = useUiSelector((state) => state.filter);
-  const query = useUiSelector((state) => state.query);
-  const selected = useUiSelector((state) => state.selected);
+export interface ItemListProps {
+  /** The rows the chip and the search leave on screen. */
+  rows: readonly Item[];
+  /** Every item, whatever the filters: the empty state says which filter hid them. */
+  total: number;
+  filter: string | null;
+  query: string;
+  selected: string | null;
+  onSelect(key: string): void;
+  onShowAll(): void;
+}
+
+export function ItemList({ rows, total, filter, query, selected, onSelect, onShowAll }: ItemListProps): JSX.Element {
   // Only what the reader toggled; a section they never touched follows its default.
   const [opened, setOpened] = useState<Partial<Record<TimelineSectionId, boolean>>>({});
   const sectionRefs = useRef(new Map<TimelineSectionId, HTMLElement>());
-  const rows = visibleItems(items, { filter, query });
   const now = new Date();
   const sections = timeline(rows, now);
   const hasHead = sections.length > 0 || query.trim() !== "";
@@ -184,6 +202,7 @@ export function ItemList(): JSX.Element {
         now={now}
         showProject={showProject}
         selected={item.key === selected}
+        onSelect={onSelect}
       />
     ));
 
@@ -239,7 +258,7 @@ export function ItemList(): JSX.Element {
           </details>
         ),
       )}
-      {rows.length === 0 ? <EmptyList total={items.length} query={query} filter={filter} /> : null}
+      {rows.length === 0 ? <EmptyList total={total} query={query} filter={filter} onShowAll={onShowAll} /> : null}
     </aside>
   );
 }

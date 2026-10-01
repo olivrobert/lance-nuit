@@ -20,13 +20,16 @@
 //
 // WHAT REPLACED WHAT
 // -------------------
-//   the global `state` object   -> `store/store.ts`, an external store read
-//                                  through `useSyncExternalStore`. It stays
-//                                  outside React because the poll, the race
-//                                  guard and the late answers all write to it
-//                                  from outside a render.
+//   the global `state` object   -> server state in TanStack Query
+//                                  (`api/queries.ts`, `api/mutations.ts`), which
+//                                  owns the poll, the race guard and the late
+//                                  answers; client-only state in a small zustand
+//                                  store (`store/ui-store.ts`).
+//   the hand-parsed hash        -> TanStack Router (`router.tsx`): the address
+//                                  owns the chip, the item, the sheet tab and the
+//                                  stats filters.
 //   `render()` and `el()`       -> `components/`, one file per zone.
-//   the rules inside `render()` -> `lib/derive.ts`, pure and unit-tested.
+//   the rules inside `render()` -> `lib/`, pure and unit-tested.
 //   one 1038-line `app.css`     -> a `*.module.css` beside each component, plus
 //                                  `styles/tokens.css` for what must stay global
 //                                  and xterm's stylesheet for the terminal screen.
@@ -36,9 +39,12 @@
 // that keeps this front end free of the render-time side effects the DOM version
 // was made of.
 
+import { QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App.js";
+import { createQueryClient } from "./api/queries.js";
+import { router } from "./router.js";
 // xterm's own stylesheet, ahead of the tokens so the global reset wins a tie.
 import "@xterm/xterm/css/xterm.css";
 import "./styles/tokens.css";
@@ -48,6 +54,8 @@ if (!container) throw new Error("#app is missing from index.html");
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <QueryClientProvider client={createQueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   </StrictMode>,
 );
