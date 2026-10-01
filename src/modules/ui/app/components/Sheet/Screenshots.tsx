@@ -8,17 +8,15 @@ import type { JSX } from "react";
 import { rawFileUrl } from "../../api/client.js";
 import type { Item, WorkItemTree } from "../../api/types.js";
 import { screenshotGroups } from "../../lib/work-item-tree.js";
-import { actions } from "../../store/store.js";
+import { useSheetNavigation } from "./sheet-context.js";
 import styles from "./Screenshots.module.css";
 
 export function Screenshots({ item, tree }: { item: Item; tree: WorkItemTree | null }): JSX.Element | null {
+  const { openFile } = useSheetNavigation();
   const groups = screenshotGroups(tree);
   if (groups.length === 0) return null;
 
-  const openSummary = (path: string): void => {
-    actions.openFile(path);
-    actions.setSheetTab("files");
-  };
+  const openSummary = (path: string): void => openFile(path, "files");
 
   return (
     <section>

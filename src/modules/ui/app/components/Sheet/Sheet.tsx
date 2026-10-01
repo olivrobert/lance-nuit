@@ -23,11 +23,15 @@
 // belongs to a tab, so closing it was an artifact of a renderer that rebuilt the
 // subtree, not a decision. A reader who opened it keeps it open.
 
+import { useQuery } from "@tanstack/react-query";
+import { useSearch } from "@tanstack/react-router";
 import type { JSX } from "react";
-import { visibleItems } from "../../lib/inbox.js";
+import { assumptionsQuery, detailQuery } from "../../api/queries.js";
+import type { Item, ItemDetail } from "../../api/types.js";
+import { splitKey } from "../../lib/items.js";
+import { sheetSearchOf } from "../../lib/inbox-address.js";
 import { currentSheetTab } from "../../lib/sheet.js";
-import { hasAssumptionContent } from "../../lib/work-item-tree.js";
-import { useUiState } from "../../store/store.js";
+import { findAssumptions, hasAssumptionContent } from "../../lib/work-item-tree.js";
 import { DocumentView, Folder } from "../Explorer/index.js";
 import { Actions } from "./Actions.js";
 import { Approval } from "./Approval.js";
@@ -40,16 +44,15 @@ import { Report } from "./Report.js";
 import { Run } from "./Run.js";
 import styles from "./Sheet.module.css";
 import { SheetHeader } from "./SheetHeader.js";
+import { SheetContext, useSheet } from "./sheet-context.js";
 import { SheetTabs } from "./SheetTabs.js";
 import { Steps } from "./Steps.js";
 
 /** The one tab on screen. The header owns the action row, so the diagnostic
  *  callout is asked not to draw a second one. */
-function TabContent(): JSX.Element | null {
-  const { detail, sheetTab } = useUiState();
-  if (!detail) return null;
+function TabContent(): JSX.Element {
+  const { detail, tab } = useSheet();
   const { item, steps, recap, tree, report } = detail;
-  const tab = currentSheetTab(item, detail, sheetTab);
 
   if (tab === "report" && report) {
     return (
@@ -108,62 +111,81 @@ function TabContent(): JSX.Element | null {
   );
 }
 
-export function Sheet(): JSX.Element {
-  const state = useUiState();
-  const detail = state.detail;
+function Placeholder({ text }: { text: string }): JSX.Element {
+  return (
+    <main className={styles.sheet}>
+      <p className="mute" style={{ padding: 40 }}>
+        {text}
+      </p>
+    </main>
+  );
+}
 
-  if (!detail) {
-    const rows = visibleItems(state.items, { filter: state.filter, query: state.query });
-    return (
-      <main className={styles.sheet}>
-        <p className="mute" style={{ padding: 40 }}>
-          {rows.length ? "Choose a run in the list." : "Nothing selected."}
-        </p>
-      </main>
-    );
-  }
+/** The sheet of the item the inbox selected, `null` when no row is on screen.
+ *  The detail is cached by item, so an answer that lands after the reader moved
+ *  on is filed under its own item and never drawn over the sheet on screen. */
+export function Sheet({ selected }: { selected: Item | null }): JSX.Element {
+  const [project, ticket] = splitKey(selected?.key ?? "");
+  const detail = useQuery({ ...detailQuery(project, ticket), enabled: selected !== null });
 
+  if (!selected) return <Placeholder text="Nothing selected." />;
+  if (detail.data) return <SheetBody detail={detail.data} />;
+  if (detail.error) return <Placeholder text={`Could not read ${selected.ticket}: ${detail.error.message}`} />;
+  return <Placeholder text="Loading…" />;
+}
+
+function SheetBody({ detail }: { detail: ItemDetail }): JSX.Element {
+  const search = sheetSearchOf(useSearch({ strict: false }));
   const { item, tree } = detail;
+  const tab = currentSheetTab(item, detail, search.tab ?? "auto");
+  const filePath = search.file ?? tree?.gatePath ?? tree?.defaultPath ?? null;
+  const assumptionsFile = tree ? findAssumptions(tree.children) : undefined;
+  const assumptions = useQuery({
+    ...assumptionsQuery(item, assumptionsFile?.path ?? ""),
+    enabled: assumptionsFile !== undefined,
+  });
+
   const folderLabel = tree ? `work-items/${item.ticket}/` : "";
   // A decision shows its approval and its reply in the panel above the tabs.
   const decision = showsDecision(item);
   const approvalRelevant = !decision && item.approval && item.approval.state !== "absent";
-  const tab = currentSheetTab(item, detail, state.sheetTab);
 
   return (
-    <main className={styles.sheet}>
-      <div className={styles.top}>
-        <SheetHeader item={item} recap={detail.recap} />
-        <Actions item={item} report={detail.report} className={styles.topActions} />
-        <SheetTabs item={item} detail={detail} current={tab} />
-      </div>
-      <div className={styles.body}>
-        {decision ? <Decision item={item} /> : null}
-        <TabContent />
-        <details className={styles.detailsPanel}>
-          <summary>Run details</summary>
-          <Meta item={item} />
-          {item.launch ? (
-            <section className={styles.block}>
-              <h3>Last launch</h3>
-              <Launch item={item} />
-            </section>
-          ) : null}
-          {approvalRelevant ? (
-            <section className={styles.block}>
-              <h3>Approval</h3>
-              <Approval item={item} />
-            </section>
-          ) : null}
-          {hasAssumptionContent(state.assumptions) ? (
-            <section className={styles.block}>
-              <h3>Assumptions</h3>
-              <Assumptions />
-            </section>
-          ) : null}
-          <p className="small mute">{folderLabel ? `Folder: ${folderLabel}` : ""}</p>
-        </details>
-      </div>
-    </main>
+    <SheetContext value={{ item, detail, tab, filePath }}>
+      <main className={styles.sheet}>
+        <div className={styles.top}>
+          <SheetHeader item={item} recap={detail.recap} />
+          <Actions item={item} report={detail.report} className={styles.topActions} />
+          <SheetTabs item={item} detail={detail} current={tab} />
+        </div>
+        <div className={styles.body}>
+          {decision ? <Decision item={item} /> : null}
+          <TabContent />
+          <details className={styles.detailsPanel}>
+            <summary>Run details</summary>
+            <Meta item={item} />
+            {item.launch ? (
+              <section className={styles.block}>
+                <h3>Last launch</h3>
+                <Launch item={item} />
+              </section>
+            ) : null}
+            {approvalRelevant ? (
+              <section className={styles.block}>
+                <h3>Approval</h3>
+                <Approval item={item} />
+              </section>
+            ) : null}
+            {assumptions.data && hasAssumptionContent(assumptions.data) ? (
+              <section className={styles.block}>
+                <h3>Assumptions</h3>
+                <Assumptions data={assumptions.data} />
+              </section>
+            ) : null}
+            <p className="small mute">{folderLabel ? `Folder: ${folderLabel}` : ""}</p>
+          </details>
+        </div>
+      </main>
+    </SheetContext>
   );
 }

@@ -15,7 +15,8 @@ import type { Item, RunReport, RunReportCriterion } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
 import { captureNumbers, capturePath, leftForYou, reviewText } from "../../lib/report.js";
 import { linkableUrl } from "../../lib/url.js";
-import { actions } from "../../store/store.js";
+import { copy } from "../../store/ui-store.js";
+import { useSheetNavigation } from "./sheet-context.js";
 import styles from "./Report.module.css";
 
 /** Id of a criterion's row, so a reserve in "Left for you" can point at it. */
@@ -27,11 +28,6 @@ function showCriterion(id: string): void {
   const row = document.getElementById(criterionAnchor(id));
   if (row instanceof HTMLDetailsElement) row.open = true;
   row?.scrollIntoView({ behavior: "smooth", block: "center" });
-}
-
-function openInFiles(path: string): void {
-  actions.openFile(path);
-  actions.setSheetTab("files");
 }
 
 function hostOf(url: string): string {
@@ -91,7 +87,7 @@ function Delivered({ report }: { report: RunReport }): JSX.Element | null {
                 type="button"
                 className={styles.copy}
                 title={`Copy ${cell.value}`}
-                onClick={() => void actions.copy(cell.value)}
+                onClick={() => void copy(cell.value)}
               >
                 Copy
               </button>
@@ -281,7 +277,7 @@ function ForReview({ report }: { report: RunReport }): JSX.Element | null {
     <section className={styles.block}>
       <div className={styles.head}>
         <h3>{review.title}</h3>
-        <button type="button" className={styles.copy} onClick={() => void actions.copy(reviewText(review))}>
+        <button type="button" className={styles.copy} onClick={() => void copy(reviewText(review))}>
           Copy
         </button>
       </div>
@@ -298,6 +294,7 @@ function ForReview({ report }: { report: RunReport }): JSX.Element | null {
 }
 
 function Notes({ report }: { report: RunReport }): JSX.Element | null {
+  const { openFile } = useSheetNavigation();
   const notes = report.notes ?? [];
   if (notes.length === 0) return null;
   return (
@@ -313,7 +310,7 @@ function Notes({ report }: { report: RunReport }): JSX.Element | null {
           </summary>
           <div className={styles.foldBody}>
             <p>
-              <button type="button" className="small" onClick={() => openInFiles(note.path)}>
+              <button type="button" className="small" onClick={() => openFile(note.path, "files")}>
                 {`Open ${note.path}`}
               </button>
             </p>

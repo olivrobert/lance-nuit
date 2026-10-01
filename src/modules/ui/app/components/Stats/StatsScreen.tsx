@@ -1,22 +1,22 @@
 // The stats screen (`#/stats`): what every ticket cost, across every project.
 //
-// It owns its data rather than going through the store. The figures are read
-// once when the screen opens and again on a manual refresh — never by the poll,
-// because the server opens every run snapshot of every project to answer — and
-// nothing else on the page needs them.
+// The figures are read when the screen opens and again on a manual refresh —
+// never by the poll, because the server opens every run snapshot of every
+// project to answer. The filters and the sort live in the address
+// (`lib/stats-search.ts`), so a filtered view survives a reload.
 //
 // The recap cards, the filter bar and the table all read the same filtered
 // list, so the cards always describe exactly the rows on screen.
 
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import type { JSX } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchStats } from "../../api/client.js";
+import { useMemo } from "react";
+import { statsQuery } from "../../api/queries.js";
 import type { StatsRead, TicketKind } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
 import { fmtCost, fmtDate, fmtDuration } from "../../lib/format.js";
 import {
-  DEFAULT_FILTER,
-  DEFAULT_SORT,
   daysAgo,
   filterTickets,
   KINDS,
@@ -32,26 +32,7 @@ import {
 import styles from "./Stats.module.css";
 import { StatsTable } from "./StatsTable.js";
 
-type Load = { status: "loading" } | { status: "error"; error: string } | { status: "ok"; data: StatsRead };
-
-function useStats(): [Load, () => void] {
-  const [load, setLoad] = useState<Load>({ status: "loading" });
-  const refresh = useCallback(() => {
-    setLoad((current) => (current.status === "ok" ? current : { status: "loading" }));
-    fetchStats()
-      .then((result) => {
-        if (result.ok && Array.isArray(result.body.tickets) && result.body.archive) {
-          setLoad({ status: "ok", data: { tickets: result.body.tickets, archive: result.body.archive } });
-        } else {
-          setLoad({ status: "error", error: result.body.error ?? `HTTP ${result.status}` });
-        }
-      })
-      .catch((error: unknown) => setLoad({ status: "error", error: String(error) }));
-  }, []);
-  useEffect(refresh, [refresh]);
-  return [load, refresh];
-}
-
+import { searchOfStatsView, statsViewOf } from "../../lib/stats-search.js";
 interface ChipProps<T> {
   label: string;
   value: T;
@@ -239,12 +220,19 @@ function ArchiveNote({ archive }: { archive: StatsRead["archive"] }): JSX.Elemen
   return <span className="small mute">No archive</span>;
 }
 
-export function StatsScreen(): JSX.Element {
-  const [load, refresh] = useStats();
-  const [filter, setFilter] = useState<StatsFilter>(DEFAULT_FILTER);
-  const [sort, setSort] = useState<StatsSort>(DEFAULT_SORT);
+const NO_TICKETS: StatsRead["tickets"] = [];
 
-  const tickets = load.status === "ok" ? load.data.tickets : [];
+export function StatsScreen(): JSX.Element {
+  const stats = useQuery(statsQuery);
+  const navigate = useNavigate();
+  const { filter, sort } = statsViewOf(useSearch({ from: "/stats" }));
+  // A filter click replaces the history entry: back leaves the screen rather
+  // than stepping through every chip the reader tried.
+  const show = (nextFilter: StatsFilter, nextSort: StatsSort): void => {
+    void navigate({ to: "/stats", search: searchOfStatsView(nextFilter, nextSort), replace: true });
+  };
+
+  const tickets = stats.data?.tickets ?? NO_TICKETS;
   const projects = useMemo(() => [...new Set(tickets.map((ticket) => ticket.project))].sort(), [tickets]);
   const shown = useMemo(() => filterTickets(tickets, filter), [tickets, filter]);
   const sorted = useMemo(() => sortTickets(shown, sort), [shown, sort]);
@@ -254,18 +242,18 @@ export function StatsScreen(): JSX.Element {
     <main className={styles.screen}>
       <div className={styles.head}>
         <h1>Ticket costs</h1>
-        {load.status === "ok" ? <ArchiveNote archive={load.data.archive} /> : null}
-        <button type="button" className={styles.refresh} onClick={refresh}>
+        {stats.data ? <ArchiveNote archive={stats.data.archive} /> : null}
+        <button type="button" className={styles.refresh} onClick={() => void stats.refetch()}>
           Refresh
         </button>
       </div>
-      {load.status === "loading" ? <p className="mute">Reading every run…</p> : null}
-      {load.status === "error" ? <p className={styles.warn}>{`Could not read the stats: ${load.error}`}</p> : null}
-      {load.status === "ok" ? (
+      {stats.isPending ? <p className="mute">Reading every run…</p> : null}
+      {stats.error ? <p className={styles.warn}>{`Could not read the stats: ${stats.error.message}`}</p> : null}
+      {stats.data ? (
         <>
           <Recap totals={totals} />
-          <Filters projects={projects} filter={filter} onChange={setFilter} />
-          <StatsTable tickets={sorted} sort={sort} onSort={setSort} />
+          <Filters projects={projects} filter={filter} onChange={(next) => show(next, sort)} />
+          <StatsTable tickets={sorted} sort={sort} onSort={(next) => show(filter, next)} />
         </>
       ) : null}
     </main>

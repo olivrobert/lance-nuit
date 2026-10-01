@@ -169,16 +169,19 @@ src/modules/ui/              server side
   terminal-viewers.ts        the embedded terminals
   static-files.ts, markdown.ts, cookies.ts
 src/modules/ui/app/          React 19 + TypeScript sources of the front end
-  index.tsx                  entry point: mounts <App> into #app
-  App.tsx                    the shell (identity page, banner, project bar, list, sheet)
-  api/                       client.ts, the only HTTP code; types.ts, type-only
+  index.tsx                  entry point: QueryClientProvider + RouterProvider into #app
+  router.tsx                 TanStack Router route tree on the hash; search params
+                             validated by pure functions of lib/
+  App.tsx                    root gate (unreachable server, identity page), the
+                             stats and terminal pages, the route error screen
+  api/                       client.ts, the only HTTP code (reads throw ApiError,
+                             writes resolve an ApiResult union); queries.ts, the
+                             TanStack Query keys, options and poll; mutations.ts,
+                             every write and its toast; types.ts, type-only
                              re-exports of the server's DTOs
-  store/                     one snapshot: state.ts (shape and contract), core.ts
-                             (set, stage, signed commit), selection.ts (race token),
-                             detail-loader.ts, refresh.ts (serialised), toasts.ts,
-                             wired by create-store.ts; store.ts holds the one
-                             instance and the React hooks, next to the poll and
-                             the attention notifications
+  store/ui-store.ts          zustand: client-only state (search, replies, open
+                             folders, toast, last inbox address); no server data
+  hooks/                     keyboard, attention notifications, debounce
   lib/                       pure derivation and formatting, one module per screen
                              concern (items, inbox, sheet, run-timeline, report...),
                              unit-tested
@@ -210,6 +213,13 @@ worktree copy, and neither calls the work-item provider. `readStats`
 (`stats.ts`) serves the ticket-costs screen: it walks every root run of every
 listed project on request, never from the poll, and merges the external
 archive described in [usage](usage.md#ticket-costs).
+
+In the front end, the address is the source of truth for where the reader is —
+chip, item, sheet tab and file, stats filters (`lib/inbox-address.ts`,
+`lib/stats-search.ts`) — the query cache for what the server said, and the
+zustand store only for what neither owns. No state is copied from one to
+another; `InboxScreen` is the one place that writes a corrected inbox address
+back.
 
 `bun run ui:build` bundles `app/index.tsx` with esbuild into
 `static/app.js` and `static/app.css`, which the static handler serves verbatim.

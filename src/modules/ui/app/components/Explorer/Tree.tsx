@@ -1,9 +1,8 @@
 // The recursive file tree of one work item's directory.
 //
-// A directory's open state is not owned by this component: it lives in the
-// store (`openDirs`) so it survives a poll and a tab switch, the same way the
-// vanilla renderer kept it on the global `state` object rather than on the
-// `<details>` node. `<details open>` is therefore driven by the store on every
+// A directory's open state is not owned by this component: it lives in the UI
+// store (`openDirs`, by item) so it survives a poll, a tab switch and a trip to
+// another item. `<details open>` is therefore driven by the store on every
 // render, and `onToggle` — fired after the browser has already flipped the
 // element, whether by a click or the keyboard — reports that back through
 // `toggleDir` instead of ever being read back off the DOM.
@@ -17,7 +16,8 @@ import type { TreeNode } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
 import { countFiles } from "../../lib/work-item-tree.js";
 import { fmtSize } from "../../lib/format.js";
-import { useActions, useUiSelector } from "../../store/store.js";
+import { openDirsOf, toggleDir, useUi } from "../../store/ui-store.js";
+import { useSheet, useSheetNavigation } from "../Sheet/sheet-context.js";
 import styles from "./Explorer.module.css";
 import { groupFiles, isMachineFoldOpen, machineFoldKey } from "./file-groups.js";
 
@@ -31,9 +31,8 @@ export function isOpen(path: string, openDirs: readonly string[], filePath: stri
 /** One directory's children in reading order: markdown documents, then the
  *  rest, then the runner's own files folded under "Machine files". */
 export function Tree({ nodes, path = "" }: { nodes: readonly TreeNode[]; path?: string }): JSX.Element {
-  const openDirs = useUiSelector((state) => state.openDirs);
-  const filePath = useUiSelector((state) => state.filePath);
-  const actions = useActions();
+  const { item, filePath } = useSheet();
+  const openDirs = useUi((state) => openDirsOf(state, item.key));
   const { documents, others, machine } = groupFiles(nodes);
 
   return (
@@ -44,7 +43,7 @@ export function Tree({ nodes, path = "" }: { nodes: readonly TreeNode[]; path?: 
         <li className={styles.machine}>
           <details
             open={isMachineFoldOpen(path, machine, openDirs, filePath)}
-            onToggle={(event) => actions.toggleDir(machineFoldKey(path), event.currentTarget.open)}
+            onToggle={(event) => toggleDir(item.key, machineFoldKey(path), event.currentTarget.open)}
           >
             <summary>
               Machine files
@@ -61,9 +60,9 @@ export function Tree({ nodes, path = "" }: { nodes: readonly TreeNode[]; path?: 
 }
 
 function Rows({ nodes }: { nodes: readonly TreeNode[] }): JSX.Element {
-  const openDirs = useUiSelector((state) => state.openDirs);
-  const filePath = useUiSelector((state) => state.filePath);
-  const actions = useActions();
+  const { item, filePath } = useSheet();
+  const openDirs = useUi((state) => openDirsOf(state, item.key));
+  const { openFile } = useSheetNavigation();
 
   return (
     <>
@@ -74,7 +73,7 @@ function Rows({ nodes }: { nodes: readonly TreeNode[] }): JSX.Element {
             <li key={node.path}>
               <details
                 open={isOpen(node.path, openDirs, filePath)}
-                onToggle={(event) => actions.toggleDir(node.path, event.currentTarget.open)}
+                onToggle={(event) => toggleDir(item.key, node.path, event.currentTarget.open)}
               >
                 <summary>
                   {`${node.name}/`}
@@ -90,7 +89,7 @@ function Rows({ nodes }: { nodes: readonly TreeNode[] }): JSX.Element {
           );
         }
         const className = cx(styles.f, node.path === filePath && styles.sel, node.gate && styles.hot);
-        const open = () => actions.openFile(node.path);
+        const open = () => openFile(node.path);
         return (
           // The row, not the `<li>`, is the interactive element: an `<li>`
           // with a click handler is not keyboard-reachable, so the class the

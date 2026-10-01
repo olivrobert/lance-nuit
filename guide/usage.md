@@ -217,10 +217,13 @@ the arrows keep scrolling the page; only `j` and `k` move the selection there.
 The address bar follows the project chip and the open item, so a reload or a
 pasted link lands on the same place: `#/projects/<project>` for a chip,
 `#/projects/<project>/tickets/<ticket>` for an item under it, and
-`#/tickets/<project>/<ticket>` for an item with every project shown. Changing
-project adds a browser history entry, so **Back** returns to the previous one;
-moving from item to item does not. A link to a project the dashboard no longer
-lists opens every project instead.
+`#/tickets/<project>/<ticket>` for an item with every project shown. The open
+tab and explorer file ride along as `?tab=<tab>&file=<path>`, so a link can
+point at one file of one item; they are dropped when another item opens.
+Changing project adds a browser history entry, so **Back** returns to the
+previous one; moving from item to item, tab to tab or file to file does not. A
+link to a project the dashboard no longer lists opens every project instead,
+and an address the dashboard does not know opens the inbox.
 
 A run waiting for a decision opens with its question above the tabs: the
 reason it stopped, the approval to give when the step asks for one, and
@@ -350,7 +353,10 @@ the user running the dashboard: keep it on loopback and behind the tunnel.
 listed project: one row per ticket, sortable by project, ticket, kind, cost,
 active time, span, run count, outcome and last run, filterable by period,
 scope, project, kind and source. A ticket unfolds into its runs. The screen reads the
-figures when it opens and on **Refresh**, never from the poll.
+figures when it opens and on **Refresh**, never from the poll. The filters and
+the sort are kept in the address (`#/stats?project=web&kind=bug&from=…`), so a
+filtered view survives a reload and can be shared; a value the screen does not
+recognise falls back to its default.
 
 A ticket's **outcome** says how it ended:
 

@@ -6,18 +6,20 @@
 // The exact `argv` is printed because it is the command a reader would type to
 // reproduce what the server did.
 //
-// The log is fetched on demand and lives in the store, so the same tail is shown
-// whether it was opened from the diagnostic tab or from the "Last launch" block.
+// The log is fetched on demand, and whether it is open is kept by launch id in
+// the UI store, so the same tail is shown whether it was opened from the
+// diagnostic tab or from the "Last launch" block. A launch that failed before
+// its run shows its log without asking: the reason is nowhere else.
 
 import type { JSX } from "react";
 import type { Item } from "../../api/types.js";
 import { verbLabel } from "../../lib/items.js";
 import { fmtDate } from "../../lib/format.js";
-import type { UiState } from "../../store/store.js";
-import { actions, LOG_LINES, useUiSelector } from "../../store/store.js";
+import { useQuery } from "@tanstack/react-query";
+import { LOG_LINES, launchLogQuery } from "../../api/queries.js";
+import { failedBeforeRun } from "../../lib/items.js";
+import { copy, setLaunchLogOpen, useUi } from "../../store/ui-store.js";
 import styles from "./Sheet.module.css";
-
-const selectLaunchLog = (state: UiState): UiState["launchLog"] => state.launchLog;
 
 /** How the launcher's process ended, in the vocabulary of the status pills. */
 function Outcome({ launch }: { launch: NonNullable<Item["launch"]> }): JSX.Element {
@@ -27,16 +29,17 @@ function Outcome({ launch }: { launch: NonNullable<Item["launch"]> }): JSX.Eleme
   return <span className="tag FAIL">{`code ${launch.exitCode}`}</span>;
 }
 
-function LaunchLogView(): JSX.Element {
-  const log = useUiSelector(selectLaunchLog);
-  if (log?.status !== "ok") return <p className="mute small">No log for this launch.</p>;
+function LaunchLogView({ id }: { id: string }): JSX.Element {
+  const log = useQuery(launchLogQuery(id)).data;
+  if (!log) return <p className="mute small">Loading log…</p>;
+  if (log.status !== "ok") return <p className="mute small">No log for this launch.</p>;
   return (
     <div>
       <pre className={styles.log}>{log.lines.length ? log.lines.join("\n") : "(empty)"}</pre>
       <div className="row small mute">
         {log.truncated ? `${LOG_LINES} last lines · ` : ""}
         <code>{log.path}</code>
-        <button type="button" className="small" onClick={() => void actions.copy(log.path)}>
+        <button type="button" className="small" onClick={() => void copy(log.path)}>
           copy path
         </button>
       </div>
@@ -45,14 +48,10 @@ function LaunchLogView(): JSX.Element {
 }
 
 export function Launch({ item }: { item: Item }): JSX.Element | null {
-  const log = useUiSelector(selectLaunchLog);
   const launch = item.launch;
+  const toggled = useUi((state) => (launch ? state.launchLogs[launch.id] : undefined));
   if (!launch) return null;
-
-  const toggle = (): void => {
-    if (log) actions.hideLaunchLog();
-    else void actions.showLaunchLog(launch.id);
-  };
+  const open = toggled ?? failedBeforeRun(item);
 
   return (
     <div>
@@ -62,12 +61,12 @@ export function Launch({ item }: { item: Item }): JSX.Element | null {
         <b>{launch.by}</b>
         <span className="mute">{` · ${fmtDate(launch.at)} · pid ${launch.pid}`}</span>
         {" · "}
-        <button type="button" className="small" onClick={toggle}>
-          {log ? "hide log" : "show log"}
+        <button type="button" className="small" onClick={() => setLaunchLogOpen(launch.id, !open)}>
+          {open ? "hide log" : "show log"}
         </button>
       </div>
       <pre>{`lancenuit ${launch.argv.join(" ")}`}</pre>
-      {log ? <LaunchLogView /> : null}
+      {open ? <LaunchLogView id={launch.id} /> : null}
     </div>
   );
 }

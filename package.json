@@ -71,6 +71,8 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.8",
     "@stylistic/eslint-plugin": "^5.10.0",
+    "@tanstack/react-query": "5.104.0",
+    "@tanstack/react-router": "1.170.41",
     "@types/bun": "^1.3.14",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.18",
@@ -81,7 +83,9 @@
     "dependency-cruiser": "18.2.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.9.1",
+    "eslint-plugin-react-hooks": "7.1.1",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "zustand": "5.0.15"
   }
 }
