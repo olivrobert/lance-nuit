@@ -22,16 +22,35 @@
 // reader can read it, relaunch, or exit — exactly what they would do in their
 // own terminal. What is typed is a dependency (`PaneCommandBuilder`): the route
 // passes `operatorCommand`, a test passes a harmless one.
+//
+// A terminal is of one of two kinds. A `run` terminal starts a run through the
+// operator agent. A `session` terminal reopens the agent session of a run's
+// coder (`claude --resume --fork-session`) in the run's own directory, so a
+// human can ask the agent what it did, or carry on from there, without touching
+// the session the run itself may resume later.
 
+import { existsSync } from "node:fs";
 import { isPipelineName } from "../../env/builtin-pipeline.js";
 import type { WorkItemGatewayRegistry } from "../../contracts/registry.js";
-import { type Item, isTicketToken, type ProjectEntry, ticketPrefixOf, validateTicketRef } from "../read-model/index.js";
+import {
+  type CoderSessionRead,
+  type Item,
+  isTicketToken,
+  type ProjectEntry,
+  ticketPrefixOf,
+  validateTicketRef,
+} from "../read-model/index.js";
 import { isBusy } from "./verbs.js";
 import type { Tmux } from "./tmux.js";
+
+/** `run`: a run started through the operator agent. `session`: the coder
+ *  session of a run, reopened. */
+export type TerminalKind = "run" | "session";
 
 /** What the browser is told about one interactive run. */
 export interface TerminalInfo {
   id: string;
+  kind: TerminalKind;
   project: string;
   ticket: string;
   pipeline: string;
@@ -63,6 +82,7 @@ const OPTION_KEYS = [
   "ln-by",
   "ln-created-at",
   "ln-command",
+  "ln-kind",
 ] as const;
 const LIST_FORMAT = ["#{session_name}", ...OPTION_KEYS.map((key) => `#{@${key}}`)].join("\t");
 
@@ -116,10 +136,12 @@ export type PaneCommandBuilder = (
 /** One `list-sessions` line back to a terminal; `undefined` for a session
  *  without our metadata, which this module did not create. */
 function parseSessionLine(line: string, tmux: Tmux): TerminalInfo | undefined {
-  const [id, project, ticket, pipeline, worktree, by, createdAt, command] = line.split("\t");
+  const [id, project, ticket, pipeline, worktree, by, createdAt, command, kind] = line.split("\t");
   if (!isSessionId(id) || !project || !ticket || !pipeline || !createdAt) return undefined;
   return {
     id,
+    // Sessions created before kinds existed were all runs.
+    kind: kind === "session" ? "session" : "run",
     project,
     ticket,
     pipeline,
@@ -198,14 +220,11 @@ export function ticketForProject(refPrefix: string | undefined, ticket: string):
 }
 
 /**
- * Start an interactive run: create the session, record who and what on it, and
- * type the command.
+ * Start an interactive run in a new tmux session (see `openPane`).
  *
  * Every refusal is answered before tmux is asked to create anything, in this
  * order: the ticket, the pipeline, tmux itself, a session already open for the
- * same item, a run already in progress on it, and the command. The options are
- * set before the command is typed, so a terminal listed by the dashboard always
- * carries its metadata.
+ * same item, a run already in progress on it, and the command.
  */
 export async function startRun(request: StartRunRequest, deps: StartRunDeps): Promise<StartRunResult> {
   const { project, worktree } = request;
@@ -233,15 +252,7 @@ export async function startRun(request: StartRunRequest, deps: StartRunDeps): Pr
   const id = sessionName(project.name, ticket);
   const exists = await deps.tmux.hasSession(id);
   if (exists === undefined) return { ok: false, status: 503, reason: "tmux is not installed" };
-  if (exists) {
-    const existing = await findTerminal(deps.tmux, id);
-    return {
-      ok: false,
-      status: 409,
-      reason: "a terminal is already open for this item",
-      ...(existing.status === "found" ? { terminal: existing.terminal } : {}),
-    };
-  }
+  if (exists) return alreadyOpen(deps.tmux, id);
 
   const item = await deps.findItem(project, ticket);
   if (item && isBusy(item)) return { ok: false, status: 409, reason: "a run is already in progress for this item" };
@@ -250,12 +261,41 @@ export async function startRun(request: StartRunRequest, deps: StartRunDeps): Pr
   if (!built.ok) return built;
   const command = shellJoin(built.words);
 
+  return openPane(
+    { id, kind: "run", project: project.name, ticket, pipeline, worktree, by: request.by, cwd: project.cwd, command },
+    deps,
+  );
+}
+
+/** One pane to open: its tmux name, where it starts, and what is recorded on it. */
+interface PaneSpec {
+  id: string;
+  kind: TerminalKind;
+  project: string;
+  ticket: string;
+  pipeline: string;
+  worktree: boolean;
+  by: string;
+  cwd: string;
+  command: string;
+}
+
+/**
+ * Create the session, record who and what on it, and type the command. The
+ * options are set before the command is typed, so a terminal listed by the
+ * dashboard always carries its metadata.
+ */
+async function openPane(
+  pane: PaneSpec,
+  deps: { tmux: Tmux; shell: string; now?: () => Date },
+): Promise<StartRunResult> {
+  const { id, command } = pane;
   const createdAt = (deps.now?.() ?? new Date()).toISOString();
   const created = await deps.tmux.newSession({
     name: id,
-    cwd: project.cwd,
+    cwd: pane.cwd,
     shell: deps.shell,
-    env: { LANCENUIT_ACTOR: request.by },
+    env: { LANCENUIT_ACTOR: pane.by },
     cols: INITIAL_COLS,
     rows: INITIAL_ROWS,
   });
@@ -264,13 +304,14 @@ export async function startRun(request: StartRunRequest, deps: StartRunDeps): Pr
   }
 
   const options: Record<(typeof OPTION_KEYS)[number], string> = {
-    "ln-project": project.name,
-    "ln-ticket": ticket,
-    "ln-pipeline": pipeline,
-    "ln-worktree": worktree ? "1" : "0",
-    "ln-by": request.by,
+    "ln-project": pane.project,
+    "ln-ticket": pane.ticket,
+    "ln-pipeline": pane.pipeline,
+    "ln-worktree": pane.worktree ? "1" : "0",
+    "ln-by": pane.by,
     "ln-created-at": createdAt,
     "ln-command": command,
+    "ln-kind": pane.kind,
   };
   const steps = [
     () => deps.tmux.setOptions(id, options),
@@ -291,16 +332,102 @@ export async function startRun(request: StartRunRequest, deps: StartRunDeps): Pr
     ok: true,
     terminal: {
       id,
-      project: project.name,
-      ticket,
-      pipeline,
-      worktree,
-      by: request.by,
+      kind: pane.kind,
+      project: pane.project,
+      ticket: pane.ticket,
+      pipeline: pane.pipeline,
+      worktree: pane.worktree,
+      by: pane.by,
       createdAt,
       command,
       attach: deps.tmux.attachCommand(id),
     },
   };
+}
+
+/** The 409 of a session that already exists, with that terminal when tmux
+ *  still lists it: it is where the reader wants to go. */
+async function alreadyOpen(tmux: Tmux, id: string): Promise<StartRunResult> {
+  const existing = await findTerminal(tmux, id);
+  return {
+    ok: false,
+    status: 409,
+    reason: "a terminal is already open for this item",
+    ...(existing.status === "found" ? { terminal: existing.terminal } : {}),
+  };
+}
+
+/** The words typed into the pane to reopen a coder session, or why nothing can
+ *  be typed. */
+export type SessionCommandBuilder = (
+  session: Pick<CoderSessionRead, "provider" | "sessionId">,
+) => { ok: true; words: string[] } | { ok: false; status: number; reason: string };
+
+export interface OpenSessionRequest {
+  project: ProjectEntry;
+  ticket: unknown;
+  /** Name from the identity cookie. */
+  by: string;
+}
+
+export interface OpenSessionDeps {
+  tmux: Tmux;
+  /** The coder session of this project + ticket, when its run has one. */
+  findSession(project: ProjectEntry, ticket: string): CoderSessionRead | undefined;
+  findItem(project: ProjectEntry, ticket: string): Promise<Item | undefined>;
+  sessionCommand: SessionCommandBuilder;
+  shell: string;
+  now?: () => Date;
+}
+
+/** Suffix of a session terminal's name, next to the run terminal of the same item. */
+const SESSION_SUFFIX = "__coder";
+
+/**
+ * Reopen the coder session of an item's run in a new tmux session.
+ *
+ * Refused while the run is in progress: the agent is still writing to that
+ * conversation, and a fork taken now would miss what comes next. Refused too
+ * when the run's directory is gone — a removed worktree — because the agent CLI
+ * looks a session up from the directory it is started in.
+ */
+export async function openCoderSession(request: OpenSessionRequest, deps: OpenSessionDeps): Promise<StartRunResult> {
+  const { project } = request;
+  if (!isTicketToken(request.ticket)) return { ok: false, status: 400, reason: "field `ticket` is required" };
+  const ticket = request.ticket;
+
+  const session = deps.findSession(project, ticket);
+  if (!session) return { ok: false, status: 404, reason: "this item has no coder session to reopen" };
+  const item = await deps.findItem(project, ticket);
+  if (session.status === "RUNNING" || (item && isBusy(item))) {
+    return { ok: false, status: 409, reason: "the run is in progress: its coder session opens once it stops" };
+  }
+  if (!isSafePath(session.cwd) || !existsSync(session.cwd)) {
+    return { ok: false, status: 409, reason: `the run's directory no longer exists: ${session.cwd}` };
+  }
+
+  const built = deps.sessionCommand(session);
+  if (!built.ok) return built;
+
+  const id = sessionName(project.name, `${ticket}${SESSION_SUFFIX}`);
+  const exists = await deps.tmux.hasSession(id);
+  if (exists === undefined) return { ok: false, status: 503, reason: "tmux is not installed" };
+  if (exists) return alreadyOpen(deps.tmux, id);
+
+  return openPane(
+    {
+      id,
+      kind: "session",
+      project: project.name,
+      ticket,
+      pipeline: session.pipeline,
+      worktree: session.worktree,
+      by: request.by,
+      cwd: session.cwd,
+      command: shellJoin(built.words),
+    },
+    deps,
+  );
 }
 
 /** False when the `claude` CLI is not on PATH. Looked up at each launch, so
@@ -325,4 +452,23 @@ export const operatorCommand: PaneCommandBuilder = ({ ticket, pipeline, worktree
       `Lance la pipeline : lancenuit run ${ticket} --pipeline ${pipeline}${worktree ? " --worktree" : ""}`,
     ],
   };
+};
+
+/** A Claude session id as the runner mints it (a UUID); anything else is not
+ *  typed into a shell, quoted or not. */
+const CLAUDE_SESSION_ID = /^[0-9A-Fa-f-]{1,64}$/;
+
+/**
+ * Default session command: the interactive Claude CLI on a FORK of the coder's
+ * session. The fork leaves the run's own conversation as it was, so a later
+ * `resume_session` repair does not inherit what the human typed. Only Claude
+ * is supported: the other backends' resume commands are non-interactive.
+ */
+export const resumeCoderCommand: SessionCommandBuilder = ({ provider, sessionId }) => {
+  if (provider !== "claude") {
+    return { ok: false, status: 409, reason: `a ${provider} session cannot be reopened from the dashboard` };
+  }
+  if (!CLAUDE_SESSION_ID.test(sessionId)) return { ok: false, status: 409, reason: "the session id is malformed" };
+  if (!hasClaudeCli()) return { ok: false, status: 503, reason: "claude CLI not found" };
+  return { ok: true, words: ["claude", "--resume", sessionId, "--fork-session"] };
 };

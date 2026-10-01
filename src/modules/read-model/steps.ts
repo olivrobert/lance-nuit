@@ -16,7 +16,19 @@ import type { PersistedStepState } from "../../model/persisted.js";
 import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
-import type { ItemFailCause, ItemFailKind, RunEventView, RunStepStatus, RunStepsView, RunStepView } from "./types.js";
+import type {
+  CoderSessionRead,
+  ItemFailCause,
+  ItemFailKind,
+  RunEventView,
+  RunStepStatus,
+  RunStepsView,
+  RunStepView,
+} from "./types.js";
+
+/** Profile of the steps that write the code: their session is the one a human
+ *  picks up to understand or continue what the agent did. */
+const CODER_PROFILE = "coder";
 
 /** Read window for the journal tail. Enough for the last events of any run
  *  without loading a journal that grew to megabytes. */
@@ -110,6 +122,7 @@ export function readSteps(
   if (!resolved) return undefined;
 
   const event = resolved.status === "RUNNING" ? lastEvent(resolved.run.runDir) : undefined;
+  const coder = coderStepOf(resolved.run.state.steps);
   return {
     pipeline: resolved.run.pipeline,
     runId: resolved.run.state.runId ?? "",
@@ -117,5 +130,50 @@ export function readSteps(
     status: resolved.status,
     steps: resolved.run.state.steps.map(stepView),
     ...(event ? { lastEvent: event } : {}),
+    ...(coder ? { coderStep: coder.id } : {}),
+  };
+}
+
+/** The last coder step, in pipeline order, holding a session its provider can
+ *  resume. The last one: in a pipeline coding lot after lot, it is the
+ *  conversation that wrote the latest code. */
+function coderStepOf(steps: PersistedStepState[]): CoderStep | undefined {
+  for (let index = steps.length - 1; index >= 0; index--) {
+    const step = steps[index];
+    if (step?.profile === CODER_PROFILE && step.session?.resumable === true && step.session.id !== "") {
+      return { id: step.id, session: step.session };
+    }
+  }
+  return undefined;
+}
+
+interface CoderStep {
+  id: string;
+  session: NonNullable<PersistedStepState["session"]>;
+}
+
+/**
+ * The coder session of the run `project/ticket` is currently about, or
+ * `undefined` when there is no such run or no coder step with a resumable
+ * session in it.
+ */
+export function readCoderSession(
+  projectName: string,
+  ticket: string,
+  options: ReadModelOptions = {},
+): CoderSessionRead | undefined {
+  const resolved = resolveRun(projectName, ticket, options);
+  if (!resolved) return undefined;
+  const coder = coderStepOf(resolved.run.state.steps);
+  if (!coder) return undefined;
+  return {
+    pipeline: resolved.run.pipeline,
+    runId: resolved.run.state.runId ?? "",
+    status: resolved.status,
+    stepId: coder.id,
+    provider: coder.session.provider,
+    sessionId: coder.session.id,
+    cwd: resolved.cwd,
+    worktree: resolved.run.state.worktree === true,
   };
 }

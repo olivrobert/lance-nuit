@@ -340,6 +340,28 @@ disappears from the dashboard, and a restarted dashboard finds every session
 still there. One session per project and ticket; a second launch is refused
 while the first one is open.
 
+### Reopen the coder session
+
+**Open coder session**, next to **Open terminal** in the item's header, reopens
+the agent conversation that wrote the code, so you can ask it what it did or
+carry on from there. The session is the one recorded by the last step of the
+current run that ran under the `coder` profile with a resumable session; the
+link is hidden when there is none, and while the run is in progress.
+
+The server starts a second tmux session, `ln-<project>-<ticket>__coder`, in the
+run's own working directory — the worktree when the run used one, because the
+Claude CLI finds a session from the directory it starts in — and types:
+
+```bash
+claude --resume <session-id> --fork-session
+```
+
+The fork leaves the run's conversation untouched, so a later
+`resume_session` repair does not inherit what you typed. Only Claude sessions
+can be reopened this way; the request is refused when the run's directory no
+longer exists (a removed worktree). A coder session already open for the item is
+reused.
+
 **Security.** The embedded terminal is a shell. Every terminal request needs a
 declared name and a same-origin request, every `/api/*` request must carry
 `Host: 127.0.0.1:<port>` or `localhost:<port>` (which blocks DNS rebinding),

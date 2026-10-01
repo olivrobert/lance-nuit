@@ -11,8 +11,18 @@ import { type ProjectEntry, type ReadModelOptions, readProjects } from "./projec
 import { readRecap } from "./recap.js";
 import { type ReportRead, readReport } from "./report.js";
 import { readStats } from "./stats.js";
-import { readSteps } from "./steps.js";
-import type { FileRead, ImageRead, Item, Launch, RunRecap, RunStepsView, StatsRead, WorkItemTree } from "./types.js";
+import { readCoderSession, readSteps } from "./steps.js";
+import type {
+  CoderSessionRead,
+  FileRead,
+  ImageRead,
+  Item,
+  Launch,
+  RunRecap,
+  RunStepsView,
+  StatsRead,
+  WorkItemTree,
+} from "./types.js";
 
 export interface ReadModel {
   projects(): ProjectEntry[];
@@ -24,6 +34,7 @@ export interface ReadModel {
   item(project: string, ticket: string): Promise<Item | undefined>;
   tree(project: string, ticket: string): WorkItemTree | undefined;
   steps(project: string, ticket: string): RunStepsView | undefined;
+  coderSession(project: string, ticket: string): CoderSessionRead | undefined;
   recap(project: string, ticket: string): RunRecap | undefined;
   report(project: string, ticket: string): ReportRead | undefined;
   file(project: string, ticket: string, path: string): FileRead;
@@ -40,6 +51,7 @@ export function createReadModel(options: ReadModelOptions = {}): ReadModel {
     item: (project, ticket) => readItem(project, ticket, options),
     tree: (project, ticket) => readTree(project, ticket, options),
     steps: (project, ticket) => readSteps(project, ticket, options),
+    coderSession: (project, ticket) => readCoderSession(project, ticket, options),
     recap: (project, ticket) => readRecap(project, ticket, options),
     report: (project, ticket) => readReport(project, ticket, options),
     file: (project, ticket, path) => readFile(project, ticket, path, options),

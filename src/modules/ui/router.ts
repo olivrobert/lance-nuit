@@ -18,6 +18,7 @@ import { meRoute } from "./routes/me.js";
 import { projectsRoute } from "./routes/projects.js";
 import type { ApiMethod, Route } from "./routes/route.js";
 import { runsRoute } from "./routes/runs.js";
+import { sessionsRoute } from "./routes/sessions.js";
 import { serveStatic } from "./routes/static.js";
 import { statsRoute } from "./routes/stats.js";
 import { terminalsRoute } from "./routes/terminals.js";
@@ -29,6 +30,7 @@ const ROUTES: Readonly<Record<string, Route>> = {
   stats: statsRoute,
   launches: launchesRoute,
   runs: runsRoute,
+  sessions: sessionsRoute,
   terminals: terminalsRoute,
   actions: actionsRoute,
 };
