@@ -562,8 +562,20 @@ lancenuit run PROJ-28 --worktree
 - `--watch` opens a tmux pane when tmux is available; the pane stays open by
   default and `--watch-auto-close` closes it after a terminal run.
 - `--steps` and `--skip` filter step IDs.
-- `--start-at` skips every step before the named step; it is exclusive with the
-  other selectors.
+- `--start-at X` replays from `X`: `X` and every later step run again, even
+  when an earlier pass finished them or an earlier selection excluded them, and
+  every step before `X` is skipped. It is exclusive with the other selectors.
+  - Replayed steps keep their attempts, spend and fix quota: the budget still
+    counts what they cost before. A replayed step runs even when its declared
+    outputs are fresh, since freshness does not see a manual fix in the tree.
+  - The requeue is durable: a later invocation without `--start-at` still runs
+    the steps the replay has not finished.
+  - `--run <id> --start-at X` replays inside that run even when it already
+    passed. Without `--run`, a completed `latest` run is not resumed, so
+    `--start-at` starts a new run there, subject to the clean-tree guard.
+  - A composed step (`runPipeline`, `forEachPipeline`) whose children already
+    settled cannot be replayed in place: the run refuses and points to
+    `--fresh`.
 - On a **resumed** run the selectors are durable, not a one-off view: every step
   they leave out is written to the snapshot as `skipped`. Once no step remains,
   the run finalizes as `PASS` and counts as complete — `--scan` will not pick the
