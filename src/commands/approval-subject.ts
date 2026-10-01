@@ -6,7 +6,7 @@
 
 import type { Artifact } from "../dsl/artifact.js";
 import type { Pipeline } from "../model/definition.js";
-import { isValidSubjectToken } from "../state/decisions.js";
+import { isValidSubjectToken, type RecordedApproval } from "../state/decisions.js";
 
 /**
  * Return the artifact bound to `subject`, or throw with the subjects actually
@@ -28,4 +28,14 @@ export function resolveApprovalArtifact(pipelineDef: Pipeline, subject: string):
     );
   }
   return artifact;
+}
+
+/** What both `--approve` paths print once the decision is settled. A kept decision
+ *  names who approved and when, so whoever repeated the approval sees it was
+ *  already granted rather than a second write. */
+export function describeRecordedApproval({ decision, written }: RecordedApproval, decisionsDir?: string): string {
+  if (!written) {
+    return `Decision ${decision.subject} already ${decision.decision} by ${decision.decidedBy} on ${decision.decidedAt} for this artifact — kept.`;
+  }
+  return `Decision ${decision.subject}=approved written to ${decisionsDir}/${decision.subject}.json (SHA-256 ${decision.artifactSha256}).`;
 }

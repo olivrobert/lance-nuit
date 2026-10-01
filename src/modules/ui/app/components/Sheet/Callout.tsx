@@ -54,15 +54,22 @@ export function Callout({ item, includeActions = true }: CalloutProps): JSX.Elem
   // alone (`item.cost.unknown`) never triggers it.
   const unaccounted = !stopped && item.costUnaccounted === true;
   const subject = item.stop?.subject;
+  // Approved elsewhere — an agent, a terminal — but not resumed: the status is
+  // still STOPPED, and asking for the approval again would misread the run.
+  const approved = subject !== undefined && item.approval?.state === "fresh";
   const heading = stopped
-    ? `⏸ Waiting for your decision${subject ? ` — ${subject}` : ""}`
+    ? approved
+      ? `⏸ Approved, waiting to resume — ${subject}`
+      : `⏸ Waiting for your decision${subject ? ` — ${subject}` : ""}`
     : unaccounted
       ? "⚠ Spending unaccounted — action needed"
       : "✗ Technical failure — action needed";
   const explanation = stopped
-    ? subject
-      ? "Review the gate artifact below, then approve to resume the run."
-      : "The run is stopped without an approval subject: address the cause, then rerun."
+    ? approved
+      ? `Approved by ${item.approval?.decidedBy ?? "?"}. Rerun to resume the run past the gate.`
+      : subject
+        ? "Review the gate artifact below, then approve to resume the run."
+        : "The run is stopped without an approval subject: address the cause, then rerun."
     : unaccounted
       ? "An attempt spent tokens no pricing table could price, so the cost ceiling can no longer be enforced. Pending steps are left resumable. Raising the budget does not help; authorize the unknown spend from the terminal:"
       : "The run failed on a technical step. Rerunning resumes from the failed step; existing approvals remain valid.";

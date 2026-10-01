@@ -57,6 +57,12 @@ function pendingGate(item: Item): string | undefined {
   return item.status === "STOPPED" ? item.stop?.subject : undefined;
 }
 
+/** A gate someone already approved, from here, an agent, or a terminal: the
+ *  decision is fresh, so the run needs resuming, not another approval. */
+function approvedGate(item: Item): boolean {
+  return pendingGate(item) !== undefined && item.approval?.state === "fresh";
+}
+
 /**
  * The command line of one verb, once admitted: every value comes from the item
  * except the budget, which the caller formatted — or a placeholder, for a
@@ -107,7 +113,7 @@ export function buildArgv(item: Item, verb: Verb, input: ActionInput = {}): Argv
       return { ok: true, argv: argvOf(item, verb, "") };
     }
     case "rerun": {
-      const blocked = item.status === "STOPPED" && !gate;
+      const blocked = item.status === "STOPPED" && (!gate || approvedGate(item));
       const failed = item.status === "FAIL" || item.status === "ABORTED";
       if (!blocked && !failed) return { ok: false, status: 409, reason: "only a blocked or failed run can be resumed" };
       return { ok: true, argv: argvOf(item, verb, "") };
@@ -165,11 +171,12 @@ export function verbsFor(item: Item): VerbAction[] {
   const verbs: VerbAction[] = [];
   const stopped = item.status === "STOPPED";
   const failed = item.status === "FAIL" || item.status === "ABORTED";
-  if (stopped && pendingGate(item)) {
+  if (stopped && pendingGate(item) && !approvedGate(item)) {
     verbs.push(offer(item, "approve-and-rerun", "Approve and rerun", { primary: true }));
     verbs.push(offer(item, "approve", "Approve only"));
   }
-  if (stopped && !pendingGate(item)) verbs.push(offer(item, "rerun", "Rerun", { primary: true }));
+  if (stopped && (!pendingGate(item) || approvedGate(item)))
+    verbs.push(offer(item, "rerun", "Rerun", { primary: true }));
   if (failed) verbs.push(offer(item, "rerun", "Rerun from failure", { primary: true }));
   if (item.budgetExceeded) verbs.push(offer(item, "budget", "Raise budget"));
   if (stopped || failed) verbs.push(offer(item, "close", "Mark as closed"));

@@ -99,12 +99,27 @@ function atomicWrite(path: string, value: ApprovalDecision): void {
   renameSync(tmp, path);
 }
 
+/** Outcome of `recordApproval`. `written` is false when a decision already covered
+ *  this exact artifact: it was kept as is, its author and date included. */
+export interface RecordedApproval {
+  decision: ApprovalDecision;
+  written: boolean;
+}
+
 export async function recordApproval(
   ctx: PipelineContext,
   subject: DecisionSubject,
   artifact: Artifact<unknown>,
-): Promise<ApprovalDecision> {
+): Promise<RecordedApproval> {
   const validated = await validateArtifact(ctx, subject, artifact);
+  // The same approval reaches the runner from several hands — the dashboard, an
+  // agent, a terminal — often for the same gate. Rewriting it would replace the
+  // person who decided with whoever repeated it, and turn an `applied` decision
+  // back into a pending one.
+  const existing = readDecision(ctx, subject);
+  if (existing?.artifact === `artifacts/${artifact.name}` && approvalFreshness(existing, validated.body) === "fresh") {
+    return { decision: existing, written: false };
+  }
   const decision: ApprovalDecision = {
     schemaVersion: 1,
     decision: "approved",
@@ -115,7 +130,7 @@ export async function recordApproval(
     decidedBy: decisionActor(),
   };
   atomicWrite(decisionPath(ctx, subject), decision);
-  return decision;
+  return { decision, written: true };
 }
 
 /**
@@ -153,6 +168,38 @@ export function readDecision(ctx: PipelineContext, subject: DecisionSubject): Ap
   return decision?.subject === subject ? decision : undefined;
 }
 
+/** Whether an approval still holds over the artifact as it stands now.
+ *
+ *  `absent`: nobody approved. `fresh`: the approval covers this exact content.
+ *  `stale`: the artifact changed since, or can no longer be read, so the gate
+ *  reopens. The runner's gate and the dashboard both answer through this one
+ *  rule, so neither can show an approval the other would refuse. */
+export type ApprovalFreshness = "absent" | "fresh" | "stale";
+
+export function approvalFreshness(decision: ApprovalDecision | undefined, body: string | undefined): ApprovalFreshness {
+  if (!decision || (decision.decision !== "approved" && decision.decision !== "applied")) return "absent";
+  return body !== undefined && sha256Text(body) === decision.artifactSha256 ? "fresh" : "stale";
+}
+
+/** The approval recorded for `subject` and whether it still holds, judged on the
+ *  artifact the decision names. For readers that know a subject but not its
+ *  artifact descriptor: a stopped run only records the subject it waits on. */
+export async function approvalStatus(
+  ctx: PipelineContext,
+  subject: DecisionSubject,
+): Promise<{ freshness: ApprovalFreshness; decision?: ApprovalDecision }> {
+  const decision = readDecision(ctx, subject);
+  if (!decision) return { freshness: "absent" };
+  let body: string | undefined;
+  try {
+    body = await ctx.artifacts.readText(ref(ctx, decision.artifact.slice("artifacts/".length)));
+  } catch {
+    // An artifact that cannot be read can no longer prove the approval fresh.
+    body = undefined;
+  }
+  return { freshness: approvalFreshness(decision, body), decision };
+}
+
 /** A decision is valid only when it names the expected artifact, which still exists
  * and has the approved hash; modifying the artifact invalidates approval. */
 export async function decisionMatchesArtifact(
@@ -161,11 +208,9 @@ export async function decisionMatchesArtifact(
   artifact: Artifact<unknown>,
 ): Promise<boolean> {
   const decision = readDecision(ctx, subject);
-  if (!decision || (decision.decision !== "approved" && decision.decision !== "applied")) return false;
-  if (decision.artifact !== `artifacts/${artifact.name}`) return false;
+  if (decision?.artifact !== `artifacts/${artifact.name}`) return false;
   try {
-    const body = await ctx.artifacts.readText(ref(ctx, artifact.name));
-    return body !== undefined && sha256Text(body) === decision.artifactSha256;
+    return approvalFreshness(decision, await ctx.artifacts.readText(ref(ctx, artifact.name))) === "fresh";
   } catch {
     // Artifact lookup failures conservatively invalidate reuse without masking the caller's decision flow.
     return false;

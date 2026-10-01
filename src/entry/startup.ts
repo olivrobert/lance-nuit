@@ -11,7 +11,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { runBoot } from "../boot/step.js";
-import { resolveApprovalArtifact } from "../commands/approval-subject.js";
+import { describeRecordedApproval, resolveApprovalArtifact } from "../commands/approval-subject.js";
 import { COMMANDS } from "../commands/command.js";
 import { runDispatch } from "../dispatch/loop.js";
 import { selectDispatch, validateDispatchArgs } from "../dispatch/strategy.js";
@@ -25,7 +25,8 @@ import { parseRunnerArgs } from "../cli/parse.js";
 import { liveFeedFromEnvironment } from "../output/live-feed.js";
 import { setRunnerLiveFeed } from "../runtime/live-feed.js";
 import { log } from "../runtime/logging.js";
-import { type DecisionSubject, recordApproval } from "../state/decisions.js";
+import { type DecisionSubject, type RecordedApproval, recordApproval } from "../state/decisions.js";
+import { resolveLatestRunSnapshot, runLockHolder } from "../state/stores/run-storage.js";
 import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
 import { createDefaultRunnerRegistries } from "./registries.js";
 
@@ -114,18 +115,40 @@ export async function applyApproval(
   context: PipelineContext,
 ): Promise<ApprovalOutcome> {
   if (!args.approve) return { kind: "ok" };
-  let subject: DecisionSubject;
+  let recorded: RecordedApproval;
   try {
-    const artifact = resolveApprovalArtifact(pipelineDef, args.approve);
-    const decision = await recordApproval(context, args.approve, artifact);
-    subject = decision.subject;
-    log(
-      `Decision ${decision.subject}=approved written to ${context.paths.decisionsDir}/${decision.subject}.json (SHA-256 ${decision.artifactSha256}).`,
-    );
+    recorded = await recordApproval(context, args.approve, resolveApprovalArtifact(pipelineDef, args.approve));
+    log(describeRecordedApproval(recorded, context.paths.decisionsDir));
   } catch (error) {
     return { kind: "error", message: errorMessage(error) };
   }
-  return args.approveOnly ? { kind: "done" } : { kind: "ok", subject };
+  if (args.approveOnly) return { kind: "done" };
+  const holder = latestRunHolder(pipelineDef.name, args, context);
+  if (holder) {
+    log(`The run is already being resumed (pid ${holder}): approval recorded, no second run started.`);
+    return { kind: "done" };
+  }
+  // Only a decision this invocation wrote is journaled: a kept one was recorded,
+  // and possibly consumed, by whoever wrote it.
+  return { kind: "ok", ...(recorded.written ? { subject: recorded.decision.subject } : {}) };
+}
+
+/**
+ * pid of a live runner already holding the run `--approve` would resume.
+ *
+ * The same gate is often lifted from two places — the dashboard, an agent, a
+ * terminal. Resolving a held run starts a NEW run beside it (`resolveRunDir`),
+ * which for a repeated approval is a duplicate, not a resume.
+ */
+function latestRunHolder(pipelineName: string, args: RunnerArgs, context: PipelineContext): number | null {
+  if (args.fresh) return null;
+  try {
+    const latest = resolveLatestRunSnapshot(pipelineName, args.ticket, context);
+    return latest ? runLockHolder(latest.runDir) : null;
+  } catch {
+    // A damaged selector is reported by the run that resolves it, with its remedy.
+    return null;
+  }
 }
 
 /**

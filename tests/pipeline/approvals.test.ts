@@ -92,7 +92,7 @@ test("a custom subject is approved end to end without knowing split/refactoring"
   writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 12 }));
 
   const resolved = resolveApprovalArtifact(def, "budget");
-  const decision = await recordApproval(context, "budget", resolved);
+  const { decision } = await recordApproval(context, "budget", resolved);
   expect(decision.subject).toBe("budget");
   expect(decision.artifact).toBe("artifacts/budget.json");
   expect(await decisionMatchesArtifact(context, "budget", budgetArtifact)).toBe(true);
@@ -124,7 +124,7 @@ test("a text artifact is approved like a JSON artifact", async () => {
   const notes = textArtifact("notes.md");
   writeFileSync(context.paths.artifact("notes.md"), "# Decision\n");
 
-  const decision = await recordApproval(context, "notes", notes);
+  const { decision } = await recordApproval(context, "notes", notes);
   expect(decision.artifact).toBe("artifacts/notes.md");
   expect(await decisionMatchesArtifact(context, "notes", notes)).toBe(true);
 });
@@ -146,12 +146,44 @@ test("an approval records who granted it", async () => {
   const previous = process.env.LANCENUIT_ACTOR;
   process.env.LANCENUIT_ACTOR = "Olivier";
   try {
-    expect((await recordApproval(context, "budget", budgetArtifact)).decidedBy).toBe("Olivier");
+    expect((await recordApproval(context, "budget", budgetArtifact)).decision.decidedBy).toBe("Olivier");
     // A named decision still opens the gate: the reader accepts any author.
     expect(await decisionMatchesArtifact(context, "budget", budgetArtifact)).toBe(true);
 
+    writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 13 }));
     process.env.LANCENUIT_ACTOR = "not a name!";
-    expect((await recordApproval(context, "budget", budgetArtifact)).decidedBy).toBe("human");
+    expect((await recordApproval(context, "budget", budgetArtifact)).decision.decidedBy).toBe("human");
+  } finally {
+    if (previous === undefined) delete process.env.LANCENUIT_ACTOR;
+    else process.env.LANCENUIT_ACTOR = previous;
+  }
+});
+
+test("approving an artifact already approved keeps the first decision", async () => {
+  const context = ticketContext();
+  writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 12 }));
+  const previous = process.env.LANCENUIT_ACTOR;
+  process.env.LANCENUIT_ACTOR = "Olivier";
+  try {
+    const first = await recordApproval(context, "budget", budgetArtifact);
+    expect(first.written).toBe(true);
+
+    // The same gate lifted again from another place: the author is not replaced.
+    delete process.env.LANCENUIT_ACTOR;
+    const again = await recordApproval(context, "budget", budgetArtifact);
+    expect(again).toEqual({ decision: first.decision, written: false });
+
+    // An applied decision stays applied rather than turning pending again.
+    await markDecisionApplied(context, "budget", budgetArtifact);
+    const afterApply = await recordApproval(context, "budget", budgetArtifact);
+    expect(afterApply.written).toBe(false);
+    expect(afterApply.decision.decision).toBe("applied");
+
+    // A changed artifact is a new question: the approval is written anew.
+    writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 13 }));
+    const changed = await recordApproval(context, "budget", budgetArtifact);
+    expect(changed.written).toBe(true);
+    expect(changed.decision.decidedBy).toBe("human");
   } finally {
     if (previous === undefined) delete process.env.LANCENUIT_ACTOR;
     else process.env.LANCENUIT_ACTOR = previous;
@@ -163,7 +195,7 @@ test("a nested text artifact approval is readable by the gate", async () => {
   const plan = textArtifact("reports/plan.json");
   await plan.write(context, "plan\n");
 
-  const decision = await recordApproval(context, "plan", plan);
+  const { decision } = await recordApproval(context, "plan", plan);
   expect(decision.artifact).toBe("artifacts/reports/plan.json");
   expect(await decisionMatchesArtifact(context, "plan", plan)).toBe(true);
 });

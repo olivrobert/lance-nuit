@@ -185,6 +185,20 @@ test("offers: a stop with a subject offers approve-and-rerun, approve only, clos
   expect(offers[0]?.command).toBe("lancenuit run DEMO-1 --pipeline feature --approve plan");
 });
 
+test("offers: a gate already approved elsewhere offers a rerun, not another approval", () => {
+  const approval = { subject: "plan", state: "fresh" as const, decidedBy: "agent", decidedAt: "2026-09-05T09:00:00Z" };
+  const approved = quiet({ stop: { subject: "plan", kind: "needs-decision", detail: "gate" }, approval });
+  const offers = verbsFor(approved);
+  expect(names(offers)).toEqual(["rerun", "close", "fresh"]);
+  expect(offers[0]?.primary).toBe(true);
+  expect(argvOf(buildArgv(approved, "rerun"))).toEqual(["run", "DEMO-1", "--pipeline", "feature"]);
+
+  // A stale approval no longer lifts the gate: approving is the question again.
+  const stale = quiet({ stop: approved.stop, approval: { ...approval, state: "stale" } });
+  expect(names(verbsFor(stale))).toEqual(["approve-and-rerun", "approve", "close", "fresh"]);
+  expect(buildArgv(stale, "rerun")).toMatchObject({ ok: false, status: 409 });
+});
+
 test("offers: a stop with no subject offers a plain rerun", () => {
   expect(names(verbsFor(quiet()))).toEqual(["rerun", "close", "fresh"]);
 });
