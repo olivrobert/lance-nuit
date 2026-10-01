@@ -27,8 +27,9 @@ function Header({ terminal, ended }: { terminal: TerminalInfo; ended: boolean })
   const [killing, setKilling] = useState(false);
 
   const kill = async (): Promise<void> => {
+    const running = terminal.kind === "session" ? "the coder session" : "the operator agent, the run";
     const sure = window.confirm(
-      `Kill the tmux session of ${terminal.ticket} in ${terminal.project}?\n\nThe shell and everything running in it — the operator agent, the run — are stopped, for every viewer.`,
+      `Kill the tmux session of ${terminal.ticket} in ${terminal.project}?\n\nThe shell and everything running in it — ${running} — are stopped, for every viewer.`,
     );
     if (!sure) return;
     setKilling(true);
@@ -49,6 +50,7 @@ function Header({ terminal, ended }: { terminal: TerminalInfo; ended: boolean })
         <span className={styles.project}>{terminal.project}</span>
         <strong className={styles.ticket}>{terminal.ticket}</strong>
         <span className="tag absent">{terminal.pipeline}</span>
+        {terminal.kind === "session" ? <span className="tag absent">coder session</span> : null}
         {terminal.worktree ? <span className="tag RUNNING">worktree</span> : null}
         <span className="small mute">{`by ${terminal.by} · ${fmtDate(terminal.createdAt)}`}</span>
         <span className="grow" />

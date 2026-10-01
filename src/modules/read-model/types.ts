@@ -241,6 +241,23 @@ export interface RunStepsView {
   /** Present only while the run is RUNNING: the snapshot is behind, the journal
    *  is not. */
   lastEvent?: RunEventView;
+  /** Step whose agent session the dashboard can reopen (see `CoderSessionRead`). */
+  coderStep?: string;
+}
+
+/** The agent session of a run's coder, and where it ran. The session is the
+ *  conversation that wrote the code; it is reopened in the run's own working
+ *  directory, because that is where the agent CLI stored it. */
+export interface CoderSessionRead {
+  pipeline: string;
+  runId: string;
+  status: ItemStatus;
+  stepId: string;
+  provider: string;
+  sessionId: string;
+  /** Effective working directory of the run: the worktree when it ran in one. */
+  cwd: string;
+  worktree: boolean;
 }
 
 /** Tokens an agent consumed, as the backends report them. `cacheWrite` is the

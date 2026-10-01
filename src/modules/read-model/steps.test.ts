@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readSteps } from "./steps.ts";
+import { readCoderSession, readSteps } from "./steps.ts";
 import {
   cleanupTempDirs,
   makeProject,
@@ -137,4 +137,59 @@ test("steps: a run without a journal, and an item without a run", () => {
   expect(readSteps("demo-app", "DEMO-1")?.lastEvent).toBeUndefined();
   expect(readSteps("demo-app", "DEMO-404")).toBeUndefined();
   expect(readSteps("unknown", "DEMO-1")).toBeUndefined();
+});
+
+test("coder session: the last coder step with a resumable session, in the run's directory", () => {
+  const project = listedProject();
+  const worktree = makeTempDir("read-model-worktree-");
+  const session = (id: string, resumable = true) => ({ provider: "claude", id, resumable });
+  writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "FAIL",
+    updatedAt: "2026-09-05T08:00:00.000Z",
+    worktree: true,
+    cwd: worktree,
+    steps: [
+      { id: "spec", status: "done", retries: 0, profile: "planner", session: session("s-spec") },
+      { id: "code-lot-1", status: "done", retries: 0, profile: "coder", session: session("s-lot-1") },
+      { id: "code-lot-2", status: "failed", retries: 1, profile: "coder", session: session("s-lot-2") },
+      // A session its provider cannot resume is not offered, even when it is the last.
+      { id: "code-lot-3", status: "failed", retries: 0, profile: "coder", session: session("s-lot-3", false) },
+      { id: "review", status: "pending", retries: 0, profile: "reviewer" },
+    ],
+  });
+
+  expect(readCoderSession("demo-app", "DEMO-1")).toEqual({
+    pipeline: "feature",
+    runId: "r-1",
+    status: "FAIL",
+    stepId: "code-lot-2",
+    provider: "claude",
+    sessionId: "s-lot-2",
+    cwd: worktree,
+    worktree: true,
+  });
+  expect(readSteps("demo-app", "DEMO-1")?.coderStep).toBe("code-lot-2");
+});
+
+test("coder session: none without a coder step, and none for an item without a run", () => {
+  const project = listedProject();
+  writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "PASS",
+    updatedAt: "2026-09-05T08:00:00.000Z",
+    steps: [
+      {
+        id: "spec",
+        status: "done",
+        retries: 0,
+        profile: "planner",
+        session: { provider: "claude", id: "s", resumable: true },
+      },
+    ],
+  });
+
+  expect(readCoderSession("demo-app", "DEMO-1")).toBeUndefined();
+  expect(readSteps("demo-app", "DEMO-1")).not.toHaveProperty("coderStep");
+  expect(readCoderSession("demo-app", "DEMO-404")).toBeUndefined();
 });

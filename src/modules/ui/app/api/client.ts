@@ -167,6 +167,11 @@ export function postRun(payload: RunPayload): Promise<ApiResult<RunResponse>> {
   return postJson<RunResponse>("/api/runs", payload);
 }
 
+/** Reopen the coder session of an item's run in a terminal of its own. */
+export function postCoderSession(project: string, ticket: string): Promise<ApiResult<RunResponse>> {
+  return postJson<RunResponse>("/api/sessions", { project, ticket });
+}
+
 function terminalUrl(id: string, suffix = ""): string {
   return `/api/terminals/${encodeURIComponent(id)}${suffix}`;
 }
