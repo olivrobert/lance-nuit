@@ -595,6 +595,10 @@ export type RunStopKind = "needs-info" | "needs-decision" | "needs-human" | "blo
 export interface RunStopState {
     /** Approval subject that lifts the stop, when the gate declares one. */
     subject?: string;
+    /** Artifact the gate is about (`artifacts/<name>`), when it reads one. A
+     *  reader cannot derive it from `subject`: the binding lives in the pipeline,
+     *  which only the runner loads. */
+    artifact?: string;
     kind?: RunStopKind;
     /** Reason without the console decoration (`escalated:` prefix, `--approve` hint). */
     detail: string;

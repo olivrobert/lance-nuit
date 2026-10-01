@@ -80,6 +80,7 @@ const TokenCountsSchema = z.looseObject({
 
 const RunStopStateSchema = z.looseObject({
   subject: optionalString,
+  artifact: optionalString,
   kind: tolerant(z.enum(STOP_KINDS)),
   detail: z.string(),
 });

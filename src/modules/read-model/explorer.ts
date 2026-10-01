@@ -17,6 +17,7 @@
 
 import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { RunStopState } from "../../model/persisted.js";
 import { isValidSubjectToken, readDecisionAt } from "../../state/decisions.js";
 import { isPathWithin } from "../../state/stores/path-safety.js";
 import type { ReadModelOptions } from "./projects.js";
@@ -215,13 +216,21 @@ function isFile(path: string): boolean {
  * The file the pending gate is about.
  *
  * The subject-to-artifact binding is declared in the pipeline, which the read
- * model never loads — loading it would execute project code to render a tree. Two
- * sources answer without that: the decision file, which names the artifact it
- * locked, and otherwise the naming the kit's gates follow (`plan` → `plan.md`).
- * When neither answers, no file is flagged rather than the wrong one.
+ * model never loads — loading it would execute project code to render a tree.
+ * The stop itself names the artifact when the runner recorded it. A run stopped
+ * before that field existed still has two sources: the decision file, which
+ * names the artifact it locked, and otherwise the naming the kit's gates follow
+ * (`plan` → `plan.md`). When none answers, no file is flagged rather than the
+ * wrong one.
  */
-function gateArtifactPath(workItemDir: string, subject: string): string | undefined {
-  if (!isValidSubjectToken(subject)) return undefined;
+function gateArtifactPath(workItemDir: string, stop: RunStopState): string | undefined {
+  const recorded = stop.artifact;
+  if (recorded?.startsWith("artifacts/") && isSafeRelativePath(recorded) && isFile(join(workItemDir, recorded))) {
+    return recorded;
+  }
+
+  const subject = stop.subject;
+  if (!subject || !isValidSubjectToken(subject)) return undefined;
 
   const decision = readDecisionAt(join(workItemDir, "decisions", `${subject}.json`));
   if (decision && isFile(join(workItemDir, decision.artifact))) return decision.artifact;
@@ -271,8 +280,8 @@ export function readTree(
     });
   }
 
-  const subject = resolved.status === "STOPPED" ? resolved.run.state.outcome?.stop?.subject : undefined;
-  const gateCandidate = subject ? gateArtifactPath(root, subject) : undefined;
+  const stop = resolved.status === "STOPPED" ? resolved.run.state.outcome?.stop : undefined;
+  const gateCandidate = stop ? gateArtifactPath(root, stop) : undefined;
   const gate = gateCandidate ? findFile(children, gateCandidate) : undefined;
   if (gate) gate.gate = true;
 

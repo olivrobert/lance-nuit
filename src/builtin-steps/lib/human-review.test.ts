@@ -201,6 +201,7 @@ test("the gate describes its stop: subject, expected recovery, undecorated reaso
   // must know what lifts the block without parsing that sentence.
   expect(gate.action === "pass" ? undefined : gate.stop).toEqual({
     subject: "sujet",
+    artifact: "artifacts/verdict.json",
     kind: "needs-decision",
     detail: "blocking verdict",
   });
@@ -212,6 +213,7 @@ test("a gate without approval declares no subject to approve", async () => {
 
   const gate = await admit(stepOf(steps, "demo-gate"), ctx);
   expect(gate.action === "pass" ? undefined : gate.stop).toEqual({
+    artifact: "artifacts/verdict.json",
     kind: "needs-human",
     detail: "blocking verdict",
   });

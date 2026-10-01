@@ -225,10 +225,11 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
   }
 
   /** What the stop is about, for a reader of `state.json` that must not parse the
-   *  console sentence: the subject that lifts it, the expected recovery, and the
-   *  reason as the exit point wrote it. */
+   *  console sentence: the subject that lifts it, the artifact under review, the
+   *  expected recovery, and the reason as the exit point wrote it. */
   const stopInfo = (detail: string): RunStopState => ({
     ...(opts.approval ? { subject: opts.approval.subject } : {}),
+    artifact: `artifacts/${opts.artifact.name}`,
     kind: opts.kind,
     detail,
   });
