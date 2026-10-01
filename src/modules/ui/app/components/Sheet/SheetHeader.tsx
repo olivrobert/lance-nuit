@@ -1,10 +1,10 @@
 // The identity and verdict of the item, at the top of the sticky header.
 //
 // Three lines, the same for every group: where the run is (project, ticket,
-// pipeline, run, with the way out to the tracker and to the terminal), what it
-// is about (the ticket's title), and how it ended. A delivered run says
-// "Delivered" and when it finished; any other keeps its status pill and its
-// headline, because there the status is the news.
+// pipeline, run, with the way out to the tracker, to the terminal and to the
+// coder's session), what it is about (the ticket's title), and how it ended. A
+// delivered run says "Delivered" and when it finished; any other keeps its
+// status pill and its headline, because there the status is the news.
 //
 // Times are wall clocks in the reader's zone (`fmtClock`), and "took" is the
 // span of the run's snapshot: first write to last, pauses included, which is
@@ -18,6 +18,7 @@ import { linkableUrl } from "../../lib/url.js";
 import { ProjectBadge } from "../ProjectBadge.js";
 import { StatusTag } from "../StatusTag.js";
 import styles from "./Sheet.module.css";
+import { CoderSessionLink } from "./CoderSessionLink.js";
 import { TerminalLink } from "./TerminalLink.js";
 
 /** Milliseconds between the first and the last write of the run, or
@@ -43,6 +44,7 @@ function Breadcrumb({ item }: { item: Item }): JSX.Element {
         </a>
       ) : null}
       <TerminalLink item={item} className={styles.crumbButton} />
+      <CoderSessionLink item={item} className={styles.crumbButton} />
     </div>
   );
 }

@@ -135,7 +135,8 @@ export interface PipelinesResponse {
   pipelines: string[];
 }
 
-/** `POST /api/runs`: the session started (201), or the one already there (409). */
+/** `POST /api/runs` and `POST /api/sessions`: the session started (201), or the
+ *  one already there (409). */
 export interface RunResponse {
   terminal: TerminalInfo;
 }

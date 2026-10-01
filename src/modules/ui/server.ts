@@ -32,7 +32,13 @@ import { VerbLauncher } from "./launcher.js";
 import { route } from "./router.js";
 import { projectPipelines } from "./routes/projects.js";
 import { type AttachSpawner, bunAttachSpawner, ViewerRegistry } from "./terminal-viewers.js";
-import { operatorCommand, type PaneCommandBuilder, paneShell } from "./terminals.js";
+import {
+  operatorCommand,
+  type PaneCommandBuilder,
+  paneShell,
+  resumeCoderCommand,
+  type SessionCommandBuilder,
+} from "./terminals.js";
 import { Tmux } from "./tmux.js";
 
 export { DEFAULT_UI_PORT, UI_HOST } from "../../lib/ui-defaults.js";
@@ -55,6 +61,8 @@ export interface UiServerOptions {
   attach?: AttachSpawner;
   /** What is typed into a new run's pane; defaults to the operator agent. */
   paneCommand?: PaneCommandBuilder;
+  /** What is typed into a reopened coder session's pane; defaults to Claude. */
+  sessionCommand?: SessionCommandBuilder;
   /** Pipeline names of a project; defaults to the kit chain's list. */
   listPipelines?: (project: ProjectEntry) => string[];
 }
@@ -93,6 +101,7 @@ function composeDeps(options: UiServerOptions, env: NodeJS.ProcessEnv): UiDeps {
       tmux: options.tmux ?? new Tmux({ env }),
       viewers: new ViewerRegistry(options.attach ?? bunAttachSpawner(env)),
       paneCommand: options.paneCommand ?? operatorCommand,
+      sessionCommand: options.sessionCommand ?? resumeCoderCommand,
       listPipelines: options.listPipelines ?? projectPipelines,
       shell: paneShell(env),
     },
