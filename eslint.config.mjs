@@ -5,6 +5,7 @@
 // cannot see (it reads imports, not globals).
 import stylistic from "@stylistic/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
+import reactHooks from "eslint-plugin-react-hooks";
 
 export default [
   {
@@ -35,6 +36,13 @@ export default [
         { blankLine: "always", prev: ["function", "class"], next: "*" },
       ],
     },
+  },
+  {
+    // Biome checks hook dependencies but not the rules of the React Compiler
+    // family — no ref read during render, no state set in an effect body, no
+    // impure call during render — which are the mistakes a growing UI makes.
+    ...reactHooks.configs.flat["recommended-latest"],
+    files: ["src/modules/ui/app/**/*.ts", "src/modules/ui/app/**/*.tsx"],
   },
   {
     // `lance-nuit/contracts` is installed on its own by external adapters: it

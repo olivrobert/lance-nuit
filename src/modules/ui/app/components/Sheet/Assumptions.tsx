@@ -8,16 +8,9 @@
 
 import type { JSX } from "react";
 import type { Assumptions as AssumptionsData } from "../../api/types.js";
-import type { UiState } from "../../store/store.js";
-import { useUiSelector } from "../../store/store.js";
 import styles from "./Sheet.module.css";
 
-const selectAssumptions = (state: UiState): AssumptionsData | null => state.assumptions;
-
-export function Assumptions(): JSX.Element {
-  const data = useUiSelector(selectAssumptions);
-  if (!data) return <p className="mute small">No assumptions.json.</p>;
-
+export function Assumptions({ data }: { data: AssumptionsData }): JSX.Element {
   const blocking = Array.isArray(data.blocking) ? data.blocking : [];
   const requiredInputs = Array.isArray(data.requiredInputs) ? data.requiredInputs : [];
   const resolved = Array.isArray(data.resolved) ? data.resolved : [];

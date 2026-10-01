@@ -22,9 +22,10 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import type { JSX } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { postTerminalInput, postTerminalResize, terminalStreamUrl } from "../../api/client.js";
 import { clampSize, createInputBatcher, decodeDataEvent } from "../../lib/terminal-io.js";
+import { InboxLink } from "../InboxLink.js";
 import styles from "./Terminal.module.css";
 
 /** Keystrokes arriving within this window leave in one POST. */
@@ -56,8 +57,9 @@ export function TerminalPane({ id, onEnded }: TerminalPaneProps): JSX.Element {
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<Status>("connecting");
   const [lostReason, setLostReason] = useState("");
-  const ended = useRef(onEnded);
-  ended.current = onEnded;
+  // Read from the stream's handler, so a new callback from the parent does not
+  // reopen the stream.
+  const ended = useEffectEvent(onEnded);
 
   useEffect(() => {
     const element = host.current;
@@ -99,7 +101,7 @@ export function TerminalPane({ id, onEnded }: TerminalPaneProps): JSX.Element {
     const batcher = createInputBatcher(async (data) => {
       if (!viewer || closed) return;
       const result = await postTerminalInput(id, viewer, data);
-      if (!result.ok) stop("lost", result.body.error ?? `input refused (error ${result.status})`);
+      if (!result.ok) stop("lost", result.error);
     }, INPUT_BATCH_MS);
 
     function sendResize(): void {
@@ -133,7 +135,7 @@ export function TerminalPane({ id, onEnded }: TerminalPaneProps): JSX.Element {
     });
     source.addEventListener("exit", () => {
       stop("ended");
-      ended.current();
+      ended();
     });
     source.onerror = () => stop("lost", "the stream was interrupted");
 
@@ -185,7 +187,7 @@ export function TerminalPane({ id, onEnded }: TerminalPaneProps): JSX.Element {
       {status === "ended" ? (
         <p className={`${styles.notice} ${styles.ended}`} role="status">
           {"Session ended. "}
-          <a href="#/">Back to the inbox</a>
+          <InboxLink>Back to the inbox</InboxLink>
         </p>
       ) : null}
       <div ref={host} className={styles.xterm} />

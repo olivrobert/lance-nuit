@@ -10,7 +10,10 @@
 import type { JSX } from "react";
 import { mimeOf } from "../../lib/work-item-tree.js";
 import { fmtSize } from "../../lib/format.js";
-import { useActions, useUiSelector } from "../../store/store.js";
+import { useQuery } from "@tanstack/react-query";
+import { fileQuery } from "../../api/queries.js";
+import { copy } from "../../store/ui-store.js";
+import { useSheet } from "../Sheet/sheet-context.js";
 import styles from "./Explorer.module.css";
 
 /** The fields every readable file carries, whether it fit under the size cap
@@ -22,13 +25,12 @@ interface WithHeader {
 }
 
 function Header({ file, headerClass }: { file: WithHeader; headerClass: string | undefined }): JSX.Element {
-  const actions = useActions();
   return (
     <div className={headerClass}>
       <code>{file.relativePath}</code>
       <span className="small mute">{fmtSize(file.size)}</span>
       <span className="grow" />
-      <button type="button" className="small" title={file.path} onClick={() => void actions.copy(file.path)}>
+      <button type="button" className="small" title={file.path} onClick={() => void copy(file.path)}>
         copy disk path
       </button>
     </div>
@@ -36,8 +38,8 @@ function Header({ file, headerClass }: { file: WithHeader; headerClass: string |
 }
 
 export function FileView({ headerClass }: { headerClass: string | undefined }): JSX.Element {
-  const filePath = useUiSelector((state) => state.filePath);
-  const file = useUiSelector((state) => state.file);
+  const { item, filePath } = useSheet();
+  const file = useQuery({ ...fileQuery(item, filePath ?? ""), enabled: filePath !== null }).data;
 
   if (!filePath) return <p className={`mute ${styles.notice}`}>Choose a file.</p>;
   if (!file) return <p className={`mute ${styles.notice}`}>Loading…</p>;

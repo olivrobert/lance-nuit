@@ -12,13 +12,11 @@ import type { JSX } from "react";
 import type { Item } from "../../api/types.js";
 import { failedBeforeRun, reasonOf, unmeteredResumeCommand, verbLabel } from "../../lib/items.js";
 import { fmtAge, fmtDate } from "../../lib/format.js";
-import type { UiState } from "../../store/store.js";
-import { POLL_MS, useUiSelector } from "../../store/store.js";
+import { useQuery } from "@tanstack/react-query";
+import { launchLogQuery, POLL_MS } from "../../api/queries.js";
 import { Actions } from "./Actions.js";
 import styles from "./Callout.module.css";
 import sheet from "./Sheet.module.css";
-
-const selectLaunchLog = (state: UiState): UiState["launchLog"] => state.launchLog;
 
 function RunningCallout({ item }: { item: Item }): JSX.Element | null {
   const launch = item.launch;
@@ -89,13 +87,14 @@ export function Callout({ item, includeActions = true }: CalloutProps): JSX.Elem
 }
 
 /** A launch that ended before the run moved: lock held, `bun` missing, refusal
- *  of the runner. The store loads the log by itself for this case, so the box
- *  only has to say "loading" until it lands. */
+ *  of the runner. Its log is the only place the reason is, so the box reads it
+ *  by itself. */
 export function LaunchFailureCallout({ item }: { item: Item }): JSX.Element | null {
-  const stored = useUiSelector(selectLaunchLog);
   const launch = item.launch;
-  if (!launch || !failedBeforeRun(item)) return null;
-  const log = stored?.status === "ok" ? stored : null;
+  const failed = failedBeforeRun(item);
+  const read = useQuery({ ...launchLogQuery(launch?.id ?? ""), enabled: launch !== undefined && failed });
+  if (!launch || !failed) return null;
+  const log = read.data?.status === "ok" ? read.data : null;
   const ending = launch.exitCode === null || launch.exitCode === undefined ? "aborted" : `code ${launch.exitCode}`;
 
   return (

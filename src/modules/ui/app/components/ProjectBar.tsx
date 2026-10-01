@@ -7,25 +7,38 @@
 // identity, because the server signs the session with the reader's name, and
 // without any reachable project, because there would be nothing to launch in.
 //
-// `addProject` and `removeProject` both go through the store, which already
+// Adding and removing a project go through `useWriteProject`, which already
 // toasts a refusal; this component only owns the `prompt()` that asks for the
-// path, because the store has no business showing a browser dialog.
+// path, because a mutation has no business showing a browser dialog.
+//
+// The chip on screen is the inbox's address, handed down by `InboxScreen`; a
+// click on a chip reports it, and the inbox moves the address.
 
+import { useQuery } from "@tanstack/react-query";
 import type { JSX } from "react";
 import { useState } from "react";
+import { useWriteProject } from "../api/mutations.js";
+import { itemsQuery, meQuery, projectsQuery } from "../api/queries.js";
 import { cx } from "../lib/cx.js";
 import { waitingCount } from "../lib/inbox.js";
-import { useActions, useUiSelector } from "../store/store.js";
+import { setQuery, useUi } from "../store/ui-store.js";
 import { LaunchRunDialog } from "./LaunchRunDialog.js";
 import styles from "./ProjectBar.module.css";
 
-export function ProjectBar(): JSX.Element {
-  const projects = useUiSelector((state) => state.projects);
-  const items = useUiSelector((state) => state.items);
-  const filter = useUiSelector((state) => state.filter);
-  const query = useUiSelector((state) => state.query);
-  const user = useUiSelector((state) => state.user);
-  const actions = useActions();
+const NONE: readonly never[] = [];
+
+export interface ProjectBarProps {
+  /** The chip on screen, `null` for every project. */
+  filter: string | null;
+  onFilter(name: string | null): void;
+}
+
+export function ProjectBar({ filter, onFilter }: ProjectBarProps): JSX.Element {
+  const projects = useQuery(projectsQuery).data ?? NONE;
+  const items = useQuery(itemsQuery).data ?? NONE;
+  const user = useQuery(meQuery).data?.user ?? null;
+  const query = useUi((state) => state.query);
+  const writeProject = useWriteProject();
   const [launching, setLaunching] = useState(false);
 
   const launchable = projects.filter((project) => project.found);
@@ -41,7 +54,7 @@ export function ProjectBar(): JSX.Element {
   const addProject = (): void => {
     const path = prompt("Project path (the folder containing .lance-nuit):", "");
     if (!path) return;
-    void actions.addProject(path);
+    writeProject("add", path);
   };
 
   return (
@@ -54,11 +67,11 @@ export function ProjectBar(): JSX.Element {
         data-list-search=""
         aria-keyshortcuts="/"
         value={query}
-        onChange={(event) => actions.setQuery(event.target.value)}
+        onChange={(event) => setQuery(event.target.value)}
       />
       <div className={styles.chips}>
         <span className="small mute">Projects</span>
-        <button type="button" className={cx(styles.chip, !filter && styles.on)} onClick={() => actions.setFilter(null)}>
+        <button type="button" className={cx(styles.chip, !filter && styles.on)} onClick={() => onFilter(null)}>
           {"All "}
           <small>{`· ${waitingCount(items, null)} to review`}</small>
         </button>
@@ -69,7 +82,7 @@ export function ProjectBar(): JSX.Element {
               type="button"
               className={cx(styles.chip, filter === project.name && styles.on)}
               title={`${project.cwd} · ${project.provider}${project.key ? ` ${project.key}` : ""}`}
-              onClick={() => actions.setFilter(project.name)}
+              onClick={() => onFilter(project.name)}
             >
               <span className={styles.dot} />
               {project.name}
@@ -86,7 +99,7 @@ export function ProjectBar(): JSX.Element {
                 type="button"
                 className={styles.drop}
                 title="Remove this project from the list"
-                onClick={() => void actions.removeProject(project.cwd)}
+                onClick={() => writeProject("remove", project.cwd)}
               >
                 {"×"}
               </button>

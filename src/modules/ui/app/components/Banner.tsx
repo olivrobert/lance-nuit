@@ -7,17 +7,17 @@
 // only something more to read.
 //
 // The document title (`(N) lancenuit — review inbox`) is set by `App`, not
-// here: it is a property of the page, not of this header, and `App` already
-// owns it because it is the one place that decides whether the shell is shown
-// at all.
+// here: it is a property of the page, not of this header.
 
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
+import { itemsQuery } from "../api/queries.js";
+import { useNotificationPermission } from "../hooks/useAttentionNotifications.js";
 import { cx } from "../lib/cx.js";
 import { freshnessOf, updatedLabel } from "../lib/freshness.js";
-import { useUiSelector } from "../store/store.js";
-import { useNotificationPermission } from "../store/useAttentionNotifications.js";
-import { useRoute } from "../store/useRoute.js";
+import { InboxLink } from "./InboxLink.js";
 import styles from "./Banner.module.css";
 
 /** How often the age of the screen is re-read. The label counts in minutes, so
@@ -33,11 +33,13 @@ function useNow(intervalMs: number): number {
   return now;
 }
 
-/** The age of the screen, and an alarm once reads stopped landing. */
+/** The age of the screen, and an alarm once reads stopped landing. The item
+ *  list stands for the whole poll: it is the read every screen depends on. */
 function Freshness(): JSX.Element {
-  const refreshedAt = useUiSelector((state) => state.refreshedAt);
-  const refreshError = useUiSelector((state) => state.refreshError);
-  // A read that lands re-renders this component through the store; the clock
+  const items = useQuery(itemsQuery);
+  const refreshedAt = items.dataUpdatedAt || null;
+  const refreshError = items.error ? items.error.message : null;
+  // A read that lands re-renders this component through the query; the clock
   // only has to move the label between two reads.
   const now = Math.max(useNow(CLOCK_MS), refreshedAt ?? 0);
   const freshness = freshnessOf(refreshedAt, refreshError, now);
@@ -78,28 +80,27 @@ function NotifyToggle(): JSX.Element | null {
 
 /** The two screens a reader moves between on purpose. A terminal is reached
  *  from its item, never from here. */
-function Nav(): JSX.Element {
-  const route = useRoute();
+function Nav({ screen }: { screen: BannerScreen }): JSX.Element {
   return (
     <nav className={styles.nav}>
-      <a href="#/" className={cx(route.view === "inbox" && styles.current)}>
-        Inbox
-      </a>
-      <a href="#/stats" className={cx(route.view === "stats" && styles.current)}>
+      <InboxLink className={cx(screen === "inbox" && styles.current)}>Inbox</InboxLink>
+      <Link to="/stats" className={cx(screen === "stats" && styles.current)}>
         Stats
-      </a>
+      </Link>
     </nav>
   );
 }
 
-export function Banner(): JSX.Element {
+export type BannerScreen = "inbox" | "stats" | "terminal";
+
+export function Banner({ screen }: { screen: BannerScreen }): JSX.Element {
   return (
     <header className={styles.banner}>
       <strong className={styles.brand}>
         <span className={styles.moon} aria-hidden="true" />
         lancenuit
       </strong>
-      <Nav />
+      <Nav screen={screen} />
       <span className={styles.end}>
         <Freshness />
         <NotifyToggle />

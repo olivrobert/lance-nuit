@@ -13,7 +13,7 @@
 import type { JSX } from "react";
 import type { Item, ItemDetail, SheetTab } from "../../api/types.js";
 import { countFiles } from "../../lib/work-item-tree.js";
-import { actions } from "../../store/store.js";
+import { useSheetNavigation } from "./sheet-context.js";
 import styles from "./Sheet.module.css";
 
 export interface SheetTabsProps {
@@ -24,6 +24,7 @@ export interface SheetTabsProps {
 }
 
 export function SheetTabs({ item, detail, current }: SheetTabsProps): JSX.Element {
+  const { showTab } = useSheetNavigation();
   const tree = detail.tree;
   const stepCount = detail.steps?.steps.length;
   const fileCount = tree ? tree.children.reduce((total, node) => total + countFiles(node), 0) : undefined;
@@ -51,7 +52,7 @@ export function SheetTabs({ item, detail, current }: SheetTabsProps): JSX.Elemen
             type="button"
             className={current === key ? styles.on : ""}
             aria-pressed={current === key}
-            onClick={() => actions.setSheetTab(key)}
+            onClick={() => showTab(key)}
           >
             {label}
             {count ? <span className={styles.tabCount}>{count}</span> : null}
