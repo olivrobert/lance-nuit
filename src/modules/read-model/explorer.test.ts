@@ -60,8 +60,9 @@ function find(nodes: readonly TreeNode[], path: string): TreeNode | undefined {
   return undefined;
 }
 
-/** A stopped run waiting on `subject`, with the four usual sections filled in. */
-function stoppedWorkItem(project: string, ticket: string, subject?: string): string {
+/** A stopped run waiting on `subject`, with the four usual sections filled in.
+ *  `artifact` is what the runner recorded as the gate's artifact, if anything. */
+function stoppedWorkItem(project: string, ticket: string, subject?: string, artifact?: string): string {
   const runDir = writeRun(project, ticket, "feature", {
     runId: "r-1",
     status: "STOPPED",
@@ -71,7 +72,12 @@ function stoppedWorkItem(project: string, ticket: string, subject?: string): str
       reason: "plan needs approval",
       logPath: null,
       resumable: true,
-      stop: { ...(subject ? { subject } : {}), kind: "needs-decision", detail: "plan needs approval" },
+      stop: {
+        ...(subject ? { subject } : {}),
+        ...(artifact ? { artifact } : {}),
+        kind: "needs-decision",
+        detail: "plan needs approval",
+      },
     },
   });
   writeArtifact(project, ticket, "plan.md", "# plan\n");
@@ -140,6 +146,26 @@ test("tree: a decision names the artifact its subject does not", () => {
 
   expect(tree?.gatePath).toBe("artifacts/plan-audit.json");
   expect(find(tree?.children ?? [], "artifacts/plan-audit.json")).toMatchObject({ gate: true, contentKind: "json" });
+});
+
+test("tree: the artifact the stop records is the gate, whatever its subject is called", () => {
+  const project = listedProject();
+  stoppedWorkItem(project, "DEMO-1", "captures-ui", "artifacts/ui-review.json");
+  writeArtifact(project, "DEMO-1", "ui-review.json", "[]\n");
+
+  const tree = readTree("demo-app", "DEMO-1");
+
+  expect(tree?.gatePath).toBe("artifacts/ui-review.json");
+  expect(tree?.defaultPath).toBe("artifacts/ui-review.json");
+});
+
+test("tree: a recorded artifact outside artifacts/ is ignored for the subject's naming", () => {
+  const project = listedProject();
+  stoppedWorkItem(project, "DEMO-1", "plan", "reports/audit.json");
+
+  const tree = readTree("demo-app", "DEMO-1");
+
+  expect(tree?.gatePath).toBe("artifacts/plan.md");
 });
 
 test("tree: a stop with no identifiable artifact flags nothing", () => {

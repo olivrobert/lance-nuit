@@ -96,9 +96,12 @@ A snapshot also records where and why the run stands where it does:
 - `outcome.stop` describes a clean stop without making a reader parse
   `stopped_reason`: `detail` is the reason without the console decoration,
   `kind` is the expected recovery (`needs-info`, `needs-decision`, `needs-human`,
-  or `blocked` for a step whose `fail_cause` says so), and `subject` is the
-  approval subject that lifts the stop when the gate declares one. The same
-  object is attached to the `run.stopped` journal event.
+  or `blocked` for a step whose `fail_cause` says so), `subject` is the
+  approval subject that lifts the stop when the gate declares one, and
+  `artifact` (`artifacts/<name>`) is the artifact a `humanReview` gate is
+  about — the file the dashboard opens under the decision, since only the
+  runner knows which artifact a subject is bound to. The same object is
+  attached to the `run.stopped` journal event.
 - `steps[].fail_cause` and `outcome.failCause` name a failure no fix pass could
   have cleared. The only value is `blocked`: an obstacle outside the code, which
   an agent declares with `"blocked": true` in its verdict (see
