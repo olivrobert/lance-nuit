@@ -18,13 +18,16 @@ export interface VerbRequest {
   verb: VerbAction;
   /** Required by the `budget` verb, asked for by the caller, which owns the prompt. */
   budget?: number;
+  /** Required by the `reject-and-rerun` verb, asked for by the caller too. */
+  reason?: string;
 }
 
 /** The body repeats the pipeline and the run id the sheet was showing, so a
  *  click on an item that moved since the last poll is refused by the server
  *  instead of applied to a run the reader never saw. */
-function payloadOf({ item, verb, budget }: VerbRequest): ActionPayload {
-  const subject = verb.verb === "approve-and-rerun" || verb.verb === "approve" ? item.stop?.subject : undefined;
+function payloadOf({ item, verb, budget, reason }: VerbRequest): ActionPayload {
+  const decides = verb.verb === "approve-and-rerun" || verb.verb === "approve" || verb.verb === "reject-and-rerun";
+  const subject = decides ? item.stop?.subject : undefined;
   return {
     project: item.project.name,
     ticket: item.ticket,
@@ -32,6 +35,7 @@ function payloadOf({ item, verb, budget }: VerbRequest): ActionPayload {
     runId: item.runId,
     ...(subject !== undefined ? { subject } : {}),
     ...(typeof budget === "number" ? { budget } : {}),
+    ...(typeof reason === "string" ? { reason } : {}),
   };
 }
 

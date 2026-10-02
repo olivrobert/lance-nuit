@@ -11,7 +11,7 @@ item normally looks like this:
 │   └── .provenance/           # runner-owned input fingerprints, one per output
 ├── reports/                   # disposable machine/human reports
 │   └── <LOT-ID>/              # isolated reports for a batch sub-run
-├── decisions/                 # hash-locked approval records
+├── decisions/                 # hash-locked approval and rejection records
 └── runs/<pipeline>/
     ├── latest -> <run-id>     # authoritative resumable selector
     └── <run-id>/
@@ -44,6 +44,28 @@ reappearance invalidates the record instead of being silently adopted. A batch
 phases use the work-item's flat `reports/` directory. Artifact descriptors read
 and write through `ctx.artifacts`, which validates names and keeps the logical
 interface independent of the filesystem.
+
+`decisions/<subject>.json` holds the current human answer for one subject; an
+approval replaces a rejection and the reverse. A rejection adds the reason the
+rework step reads and the round it opened:
+
+```json
+{
+  "schemaVersion": 1,
+  "decision": "rejected",
+  "subject": "plan",
+  "artifact": "artifacts/plan.md",
+  "artifactSha256": "<sha256>",
+  "decidedAt": "2026-09-03T12:00:00.000Z",
+  "decidedBy": "human",
+  "reason": "split step 2",
+  "round": 1
+}
+```
+
+The file is shared by a parent run and its children and survives `--fresh`, so
+the round bound holds across runs. See
+[human-control.md](human-control.md#reject-and-rework).
 
 A project pipeline can split a parent plan into lots without creating a dispatch
 run for each lot. The generic resolver also supports explicit nested work-item
@@ -368,7 +390,7 @@ kept and read on what it still says.
 | `pipeline.child.started` | a composed child is launched |
 | `pipeline.child.finished` | a composed child is settled |
 | `pipeline.child.cost.reconciled` | a child's spend is posted to the parent's ledger |
-| `decision.recorded` | `--approve` wrote a new approval at boot (a repeated approval of the same artifact is not journaled) |
+| `decision.recorded` | `--approve` or `--reject` wrote a new decision at boot: `decision` is `approved` or `rejected`, a rejection also carries `reason` and `round` (a repeated identical decision is not journaled) |
 
 ## Scan records
 

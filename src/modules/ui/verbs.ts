@@ -6,7 +6,8 @@
 // The server builds `argv` itself. A request names a verb and an item; it never
 // carries an argument that reaches the command line as typed. The subject must
 // be the one the run is stopped on, the pipeline is the run's, the worktree mode
-// is the run's, and the budget is a bounded number the server formats.
+// is the run's, the budget is a bounded number the server formats, and a
+// rejection reason is bounded text passed as one argument, never through a shell.
 //
 // The same rules decide what the sheet offers: `verbsFor` lists the verbs an
 // item admits, each with the command `buildArgv` would build, and every item the
@@ -14,9 +15,18 @@
 //
 // Pure: nothing here spawns or writes; `launcher.ts` does.
 
-import type { Item } from "../read-model/index.js";
+import { type Item, MAX_REJECTION_REASON } from "../read-model/index.js";
 
-export const VERBS = ["approve-and-rerun", "approve", "rerun", "fresh", "budget", "close", "reopen"] as const;
+export const VERBS = [
+  "approve-and-rerun",
+  "approve",
+  "reject-and-rerun",
+  "rerun",
+  "fresh",
+  "budget",
+  "close",
+  "reopen",
+] as const;
 export type Verb = (typeof VERBS)[number];
 
 export function isVerb(value: unknown): value is Verb {
@@ -30,6 +40,7 @@ export const MAX_BUDGET_USD = 1000;
 export interface ActionInput {
   subject?: unknown;
   budget?: unknown;
+  reason?: unknown;
 }
 
 export type ArgvResult = { ok: true; argv: string[] } | { ok: false; status: number; reason: string };
@@ -52,6 +63,15 @@ function formatBudget(value: unknown): string | undefined {
   return String(cents);
 }
 
+/** Trim a rejection reason, or refuse it. A lone option name is refused because
+ *  the CLI would read it as an option rather than as the value of `--reason`. */
+function formatReason(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const reason = value.trim();
+  if (reason.length === 0 || reason.length > MAX_REJECTION_REASON || /^-\S*$/.test(reason)) return undefined;
+  return reason;
+}
+
 /** The subject the run is stopped on, when it is stopped at a gate. */
 function pendingGate(item: Item): string | undefined {
   return item.status === "STOPPED" ? item.stop?.subject : undefined;
@@ -63,12 +83,23 @@ function approvedGate(item: Item): boolean {
   return pendingGate(item) !== undefined && item.approval?.state === "fresh";
 }
 
+/** A gate whose artifact was rejected and not yet reworked: the run needs
+ *  resuming so the rework step reads the reason, not another decision. */
+function rejectedGate(item: Item): boolean {
+  return pendingGate(item) !== undefined && item.approval?.state === "rejected";
+}
+
+/** The gate waits on a decision: none holds, or the one recorded went stale. */
+function undecidedGate(item: Item): boolean {
+  return pendingGate(item) !== undefined && !approvedGate(item) && !rejectedGate(item);
+}
+
 /**
  * The command line of one verb, once admitted: every value comes from the item
- * except the budget, which the caller formatted — or a placeholder, for a
- * command shown before the reader typed an amount.
+ * except the budget and the reason, which the caller formatted — or
+ * placeholders, for a command shown before the reader typed them.
  */
-function argvOf(item: Item, verb: Verb, budget: string): string[] {
+function argvOf(item: Item, verb: Verb, budget: string, reason = ""): string[] {
   const worktree = item.worktree ? ["--worktree"] : [];
   const run = ["run", item.ticket, "--pipeline", item.pipeline];
   const gate = pendingGate(item) ?? "";
@@ -77,6 +108,8 @@ function argvOf(item: Item, verb: Verb, budget: string): string[] {
       return [...run, "--approve", gate, ...worktree];
     case "approve":
       return ["approve", item.ticket, gate, "--pipeline", item.pipeline, ...worktree];
+    case "reject-and-rerun":
+      return [...run, "--reject", gate, "--reason", reason, ...worktree];
     case "rerun":
       return [...run, ...worktree];
     case "budget":
@@ -112,8 +145,26 @@ export function buildArgv(item: Item, verb: Verb, input: ActionInput = {}): Argv
       if (!/^[\w-]+$/.test(gate)) return { ok: false, status: 409, reason: "the pending subject is not a valid token" };
       return { ok: true, argv: argvOf(item, verb, "") };
     }
+    case "reject-and-rerun": {
+      if (!gate || !item.stop?.reworkable) {
+        return { ok: false, status: 409, reason: "this run is not stopped at a gate that declares a rework step" };
+      }
+      if (typeof input.subject !== "string" || input.subject !== gate) {
+        return { ok: false, status: 400, reason: `subject must be the pending gate "${gate}"` };
+      }
+      if (!/^[\w-]+$/.test(gate)) return { ok: false, status: 409, reason: "the pending subject is not a valid token" };
+      const reason = formatReason(input.reason);
+      if (!reason) {
+        return {
+          ok: false,
+          status: 400,
+          reason: `reason must be a non-empty text of at most ${MAX_REJECTION_REASON} characters`,
+        };
+      }
+      return { ok: true, argv: argvOf(item, verb, "", reason) };
+    }
     case "rerun": {
-      const blocked = item.status === "STOPPED" && (!gate || approvedGate(item));
+      const blocked = item.status === "STOPPED" && (!gate || approvedGate(item) || rejectedGate(item));
       const failed = item.status === "FAIL" || item.status === "ABORTED";
       if (!blocked && !failed) return { ok: false, status: 409, reason: "only a blocked or failed run can be resumed" };
       return { ok: true, argv: argvOf(item, verb, "") };
@@ -151,7 +202,7 @@ export interface VerbAction {
 }
 
 function offer(item: Item, verb: Verb, label: string, flags: { primary?: true; danger?: true } = {}): VerbAction {
-  return { verb, label, command: ["lancenuit", ...argvOf(item, verb, "<usd>")].join(" "), ...flags };
+  return { verb, label, command: ["lancenuit", ...argvOf(item, verb, "<usd>", '"<reason>"')].join(" "), ...flags };
 }
 
 /**
@@ -171,11 +222,12 @@ export function verbsFor(item: Item): VerbAction[] {
   const verbs: VerbAction[] = [];
   const stopped = item.status === "STOPPED";
   const failed = item.status === "FAIL" || item.status === "ABORTED";
-  if (stopped && pendingGate(item) && !approvedGate(item)) {
+  if (stopped && undecidedGate(item)) {
     verbs.push(offer(item, "approve-and-rerun", "Approve and rerun", { primary: true }));
     verbs.push(offer(item, "approve", "Approve only"));
+    if (item.stop?.reworkable) verbs.push(offer(item, "reject-and-rerun", "Reject and rework"));
   }
-  if (stopped && (!pendingGate(item) || approvedGate(item)))
+  if (stopped && (!pendingGate(item) || approvedGate(item) || rejectedGate(item)))
     verbs.push(offer(item, "rerun", "Rerun", { primary: true }));
   if (failed) verbs.push(offer(item, "rerun", "Rerun from failure", { primary: true }));
   if (item.budgetExceeded) verbs.push(offer(item, "budget", "Raise budget"));

@@ -11,6 +11,8 @@ export interface StepApprovalDeclaration {
   /** Reason `subject` cannot be approved for the current artifact, undefined when
    *  it can. Absent when every subject is approvable whatever the verdict. */
   guard?: (subject: string, ctx: PipelineContext) => Promise<string | undefined>;
+  /** Step that reworks the artifact when a human rejects one of `subjects`. */
+  rework?: { stepId: string; maxRounds: number };
 }
 
 const declaredSources = new WeakMap<AssemblyTarget, PipelineWorkItemSource>();

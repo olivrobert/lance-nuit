@@ -3,7 +3,7 @@
 // No hardcoded subject list exists anywhere—that is the point of these tests.
 
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveApprovableArtifact, resolveApprovalArtifact } from "../../src/commands/approval-subject.js";
@@ -13,8 +13,14 @@ import { buildPipelineContext } from "../../src/pipeline/context.js";
 import {
   decisionActor,
   decisionMatchesArtifact,
+  MAX_REJECTION_REASON,
   markDecisionApplied,
+  pendingRejection,
+  readDecision,
+  readDecisionAt,
   recordApproval,
+  recordRejection,
+  rejectionPending,
 } from "../../src/state/decisions.js";
 
 const step = () => bashStep({ id: "noop", name: "Noop", command: "true" });
@@ -237,4 +243,126 @@ test("a static subject is accepted whatever the verdict", async () => {
   const context = ticketContext();
   const def = pipeline("budgeted").approval("budget", budgetArtifact).add(step()).build();
   expect((await resolveApprovableArtifact(def, "budget", context)).name).toBe("budget.json");
+});
+
+test("a rejection records the trimmed reason, the artifact hash, the round and its author", async () => {
+  const context = ticketContext();
+  writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 12 }));
+  const previous = process.env.LANCENUIT_ACTOR;
+  process.env.LANCENUIT_ACTOR = "Olivier";
+  try {
+    const { decision, written } = await recordRejection(context, "budget", budgetArtifact, "  too expensive  ", 3);
+    expect(written).toBe(true);
+    expect(decision).toMatchObject({
+      decision: "rejected",
+      subject: "budget",
+      artifact: "artifacts/budget.json",
+      reason: "too expensive",
+      round: 1,
+      decidedBy: "Olivier",
+    });
+    expect(decision.artifactSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(readDecisionAt(join(context.paths.decisionsDir!, "budget.json"))).toEqual(decision);
+  } finally {
+    if (previous === undefined) delete process.env.LANCENUIT_ACTOR;
+    else process.env.LANCENUIT_ACTOR = previous;
+  }
+});
+
+test("rejecting the same bytes again keeps the round: same reason writes nothing, another reason rewrites it", async () => {
+  const context = ticketContext();
+  writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 12 }));
+  const first = await recordRejection(context, "budget", budgetArtifact, "too expensive", 3);
+
+  expect(await recordRejection(context, "budget", budgetArtifact, "too expensive ", 3)).toEqual({
+    decision: first.decision,
+    written: false,
+  });
+  const reworded = await recordRejection(context, "budget", budgetArtifact, "halve it", 3);
+  expect(reworded.written).toBe(true);
+  expect(reworded.decision).toMatchObject({ reason: "halve it", round: 1 });
+});
+
+test("rejecting reworked bytes opens the next round, and a round past the bound is refused", async () => {
+  const context = ticketContext();
+  writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 12 }));
+  await recordRejection(context, "budget", budgetArtifact, "too expensive", 2);
+
+  writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 11 }));
+  expect((await recordRejection(context, "budget", budgetArtifact, "still too expensive", 2)).decision.round).toBe(2);
+
+  writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 10 }));
+  expect(recordRejection(context, "budget", budgetArtifact, "no", 2)).rejects.toThrow(
+    'Rejection of "budget" refused: 2 rework round(s) already rejected (maxRounds 2). Approve the artifact (--approve budget) or answer on the ticket instead.',
+  );
+  expect(readDecision(context, "budget")?.round).toBe(2);
+});
+
+test("an approval replaces a rejection, and the next rejection starts over at round 1", async () => {
+  const context = ticketContext();
+  writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 12 }));
+  await recordRejection(context, "budget", budgetArtifact, "too expensive", 1);
+  const approved = await recordApproval(context, "budget", budgetArtifact);
+  expect(approved.written).toBe(true);
+  expect(approved.decision.reason).toBeUndefined();
+  expect((await recordRejection(context, "budget", budgetArtifact, "changed my mind", 1)).decision.round).toBe(1);
+});
+
+test("an empty or oversized rejection reason is refused and nothing is written", async () => {
+  const context = ticketContext();
+  writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 12 }));
+  expect(recordRejection(context, "budget", budgetArtifact, "   ", 3)).rejects.toThrow(
+    'Rejection of "budget" needs a reason',
+  );
+  expect(recordRejection(context, "budget", budgetArtifact, "x".repeat(MAX_REJECTION_REASON + 1), 3)).rejects.toThrow(
+    `at most ${MAX_REJECTION_REASON} characters`,
+  );
+  expect(existsSync(join(context.paths.decisionsDir!, "budget.json"))).toBe(false);
+});
+
+test("a decision file is read with or without the rejection fields, and a rejection must carry them", () => {
+  const dir = mkdtempSync(join(tmpdir(), "decision-"));
+  const base = {
+    schemaVersion: 1,
+    subject: "budget",
+    artifact: "artifacts/budget.json",
+    artifactSha256: "a".repeat(64),
+    decidedAt: "2026-01-01T00:00:00.000Z",
+    decidedBy: "human",
+  };
+  const write = (value: object) => {
+    const path = join(dir, `${Math.random()}.json`);
+    writeFileSync(path, JSON.stringify(value));
+    return path;
+  };
+  expect(readDecisionAt(write({ ...base, decision: "approved" }))?.decision).toBe("approved");
+  expect(readDecisionAt(write({ ...base, decision: "rejected", reason: "no", round: 2 }))).toMatchObject({
+    reason: "no",
+    round: 2,
+  });
+  expect(readDecisionAt(write({ ...base, decision: "rejected" }))).toBeUndefined();
+  expect(readDecisionAt(write({ ...base, decision: "rejected", reason: "", round: 1 }))).toBeUndefined();
+  expect(readDecisionAt(write({ ...base, decision: "rejected", reason: "no", round: 0 }))).toBeUndefined();
+});
+
+test("a rejection is pending while the artifact is absent or unchanged, never for an approval", async () => {
+  const context = ticketContext();
+  const path = context.paths.artifact("budget.json");
+  writeFileSync(path, JSON.stringify({ amountUsd: 12 }));
+  const { decision } = await recordRejection(context, "budget", budgetArtifact, "too expensive", 3);
+  const body = readFileSync(path, "utf-8");
+
+  expect(rejectionPending(decision, body)).toBe(true);
+  // A rework interrupted after its outputs were erased has produced nothing yet.
+  expect(rejectionPending(decision, undefined)).toBe(true);
+  expect(rejectionPending(decision, `${body} `)).toBe(false);
+  expect(rejectionPending({ ...decision, decision: "approved" }, body)).toBe(false);
+  expect(rejectionPending(undefined, body)).toBe(false);
+
+  expect(await pendingRejection(context, "budget")).toMatchObject({ reason: "too expensive", round: 1 });
+  rmSync(path);
+  expect(await pendingRejection(context, "budget")).toMatchObject({ reason: "too expensive", round: 1 });
+  writeFileSync(path, JSON.stringify({ amountUsd: 11 }));
+  expect(await pendingRejection(context, "budget")).toBeUndefined();
+  expect(await pendingRejection(context, "unknown")).toBeUndefined();
 });

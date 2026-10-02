@@ -6,7 +6,7 @@
 // Commands are evaluated first in main(), in registry order.
 
 import { readFileSync } from "node:fs";
-import { approvalCommand } from "./approval.js";
+import { approvalCommand, rejectionCommand } from "./approval.js";
 import { closeCommand, reopenCommand } from "./closure.js";
 import { createPipelineCommand } from "./create-pipeline.js";
 import { cleanCommand, inspectCommand, logsCommand } from "./diagnostics.js";
@@ -53,6 +53,7 @@ export const COMMANDS: RunnerCommand[] = [
   typecheckCommand,
   typesInstallCommand,
   approvalCommand,
+  rejectionCommand,
   closeCommand,
   reopenCommand,
   inspectCommand,

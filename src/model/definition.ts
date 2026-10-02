@@ -132,6 +132,10 @@ export interface PipelineStep {
    *  restore the Git state (HEAD on the feature/fix branch) that a skip would leave
    *  wrong (HEAD left on base/develop → commits on the wrong branch). */
   rerun_on_resume?: boolean;
+  /** Approval subjects this step reworks when a human rejects them. On resume the
+   *  step replays while one of them has a pending rejection, whatever its input
+   *  freshness says: a rejection is not an input, it is the reason to run. */
+  rework_for?: string[];
 }
 
 /** Discovery configuration carried by a pipeline work-item source.
@@ -158,6 +162,11 @@ export interface PipelineWorkItemSource {
   scan?: WorkItemScanDefinition;
 }
 
+export interface PipelineRework {
+  stepId: string;
+  maxRounds: number;
+}
+
 export interface Pipeline {
   name: string;
   description?: string;
@@ -177,6 +186,10 @@ export interface Pipeline {
   /** Reason a subject cannot be approved for the current artifact, undefined when
    * it can. Absent for a subject approvable whatever the verdict. */
   approvalGuards?: ReadonlyMap<string, (ctx: PipelineContext) => Promise<string | undefined>>;
+  /** Step that reworks the artifact of a rejected subject, and the number of
+   * rejection rounds allowed. `--reject <subject>` is refused for a subject
+   * absent here: nothing would replay and the gate would stop forever. */
+  reworks?: ReadonlyMap<string, PipelineRework>;
   steps: PipelineStep[];
 }
 

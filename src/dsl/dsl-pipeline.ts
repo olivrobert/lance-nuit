@@ -1,5 +1,5 @@
 import type { PipelineContext } from "../model/context.js";
-import type { Pipeline } from "../model/definition.js";
+import type { Pipeline, PipelineRework } from "../model/definition.js";
 import { isValidSubjectToken } from "../state/decisions.js";
 import type { Artifact } from "./artifact.js";
 import { StepBuilder } from "./dsl-steps.js";
@@ -35,6 +35,14 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
   private readonly approvalGuards = new Map<string, (ctx: PipelineContext) => Promise<string | undefined>>();
 
   private readonly stepBuilders: StepBuilder[] = [];
+
+  /** Rework loops declared by gates, checked in `build()` once every step is known. */
+  private readonly reworkDeclarations: {
+    gate: StepBuilder;
+    subjects: readonly string[];
+    artifact: Artifact<unknown>;
+    rework: PipelineRework;
+  }[] = [];
 
   private mode: PipelineBuilderMode = "empty";
 
@@ -130,12 +138,13 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
   private appendStep(step: StepBuilder): void {
     const approval = approvalDeclaration(step);
     if (approval) {
-      const { artifact, guard } = approval;
+      const { artifact, guard, rework } = approval;
       for (const subject of approval.subjects) {
         if (guard && this.approvals.has(subject)) throw this.guardedTwice(subject);
         this.approval(subject, artifact);
         if (guard) this.approvalGuards.set(subject, (ctx) => guard(subject, ctx));
       }
+      if (rework) this.reworkDeclarations.push({ gate: step, subjects: approval.subjects, artifact, rework });
     }
     const source = workItemSourceDeclaration(step);
     if (source) {
@@ -159,7 +168,30 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
     });
     if (this.approvals.size > 0) this.p.approvals = new Map(this.approvals);
     if (this.approvalGuards.size > 0) this.p.approvalGuards = new Map(this.approvalGuards);
+    const reworks = this.bindReworks();
+    if (reworks.size > 0) this.p.reworks = reworks;
     return this.p;
+  }
+
+  /** A rework step must exist, run before its gate, and write the artifact the
+   *  gate reviews; otherwise a rejection would replay nothing that can answer it. */
+  private bindReworks(): Map<string, PipelineRework> {
+    const reworks = new Map<string, PipelineRework>();
+    for (const { gate, subjects, artifact, rework } of this.reworkDeclarations) {
+      const subject = subjects.join(", ");
+      const index = this.p.steps.findIndex((step) => step.id === rework.stepId);
+      const target = this.p.steps[index];
+      const fail = (why: string) =>
+        new Error(`Pipeline "${this.p.name}": rework step "${rework.stepId}" of subject "${subject}" ${why}`);
+      if (!target) throw fail("is not declared");
+      if (index > this.stepBuilders.indexOf(gate)) throw fail("must run before its gate");
+      if (!target.outputs?.some((output) => output.name === artifact.name)) {
+        throw fail(`does not declare ${artifact.name} as an output`);
+      }
+      target.rework_for = [...new Set([...(target.rework_for ?? []), ...subjects])];
+      for (const declared of subjects) reworks.set(declared, rework);
+    }
+    return reworks;
   }
 }
 

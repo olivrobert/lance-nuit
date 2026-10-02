@@ -113,15 +113,23 @@ export function writeRunEvents(runDir: string, events: Record<string, unknown>[]
 
 /** An approval decision locked to `body`; pass the body the artifact had when it
  *  was approved to build a stale one. */
-export function writeDecision(root: string, ticket: string, subject: string, artifact: string, body: string): void {
+export function writeDecision(
+  root: string,
+  ticket: string,
+  subject: string,
+  artifact: string,
+  body: string,
+  rejection?: { reason: string; round: number },
+): void {
   writeJson(join(workItemDir(root, ticket), "decisions", `${subject}.json`), {
     schemaVersion: 1,
-    decision: "approved",
+    decision: rejection ? "rejected" : "approved",
     subject,
     artifact: `artifacts/${artifact}`,
     artifactSha256: sha256Text(body),
     decidedAt: "2026-09-05T08:00:00.000Z",
     decidedBy: "Olivier",
+    ...(rejection ?? {}),
   });
 }
 
