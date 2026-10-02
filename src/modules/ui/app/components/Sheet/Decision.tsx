@@ -2,7 +2,7 @@
 //
 // A decision is the reason the item is in the inbox, so it is not a tab and not
 // a line in the collapsed panel: the question, the state of its approval and the
-// two ways to answer — approve from the header, or reply on the ticket — stay on
+// ways to answer — approve or reject from the header, or reply on the ticket — stay on
 // screen while the reader moves between the document, the steps and the files
 // that inform the answer. Each of them used to live somewhere else (the callout
 // in the diagnostic tab, the approval twice, the reply folded away), and a

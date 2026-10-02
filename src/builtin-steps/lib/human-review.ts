@@ -16,6 +16,8 @@
 //    static subject or, per blocking value, one of a declared list or none.
 //  - the stop message is prefixed `escalated:` and suffixed with `--approve`, rather
 //    than rewritten in every gate.
+//  - a gate declaring `rework` accepts `--reject <subject>`: the named step reruns
+//    with the reason, and the gate asks again whatever the reworked verdict says.
 //
 // Execution still has SEPARATE steps by design. A note-publishing step must not stop
 // the run (an admission has one failure policy, and escalation must remain `skip`
@@ -34,7 +36,7 @@ import { reject } from "../../dsl/preconditions.js";
 import { declareApproval, inferredPipelineName } from "../../dsl/work-item-assembly.js";
 import type { PipelineContext } from "../../model/context.js";
 import type { RunStopState } from "../../model/persisted.js";
-import { decisionMatchesArtifact } from "../../state/decisions.js";
+import { decisionMatchesArtifact, readDecision, rejectionStatus } from "../../state/decisions.js";
 import { abandonWorkItemBranch } from "./branch.js";
 import { workItemEscalateStep } from "./work-item-steps.js";
 
@@ -119,6 +121,14 @@ export interface HumanReviewOptions<T> {
    * none, and `--approve` then refuses a subject the current verdict does not offer.
    */
   approval?: ReviewApproval | ReviewApprovalChoice<T>;
+  /**
+   * Step that rewrites the artifact when a human rejects it (`--reject <subject>
+   * --reason <text>`). It must run before the gate and declare the artifact as an
+   * output; its prompt reads the reason through `pendingRejection`. Once rejected,
+   * the gate stops until a human approves a new version, even one `blocked` lets
+   * through. `maxRounds` (default 3) bounds how many versions can be rejected.
+   */
+  rework?: { step: string; maxRounds?: number };
   /** Base branch to restore. Absent = no branch created, nothing to undo. */
   abandonBranch?: (ctx: PipelineContext) => string;
   /** Labels shown in run logs. Defaults derive from `id`. */
@@ -133,13 +143,18 @@ function approveCommand(subject: string, ticket: string | undefined, pipelineNam
   return `lancenuit run ${ticket ?? "<ticket>"} --pipeline ${pipelineName} --approve ${subject}`;
 }
 
+/** Rejection command for the human to type; the reason placeholder is theirs to write. */
+function rejectCommand(subject: string, ticket: string | undefined, pipelineName: string): string {
+  return `lancenuit reject ${ticket ?? "<ticket>"} ${subject} --reason "..." --pipeline ${pipelineName}`;
+}
+
 /**
  * Complete the template note with what only the exit point knows: recovery type and
  * the command that lifts the block when one exists.
  *
  * `Type` is inserted before the `State` / `Action` pair closing every escalation;
- * `Approve` closes it afterward. For an out-of-contract note without `State`, both
- * are appended.
+ * `Approve`, then `Reject` when the gate reworks, close it afterward. For an
+ * out-of-contract note without `State`, all are appended.
  */
 function withReviewFields(
   note: WorkItemNote,
@@ -147,11 +162,13 @@ function withReviewFields(
   subject: string | undefined,
   ticket: string | undefined,
   pipelineName: string,
+  reworkable: boolean,
 ): WorkItemNote {
   const at = note.fields.findIndex((existing) => existing.label === "State");
   const fields = [...note.fields];
   fields.splice(at < 0 ? fields.length : at, 0, { label: "Type", value: KIND_LABEL[kind] });
   if (subject) fields.push({ label: "Approve", value: approveCommand(subject, ticket, pipelineName) });
+  if (subject && reworkable) fields.push({ label: "Reject", value: rejectCommand(subject, ticket, pipelineName) });
   return { ...note, fields };
 }
 
@@ -169,12 +186,31 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
   if (choice && (!Array.isArray(choice.subjects) || choice.subjects.length === 0)) {
     throw new Error(`humanReview("${opts.id}"): approval.subjects must be a non-empty array`);
   }
+  if (opts.rework && !approval)
+    throw new Error(`humanReview("${opts.id}"): rework needs an approval subject to reject`);
+  const maxRounds = opts.rework?.maxRounds ?? 3;
+  if (!Number.isInteger(maxRounds) || maxRounds < 1) {
+    throw new Error(`humanReview("${opts.id}"): rework.maxRounds must be a positive integer`);
+  }
+  const reworkable = opts.rework !== undefined;
+  const declaredSubjects: readonly string[] = choice ? choice.subjects : staticSubject ? [staticSubject] : [];
   // The builder binds this metadata before building the step. Looking it up at
   // execution time keeps approval notes and stop reasons correct when a pipeline
   // is renamed, without copying the name into every review declaration.
   let gate: ActionStepBuilder;
   const approvalCommand = (subject: string | undefined, ctx: PipelineContext): string | undefined =>
     subject ? approveCommand(subject, ctx.ticket, inferredPipelineName(gate) ?? failPipelineName()) : undefined;
+  /** Console hint naming every way out the gate accepts for `subject`. `--approve`
+   *  on a run records the decision AND resumes: there is no second command to type. */
+  const liftHint = (subject: string | undefined, ctx: PipelineContext): string => {
+    const command = approvalCommand(subject, ctx);
+    if (!command) return "";
+    const rejection =
+      subject && reworkable
+        ? ` or reject with "${rejectCommand(subject, ctx.ticket, inferredPipelineName(gate) ?? failPipelineName())}"`
+        : "";
+    return ` — lift with "${command}"${rejection}`;
+  };
 
   function failPipelineName(): never {
     throw new Error(`humanReview("${opts.id}"): pipeline name was not bound during assembly`);
@@ -254,6 +290,7 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
               await offeredSubject(value, ctx),
               ctx.ticket,
               inferredPipelineName(gate) ?? failPipelineName(),
+              reworkable,
             ),
         }),
       ]
@@ -280,9 +317,31 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
     artifact: `artifacts/${opts.artifact.name}`,
     kind: opts.kind,
     detail,
+    ...(reworkable ? { reworkable: true } : {}),
   });
 
+  /** A rejection holds the gate until a human approves a new version: the rework
+   *  may well produce content `blocked` accepts, but only the person who rejected
+   *  the artifact may accept its replacement. */
+  const rejectedStop = async (ctx: PipelineContext): Promise<InputPredicateResult | undefined> => {
+    for (const subject of declaredSubjects) {
+      const status = await rejectionStatus(ctx, subject);
+      if (!status) continue;
+      const round = status.decision.round ?? 1;
+      const detail =
+        status.artifact === "absent"
+          ? `the rework produced no artifact after rejection round ${round}`
+          : status.artifact === "unchanged"
+            ? `the rework did not change the artifact rejected in round ${round}`
+            : `the artifact was reworked after rejection round ${round} and needs a new decision (approve or reject again)`;
+      return reject(`escalated: ${detail}${liftHint(subject, ctx)}`, stopInfo(detail, subject));
+    }
+    return undefined;
+  };
+
   const verdict = async (ctx: PipelineContext): Promise<InputPredicateResult> => {
+    const rejected = await rejectedStop(ctx);
+    if (rejected) return rejected;
     if (opts.gateCheck) {
       const result = await opts.gateCheck(ctx);
       // A custom gate owns its reason; it still stops for this exit point, so
@@ -296,11 +355,7 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
     const value = await opts.artifact.require(ctx);
     const detail = await opts.reason(value, ctx);
     const subject = await offeredSubject(value, ctx);
-    const command = approvalCommand(subject, ctx);
-    // `--approve` on a run records the decision AND resumes: there is no second
-    // command to type. Only the `approve` subcommand is approval-only.
-    const commandHint = command ? ` — lift with "${command}"` : "";
-    return reject(`escalated: ${detail}${commandHint}`, stopInfo(detail, subject));
+    return reject(`escalated: ${detail}${liftHint(subject, ctx)}`, stopInfo(detail, subject));
   };
 
   gate = actionStep({
@@ -318,7 +373,11 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
     declareApproval(gate, {
       subjects: choice.subjects,
       artifact: opts.artifact as Artifact<unknown>,
+      ...(opts.rework ? { rework: { stepId: opts.rework.step, maxRounds } } : {}),
       guard: async (subject, ctx) => {
+        // The gate asks again about a rejected subject whatever the reworked
+        // verdict offers, so the human must be able to answer under that subject.
+        if (readDecision(ctx, subject)?.decision === "rejected") return undefined;
         const value = await blockingValue(ctx);
         const offered = value === undefined ? undefined : await offeredSubject(value, ctx);
         if (offered === subject) return undefined;
@@ -332,7 +391,11 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
       },
     });
   } else if (staticSubject) {
-    declareApproval(gate, { subjects: [staticSubject], artifact: opts.artifact as Artifact<unknown> });
+    declareApproval(gate, {
+      subjects: [staticSubject],
+      artifact: opts.artifact as Artifact<unknown>,
+      ...(opts.rework ? { rework: { stepId: opts.rework.step, maxRounds } } : {}),
+    });
   }
 
   steps.push(gate);

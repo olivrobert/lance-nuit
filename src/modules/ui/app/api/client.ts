@@ -143,6 +143,7 @@ export interface ActionPayload {
   runId: string;
   subject?: string;
   budget?: number;
+  reason?: string;
 }
 
 export function postAction(verb: string, payload: ActionPayload): Promise<ApiResult<ActionResponse>> {

@@ -37,6 +37,8 @@ const FIXTURE_TYPES = [
   "pipeline.child.finished",
   "pipeline.child.cost.reconciled",
   "decision.recorded",
+  // Twice: once approved, once rejected with its reason and round.
+  "decision.recorded",
 ] as const;
 
 /** Parse the fixture without going through the store, so this inventory stays a
@@ -184,5 +186,15 @@ test("degraded journal: the statistics projection drops the same partial events"
   const keep = runFor(dir, "keep");
   expect(attemptFacts(keep.run, keep.step, keep.run.eventStore)).toEqual([
     { attempt: 1, kind: "step", status: "done", logPath: "steps/keep/attempt-001/output.log" },
+  ]);
+});
+
+test("journal fixtures: a rejection is a known decision carrying its reason and round", () => {
+  const decisions = readRunEvents(journalDir("all-event-types.jsonl")).filter(
+    (event) => event.type === "decision.recorded",
+  );
+  expect(decisions).toEqual([
+    expect.objectContaining({ subject: "plan", decision: "approved" }),
+    expect.objectContaining({ subject: "plan", decision: "rejected", reason: "split step 2", round: 1 }),
   ]);
 });

@@ -15,6 +15,7 @@ import type { RunStopState } from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { costDecision, type RunBudget } from "../state/budget.js";
+import { pendingRejection } from "../state/decisions.js";
 import { recordCostStop } from "../state/cost-stop-events.js";
 import { adoptOutputs, stepFreshness } from "../state/provenance.js";
 import { appendRunEvent } from "../state/run-journal.js";
@@ -23,6 +24,9 @@ import { absorbNonBlocking } from "./non-blocking.js";
 
 /** Reason logged when declared inputs still match every produced output. */
 const SKIP_UP_TO_DATE = "outputs up to date with declared inputs";
+
+/** Reason logged when a rework step already ran and nobody rejected its output since. */
+const SKIP_NO_REJECTION = "no pending rejection";
 
 export type StepAdmission =
   | { kind: "budget-exceeded" }
@@ -141,6 +145,11 @@ function admissionsToEvaluate(step: RunStep): readonly StepInputCondition[] {
   return conditions.filter((condition) => !condition.frozenOnStart);
 }
 
+async function anyPendingRejection(ctx: PipelineContext, subjects: readonly string[]): Promise<boolean> {
+  for (const subject of subjects) if (await pendingRejection(ctx, subject)) return true;
+  return false;
+}
+
 /**
  * Prepare a step and apply all guards that precede spawn. Status mutations stay here
  * so every admission result is persisted with the same semantics.
@@ -222,9 +231,20 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
     }
   }
 
-  // A `--start-at` replay skips the freshness check: it does not track the
+  // A rejection is the reason a rework step runs, not one of its inputs: a
+  // pending one overrides the freshness verdict, and `when` above still outranks
+  // it. Without one, a step declaring input still answers to its freshness. The
+  // command is resolved below, before attempt erases the outputs, so the prompt
+  // still sees the rejected artifact through `pendingRejection`.
+  const reworks = step.def.rework_for ?? [];
+  const rejected = reworks.length > 0 && (await anyPendingRejection(baseCtx, reworks));
+  if (reworks.length > 0 && !rejected && !declaresInput && step.control != null) {
+    return applyInputDecision(run, step, input.output, "skip", SKIP_NO_REJECTION);
+  }
+
+  // A `--start-at` replay skips the freshness check too: it does not track the
   // repository tree, which is what an operator fixes before replaying.
-  if (declaresInput && step.replay !== true) {
+  if (declaresInput && !rejected && step.replay !== true) {
     const report = await stepFreshness(baseCtx, step.def);
     if (!report.mustRun) {
       // Adopt before skipping: an output produced before this record existed keeps

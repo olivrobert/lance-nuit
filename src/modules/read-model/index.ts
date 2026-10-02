@@ -24,6 +24,8 @@ export {
   readTree,
   TEXT_LIMIT_BYTES,
 } from "./explorer.js";
+// The dashboard must refuse a reason the runner would refuse, before spawning.
+export { MAX_REJECTION_REASON } from "../../state/decisions.js";
 export { GROUP_ORDER, listItems, readItem } from "./items.js";
 export { readLaunches, readLaunchesFor } from "./launches.js";
 export {

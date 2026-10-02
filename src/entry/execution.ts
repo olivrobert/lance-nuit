@@ -11,7 +11,7 @@ import { startLiveFeed } from "./feed.js";
 import { enforceCleanTree } from "../boot/gitguard.js";
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineContext } from "../model/context.js";
-import type { Run } from "../model/run.js";
+import type { Run, RunStep } from "../model/run.js";
 import { consoleReport } from "../output/console-reporter.js";
 import { ConsoleRunOutput, LiveFeedOutput } from "../output/run-output.js";
 import { CompositeRunOutput, type RunOutput } from "../runtime/run-output.js";
@@ -125,8 +125,14 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: Run) => vo
   }
   target.explicit?.commit();
   onRunCreated(run);
-  if (ready.approvedSubject) {
-    appendRunEvent(run, "decision.recorded", { subject: ready.approvedSubject, decision: "approved" });
+  const recorded = ready.recordedDecision;
+  if (recorded) {
+    appendRunEvent(run, "decision.recorded", {
+      subject: recorded.subject,
+      decision: recorded.decision === "rejected" ? "rejected" : "approved",
+      ...(recorded.reason !== undefined ? { reason: recorded.reason } : {}),
+      ...(recorded.round !== undefined ? { round: recorded.round } : {}),
+    });
     saveRun(run);
   }
   if (run.specPath !== context.config.specPath) {
@@ -190,11 +196,13 @@ export function announceRun(run: Run, args: RunnerArgs): void {
   // Both families the resume loop re-admits (`step/step-loop.ts`) must stay out of
   // "already done", or the header promises a step that is about to run again. They
   // do not make the same promise, so they get one line each: `rerun_on_resume`
-  // replays unconditionally, while a step declaring `input` is only re-examined and
-  // costs nothing when its sources have not moved.
+  // replays unconditionally, while a step declaring `input` or reworking a gated
+  // artifact is only re-examined and costs nothing when its sources have not moved
+  // and no rejection is pending.
+  const reexamined = (s: RunStep) => (s.def.sources?.length ?? 0) > 0 || (s.def.rework_for?.length ?? 0) > 0;
   const rerun = done.filter((s) => s.def.rerun_on_resume);
-  const rechecked = done.filter((s) => !s.def.rerun_on_resume && s.def.sources?.length);
-  const settled = done.filter((s) => !s.def.rerun_on_resume && !s.def.sources?.length);
+  const rechecked = done.filter((s) => !s.def.rerun_on_resume && reexamined(s));
+  const settled = done.filter((s) => !s.def.rerun_on_resume && !reexamined(s));
   if (settled.length > 0) log(`Resumed — already done: ${settled.map((s) => s.def.name).join(", ")}`);
   if (rechecked.length > 0) log(`Re-checked on resume: ${rechecked.map((s) => s.def.name).join(", ")}`);
   if (rerun.length > 0) log(`Re-run on resume: ${rerun.map((s) => s.def.name).join(", ")}`);

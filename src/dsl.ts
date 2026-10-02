@@ -28,7 +28,7 @@ import type {
 import type { reject } from "./dsl/preconditions.js";
 import type { FixContext } from "./model/context.js";
 import type { Pipeline } from "./model/definition.js";
-import type { decisionMatchesArtifact } from "./state/decisions.js";
+import type { decisionMatchesArtifact, pendingRejection } from "./state/decisions.js";
 import type { freshness } from "./state/provenance.js";
 
 export type {
@@ -165,6 +165,8 @@ export interface Dsl {
   reject: typeof reject;
   /** True when the recorded approval decision still matches the artifact bytes. */
   decisionMatchesArtifact: typeof decisionMatchesArtifact;
+  /** Reason and round of a rejection the rework has not answered yet, for its prompt. */
+  pendingRejection: typeof pendingRejection;
   /** Freshness of an artifact against the inputs recorded when it was produced. */
   freshness: typeof freshness;
 }

@@ -2,9 +2,9 @@
 //
 // The verbs themselves are decided by the server, which sends with every item
 // the closed set it accepts (spec 5.1); this component only draws them and asks
-// the two questions that must be answered before a verb is posted. Those two
-// questions live HERE and not in the mutation on purpose: `confirm` and
-// `prompt` are a property of the browser, and the mutation receives an amount
+// the questions that must be answered before a verb is posted. Those questions
+// live HERE and not in the mutation on purpose: `confirm` and `prompt` are a
+// property of the browser, and the mutation receives an amount or a reason
 // already resolved.
 //
 // A delivered run with a report (`deliveryActions`) leads with what the report
@@ -22,9 +22,10 @@ import { usePendingVerb, useRunVerb } from "../../api/mutations.js";
 import { copy, toast } from "../../store/ui-store.js";
 import styles from "./Actions.module.css";
 
-/** Ask before abandoning or closing a run, and ask for the amount a budget verb needs.
- *  Returns the options to post with, or `null` when the reader backed out. */
-function askFor(item: Item, verb: VerbAction): { budget?: number } | null {
+/** Ask before abandoning or closing a run, and ask for the amount a budget verb
+ *  or the reason a rejection needs. Returns the options to post with, or `null`
+ *  when the reader backed out. */
+function askFor(item: Item, verb: VerbAction): { budget?: number; reason?: string } | null {
   if (verb.verb === "fresh") {
     const sure = window.confirm(
       `Start ${item.ticket} fresh?\n\nThe current run will be abandoned and pipeline ${item.pipeline} will restart from the beginning. Existing approvals remain on disk.`,
@@ -46,6 +47,18 @@ function askFor(item: Item, verb: VerbAction): { budget?: number } | null {
       return null;
     }
     return { budget: amount };
+  }
+  if (verb.verb === "reject-and-rerun") {
+    const answer = window.prompt(
+      `Why is ${item.stop?.subject ?? "the artifact"} of ${item.ticket} rejected?\n\nThe rework step reads this reason, then the gate asks again.`,
+      "",
+    );
+    if (answer === null) return null;
+    if (answer.trim() === "") {
+      toast("A rejection needs a reason.");
+      return null;
+    }
+    return { reason: answer.trim() };
   }
   return {};
 }

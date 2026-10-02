@@ -12,7 +12,7 @@ import type { RunJournalCounts } from "../model/journal.js";
 import type { PersistedRun } from "../model/persisted.js";
 import { createRunRef, type RunLogStore, type RunStateSnapshot, type RunStateStore } from "../model/storage-ports.js";
 import { errorMessage } from "../lib/errors.js";
-import { approvalStatus, isValidSubjectToken } from "./decisions.js";
+import { approvalStatus, isValidSubjectToken, rejectionStatus } from "./decisions.js";
 import { readRunJournal, type RunJournalReport } from "./run-journal.js";
 import { matchesStepSelector } from "./run-timeline.js";
 import { FileRunLogStore } from "./stores/file-run-log-store.js";
@@ -169,11 +169,19 @@ function journalLine(record: RunRecord): string {
  *
  * An approval granted elsewhere (the dashboard, another terminal) does not change
  * the run's status: only this line tells whoever reads `--inspect` that the gate
- * is already lifted and the run only needs resuming.
+ * is already lifted and the run only needs resuming. A rejection is told apart
+ * by whether the rework has answered it yet.
  */
 async function approvalLine(context: PipelineContext, state: PersistedRun): Promise<string | undefined> {
   const subject = statusLabel(state) === "STOPPED" ? state.outcome?.stop?.subject : undefined;
   if (!subject || !isValidSubjectToken(subject) || !context.paths.decisionsDir) return undefined;
+  const rejection = await rejectionStatus(context, subject);
+  if (rejection) {
+    const { decision } = rejection;
+    return rejection.artifact === "reworked"
+      ? `approval: ${subject} — reworked after rejection round ${decision.round}; approve it or reject it again`
+      : `approval: ${subject} — rejected in round ${decision.round} by ${decision.decidedBy} on ${decision.decidedAt}: ${decision.reason}; resume the run to rework it`;
+  }
   const { freshness, decision } = await approvalStatus(context, subject);
   if (freshness === "absent" || !decision) return `approval: ${subject} — none recorded`;
   const by = `${decision.decidedBy} on ${decision.decidedAt}`;

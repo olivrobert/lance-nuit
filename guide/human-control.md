@@ -214,6 +214,79 @@ grants nothing. Gates accept any non-empty author, so an approval signed by a
 person opens the gate exactly like an anonymous one, and decision files written
 before this field carried a name stay valid.
 
+### Reject and rework
+
+Approving is not the only answer to a gate. When the artifact is wrong but the
+way to fix it is known, declare the step that produces it as the rework step and
+let the human reject the artifact with a reason:
+
+```ts
+export default ({ pipeline, llmStep, humanReview, pendingRejection, textArtifact }: Dsl) => {
+  const plan = textArtifact("plan.md");
+  return pipeline("delivery")
+    .add(
+      llmStep({
+        id: "write-plan",
+        prompt: async (ctx) => {
+          const rejection = await pendingRejection(ctx, "plan");
+          return rejection
+            ? `Rework plan.md. Round ${rejection.round} was rejected: ${rejection.reason}`
+            : "Write plan.md for the ticket.";
+        },
+      }).output(plan),
+      humanReview({
+        id: "plan-review",
+        artifact: plan,
+        kind: "needs-decision",
+        blocked: () => true,
+        approval: { subject: "plan" },
+        rework: { step: "write-plan", maxRounds: 3 },
+        reason: () => "the plan needs a decision",
+      }),
+    )
+    .build();
+};
+```
+
+`rework` needs an approval subject. The step must be declared in the same
+pipeline, run before the gate, and list the gated artifact among its outputs;
+`.build()` refuses the pipeline otherwise.
+
+```bash
+lancenuit run PROJ-28 --pipeline delivery --reject plan --reason "split step 2"
+lancenuit reject PROJ-28 plan --reason "split step 2" --pipeline delivery   # record only
+```
+
+The loop:
+
+1. The rejection is written to `decisions/plan.json` as `rejected`, with the
+   reason, the author, the artifact's SHA-256, and its round. `run --reject`
+   journals it as `decision.recorded` and resumes the run.
+2. On resume, the rework step replays while the rejection is pending, i.e. while
+   the artifact is absent or still has the rejected bytes. It replays whatever its
+   declared inputs say, and `pendingRejection(ctx, subject)` hands its prompt the
+   reason and round. An author `when` still wins: a step it skips is not
+   reworked. Without a pending rejection, a rework step that already ran is
+   skipped with `no pending rejection`, unless it declares `input`: its
+   [freshness](dsl.md#input-freshness) then decides, as for any other step.
+3. The gate stops again on any rejected subject, whatever `blocked` says: with
+   `the rework did not change the artifact rejected in round N` when the rework
+   left it untouched, and with a request for a new decision once it changed. The
+   human then approves the new artifact or rejects it again.
+
+Rejecting the same bytes twice with the same reason changes nothing; another
+reason replaces it in the same round. A rejection of new bytes opens the next
+round, and the rejection after round `maxRounds` (3 by default) is refused: the
+way out is then to approve, or to answer on the ticket. A subject whose gate
+declares no rework cannot be rejected.
+
+The loop needs no tracker: a gate without `note` works the same, and in a child
+pipeline the rejection names the child, as an approval would (`lancenuit reject
+<ticket> <subject> --reason <text> --pipeline <child>`), before the parent is
+rerun. `lancenuit inspect` prints the pending rejection with its round and
+reason, and the dashboard offers **Reject and rework** on a gate that declares a
+rework, then **Rerun** while the rejection waits for the rework.
+
 Project helpers can build richer gates that add an escalation note, branch
 cleanup, or a resume command. Those policies use the same hash-locked decision
 primitive; they do not change the distinction between human control and capacity

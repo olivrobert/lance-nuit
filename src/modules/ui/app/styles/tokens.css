@@ -209,6 +209,10 @@ details > summary {
   color: var(--stale);
   background: var(--stop-bg);
 }
+.tag.rejected {
+  color: var(--fail);
+  background: var(--fail-bg);
+}
 .tag.fresh {
   color: var(--ok);
   background: var(--ok-bg);

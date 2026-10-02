@@ -218,6 +218,43 @@ test("items: the pending approval is absent, fresh, or stale", async () => {
   expect(stale!.approval?.state).toBe("stale");
 });
 
+test("items: a pending rejection shows its reason and round, a reworked artifact awaits a new decision", async () => {
+  const project = listedProject();
+  const stopped = (ticket: string, runId: string, updatedAt: string) =>
+    writeRun(project, ticket, "feature", {
+      runId,
+      status: "STOPPED",
+      updatedAt,
+      outcome: {
+        phase: "plan",
+        reason: "plan was rejected",
+        logPath: null,
+        resumable: true,
+        stop: { subject: "plan", kind: "needs-decision", detail: "plan was rejected", reworkable: true },
+      },
+    });
+
+  stopped("DEMO-1", "r-1", "2026-09-05T09:00:00.000Z");
+  writeArtifact(project, "DEMO-1", "plan.md", "# plan\n");
+  writeDecision(project, "DEMO-1", "plan", "plan.md", "# plan\n", { reason: "split step 2", round: 1 });
+  stopped("DEMO-2", "r-2", "2026-09-05T08:00:00.000Z");
+  writeArtifact(project, "DEMO-2", "plan.md", "# plan, reworked\n");
+  writeDecision(project, "DEMO-2", "plan", "plan.md", "# plan\n", { reason: "split step 2", round: 1 });
+
+  const [pending, reworked] = await listItems();
+
+  expect(pending!.stop?.reworkable).toBe(true);
+  expect(pending!.approval).toEqual({
+    subject: "plan",
+    state: "rejected",
+    decidedAt: "2026-09-05T08:00:00.000Z",
+    decidedBy: "Olivier",
+    reason: "split step 2",
+    round: 1,
+  });
+  expect(reworked!.approval).toEqual({ subject: "plan", state: "absent" });
+});
+
 /** A worktree run stopped on the `plan` gate, approved from the main clone. */
 function stoppedWorktreeRun(project: string, worktree: string): void {
   writeRun(project, "DEMO-1", "feature", {
