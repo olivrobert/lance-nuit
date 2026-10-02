@@ -19,6 +19,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { runSupervisedCommand } from "../exec/process-runner.js";
+import type { ProcessScope } from "../exec/process-supervision.js";
 import { log } from "../runtime/logging.js";
 import { acquireRunnerLock, releaseRunnerLock } from "./runlock.js";
 
@@ -30,6 +31,7 @@ const SETUP_ASYNC_TIMEOUT_MS = 900_000;
 // Dependency installs and a database reset run here, which outlast a setup hook.
 const READY_ASYNC_TIMEOUT_MS = 1_800_000;
 const TEARDOWN_ASYNC_TIMEOUT_MS = 300_000;
+const STOP_ASYNC_TIMEOUT_MS = 300_000;
 
 function firstExistingPath(paths: readonly string[]): string | null {
   return paths.find((path) => existsSync(path)) ?? null;
@@ -338,11 +340,13 @@ async function runPipedHookAsync(
   script: string,
   spec: WorktreeSpec,
   timeoutMs: number,
+  scope?: ProcessScope,
 ): Promise<{ ok: boolean; tail: string[] }> {
   const logFile = join(tmpdir(), `${label}-${process.pid}.log`);
   const r = await runSupervisedCommand("bash", ["-c", SETUP_PIPE, label, script, spec.path, logFile], {
     stdio: "inherit",
     timeoutMs,
+    ...(scope ? { scope } : {}),
   });
   const raw = r.status !== 0 && existsSync(logFile) ? readFileSync(logFile, "utf-8") : "";
   if (existsSync(logFile)) unlinkSync(logFile);
@@ -383,6 +387,27 @@ export async function runReadyHookAsync(spec: WorktreeSpec): Promise<void> {
   if (!r.ok) {
     const tail = r.tail.map((line) => `\n  │ ${line}`).join("");
     throw new Error(`project hook worktree-ready failed (${script})${tail}`);
+  }
+}
+
+/**
+ * Optional project hook that stops the worktree's services when a run ends
+ * without PASS, so a stopped work item stops holding RAM and ports. It must keep
+ * their state (for example `docker compose stop`): resume starts them again
+ * through the stack preflight and the ready hook. Teardown is a different hook
+ * because it removes the worktree and typically drops volumes.
+ *
+ * `scope` lets the caller keep the hook out of the default scope, which the
+ * signal handler sweeps on the first Ctrl+C. A failure throws; the caller
+ * decides whether it matters.
+ */
+export async function runStopHookAsync(spec: WorktreeSpec, scope?: ProcessScope): Promise<void> {
+  const script = projectHookFor(spec, "worktree-stop.sh");
+  if (!script) return;
+  const r = await runPipedHookAsync("worktree-stop", script, spec, STOP_ASYNC_TIMEOUT_MS, scope);
+  if (!r.ok) {
+    const tail = r.tail.map((line) => `\n  │ ${line}`).join("");
+    throw new Error(`project hook worktree-stop failed (${script})${tail}`);
   }
 }
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { loadOrCreateRun } from "../boot/resume.ts";
@@ -40,8 +40,9 @@ function pipelineFile(root: string): string {
 
 /** Source of the interrupted runner. It reaches the exact state a signal is
  *  worst in: step `a` done, step `b` running with an open attempt, then nothing
- *  left to do but wait. */
-function childSource(root: string, runDir: string, pipelinePath: string): string {
+ *  left to do but wait. `stopSource` defines a `stop` const handed to the
+ *  handler as its stack stop; without it the handler gets its default. */
+function childSource(root: string, runDir: string, pipelinePath: string, stopSource?: string): string {
   const module = (path: string) => JSON.stringify(join(REPO_ROOT, path));
   return [
     `import { loadOrCreateRun } from ${module("src/boot/resume.ts")};`,
@@ -62,7 +63,9 @@ function childSource(root: string, runDir: string, pipelinePath: string): string
     'const logPath = nextAttemptLogPath(run, run.steps[1], "step");',
     'appendRunEvent(run, "step.attempt.started", { stepId: "b", attempt: 1, kind: "step", logPath });',
     "saveRun(run);",
-    "installChildKillHandlers(createAbortScope(), () => run);",
+    ...(stopSource
+      ? [stopSource, "installChildKillHandlers(createAbortScope(), () => run, () => stop);"]
+      : ["installChildKillHandlers(createAbortScope(), () => run);"]),
     // The handshake: the parent signals only once the run is in flight, so the
     // test never races the setup.
     'process.stdout.write("ready\\n");',
@@ -81,12 +84,15 @@ interface Interrupted {
 
 /** Start a runner, wait until it holds a running step, signal it, and wait for
  *  it to be gone. No fixed delay anywhere: both waits are on events. */
-async function interruptRunner(signal: "SIGINT" | "SIGTERM"): Promise<Interrupted> {
+async function interruptRunner(
+  signal: "SIGINT" | "SIGTERM",
+  stopSource?: (root: string) => string,
+): Promise<Interrupted> {
   const root = mkdtempSync(join(tmpdir(), `signals-${signal.toLowerCase()}-`));
   const runDir = join(root, "run");
   const pipelinePath = pipelineFile(root);
   const { RUNNER_EVENTS_FILE: _ignored, ...env } = process.env;
-  const child = spawn(process.execPath, ["-e", childSource(root, runDir, pipelinePath)], {
+  const child = spawn(process.execPath, ["-e", childSource(root, runDir, pipelinePath, stopSource?.(root))], {
     cwd: root,
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -187,4 +193,43 @@ test("a real SIGINT is the same durable stop, with the Ctrl+C exit code", async 
   expect(String(snapshot.outcome?.reason)).toContain("SIGINT");
   expect(snapshot.steps.map((step) => step.status)).toEqual(["done", "aborted", "pending"]);
   expect(resumeDecision(snapshot)).toEqual({ resume: true });
+}, 30_000);
+
+test("a real SIGTERM runs the stack stop before exiting", async () => {
+  const { exitCode, signal, root, runDir } = await interruptRunner(
+    "SIGTERM",
+    (root) => `import { writeFileSync } from "node:fs";
+const stop = {
+  run: () => new Promise((done) => setTimeout(() => { writeFileSync(${JSON.stringify(join(root, "stopped"))}, ""); done(); }, 200)),
+  inProgress: () => false,
+  skip: () => {},
+};`,
+  );
+
+  expect(signal).toBeNull();
+  expect(exitCode).toBe(143);
+  expect(existsSync(join(root, "stopped"))).toBe(true);
+  expect(readRunSnapshot(join(runDir, "state.json"))!.status).toBe("ABORTED");
+}, 30_000);
+
+test("a signal during a stop already in progress neither kills it nor exits", async () => {
+  // The run is already reported when its stop runs: the handler must leave both
+  // the hook and the exit code to the entry point, which here exits 7 once the
+  // stop "finishes".
+  const { exitCode, signal, root, runDir, stderr } = await interruptRunner(
+    "SIGINT",
+    (root) => `import { writeFileSync } from "node:fs";
+const stop = {
+  run: () => Promise.resolve(),
+  inProgress: () => true,
+  skip: () => writeFileSync(${JSON.stringify(join(root, "skipped"))}, ""),
+};
+process.on("SIGINT", () => setTimeout(() => process.exit(7), 200));`,
+  );
+
+  expect(signal).toBeNull();
+  expect(exitCode).toBe(7);
+  expect(stderr).toContain("press Ctrl+C again to skip");
+  expect(existsSync(join(root, "skipped"))).toBe(false);
+  expect(readRunSnapshot(join(runDir, "state.json"))!.status).not.toBe("ABORTED");
 }, 30_000);
