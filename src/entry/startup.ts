@@ -11,7 +11,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { runBoot } from "../boot/step.js";
-import { describeRecordedApproval, resolveApprovalArtifact } from "../commands/approval-subject.js";
+import { describeRecordedApproval, resolveApprovableArtifact } from "../commands/approval-subject.js";
 import { COMMANDS } from "../commands/command.js";
 import { runDispatch } from "../dispatch/loop.js";
 import { selectDispatch, validateDispatchArgs } from "../dispatch/strategy.js";
@@ -120,7 +120,8 @@ export async function applyApproval(
   if (!args.approve) return { kind: "ok" };
   let recorded: RecordedApproval;
   try {
-    recorded = await recordApproval(context, args.approve, resolveApprovalArtifact(pipelineDef, args.approve));
+    const artifact = await resolveApprovableArtifact(pipelineDef, args.approve, context);
+    recorded = await recordApproval(context, args.approve, artifact);
     log(describeRecordedApproval(recorded, context.paths.decisionsDir));
   } catch (error) {
     return { kind: "error", message: errorMessage(error) };

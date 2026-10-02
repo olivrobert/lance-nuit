@@ -174,6 +174,9 @@ export interface Pipeline {
    * only source of the mapping, with no hard-coded subject list. Missing means
    * this pipeline accepts no approvals. */
   approvals?: ReadonlyMap<string, Artifact<unknown>>;
+  /** Reason a subject cannot be approved for the current artifact, undefined when
+   * it can. Absent for a subject approvable whatever the verdict. */
+  approvalGuards?: ReadonlyMap<string, (ctx: PipelineContext) => Promise<string | undefined>>;
   steps: PipelineStep[];
 }
 

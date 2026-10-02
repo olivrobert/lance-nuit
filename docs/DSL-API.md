@@ -18,7 +18,7 @@ export interface Dsl {
     bashStep: typeof bashStep;
     actionStep: typeof actionStep;
     workItemEscalateStep: typeof workItemEscalateStepFactory;
-    /** Unified human-review helper; `approval.subject` is bound to this pipeline automatically. */
+    /** Unified human-review helper; approval subjects are bound to this pipeline automatically. */
     humanReview: typeof humanReviewFactory;
     workItemDeliveryStep: typeof workItemDeliveryStepFactory;
     requireCapabilitiesStep: typeof requireCapabilitiesStep;
@@ -68,6 +68,9 @@ export interface Pipeline {
      * only source of the mapping, with no hard-coded subject list. Missing means
      * this pipeline accepts no approvals. */
     approvals?: ReadonlyMap<string, Artifact<unknown>>;
+    /** Reason a subject cannot be approved for the current artifact, undefined when
+     * it can. Absent for a subject approvable whatever the verdict. */
+    approvalGuards?: ReadonlyMap<string, (ctx: PipelineContext) => Promise<string | undefined>>;
     steps: PipelineStep[];
 }
 
@@ -948,9 +951,22 @@ export interface RunReportNote {
  */
 export type ReviewKind = "needs-info" | "needs-decision" | "needs-human";
 
-/** `--approve` subject that lifts this block, and wrapper command to type. */
+/** `--approve` subject that lifts this block, whatever the verdict. */
 export interface ReviewApproval {
     subject: string;
+}
+
+/**
+ * Approval decided per blocking value: `subjectFor` names the subject that lifts
+ * this verdict, or `undefined` when approving is not the way out (a split that
+ * must become separate tickets). Such a verdict stops with its reason only.
+ *
+ * `subjects` lists every subject `subjectFor` may return: the CLI resolves
+ * `--approve <subject>` before any artifact exists, so the list cannot be derived.
+ */
+export interface ReviewApprovalChoice<T> {
+    subjects: readonly string[];
+    subjectFor: (value: T, ctx: PipelineContext) => string | undefined | Promise<string | undefined>;
 }
 
 export interface HumanReviewOptions<T> {
@@ -989,7 +1005,12 @@ export interface HumanReviewOptions<T> {
      * decision. `reason` remains for the note, not the gate.
      */
     gateCheck?: (ctx: PipelineContext) => InputPredicateResult | Promise<InputPredicateResult>;
-    approval?: ReviewApproval;
+    /**
+     * Subject that lifts the block. `{ subject }` is offered for every verdict;
+     * `{ subjects, subjectFor }` lets each blocking value offer its own subject or
+     * none, and `--approve` then refuses a subject the current verdict does not offer.
+     */
+    approval?: ReviewApproval | ReviewApprovalChoice<T>;
     /** Base branch to restore. Absent = no branch created, nothing to undo. */
     abandonBranch?: (ctx: PipelineContext) => string;
     /** Labels shown in run logs. Defaults derive from `id`. */
