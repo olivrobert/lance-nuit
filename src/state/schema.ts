@@ -175,6 +175,7 @@ export const PersistedStepStateSchema = z.looseObject({
   timeout_retries: nonNegativeInt.optional(),
   last_attempt: nonNegativeInt.optional(),
   excluded: z.literal(true).optional(),
+  replay: z.literal(true).optional(),
   orchestration: PersistedPipelineOrchestrationStateSchema.optional(),
 });
 

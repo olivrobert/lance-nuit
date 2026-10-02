@@ -71,7 +71,10 @@ disagree is settled per concept in [Which record is authoritative](#which-record
 
 Resume is a boot step (`boot/resume.ts`): it loads the definition, applies the
 `--step`/`--skip`/`--start-at` selectors, and assembles the in-memory run from the
-definition and the projected state. `state/` only reads, projects and reconciles
+definition and the projected state. `--start-at X` requeues `X` and every later
+step on the persisted states, before the projection, so the run is hydrated live
+with totals derived from the steps even when the snapshot had passed; attempts,
+retries and spend are kept. `state/` only reads, projects and reconciles
 (`state/run-projection.ts`): it reconciles each persisted step with the attempts
 the journal holds and settles the attempts a crash left running, without ever
 knowing about a pipeline definition.
@@ -242,7 +245,7 @@ projection of spend already accounted for when the attempt closed.
 
 | Concept | Authority | Derived from it | When the other record knows more |
 | --- | --- | --- | --- |
-| Step status, timestamps, reason | snapshot | — | A **terminal** `step.status.changed` (`done`, `failed`, `skipped`, `aborted`) over an **unfinished** snapshot status (`pending`, `running`) wins, with the event's instant, reason and fail cause. One-way only: a terminal snapshot is the later record, and a journal that walked the step back to `running` describes a pass the snapshot has since closed. |
+| Step status, timestamps, reason | snapshot | — | A **terminal** `step.status.changed` (`done`, `failed`, `skipped`, `aborted`) over an **unfinished** snapshot status (`pending`, `running`) wins, with the event's instant, reason and fail cause. One-way only: a terminal snapshot is the later record, and a journal that walked the step back to `running` describes a pass the snapshot has since closed. A `pending` step carrying `replay` is not superseded: its terminal event is the pass `--start-at` asked to replay. Once that replay is `running`, a terminal event closes it as usual and drops `replay`. |
 | Attempts (number, kind, status, session, log path, own figures) | journal (`step.attempt.started` / `step.attempt.finished`) | in-memory `step.attempts`; the next attempt number | The snapshot holds none. A finish without its start is kept (the numbering must not shift); an attempt still `running` at load is settled by `settleCrashedAttempts` as failed and unpriced, through the same `closeAttempt` as any other ending, and the finish is journaled so the next resume projects it instead of deciding again. |
 | Attempt numbering floor | snapshot `last_attempt` | next attempt = max(`last_attempt`, journaled attempts, list length) + 1 | The journal cannot lower it. It is kept precisely for the journal that lost an attempt (a failed append, a rewritten file): without it a resume would reuse a number and append into an existing log. It stays until a replacement proves the same guarantee with an incomplete journal. |
 | Step spend total (`control`, `usage`) | snapshot | budget ledger seed on resume | The journal wins **only when its priced sum exceeds the snapshot's** (`projectStepSpend`): the finish event is appended before the snapshot, so a crash in that window leaves a priced attempt the step total never received. An attempt lost with no price in the journal does not change the total: the snapshot stays the record, and the attempt keeps its own figures where they were read. |
@@ -253,7 +256,7 @@ projection of spend already accounted for when the attempt closed.
 | Composed child identity (`pipeline.child.started`) | journal | — | The reference's `runId` alone is not proof the child started; the start fact lives in the journal only, which is why an unreadable journal fails the resume instead of reading as empty. |
 | Composed child spend (`accountedCostUsd`, `accountedDurationMs`, `accountedUsage`) | parent snapshot | the parent node's `control` and `usage`, the parent ledger | What the parent already charged for this child (`chargeChildReconciliation`). A resumed child re-reports its whole history and is charged by difference; a reference reloaded from a snapshot written before the last reconciliation is charged the missing difference again, never twice. |
 | Location (`worktree`, `cwd`) | snapshot | — | Rewritten by every resume with the invocation's own location. |
-| Selection (`excluded`, skipped steps) | snapshot, then the current selectors | — | `--step` / `--skip` / `--start-at` apply on top of the persisted state to every step that still owes work, including steps the definition gained since the snapshot. |
+| Selection (`excluded`, `replay`, skipped steps) | snapshot, then the current selectors | — | `--step` / `--skip` / `--start-at` apply on top of the persisted state to every step that still owes work, including steps the definition gained since the snapshot. `--start-at X` also requeues `X` and every later step, whatever their status, as `pending` with `replay`, and lifts their `excluded` mark; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
 
 ### Interruption windows
 

@@ -111,3 +111,20 @@ test("projectRunState: a journal that reopens a step does not undo the snapshot"
   // Only the last event counts, and it is not terminal: nothing to reconcile.
   expect(projected.steps.get("a")?.state?.status).toBe("running");
 });
+
+test("projectRunState: a step requeued by --start-at is not closed again by its earlier done event", () => {
+  const saved = savedRun([{ id: "a", status: "pending", retries: 1, replay: true }]);
+  const projected = projectRunState(saved, [...attemptEvents("a", 1), statusEvent("a", "done")]);
+
+  expect(projected.steps.get("a")?.state).toMatchObject({ status: "pending", replay: true, retries: 1 });
+});
+
+test("projectRunState: a requeued step the journal finished during its replay is closed and loses its replay mark", () => {
+  // The replay reached `updateStep(done)` and died before the snapshot write.
+  const saved = savedRun([{ id: "a", status: "running", retries: 0, replay: true }]);
+  const projected = projectRunState(saved, [...attemptEvents("a", 2), statusEvent("a", "done")]);
+
+  const state = projected.steps.get("a")?.state;
+  expect(state?.status).toBe("done");
+  expect(state?.replay).toBeUndefined();
+});

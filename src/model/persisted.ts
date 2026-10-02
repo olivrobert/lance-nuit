@@ -166,6 +166,11 @@ export interface PersistedStepState {
    * admission carries no such flag, which is what lets a resume re-admit it while
    * leaving an operator exclusion alone. Absent by default; the schema is unchanged. */
   excluded?: true;
+  /** Requeued by `--start-at`: the operator asked to run the step again, so
+   * admission runs it even when its declared outputs are fresh, and resume keeps
+   * it pending over the `done` its earlier pass journaled. Cleared when the step
+   * settles (`done` or `skipped`). Absent by default; the schema is unchanged. */
+  replay?: true;
   orchestration?: PersistedPipelineOrchestrationState;
 }
 

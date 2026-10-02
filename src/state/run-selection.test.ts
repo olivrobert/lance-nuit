@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PipelineContext } from "../model/context.js";
-import { discardedResumeNotice, resolveExplicitRunDir } from "./run-selection.js";
+import { discardedResumeNotice, resolveExplicitRunDir, selectExplicitRun } from "./run-selection.js";
 import { pipelineRunsDir, resolveLatestRunSnapshot, resolveRunDir, wouldResumeLatest } from "./stores/run-storage.js";
 
 function fixtureContext(): PipelineContext {
@@ -294,4 +294,20 @@ test("latest selection exposes an injected read denial instead of treating it as
     }),
   ).toThrow(/EACCES/);
   expect(readlinkSync(join(pipelineRunsDir("feature", "DEMO-1", context), "latest"))).toBe("run-live");
+});
+
+test("selectExplicitRun: a finished run is selectable when --start-at asks for a replay", () => {
+  const context = fixtureContext();
+  const runDir = writeRun(context, "feature", "DEMO-1", "run-finished", {
+    status: "PASS",
+    steps: [
+      { id: "plan", status: "done" },
+      { id: "create-mr", status: "done" },
+    ],
+  });
+
+  const selection = selectExplicitRun("feature", "DEMO-1", "run-finished", context, { replay: true });
+  expect(selection.dir).toBe(runDir);
+  selection.release();
+  expect(() => selectExplicitRun("feature", "DEMO-1", "run-finished", context)).toThrow(/no remaining step/);
 });

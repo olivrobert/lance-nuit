@@ -386,7 +386,9 @@ The rules:
   is stale, the reason reads `... (inputs changed, outputs kept)`.
 - **Resume.** A `done` step declaring `input` is re-admitted, and so is a
   `skipped` one — unless it was taken out by `--step`, `--skip`, or `--start-at`.
-  A re-admitted step whose outputs are all fresh costs nothing.
+  A re-admitted step whose outputs are all fresh costs nothing. A step requeued
+  by `--start-at` is the exception: it runs even when its outputs are fresh,
+  because freshness does not track the repository tree an operator fixed.
 - **Provenance is merged, not replaced.** A step that revises an artifact updates
   its record, so `plan-audit` (`input: [spec, plan]`, `output: [planAudit, plan]`)
   does not break the provenance of `plan`.
