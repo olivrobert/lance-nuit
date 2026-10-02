@@ -20,6 +20,7 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import { log } from "../runtime/logging.js";
 import { restoreRunTotals } from "../state/cost-accounting.js";
+import { isChildSettled } from "../state/child-transitions.js";
 import { appendRunEvent, readRunEvents } from "../state/run-journal.js";
 import { allStepsSettled } from "../state/run-predicates.js";
 import { type ProjectedRunState, projectRunState, settleCrashedAttempts } from "../state/run-projection.js";
@@ -228,6 +229,31 @@ function applyStepFilters(
   }
 }
 
+/** Composed steps in the replay range that cannot run again in place: a child
+ * already settled returns at once on the next pass, so the node would turn
+ * `done` without running anything. */
+function unreplayableSteps(steps: readonly PersistedStepState[], replayIds: ReadonlySet<string>): string[] {
+  return steps
+    .filter((state) => replayIds.has(state.id) && (state.orchestration?.children.some(isChildSettled) ?? false))
+    .map((state) => state.id);
+}
+
+/** Requeue the steps `--start-at` names for replay, whatever their status.
+ *
+ * Naming the target is the operator's newest decision, so it also lifts an
+ * exclusion an earlier selection left inside the range. Attempts, retries and
+ * spend are kept: the budget ledger seeds from them, and the replay is more work
+ * on the same run, not a new one. `replay` is what keeps the requeue durable
+ * over the `done` events the journal holds for the earlier pass. */
+function requeueForReplay(steps: PersistedStepState[], replayIds: ReadonlySet<string>): void {
+  for (const state of steps) {
+    if (!replayIds.has(state.id)) continue;
+    state.status = "pending";
+    state.replay = true;
+    delete state.excluded;
+  }
+}
+
 /** Give the snapshot a pending entry for every definition step it never recorded.
  * A step added to the pipeline since the last invocation has no persisted state,
  * so the selectors would never see it and hydration would default it to `pending`:
@@ -264,7 +290,9 @@ export async function loadOrCreateRun(
   const fallbackStore = new FileRunStateStore({ context: buildContext, ticket, pipeline: pipeline.name });
   const stateStore = options.stateStore ?? fallbackStore;
 
-  // --start-at makes preceding steps effective skips.
+  // --start-at makes preceding steps effective skips, and requeues the target
+  // and every later step even when an earlier pass finished them.
+  let replayIds: ReadonlySet<string> = new Set();
   if (startAt) {
     const ids = pipeline.steps.map((step) => step.id);
     const cut = ids.indexOf(startAt);
@@ -274,6 +302,7 @@ export async function loadOrCreateRun(
       );
     }
     skipFilter = ids.slice(0, cut);
+    replayIds = new Set(ids.slice(cut));
   }
 
   // A strict explicit selection already has a concrete directory and snapshot
@@ -363,6 +392,15 @@ export async function loadOrCreateRun(
     // snapshot does not know yet.
     seedNewDefinitionSteps(pipeline, saved);
     applyStepFilters(saved.steps, stepFilter, skipFilter);
+    const unreplayable = unreplayableSteps(saved.steps, replayIds);
+    if (unreplayable.length > 0) {
+      if (resolution?.acquiredRunLock || options.strictSnapshot?.releaseRunLock) releaseRunDir(dir);
+      throw new Error(
+        `--start-at: step "${unreplayable[0]}" composes pipelines whose children already settled and cannot be ` +
+          `replayed in place. Use --fresh to start a new run.`,
+      );
+    }
+    requeueForReplay(saved.steps, replayIds);
     const projected = projectRunState(saved, readRunEvents({ run_dir: dir, runId: saved.runId, eventStore }));
     const run = hydrate(pipeline, pipelinePath, saved, options, projected);
     run.run_dir = dir;
@@ -423,7 +461,8 @@ export async function loadOrCreateRun(
       const excluded =
         (stepFilter && !stepFilter.some((selector) => matchesStepSelector(def.id, selector))) ||
         (skipFilter?.some((selector) => matchesStepSelector(def.id, selector)) ?? false);
-      return makeRunStep(def, excluded ? { status: "skipped", excluded: true } : { status: "pending" });
+      if (excluded) return makeRunStep(def, { status: "skipped", excluded: true });
+      return makeRunStep(def, replayIds.has(def.id) ? { status: "pending", replay: true } : { status: "pending" });
     }),
   };
 

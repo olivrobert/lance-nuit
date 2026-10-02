@@ -222,7 +222,9 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
     }
   }
 
-  if (declaresInput) {
+  // A `--start-at` replay skips the freshness check: it does not track the
+  // repository tree, which is what an operator fixes before replaying.
+  if (declaresInput && step.replay !== true) {
     const report = await stepFreshness(baseCtx, step.def);
     if (!report.mustRun) {
       // Adopt before skipping: an output produced before this record existed keeps

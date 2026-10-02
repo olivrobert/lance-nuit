@@ -51,7 +51,9 @@ function resolveTargetRunDir(ready: ReadyRun): { dir?: string; explicit?: Explic
     return {};
   }
   try {
-    const explicit = selectExplicitRun(pipelineDef.name, args.ticket, args.runId, context);
+    const explicit = selectExplicitRun(pipelineDef.name, args.ticket, args.runId, context, {
+      replay: args.startAt !== undefined,
+    });
     log(`→ Explicitly resuming run ${args.runId}`);
     return { dir: explicit.dir, explicit };
   } catch (error) {
