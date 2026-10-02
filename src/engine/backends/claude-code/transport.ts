@@ -43,6 +43,8 @@ export async function executeClaudeWithTransportRetry(
   // Tokens burned by attempts discarded before an overload are real spend:
   // carry their cost forward so the budget ledger and stats still see it.
   let priorCost = 0;
+  // Same for time: `durationMs` measures one spawn, the attempt lasted all of them.
+  let priorDuration = 0;
   // Ledger the session must hold after the attempts already charged: the baseline
   // the previous spawn restored plus what it reported on top. Zero until a spawn
   // has run, or when the first spawn was a fresh session.
@@ -70,6 +72,7 @@ export async function executeClaudeWithTransportRetry(
     const finish = (): RawClaudeExecutionResult => ({
       ...result,
       ...(priorCost > 0 ? { priorAttemptsCostUsd: priorCost } : {}),
+      ...(priorDuration > 0 ? { priorAttemptsDurationMs: priorDuration } : {}),
       ...(baseline ? { resumeBaseline: baseline } : {}),
     });
     if (!error || !isOverloaded(error) || i >= delays.length) return finish();
@@ -83,6 +86,7 @@ export async function executeClaudeWithTransportRetry(
     // more with a zero-dollar budget and overspending before the first usage tick.
     if (attempt.budgetRemaining != null && attemptCost >= attempt.budgetRemaining) return finish();
     priorCost += attemptCost;
+    priorDuration += result.durationMs + (delays[i] ?? 0);
     // An estimated cost was computed from tokens the CLI never wrote to its
     // ledger (no `result` event), so the ledger did not move.
     expectedLedger = (baseline?.costUsd ?? 0) + (estimated ? 0 : attemptCost);

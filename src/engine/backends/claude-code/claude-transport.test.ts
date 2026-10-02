@@ -229,4 +229,31 @@ describe("Claude transport", () => {
     expect(seenPrior).toEqual([undefined, 0.2, 0.4]);
     expect(result.priorAttemptsCostUsd).toBeCloseTo(0.4);
   });
+
+  test("carries the wall time of the discarded attempts and their backoff to the last spawn", async () => {
+    const overloaded = JSON.stringify({
+      type: "result",
+      is_error: true,
+      terminal_reason: "api_error",
+      api_error_status: 529,
+      result: "overloaded",
+    });
+    let calls = 0;
+    const result = await executeClaudeWithTransportRetry(
+      { bin: "claude", args: [] },
+      async () => {
+        calls++;
+        // The final spawn is killed by the timeout: no `result`, wall time only.
+        return calls === 1
+          ? { output: overloaded, code: 0, killed: false, durationMs: 300 }
+          : { output: "", code: null, killed: true, killReason: "timeout (1s)", durationMs: 900 };
+      },
+      (output) => parseClaudeEvents(output),
+      [5],
+    );
+
+    expect(result.durationMs).toBe(900);
+    expect(result.priorAttemptsDurationMs).toBe(305);
+    expect(mapClaudeExecutionResult(result, {}).stats.duration_ms).toBe(1205);
+  });
 });
