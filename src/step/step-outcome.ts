@@ -17,7 +17,7 @@ import { recordCostStop } from "../state/cost-stop-events.js";
 import { latestAttemptLog } from "../state/run-timeline.js";
 import { stopRun, updateStep } from "../state/run-transitions.js";
 import type { runFixLoop } from "./fix-loop.js";
-import { absorbNonBlocking } from "./non-blocking.js";
+import { absorbNonBlocking, settleStepFailure } from "./non-blocking.js";
 import { onFailureHandlerFor } from "./on-failure.js";
 import { runAttempt } from "./step-attempt.js";
 
@@ -145,6 +145,23 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<Outcom
   // Persist the initial attempt failure reason on the step, or pass it to
   // on_failure handlers so their attempts can refine it.
   const lastFailReason = result.failReason;
+
+  // A live cost guard killed the attempt: the step did not fail, the run ran out of
+  // approved spend. Neither `blocking: false` nor `on_failure` may answer it — the
+  // first would mark the unfinished work done, the second has nothing to repair.
+  // Left failed, the step is what a `--budget` resume replays.
+  if (!ok && (result.budgetExceeded || result.costUnaccounted)) {
+    settleStepFailure(
+      run,
+      step,
+      input.output,
+      lastFailReason,
+      { failSuffix: ` (stopped by the cost guard)${lastFailReason ? ` — ${lastFailReason}` : ""}` },
+      true,
+    );
+    emitOutputPath(input.output, stepLog);
+    return "failed";
+  }
 
   // A wall-clock timeout truncates output; no extractor error is not evidence of
   // success, so never force "done".

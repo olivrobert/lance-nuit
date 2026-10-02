@@ -47,6 +47,11 @@ an estimate, and the provider's final figure can land under the ceiling; the
 snapshot therefore records the stop itself, so a resume without `--budget` halts
 where the guard did instead of replaying — and repaying — the killed step.
 
+The killed step is left `failed`, even when it is declared `blocking: false`: a
+cost stop withholds the step's work rather than judging it, and a step absorbed as
+`done` would be skipped by every resume, `--budget` included. See
+[failures, retries, and escalation](failures-retries-escalation.md#budgets-and-persistence).
+
 Either cost stop is also recorded as a fact, not only as a console sentence: the
 run outcome carries `stopKind` (`budget-exceeded` or `cost-unaccounted`, see
 [persistence](persistence.md)) and the journal carries one
