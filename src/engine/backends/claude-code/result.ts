@@ -33,6 +33,10 @@ export function mapClaudeExecutionResult(
   options: ClaudeResultOptions = {},
 ): AgentResult {
   const parsed = parseClaudeEvents(raw.output, options.model);
+  // `duration_ms` only arrives on the CLI's final `result` event, which a process
+  // killed for timeout or budget never emits: fall back to the supervisor's clock.
+  if (raw.killed || !parsed.stats.duration_ms) parsed.stats.duration_ms = raw.durationMs;
+  if (raw.priorAttemptsDurationMs) parsed.stats.duration_ms += raw.priorAttemptsDurationMs;
   // A resumed spawn reports the session ledger the CLI restored, not its own work.
   // Charge the difference against that baseline — the reconciliation the
   // orchestrator already applies to child runs — before anything else adds to it.
