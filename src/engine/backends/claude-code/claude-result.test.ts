@@ -128,6 +128,37 @@ describe("Claude result mapping", () => {
     expect(netted).toBe(estimated);
   });
 
+  test.each([
+    ["timeout", "timeout (900s)"],
+    ["budget", "budget exceeded: estimated $1.20 > $1.00"],
+  ])("a %s-killed attempt records its wall duration, not 0", (_label, killReason) => {
+    // A killed CLI never emits its `result` event, the only place the stream
+    // carries `duration_ms`: the supervisor's wall clock is the measure left.
+    const assistant = JSON.stringify({
+      type: "assistant",
+      message: { id: "m1", usage: { input_tokens: 10, output_tokens: 2 } },
+    });
+    const result = mapClaudeExecutionResult({
+      output: assistant,
+      code: null,
+      killed: true,
+      killReason,
+      durationMs: 900_000,
+    });
+    expect(result.stats.duration_ms).toBe(900_000);
+  });
+
+  test("keeps the CLI-reported duration of a completed attempt", () => {
+    const output = JSON.stringify({ type: "result", duration_ms: 42 });
+    expect(mapClaudeExecutionResult({ ...raw(output), durationMs: 50 }).stats.duration_ms).toBe(42);
+  });
+
+  test("adds the discarded transport attempts to the duration", () => {
+    const output = JSON.stringify({ type: "result", duration_ms: 42 });
+    const result = mapClaudeExecutionResult({ ...raw(output), priorAttemptsDurationMs: 1000 });
+    expect(result.stats.duration_ms).toBe(1042);
+  });
+
   test("maps timeout cleanup as a technical timeout", () => {
     const result = mapClaudeExecutionResult({
       output: "",

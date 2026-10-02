@@ -32,6 +32,9 @@ export interface RawClaudeExecutionResult {
   durationMs: number;
   /** Cost spent by transport attempts discarded before an overload retry. */
   priorAttemptsCostUsd?: number;
+  /** Wall time of those discarded attempts and the backoff waited after each:
+   *  `durationMs` covers only the last spawn. */
+  priorAttemptsDurationMs?: number;
   /** Session ledger the LAST executed attempt resumed from, when it resumed one.
    *  The mapper charges the cumulative figures by difference against it. */
   resumeBaseline?: ClaudeResumeBaseline;
