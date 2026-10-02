@@ -12,7 +12,7 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import { log } from "../runtime/logging.js";
 import { recordApproval } from "../state/decisions.js";
-import { describeRecordedApproval, resolveApprovalArtifact } from "./approval-subject.js";
+import { describeRecordedApproval, resolveApprovableArtifact } from "./approval-subject.js";
 import type { RunnerCommand } from "./runner-command.js";
 import { pipelineNotFoundError } from "./pipeline-reference.js";
 import { commandRegistries } from "./registries.js";
@@ -55,7 +55,7 @@ export const approvalCommand: RunnerCommand = {
       return 1;
     }
     try {
-      const artifact = resolveApprovalArtifact(pipelineDef, args.approve);
+      const artifact = await resolveApprovableArtifact(pipelineDef, args.approve, context);
       log(describeRecordedApproval(await recordApproval(context, args.approve, artifact), context.paths.decisionsDir));
       return 0;
     } catch (error) {

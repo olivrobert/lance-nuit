@@ -23,6 +23,8 @@ const TICKET = "PROJ-1";
 
 interface Verdict {
   blocked?: boolean;
+  /** Triage family: the per-verdict approval tests offer a subject for each but `split`. */
+  family?: "info" | "decision" | "split";
 }
 
 const verdictArtifact = artifact<Verdict>("verdict.json", (value) => value as Verdict);
@@ -61,20 +63,24 @@ interface Fixture {
   store: MemoryArtifactStore;
 }
 
-function fixture(opts: { blocked?: boolean; approved?: boolean } = {}): Fixture {
+function fixture(
+  opts: { blocked?: boolean; approved?: boolean; body?: Verdict; approvedSubject?: string } = {},
+): Fixture {
   const dir = mkdtempSync(join(tmpdir(), "human-review-"));
   const store = new MemoryArtifactStore();
   const ctx = buildPipelineContext({ cwd: dir, ticket: TICKET, artifacts: store });
-  const body = opts.blocked === undefined ? undefined : JSON.stringify({ blocked: opts.blocked });
+  const value = opts.body ?? (opts.blocked === undefined ? undefined : { blocked: opts.blocked });
+  const body = value === undefined ? undefined : JSON.stringify(value);
   if (body !== undefined) store.put("verdict.json", body);
-  if (opts.approved) {
+  const subject = opts.approvedSubject ?? (opts.approved ? "sujet" : undefined);
+  if (subject) {
     mkdirSync(ctx.paths.decisionsDir!, { recursive: true });
     writeFileSync(
-      join(ctx.paths.decisionsDir!, "sujet.json"),
+      join(ctx.paths.decisionsDir!, `${subject}.json`),
       JSON.stringify({
         schemaVersion: 1,
         decision: "approved",
-        subject: "sujet",
+        subject,
         artifact: "artifacts/verdict.json",
         artifactSha256: createHash("sha256")
           .update(body ?? "")
@@ -324,4 +330,161 @@ test("child pipeline: no note declared → gate only, approval still exposed", a
 
   const approved = fixture({ blocked: true, approved: true });
   expect((await admit(stepOf(child.steps, "reuse-gate"), approved.ctx)).action).toBe("pass");
+});
+
+/** A triage gate whose split verdict must be undone by new tickets, not approved. */
+const byVerdict = {
+  subjects: ["triage-info", "triage-decision"],
+  subjectFor: (value: Verdict) => (value.family === "split" ? undefined : `triage-${value.family}`),
+} as const;
+
+const blockedAs = (family: Verdict["family"]): Verdict => ({ blocked: true, family });
+
+test("approval by verdict: the hint names the subject the verdict offers", async () => {
+  const steps = build({ approval: byVerdict });
+  const { ctx } = fixture({ body: blockedAs("decision") });
+
+  const gate = await admit(stepOf(steps, "demo-gate"), ctx);
+  expect(gate.action === "pass" ? "" : gate.reason).toBe(
+    'escalated: blocking verdict — lift with "lancenuit run PROJ-1 --pipeline test --approve triage-decision"',
+  );
+  expect(gate.action === "pass" ? undefined : gate.stop?.subject).toBe("triage-decision");
+});
+
+test("approval by verdict: a non-approvable verdict stops with its reason and no subject", async () => {
+  const steps = build({ approval: byVerdict });
+  // A fresh decision under another declared subject must not lift a verdict that
+  // offers none: it was recorded for an earlier, approvable verdict.
+  const { ctx } = fixture({ body: blockedAs("split"), approvedSubject: "triage-info" });
+
+  expect((await admit(stepOf(steps, "escalate-demo"), ctx)).action).toBe("pass");
+  const gate = await admit(stepOf(steps, "demo-gate"), ctx);
+  expect(gate.action === "pass" ? "" : gate.reason).toBe("escalated: blocking verdict");
+  expect(gate.action === "pass" ? undefined : gate.stop).toEqual({
+    artifact: "artifacts/verdict.json",
+    kind: "needs-decision",
+    detail: "blocking verdict",
+  });
+});
+
+test("approval by verdict: only a decision under the offered subject lifts the gate", async () => {
+  const steps = build({ approval: byVerdict });
+
+  const other = fixture({ body: blockedAs("decision"), approvedSubject: "triage-info" });
+  expect((await admit(stepOf(steps, "demo-gate"), other.ctx)).action).toBe("stop");
+
+  const offered = fixture({ body: blockedAs("decision"), approvedSubject: "triage-decision" });
+  expect((await admit(stepOf(steps, "escalate-demo"), offered.ctx)).action).toBe("skip");
+  expect((await admit(stepOf(steps, "demo-gate"), offered.ctx)).action).toBe("pass");
+});
+
+test("approval by verdict: a subject outside the declared list is an authoring error", async () => {
+  const steps = build({ approval: { subjects: ["triage-info"], subjectFor: () => "triage-other" } });
+  const { ctx } = fixture({ body: blockedAs("info") });
+
+  // Admission turns the thrown error into a stop, so the run halts on the bug
+  // instead of writing a decision for an undeclared subject.
+  const gate = await admit(stepOf(steps, "demo-gate"), ctx);
+  expect(gate.action).toBe("stop");
+  expect(gate.action === "pass" ? "" : gate.reason).toBe(
+    'humanReview("demo"): approval.subjectFor returned "triage-other", which is not declared (subjects: triage-info)',
+  );
+});
+
+test("approval by verdict: an empty subject list fails at declaration", () => {
+  expect(() => build({ approval: { subjects: [], subjectFor: () => undefined } })).toThrow(
+    'humanReview("demo"): approval.subjects must be a non-empty array',
+  );
+});
+
+test("approval by verdict: the note promises no command for a non-approvable verdict", async () => {
+  const notes = async (family: Verdict["family"]): Promise<string> => {
+    const gateway = createFakeWorkItemGateway({ items: [{ ref: TICKET, queues: ["featureTodo"], state: "todo" }] });
+    const { ctx: base } = fixture({ body: blockedAs(family) });
+    const ctx = buildPipelineContext({ cwd: base.cwd, ticket: TICKET, artifacts: base.artifacts, workItem: gateway });
+    await stepOf(build({ approval: byVerdict }), "escalate-demo").action!(ctx);
+    return gateway.bodiesOf(TICKET)[0]!;
+  };
+
+  expect(await notes("info")).toContain("Approve : lancenuit run PROJ-1 --pipeline test --approve triage-info");
+  const split = await notes("split");
+  expect(split).not.toContain("Approve");
+  expect(split).not.toContain("--approve");
+});
+
+test("approval by verdict: every declared subject is exposed to the pipeline", async () => {
+  const built = pipeline("test")
+    .add(
+      humanReview<Verdict>({
+        id: "demo",
+        artifact: verdictArtifact,
+        kind: "needs-decision",
+        blocked: (value) => value.blocked === true,
+        approval: byVerdict,
+        reason: () => "blocking verdict",
+      }),
+    )
+    .build();
+
+  expect([...built.approvals!.keys()]).toEqual(["triage-info", "triage-decision"]);
+  expect(built.approvals?.get("triage-decision")?.name).toBe("verdict.json");
+  expect([...built.approvalGuards!.keys()]).toEqual(["triage-info", "triage-decision"]);
+
+  // The guard applies the gate's rule: only the subject the current verdict offers.
+  const { ctx } = fixture({ body: blockedAs("decision") });
+  expect(await built.approvalGuards!.get("triage-decision")!(ctx)).toBeUndefined();
+  expect(await built.approvalGuards!.get("triage-info")!(ctx)).toBe(
+    'Approval subject "triage-info" is not offered by the current verdict of artifacts/verdict.json (offered: triage-decision).',
+  );
+  const split = fixture({ body: blockedAs("split") });
+  expect(await built.approvalGuards!.get("triage-info")!(split.ctx)).toBe(
+    'Approval subject "triage-info" is not offered by the current verdict of artifacts/verdict.json (this verdict cannot be approved).',
+  );
+  const free = fixture({ blocked: false });
+  expect(await built.approvalGuards!.get("triage-info")!(free.ctx)).toBe(
+    'Approval subject "triage-info" is not offered by the current verdict of artifacts/verdict.json (nothing blocks).',
+  );
+});
+
+test("approval by verdict: a guarded subject cannot be declared twice", () => {
+  const review = (approval: Parameters<typeof humanReview<Verdict>>[0]["approval"], id = "demo") =>
+    humanReview<Verdict>({
+      id,
+      artifact: verdictArtifact,
+      kind: "needs-decision",
+      blocked: (value) => value.blocked === true,
+      approval,
+      reason: () => "blocking verdict",
+    });
+  const guarded = 'approval subject "triage-info" is guarded by a human review and cannot be declared twice';
+
+  expect(() => pipeline("twice").add(review(byVerdict, "first"), review(byVerdict, "second")).build()).toThrow(guarded);
+  expect(() => pipeline("twice").approval("triage-info", verdictArtifact).add(review(byVerdict)).build()).toThrow(
+    guarded,
+  );
+  expect(() => pipeline("twice").add(review(byVerdict)).approval("triage-info", verdictArtifact).build()).toThrow(
+    guarded,
+  );
+  expect(() =>
+    pipeline("twice")
+      .add(review(byVerdict, "first"), review({ subject: "triage-info" }, "second"))
+      .build(),
+  ).toThrow(guarded);
+});
+
+test("approval by verdict: an invalid subject token fails at build", () => {
+  expect(() =>
+    pipeline("evil")
+      .add(
+        humanReview<Verdict>({
+          id: "demo",
+          artifact: verdictArtifact,
+          kind: "needs-decision",
+          blocked: () => true,
+          approval: { subjects: ["../escape"], subjectFor: () => undefined },
+          reason: () => "blocking verdict",
+        }),
+      )
+      .build(),
+  ).toThrow('Pipeline "evil": invalid approval subject "../escape"');
 });

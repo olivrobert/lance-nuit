@@ -3,8 +3,11 @@
 // Shared by both `--approve` paths: `commands/approval.ts` loads the pipeline only
 // for approval, while `runner.ts` has already loaded it. There is no hard-coded
 // subject list; an unknown subject is simply undeclared by the target pipeline.
+// A subject guarded by a per-verdict human review is also refused when the
+// current verdict does not offer it, with the same check on both paths.
 
 import type { Artifact } from "../dsl/artifact.js";
+import type { PipelineContext } from "../model/context.js";
 import type { Pipeline } from "../model/definition.js";
 import { isValidSubjectToken, type RecordedApproval } from "../state/decisions.js";
 
@@ -27,6 +30,21 @@ export function resolveApprovalArtifact(pipelineDef: Pipeline, subject: string):
         (declared.length > 0 ? ` (declared: ${declared.join(", ")}).` : " (no subjects declared)."),
     );
   }
+  return artifact;
+}
+
+/**
+ * `resolveApprovalArtifact`, then refuse a subject the current artifact does not
+ * offer. Throws before any decision is recorded.
+ */
+export async function resolveApprovableArtifact(
+  pipelineDef: Pipeline,
+  subject: string,
+  ctx: PipelineContext,
+): Promise<Artifact<unknown>> {
+  const artifact = resolveApprovalArtifact(pipelineDef, subject);
+  const refusal = await pipelineDef.approvalGuards?.get(subject)?.(ctx);
+  if (refusal) throw new Error(refusal);
   return artifact;
 }
 
