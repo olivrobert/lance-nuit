@@ -331,6 +331,13 @@ previous attempts. When the budget is exhausted, remaining steps/retries are not
 spawned and the run reports `BUDGET EXCEEDED`. A work-item loop uses
 `maxCostPerWorkItemUsd`; a simple pipeline uses `maxCost`.
 
+A cost stop is never a step's own failure, so `blocking: false` does not absorb
+it: a step whose attempt the live guard killed, or whose retry or fix pass a cost
+gate withheld, stays `failed` and the run stops resumable. A resume with
+`--budget` (or `--allow-unmetered`) replays that step. The guard's kill does not
+start the step's `onFail` policy, and a retry or fix pass the guard cut short does
+not count against `retries`: the resume that approves the spend can still run it.
+
 The same gate withholds retries and fix passes when a capped run's spend stops
 being priceable: the run reports `COST UNACCOUNTED` instead, and the retry loop
 logs which stop it hit rather than repairing its way past it. Uncertainty about a

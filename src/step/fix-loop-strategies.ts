@@ -21,6 +21,9 @@ export async function runFixRetryLoop(
   let lastFailReason = initialFailReason;
   let fixed = false;
   let announced = false;
+  // Set whenever the loop ends because spend was withheld or cut short, so the
+  // epilogue keeps the step resumable instead of absorbing it as non-blocking.
+  let costStopped = false;
 
   // `step.retries` is persisted across run segments on purpose, so a resumed step
   // readmitted by `rerun_on_resume` can reach the loop with its quota already
@@ -49,6 +52,7 @@ export async function runFixRetryLoop(
       });
       // A withheld repair pass is withheld work, like a withheld retry.
       recordCostStop(run, budget, beforeFix, { kind: "gate", stepId: step.id });
+      costStopped = true;
       break;
     }
 
@@ -89,6 +93,17 @@ export async function runFixRetryLoop(
     });
     if (!pass) return { failed: false };
 
+    // A repair the cost guard cut short gives its quota back: the counter counts
+    // repairs that had their chance, and a `--budget` resume must still be able to
+    // run this one instead of reporting the quota as consumed.
+    if (pass.fix.budgetExceeded || pass.fix.costUnaccounted) {
+      step.retries--;
+      saveRun(run);
+      costStopped = true;
+      fx.output.emit({ type: "runner.message", level: "warn", message: `  Fix stopped by the cost guard` });
+      break;
+    }
+
     if (!pass.fix.ok) {
       fx.output.emit({ type: "runner.message", level: "error", message: `  Fix failed, retry cancelled` });
       break;
@@ -113,6 +128,7 @@ export async function runFixRetryLoop(
             : `  Budget exceeded, stopping retries`,
       });
       recordCostStop(run, budget, beforeRetry, { kind: "gate", stepId: step.id });
+      costStopped = true;
       break;
     }
 
@@ -124,6 +140,11 @@ export async function runFixRetryLoop(
       break;
     }
     if (retry.failReason) lastFailReason = retry.failReason;
+    // The replay was cut short, not refuted: its verdict is unknown.
+    if (retry.budgetExceeded || retry.costUnaccounted) {
+      costStopped = true;
+      break;
+    }
 
     // Exit status remains authoritative: a silent extractor after a crash cannot
     // turn the retry into success. Full output feeds the next fix.
@@ -141,8 +162,15 @@ export async function runFixRetryLoop(
     });
     return { failed: false };
   }
-  return settleStepFailure(run, step, fx.output, lastFailReason, {
-    absorbDetail: `after ${step.retries} attempt(s)`,
-    failSuffix: ` after ${step.retries} attempts`,
-  });
+  return settleStepFailure(
+    run,
+    step,
+    fx.output,
+    lastFailReason,
+    {
+      absorbDetail: `after ${step.retries} attempt(s)`,
+      failSuffix: ` after ${step.retries} attempts`,
+    },
+    costStopped,
+  );
 }
