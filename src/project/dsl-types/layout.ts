@@ -20,15 +20,17 @@ export const CONTRACTS_PACKAGE_NAME = "lance-nuit";
 export const NODE_MODULES_SUBDIR = "node_modules";
 // Generated surface plus every runtime state directory the runner writes under
 // the kit: without them the second fresh run finds a dirty tree and refuses.
+// No trailing slash on the directories a worktree links to the main clone:
+// there they are symlinks, which a `dir/` pattern does not match.
 export const GITIGNORE_ENTRIES = [
   `/${TYPES_SUBDIR}/`,
   `/${TSCONFIG_NAME}`,
-  `/${NODE_MODULES_SUBDIR}/`,
+  `/${NODE_MODULES_SUBDIR}`,
   "/state/",
   "/runs/",
   "/run/",
   "/history/",
-  "/pipeline-history/",
+  "/pipeline-history",
   "/work-items/",
   "/logs/",
   "/tmp/",

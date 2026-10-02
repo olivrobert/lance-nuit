@@ -87,7 +87,8 @@ test("the kit directory gitignores its own generated files", () => {
   expect(ignore).toContain("/.lance-nuit-types/");
   expect(ignore).toContain("/tsconfig.json");
   expect(ignore).toContain("/work-items/");
-  expect(ignore).toContain("/pipeline-history/");
+  expect(ignore).toContain("/pipeline-history\n");
+  expect(ignore).toContain("/node_modules\n");
   expect(ignore).toContain("/logs/");
 
   writeFileSync(join(kit, ".gitignore"), "/scratch/\n");
@@ -97,6 +98,15 @@ test("the kit directory gitignores its own generated files", () => {
   expect(merged).toContain("/.lance-nuit-types/");
   installKitTypes(kit);
   expect(readFileSync(join(kit, ".gitignore"), "utf8")).toBe(merged);
+});
+
+test("a kit .gitignore from before the worktree links gains the entries that match them", () => {
+  const kit = dir("legacy-ignore");
+  writeFileSync(join(kit, ".gitignore"), "/node_modules/\n/pipeline-history/\n");
+  installKitTypes(kit);
+  const lines = readFileSync(join(kit, ".gitignore"), "utf8").split("\n");
+  expect(lines).toContain("/node_modules");
+  expect(lines).toContain("/pipeline-history");
 });
 
 test("--create --user writes to the shared directory", () => {
