@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { defaultScope, ProcessScope } from "../exec/process-supervision.ts";
 import { GITIGNORE_ENTRIES } from "../project/dsl-types/layout.ts";
 import { log } from "../runtime/logging.ts";
 import {
@@ -19,6 +20,7 @@ import {
   isLinkedWorktreeAsync,
   removeWorktreeAsync,
   runReadyHookAsync,
+  runStopHookAsync,
   setupScriptFor,
   setupWorktreeAsync,
   slugifyTicket,
@@ -536,4 +538,54 @@ test("runReadyHookAsync: a failure throws with the tail of the hook output", asy
   readyHook(repo, "echo 'composer: lock file out of date'\nexit 4");
 
   await expect(runReadyHookAsync(spec)).rejects.toThrow(/worktree-ready failed[\s\S]*lock file out of date/);
+});
+
+/** Untracked stop hook in the main clone: the lookup falls back to it. */
+function stopHook(repo: string, body: string): void {
+  mkdirSync(join(repo, ".lance-nuit"), { recursive: true });
+  writeFileSync(join(repo, ".lance-nuit", "worktree-stop.sh"), `${body}\n`);
+}
+
+test("runStopHookAsync: without a hook, nothing runs", async () => {
+  const repo = gitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  await runStopHookAsync(spec);
+});
+
+test("runStopHookAsync: the main-clone hook receives the worktree path", async () => {
+  const repo = gitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  stopHook(repo, 'echo "$1" > "$(dirname "$0")/stop.called"');
+
+  await runStopHookAsync(spec);
+
+  expect(readFileSync(join(repo, ".lance-nuit", "stop.called"), "utf-8").trim()).toBe(spec.path);
+});
+
+test("runStopHookAsync: a failure throws with the tail of the hook output", async () => {
+  const repo = gitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  stopHook(repo, "echo 'compose: no such service'\nexit 3");
+
+  await expect(runStopHookAsync(spec)).rejects.toThrow(/worktree-stop failed[\s\S]*no such service/);
+});
+
+test("runStopHookAsync: the hook is tracked in the given scope, not the default one", async () => {
+  const repo = gitRepo();
+  const spec = freshSpec(repo);
+  await setupWorktreeAsync(spec, setupOpts());
+  stopHook(repo, `touch "$(dirname "$0")/stop.started"\nsleep 30`);
+  const scope = new ProcessScope();
+
+  const pending = runStopHookAsync(spec, scope);
+  const started = join(repo, ".lance-nuit", "stop.started");
+  while (!existsSync(started)) await Bun.sleep(20);
+  expect(scope.hasLiveChildren()).toBe(true);
+  expect(defaultScope().hasLiveChildren()).toBe(false);
+  scope.forceKillAll();
+
+  await expect(pending).rejects.toThrow(/worktree-stop failed/);
 });

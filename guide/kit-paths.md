@@ -19,6 +19,12 @@ self-contained copy of `lance-nuit/contracts` for the extensions the kit holds
 (see [extensions](packages-and-extensions.md#how-a-kit-extension-resolves-lance-nuitcontracts)).
 Both are ignored and rewritten by the CLI; a worktree shares the main clone's.
 
+`.lance-nuit/` also holds the optional project hooks of `--worktree` runs:
+`worktree-init.sh`, `worktree-setup.sh` / `worktree-setup-light.sh`,
+`worktree-ready.sh`, `worktree-stop.sh`, and `worktree-teardown.sh`. Each is looked
+up in the worktree first, then in the main clone; see
+[Worktrees](usage.md#worktrees) for when each one runs.
+
 **Resolution chain** (`env/kit-paths.ts`), from highest to lowest priority:
 
 ```text
