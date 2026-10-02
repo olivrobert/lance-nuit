@@ -67,6 +67,9 @@ export function updateStep(run: Run, step: RunStep, status: RunStep["status"], e
   } else {
     step.finished_at = new Date().toISOString();
   }
+  // A `--start-at` replay is owed until the step settles: a failed or
+  // interrupted replay must still run on a resume that no longer names it.
+  if (status === "done" || status === "skipped") delete step.replay;
   // Persist failure reason unless an error_extractor already supplied one.
   if (status === "failed" && errors && !step.errors) step.errors = errors;
   const attemptLog = latestAttemptLog(run, step);

@@ -60,13 +60,16 @@ function explicitSnapshotError(
  * refuses a run with nothing left to do — no pending step and no missing
  * verdict. A settled-but-unfinalized run (crash between the last step and
  * `finalizeRun`) has no pending step yet still owes its verdict, and automatic
- * resume accepts it; refusing it here would leave it unreachable.
+ * resume accepts it; refusing it here would leave it unreachable. A replay
+ * request (`--start-at`) lifts that refusal too: it is the operator's decision
+ * that the run has work again, and boot requeues the steps it names.
  */
 export function selectExplicitRun(
   pipelineName: string,
   ticket: string | undefined,
   runId: string,
   context?: PipelineContext,
+  options: { replay?: boolean } = {},
 ): ExplicitRunSelection {
   const pipelineDir = pipelineRunsDir(pipelineName, ticket, context);
   let ref: ReturnType<typeof createRunRef>;
@@ -94,7 +97,7 @@ export function selectExplicitRun(
   if (mismatches.length > 0) {
     throw new Error(`--run: snapshot identity mismatch for "${runId}": ${mismatches.join(", ")}`);
   }
-  if (pendingSteps(snapshot).length === 0 && !settledButUnfinalized(snapshot)) {
+  if (options.replay !== true && pendingSteps(snapshot).length === 0 && !settledButUnfinalized(snapshot)) {
     throw new Error(`--run: run "${runId}" has no remaining step to execute — nothing to resume.`);
   }
 

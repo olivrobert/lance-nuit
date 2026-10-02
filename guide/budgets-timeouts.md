@@ -370,7 +370,9 @@ If `stackPreflight` is configured, Docker readiness has its own budget, outside
 step timeouts. Its default readiness window is 300 seconds; `startCommand` and
 `readinessTimeoutMs` can be changed in `.lance-nuit/config.json`. The
 `worktree-ready.sh` hook that follows it also runs before the first step, outside
-step timeouts, with a fixed 30-minute limit.
+step timeouts, with a fixed 30-minute limit. `worktree-stop.sh` runs after the run
+is finalized, outside step timeouts and cost accounting, with a fixed 5-minute
+limit.
 
 ## Informational output-token signal
 
