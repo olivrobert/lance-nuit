@@ -12,6 +12,7 @@ import { liveAttemptCost } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
 import { emitRunStats } from "../state/stats/run-stats.js";
 import { abortRun } from "../state/run-transitions.js";
+import { NO_STACK_STOP, type StackStop } from "./stack-stop.js";
 
 /**
  * Install child-tree killing for Ctrl+C / SIGTERM / exit.
@@ -25,16 +26,39 @@ import { abortRun } from "../state/run-transitions.js";
  * recorded here is what stops in-process child runs, which never receive
  * `run.aborted` themselves. `getActiveRun` covers the root run before its step
  * loop registered it on the scope (admission, preflight).
+ *
+ * `getStackStop` is read on every signal because the stop only exists once
+ * startup returns a run. An interruption during the steps waits for it before
+ * exiting. A signal while it already runs neither kills the hook nor exits: the
+ * run is reported by then, and the entry point exits with its own code. Only a
+ * second signal skips the hook.
  */
-export function installChildKillHandlers(abort: AbortScope, getActiveRun: () => Run | undefined): void {
+export function installChildKillHandlers(
+  abort: AbortScope,
+  getActiveRun: () => Run | undefined,
+  getStackStop: () => StackStop = () => NO_STACK_STOP,
+): void {
   // `exit` cannot await a promise; this synchronous fallback immediately kills
   // groups that are still visible.
   process.on("exit", () => killAllChildren("SIGKILL"));
   let shutdownPromise: Promise<void> | undefined;
   let abortPersisted = false;
+  // A stop started after the report never sets `shutdownPromise`, so its
+  // signals need their own count.
+  let signalsDuringStop = 0;
 
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
     process.on(sig, () => {
+      const stackStop = getStackStop();
+      if (stackStop.inProgress()) {
+        signalsDuringStop += 1;
+        // After an interruption the user already pressed Ctrl+C once: this one
+        // is the second, so it skips at once.
+        if (signalsDuringStop > 1 || shutdownPromise) stackStop.skip();
+        else log.warn("stopping project services — press Ctrl+C again to skip");
+        return;
+      }
+
       // The handler is synchronous from the orchestrator's perspective: any loop
       // or rerun that resumes after child termination sees this flag before a new
       // spawn or failure persistence.
@@ -71,10 +95,12 @@ export function installChildKillHandlers(abort: AbortScope, getActiveRun: () => 
       // creating another promise or competing exit.
       if (shutdownPromise) {
         forceKillAllChildren();
+        // The stop hook lives in its own scope, out of reach of the line above.
+        stackStop.skip();
         return;
       }
 
-      shutdownPromise = shutdownAllChildren();
+      shutdownPromise = shutdownAllChildren().then(() => stackStop.run());
       void shutdownPromise.then(
         () => process.exit(exitCode),
         () => process.exit(exitCode),

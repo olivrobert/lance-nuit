@@ -16,6 +16,7 @@ import { COMMANDS } from "../commands/command.js";
 import { runDispatch } from "../dispatch/loop.js";
 import { selectDispatch, validateDispatchArgs } from "../dispatch/strategy.js";
 import { enclosingKitProjectRoot, KIT_DIR } from "../env/kit-paths.js";
+import type { WorktreeSpec } from "../env/worktree.js";
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineContext } from "../model/context.js";
 import type { Pipeline } from "../model/definition.js";
@@ -44,6 +45,8 @@ export interface ReadyRun {
   worktreeMode: boolean;
   /** Set when `--approve` recorded a decision that the run must journal. */
   approvedSubject?: DecisionSubject;
+  /** Set only in the process that entered the worktree, which owns its stack. */
+  enteredWorktree?: WorktreeSpec;
 }
 
 export type StartupOutcome = { kind: "exit"; code: number } | { kind: "run"; ready: ReadyRun };
@@ -227,6 +230,15 @@ export async function startup(argv: string[]): Promise<StartupOutcome> {
 
   return {
     kind: "run",
-    ready: { args, context, pipelineDef, pipelinePath, stateStore, worktreeMode, approvedSubject: approval.subject },
+    ready: {
+      args,
+      context,
+      pipelineDef,
+      pipelinePath,
+      stateStore,
+      worktreeMode,
+      approvedSubject: approval.subject,
+      ...(boot.enteredWorktree ? { enteredWorktree: boot.enteredWorktree } : {}),
+    },
   };
 }
