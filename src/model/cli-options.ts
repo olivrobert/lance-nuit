@@ -182,7 +182,7 @@ export const FLAGS: FlagSpec[] = [
     short: "-a",
     key: "startAt",
     kind: "string",
-    desc: "Start at this step; all preceding steps are skipped.",
+    desc: "Replay from this step: it and every later step run again; preceding steps are skipped.",
   },
   {
     long: "--base-branch",

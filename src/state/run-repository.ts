@@ -22,6 +22,7 @@ function persistedStep(step: RunStep): PersistedStepState {
     timeout_retries: step.timeout_retries,
     last_attempt: step.last_attempt,
     excluded: step.excluded,
+    replay: step.replay,
     started_at: step.started_at,
     finished_at: step.finished_at,
     session: step.session,

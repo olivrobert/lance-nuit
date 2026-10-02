@@ -39,6 +39,7 @@ export function makeRunStep(def: PipelineStep, state: StepStateInput = {}): RunS
     // hydration would let a resume renumber from 1 and overwrite earlier logs.
     last_attempt: state.last_attempt,
     excluded: state.excluded,
+    replay: state.replay,
     attempts: state.attempts ? state.attempts.map((attempt) => ({ ...attempt })) : [],
     orchestration: state.orchestration,
   };

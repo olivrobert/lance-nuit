@@ -10,7 +10,7 @@ flags.
 | `--pipeline <name\|path>` | `-p` | **Name** (`deploy`) resolved through the kit chain, or a path used as-is (default: `default`) |
 | `--steps <ids>` | `-s` | Comma-separated IDs (the others are skipped). A prefix such as `checks` also selects `checks.*` |
 | `--skip <ids>` | `-k` | IDs to skip (mutually exclusive with `--steps`) |
-| `--start-at <id>` | `-a` | Start at this step; previous steps are skipped (exclusive with `--steps`/`--skip`) |
+| `--start-at <id>` | `-a` | Replay from this step: it and every later step run again, even when already `done`; previous steps are skipped (exclusive with `--steps`/`--skip`) |
 | `--budget <usd>` | | Approve a cost ceiling in USD for this run. Resumes a run stopped by its budget without repaying completed steps. It changes the amount only: it never authorizes spend the runner could not price. Giving a ceiling to a run that had none when it spent an unpriceable amount stops that run as `cost-unaccounted` — the new amount is enforceable against nothing, so pair it with `--allow-unmetered` to cap the priced spend and authorize the rest |
 | `--allow-unmetered` | | Authorize spend nobody can price, and resume a run stopped by `cost-unaccounted`. It lifts that stop only — the spend the runner *did* price still obeys the ceiling. Recorded on the selected run (later resumes need no flag) and propagated to the children it composes. Rejected on an inspection command and under `--scan` |
 | `--watch` | `-w` | Open a tmux pane with a live stream |
