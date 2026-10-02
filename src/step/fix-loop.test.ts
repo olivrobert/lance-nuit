@@ -92,7 +92,7 @@ function makeStep(onFailure: StepFailure, def: Partial<PipelineStep> = {}): RunS
 
 /** Programmable results and call counters. */
 function fakes(opts: {
-  fix?: Array<{ ok: boolean; sessionId?: string; cost?: number; failReason?: string }>;
+  fix?: Array<{ ok: boolean; sessionId?: string; cost?: number; failReason?: string; budgetExceeded?: boolean }>;
   retry?: Array<Partial<StepResult>>;
   extract?: Array<{ hasErrors: boolean; errors: string }>;
   sizeKb?: number;
@@ -116,6 +116,7 @@ function fakes(opts: {
         stats: { duration_ms: 1, total_cost_usd: r.cost ?? 0 },
         ...(r.sessionId ? { session: { provider: spec.id, id: r.sessionId, resumable: true } } : {}),
         failReason: r.failReason,
+        ...(r.budgetExceeded ? { budgetExceeded: true } : {}),
       };
     },
     executeStep: async (_s, _c, _b, ctx) => {
@@ -129,6 +130,7 @@ function fakes(opts: {
         session: r.session,
         timedOut: r.timedOut,
         failReason: r.failReason,
+        budgetExceeded: r.budgetExceeded,
       };
     },
     extractErrors: async (_s, output) => {
@@ -818,4 +820,140 @@ test("a cost stop before the first repair announces no fix backend", async () =>
   expect(calls.fix.length).toBe(0);
   expect(messages().some((message) => message.includes("Fix backend"))).toBe(false);
   expect(messages().some((message) => message.includes("Budget exceeded"))).toBe(true);
+});
+
+// A cost stop is the run's decision, not a verdict on the step: `blocking: false`
+// must not absorb the work it withheld, or no resume would ever run it.
+test("a non-blocking step whose repair the budget gate withholds stays failed", async () => {
+  const step = makeStep(FIX, { blocking: false });
+  const run = makeRun(step, 1);
+  const { deps, calls } = fakes({});
+
+  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 5 }, "r0", {
+    deps,
+    output: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
+
+  expect(res.failed).toBe(true);
+  expect(step.status).toBe("failed");
+  expect(step.errors).toBe("r0");
+  expect(step.retries).toBe(0);
+  expect(calls.fix.length).toBe(0);
+});
+
+test("a non-blocking step whose replay the live guard kills stays failed", async () => {
+  const step = makeStep({ fix_prompt: "fix", max_retries: 1 }, { blocking: false });
+  const run = makeRun(step, 5);
+  const { deps } = fakes({
+    fix: [{ ok: true }],
+    retry: [{ ok: false, budgetExceeded: true, failReason: "process killed: budget exceeded" }],
+  });
+
+  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+    deps,
+    output: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
+
+  expect(res.failed).toBe(true);
+  expect(step.status).toBe("failed");
+});
+
+// The counter persists across resumes; a repair the guard cut short must not
+// leave it spent, or the `--budget` resume that approves it refuses to run it.
+test("a repair killed by the live guard gives its quota back to the --budget resume", async () => {
+  const step = makeStep({ fix_prompt: "fix", max_retries: 1 }, { blocking: false });
+  const run = makeRun(step, 1);
+  const first = fakes({ fix: [{ ok: false, budgetExceeded: true, failReason: "process killed: budget exceeded" }] });
+
+  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+    deps: first.deps,
+    output: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
+
+  expect(res.failed).toBe(true);
+  expect(step.status).toBe("failed");
+  expect(step.retries).toBe(0);
+  expect(first.calls.retry).toBe(0);
+
+  run.max_cost_usd = 5;
+  const second = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
+  const { output, messages } = messageRecorder();
+  const again = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+    deps: second.deps,
+    output,
+    abort: createAbortScope(),
+  });
+
+  expect(again.failed).toBe(false);
+  expect(step.status).toBe("done");
+  expect(second.calls.fix.length).toBe(1);
+  expect(messages().some((message) => message.includes("quota already consumed"))).toBe(false);
+});
+
+// End to end through the step loop: the initial attempt is the one the guard
+// kills, so no repair ran and the resumed step must get its whole fix quota.
+test("a non-blocking step with a fix policy killed by the live guard replays and repairs after --budget", async () => {
+  const policy: StepFailure = { fix_prompt: "fix", max_retries: 1 };
+  const step = makeRunStep({
+    id: "verify",
+    name: "Verify",
+    command: "make test",
+    runner: "bash",
+    blocking: false,
+    on_failure: policy,
+  });
+  const run = makeRun(step, 1);
+  const first = fakes({});
+  const killedDeps: StepLoopDeps = {
+    executeStep: async () => ({
+      output: "",
+      ok: false,
+      stats: { duration_ms: 1, total_cost_usd: 0.3, cost_estimated: true },
+      budgetExceeded: true,
+      failReason: "process killed: budget exceeded ($1.10 estimated > $1.00 remaining)",
+    }),
+    extractErrors: async () => ({ hasErrors: true, errors: "err" }),
+    runFixLoop: (r, s, command, output, ctx, budget, reason, opts) =>
+      runFixLoop(r, s, command, output, ctx, budget, reason, { ...opts, deps: first.deps }),
+    output: NULL_RUN_OUTPUT,
+  };
+
+  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, killedDeps);
+
+  expect(outcome.budgetExceeded).toBe(true);
+  expect(step.status).toBe("failed");
+  expect(step.retries).toBe(0);
+  expect(first.calls.fix.length).toBe(0);
+
+  // `--budget 5`, as boot/resume.ts applies it: a raised ceiling, the latch wiped.
+  const resumedStep = makeRunStep(
+    { id: "verify", name: "Verify", command: "make test", runner: "bash", blocking: false, on_failure: policy },
+    { status: "failed", retries: step.retries, control: { duration_ms: 1, total_cost_usd: 0.3 } },
+  );
+  const resumed = makeRun(resumedStep, 5);
+  const second = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
+  const { output, messages } = messageRecorder();
+  const resumedDeps: StepLoopDeps = {
+    executeStep: async () => ({
+      output: "make test: 1 failure",
+      ok: false,
+      stats: { duration_ms: 1 },
+      failReason: "make test failed",
+    }),
+    extractErrors: async () => ({ hasErrors: true, errors: "err" }),
+    runFixLoop: (r, s, command, out, ctx, budget, reason, opts) =>
+      runFixLoop(r, s, command, out, ctx, budget, reason, { ...opts, deps: second.deps }),
+    output,
+  };
+
+  const again = await executeRunSteps(resumed, undefined, undefined, { resuming: true }, resumedDeps);
+
+  expect(again.failed).toBe(false);
+  expect(again.budgetExceeded).toBe(false);
+  expect(resumedStep.status).toBe("done");
+  expect(second.calls.fix.length).toBe(1);
+  expect(messages().some((message) => message.includes("quota already consumed"))).toBe(false);
 });

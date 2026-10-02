@@ -81,6 +81,9 @@ interface RetryLoopState {
   timedOut: boolean;
   ok: boolean;
   aborted: boolean;
+  /** The loop ended on a cost stop: a gate withheld the next attempt, or a guard
+   *  cut the last one short. The step then stays resumable, never absorbed. */
+  costStopped: boolean;
   output: string;
   lastFailReason?: string;
 }
@@ -103,6 +106,7 @@ async function retryStepCommand(ctx: OnFailureContext, spec: RetryLoopSpec): Pro
     timedOut: ctx.timedOut,
     ok: false,
     aborted: false,
+    costStopped: false,
     output: ctx.output,
     lastFailReason: ctx.lastFailReason,
   };
@@ -122,6 +126,7 @@ async function retryStepCommand(ctx: OnFailureContext, spec: RetryLoopSpec): Pro
       // A withheld retry is withheld work: recorded so the report names the
       // accounting stop rather than the step it left red.
       recordCostStop(run, budget, cost, { kind: "gate", stepId: step.id });
+      state.costStopped = true;
       break;
     }
 
@@ -175,6 +180,15 @@ async function retryStepCommand(ctx: OnFailureContext, spec: RetryLoopSpec): Pro
       state.ok = true;
       break;
     }
+    // A rerun the cost guard cut short gives its quota back, as a cut-short repair
+    // does in the fix loop: a `--budget` resume must still be able to run it.
+    if (retry.budgetExceeded || retry.costUnaccounted) {
+      step[spec.counter] = consumed() - 1;
+      saveRun(run);
+      state.attempts = consumed();
+      state.costStopped = true;
+      break;
+    }
   }
 
   state.aborted = !!abort.isRunAborted(run);
@@ -199,10 +213,17 @@ export const rerunHandler: OnFailureHandler = async (ctx) => {
     ctx.runOutput.emit({ type: "step.done", step, suffix: ` (after ${state.attempts} reruns)` });
     return { failed: false };
   }
-  return settleStepFailure(run, step, ctx.runOutput, state.lastFailReason, {
-    absorbDetail: `after ${state.attempts} rerun(s)`,
-    failSuffix: ` after ${state.attempts} reruns`,
-  });
+  return settleStepFailure(
+    run,
+    step,
+    ctx.runOutput,
+    state.lastFailReason,
+    {
+      absorbDetail: `after ${state.attempts} rerun(s)`,
+      failSuffix: ` after ${state.attempts} reruns`,
+    },
+    state.costStopped,
+  );
 };
 
 /** Timeout-drain result: final verdict or input for the fix loop. */
@@ -245,10 +266,17 @@ async function drainTimeouts(ctx: OnFailureContext): Promise<TimeoutDrainResult>
   // a fix based on truncated output would not help.
   if (state.timedOut) {
     const reason = state.lastFailReason ?? "persistent timeout";
-    const outcome = settleStepFailure(run, step, ctx.runOutput, reason, {
-      absorbDetail: `(persistent timeout after ${state.attempts} rerun(s))`,
-      failSuffix: ` — persistent timeout after ${state.attempts} rerun(s)`,
-    });
+    const outcome = settleStepFailure(
+      run,
+      step,
+      ctx.runOutput,
+      reason,
+      {
+        absorbDetail: `(persistent timeout after ${state.attempts} rerun(s))`,
+        failSuffix: ` — persistent timeout after ${state.attempts} rerun(s)`,
+      },
+      state.costStopped,
+    );
     return { outcome, ...drained };
   }
 

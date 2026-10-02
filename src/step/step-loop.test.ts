@@ -66,6 +66,7 @@ function fakeDeps(results: Array<Partial<StepResult>> = []): {
         session: r.session,
         timedOut: r.timedOut,
         budgetExceeded: r.budgetExceeded,
+        costUnaccounted: r.costUnaccounted,
         failReason: r.failReason,
         failCause: r.failCause,
       };
@@ -917,6 +918,87 @@ test("step-loop: a live guard kill is a durable budget stop, not a replayable fa
   const resumedEvents = readRunEvents(resumed.run_dir).filter((event) => event.type === "run.budget.exceeded");
   expect(resumedEvents).toHaveLength(1);
   expect(resumedEvents[0]).toMatchObject({ stepId: "a", estimated: true });
+});
+
+// `blocking: false` absorbs a step's own failure; a cost stop is not one. Absorbed
+// as done, the killed step was skipped by every later resume — `--budget` included —
+// and its work silently lost while the run could end PASS.
+test("step-loop: a non-blocking step killed by the live guard stays failed and replays after --budget", async () => {
+  const steps = [bashStep("a", "cmd", { blocking: false }), bashStep("b", "cmd")];
+  const run = makeRun(steps, 1);
+  const { deps, calls } = fakeDeps([
+    {
+      ok: false,
+      budgetExceeded: true,
+      failReason: "process killed: budget exceeded ($1.10 estimated > $1.00 remaining)",
+      stats: { duration_ms: 1, total_cost_usd: 0.3, cost_estimated: true },
+    },
+  ]);
+
+  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+
+  expect(out.budgetExceeded).toBe(true);
+  expect(calls.ids).toEqual(["a"]);
+  expect(steps[0]!.status).toBe("failed");
+  expect(steps[0]!.errors).toContain("budget exceeded");
+  expect(steps[1]!.status).toBe("pending");
+  finalizeRun(run, out);
+  const snapshot = readRunSnapshot(join(run.run_dir, "state.json"));
+  expect(snapshot?.status).not.toBe("PASS");
+  expect(snapshot?.outcome?.stopKind).toBe("budget-exceeded");
+  expect(isPersistedRunResumable(snapshot)).toBe(true);
+  expect(snapshot?.steps.find((state) => state.id === "a")?.status).toBe("failed");
+
+  // `--budget 5`: the ceiling is raised and the guard latch wiped (boot/resume.ts).
+  const resumedSteps = [
+    bashStep("a", "cmd", { blocking: false }, { status: "failed", control: { duration_ms: 1, total_cost_usd: 0.3 } }),
+    bashStep("b", "cmd"),
+  ];
+  const resumed = makeRun(resumedSteps, 5);
+  const second = fakeDeps([{ ok: true }, { ok: true }]);
+  const again = await executeRunSteps(resumed, undefined, undefined, { resuming: true }, second.deps);
+
+  expect(again.failed).toBe(false);
+  expect(again.budgetExceeded).toBe(false);
+  expect(second.calls.ids).toEqual(["a", "b"]);
+  expect(resumedSteps[0]!.status).toBe("done");
+});
+
+test("step-loop: a non-blocking step killed for unpriceable usage stays failed and replays once authorized", async () => {
+  const steps = [bashStep("a", "cmd", { blocking: false }), bashStep("b", "cmd")];
+  const run = makeRun(steps, 5);
+  const { deps, calls } = fakeDeps([
+    {
+      ok: false,
+      costUnaccounted: true,
+      failReason: "process killed: cost unaccounted (no rate for model)",
+      stats: { duration_ms: 1, cost_unknown: true },
+    },
+  ]);
+
+  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+
+  expect(out.costUnaccountedStop).toBe(true);
+  expect(calls.ids).toEqual(["a"]);
+  expect(steps[0]!.status).toBe("failed");
+  expect(steps[1]!.status).toBe("pending");
+  finalizeRun(run, out);
+  const snapshot = readRunSnapshot(join(run.run_dir, "state.json"));
+  expect(snapshot?.outcome?.stopKind).toBe("cost-unaccounted");
+  expect(isPersistedRunResumable(snapshot)).toBe(true);
+
+  // `--allow-unmetered`: the authorization is persisted on the run.
+  const resumedSteps = [
+    bashStep("a", "cmd", { blocking: false }, { status: "failed", control: { duration_ms: 1, cost_unknown: true } }),
+    bashStep("b", "cmd"),
+  ];
+  const resumed: Run = { ...makeRun(resumedSteps, 5), cost_unaccounted: true, allow_unmetered: true };
+  const second = fakeDeps([{ ok: true }, { ok: true }]);
+  const again = await executeRunSteps(resumed, undefined, undefined, { resuming: true }, second.deps);
+
+  expect(again.failed).toBe(false);
+  expect(second.calls.ids).toEqual(["a", "b"]);
+  expect(resumedSteps[0]!.status).toBe("done");
 });
 
 test("resume: validates the contract", async () => {
