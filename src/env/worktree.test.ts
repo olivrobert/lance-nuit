@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultScope, ProcessScope } from "../exec/process-supervision.ts";
+import { GITIGNORE_ENTRIES } from "../project/dsl-types/layout.ts";
 import { log } from "../runtime/logging.ts";
 import {
   gitToplevelAsync,
@@ -431,7 +432,9 @@ test("setupWorktreeAsync: existing wt/ branch (deleted worktree) → reattached 
 function kitRepo(): string {
   const repo = gitRepo();
   mkdirSync(join(repo, ".lance-nuit"), { recursive: true });
-  writeFileSync(join(repo, ".lance-nuit", ".gitignore"), "/run/\n/pipeline-history/\n/node_modules/\n");
+  writeFileSync(join(repo, ".lance-nuit", ".gitignore"), `${GITIGNORE_ENTRIES.join("\n")}\n`);
+  // A developer's global ignore file would hide what the kit .gitignore misses.
+  spawnSync("git", ["config", "core.excludesFile", "/dev/null"], { cwd: repo });
   spawnSync("git", ["add", "."], { cwd: repo });
   spawnSync("git", ["commit", "-qm", "kit"], { cwd: repo });
   return repo;
