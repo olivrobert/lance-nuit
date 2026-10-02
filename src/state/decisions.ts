@@ -1,7 +1,9 @@
 // runner/state/decisions.ts
 //
-// Human decisions. The runner is the only writer: `--approve <subject>`
-// validates the artifact, hashes it, and writes the decision atomically.
+// Human decisions. The runner is the only writer: `--approve <subject>` and
+// `--reject <subject>` validate the artifact, hash it, and write the decision
+// atomically. One file per subject holds the current answer, so an approval
+// replaces a rejection and the reverse.
 //
 // Subjects are free-form: the pipeline declares each approval subject and its
 // artifact (`.approval(subject, artifact)`). This module knows no subject names;
@@ -31,7 +33,18 @@ export interface ApprovalDecision {
    *  caller announced one through `LANCENUIT_ACTOR` (the dashboard does, so an
    *  approval carries the person who clicked). Never empty. */
   decidedBy: string;
+  /** Why the human rejected the artifact. Present on every `rejected` decision:
+   *  the rework step's prompt reads it through `pendingRejection`. */
+  reason?: string;
+  /** Rework round this rejection opened, from 1. It grows only when a new
+   *  version of the artifact is rejected, and bounds the reject/rework loop
+   *  across runs: the decision file outlives any run snapshot. */
+  round?: number;
 }
+
+/** Longest rejection reason accepted. It reaches a prompt and every reader of
+ *  the decision file, so the CLI and the dashboard refuse anything longer. */
+export const MAX_REJECTION_REASON = 2000;
 
 const SUBJECT_CHARSET = /^[\w-]+$/;
 
@@ -77,11 +90,12 @@ async function validateArtifact(
   ctx: PipelineContext,
   subject: DecisionSubject,
   artifact: Artifact<unknown>,
+  verb: "approve" | "reject" = "approve",
 ): Promise<{ path: string; body: string }> {
   const path = ctx.paths.artifact(artifact.name);
   const body = await ctx.artifacts.readText(ref(ctx, artifact.name));
-  if (body === undefined) throw new Error(`artifact ${path} not found — cannot approve ${subject}`);
-  if (body.length === 0) throw new Error(`artifact ${path} is empty — cannot approve ${subject}`);
+  if (body === undefined) throw new Error(`artifact ${path} not found — cannot ${verb} ${subject}`);
+  if (body.length === 0) throw new Error(`artifact ${path} is empty — cannot ${verb} ${subject}`);
   try {
     // Delegate to the descriptor parser: approving an artifact it rejects would
     // approve a file that the next step cannot process.
@@ -134,6 +148,53 @@ export async function recordApproval(
 }
 
 /**
+ * Record that a human rejected the artifact behind `subject`, with the reason the
+ * rework step will read. Repeating the same rejection of the same bytes writes
+ * nothing; a new reason for those bytes replaces the old one in the same round;
+ * rejecting reworked bytes opens the next round, refused past `maxRounds`.
+ */
+export async function recordRejection(
+  ctx: PipelineContext,
+  subject: DecisionSubject,
+  artifact: Artifact<unknown>,
+  reason: string,
+  maxRounds: number,
+): Promise<RecordedApproval> {
+  const trimmed = reason.trim();
+  if (trimmed.length === 0) throw new Error(`Rejection of "${subject}" needs a reason (--reason <text>).`);
+  if (trimmed.length > MAX_REJECTION_REASON) {
+    throw new Error(`Rejection reason for "${subject}" must be at most ${MAX_REJECTION_REASON} characters.`);
+  }
+  const validated = await validateArtifact(ctx, subject, artifact, "reject");
+  const sha = sha256Text(validated.body);
+  const existing = readDecision(ctx, subject);
+  const previous =
+    existing?.decision === "rejected" && existing.artifact === `artifacts/${artifact.name}` ? existing : undefined;
+  const sameBytes = previous?.artifactSha256 === sha;
+  if (sameBytes && previous.reason === trimmed) return { decision: previous, written: false };
+  const round = previous ? (previous.round ?? 1) + (sameBytes ? 0 : 1) : 1;
+  if (round > maxRounds) {
+    throw new Error(
+      `Rejection of "${subject}" refused: ${round - 1} rework round(s) already rejected (maxRounds ${maxRounds}). ` +
+        `Approve the artifact (--approve ${subject}) or answer on the ticket instead.`,
+    );
+  }
+  const decision: ApprovalDecision = {
+    schemaVersion: 1,
+    decision: "rejected",
+    subject,
+    artifact: `artifacts/${artifact.name}`,
+    artifactSha256: sha,
+    decidedAt: new Date().toISOString(),
+    decidedBy: decisionActor(),
+    reason: trimmed,
+    round,
+  };
+  atomicWrite(decisionPath(ctx, subject), decision);
+  return { decision, written: true };
+}
+
+/**
  * Read a decision file by path and validate its shape only. Gates such as
  * `reuseState` do not have the artifact descriptor, so they cannot verify that
  * `artifact` matches `subject`; `decisionMatchesArtifact` and
@@ -156,6 +217,17 @@ export function readDecisionAt(path: string): ApprovalDecision | undefined {
     // human decision too, and rejecting it here would leave the gate closed on an
     // approval that was actually granted.
     if (typeof decision.decidedBy !== "string" || decision.decidedBy.length === 0) return undefined;
+    // A rejection without its reason would replay the rework step with nothing to
+    // act on, so it is no decision at all.
+    if (
+      decision.decision === "rejected" &&
+      (typeof decision.reason !== "string" ||
+        decision.reason.length === 0 ||
+        typeof decision.round !== "number" ||
+        !Number.isInteger(decision.round) ||
+        decision.round < 1)
+    )
+      return undefined;
     return decision as ApprovalDecision;
   } catch {
     // An absent or malformed decision is treated as no approval by design.
@@ -190,14 +262,55 @@ export async function approvalStatus(
 ): Promise<{ freshness: ApprovalFreshness; decision?: ApprovalDecision }> {
   const decision = readDecision(ctx, subject);
   if (!decision) return { freshness: "absent" };
-  let body: string | undefined;
+  // An artifact that cannot be read can no longer prove the approval fresh.
+  return { freshness: approvalFreshness(decision, await decisionArtifactBody(ctx, decision)), decision };
+}
+
+/** Whether a rejection still waits for its rework. An absent artifact counts as
+ *  pending: the step attempt erases its declared outputs before spawning, so a
+ *  rework interrupted or failed midway leaves nothing, and treating that as done
+ *  would let the gate skip the rework on resume. The admission, the gate and the
+ *  dashboard all answer through this one rule. */
+export function rejectionPending(decision: ApprovalDecision | undefined, body: string | undefined): boolean {
+  if (decision?.decision !== "rejected") return false;
+  return body === undefined || sha256Text(body) === decision.artifactSha256;
+}
+
+/** Artifact a decision names, or undefined when it is missing or unreadable. */
+async function decisionArtifactBody(ctx: PipelineContext, decision: ApprovalDecision): Promise<string | undefined> {
   try {
-    body = await ctx.artifacts.readText(ref(ctx, decision.artifact.slice("artifacts/".length)));
+    return await ctx.artifacts.readText(ref(ctx, decision.artifact.slice("artifacts/".length)));
   } catch {
-    // An artifact that cannot be read can no longer prove the approval fresh.
-    body = undefined;
+    return undefined;
   }
-  return { freshness: approvalFreshness(decision, body), decision };
+}
+
+/** Where a rejection of `subject` stands against the artifact as it is now:
+ *  `absent` and `unchanged` still wait for the rework, `reworked` waits for a
+ *  new human decision. Undefined when the current decision is no rejection. */
+export async function rejectionStatus(
+  ctx: PipelineContext,
+  subject: DecisionSubject,
+): Promise<{ decision: ApprovalDecision; artifact: "absent" | "unchanged" | "reworked" } | undefined> {
+  if (!ctx.paths.decisionsDir) return undefined;
+  const decision = readDecision(ctx, subject);
+  if (decision?.decision !== "rejected") return undefined;
+  const body = await decisionArtifactBody(ctx, decision);
+  if (body === undefined) return { decision, artifact: "absent" };
+  return { decision, artifact: rejectionPending(decision, body) ? "unchanged" : "reworked" };
+}
+
+/** Pending rejection of `subject`, for the prompt of the step that reworks it.
+ *  Undefined once the artifact was rewritten, or when nobody rejected it. */
+export async function pendingRejection(
+  ctx: PipelineContext,
+  subject: DecisionSubject,
+): Promise<{ reason: string; round: number; decidedBy: string; decidedAt: string } | undefined> {
+  const status = await rejectionStatus(ctx, subject);
+  if (!status || status.artifact === "reworked") return undefined;
+  const { reason, round, decidedBy, decidedAt } = status.decision;
+  // readDecisionAt refuses a rejection without reason or round.
+  return { reason: reason!, round: round!, decidedBy, decidedAt };
 }
 
 /** A decision is valid only when it names the expected artifact, which still exists

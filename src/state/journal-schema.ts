@@ -202,7 +202,9 @@ const EVENT_SCHEMAS = {
     ...base,
     type: z.literal("decision.recorded"),
     subject: z.string(),
-    decision: z.literal("approved"),
+    decision: z.enum(["approved", "rejected"]),
+    reason: optionalString,
+    round: optionalNumber,
   }),
 } as const satisfies Record<RunJournalEventType, z.ZodType>;
 

@@ -41,7 +41,7 @@ import { configFileLabel } from "../env/kit-paths.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../model/context.js";
 import type { Pipeline } from "../model/definition.js";
 import type { StepOverride } from "../model/profiles.js";
-import { decisionMatchesArtifact } from "../state/decisions.js";
+import { decisionMatchesArtifact, pendingRejection } from "../state/decisions.js";
 import { freshness } from "../state/provenance.js";
 import { applyStepOverrides, imposedAxes } from "../validation/step-overrides.js";
 import { AgentBackendValidator } from "../validation/backend.js";
@@ -110,6 +110,7 @@ export function createProjectDsl(context: PipelineContext, pipelineDir: string):
     mechanicalFix,
     reject,
     decisionMatchesArtifact,
+    pendingRejection,
     freshness,
   };
 }

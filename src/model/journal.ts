@@ -132,7 +132,14 @@ export type RunJournalKnownEvent =
       accountedCostUsd?: number;
       deltaCostUsd?: number;
     })
-  | (JournalBase & { type: "decision.recorded"; subject: string; decision: "approved" });
+  | (JournalBase & {
+      type: "decision.recorded";
+      subject: string;
+      decision: "approved" | "rejected";
+      /** Rejection only: why, and the rework round it opened. */
+      reason?: string;
+      round?: number;
+    });
 
 export type RunJournalEventType = RunJournalKnownEvent["type"];
 

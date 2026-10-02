@@ -200,6 +200,47 @@ case "$VERB" in
     exec "$RUNNER_BIN" "$RUNNER_ENTRY" "$TICKET" --pipeline "$APPROVE_PIPELINE" \
       --approve "$SUBJECT" --approve-only "${APPROVE_ARGS[@]+"${APPROVE_ARGS[@]}"}"
     ;;
+  reject)
+    if [[ $# -lt 2 ]]; then
+      echo "Usage: lancenuit reject <id> <subject> --reason <text> --pipeline <name>" >&2
+      exit 1
+    fi
+    TICKET="$1"; SUBJECT="$2"; shift 2
+    REJECT_PIPELINE=""
+    REJECT_REASON=""
+    REJECT_ARGS=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --pipeline|-p)
+          if [[ $# -lt 2 ]]; then
+            echo "Option $1 expects a pipeline name." >&2
+            exit 1
+          fi
+          REJECT_PIPELINE="$2"; shift 2
+          ;;
+        --pipeline=*) REJECT_PIPELINE="${1#*=}"; shift ;;
+        --reason)
+          if [[ $# -lt 2 ]]; then
+            echo "Option --reason expects a text." >&2
+            exit 1
+          fi
+          REJECT_REASON="$2"; shift 2
+          ;;
+        --reason=*) REJECT_REASON="${1#*=}"; shift ;;
+        *) REJECT_ARGS+=("$1"); shift ;;
+      esac
+    done
+    if [[ -z "$REJECT_PIPELINE" ]]; then
+      echo "Rejection requires --pipeline <name>." >&2
+      exit 1
+    fi
+    if [[ -z "$REJECT_REASON" ]]; then
+      echo "Rejection requires --reason <text>: the rework step reads it." >&2
+      exit 1
+    fi
+    exec "$RUNNER_BIN" "$RUNNER_ENTRY" "$TICKET" --pipeline "$REJECT_PIPELINE" \
+      --reject "$SUBJECT" --reason "$REJECT_REASON" --reject-only "${REJECT_ARGS[@]+"${REJECT_ARGS[@]}"}"
+    ;;
   close|reopen)
     if [[ $# -lt 1 ]]; then
       echo "Usage: lancenuit $VERB <id> --pipeline <name>" >&2

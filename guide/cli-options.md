@@ -2,7 +2,7 @@
 
 Source of truth: the `FLAGS` registry in `model/cli-options.ts`, which drives the
 parser (`cli/parse.ts`) and `runner --help`. The `pipeline` wrapper maps `run`, `single`, `inspect`, `logs`,
-`clean`, `worktree clean`, `stats`, `typecheck`, `lint`, `create`, `approve`, `close`, `reopen`, and `list` to these
+`clean`, `worktree clean`, `stats`, `typecheck`, `lint`, `create`, `approve`, `reject`, `close`, `reopen`, and `list` to these
 flags.
 
 | Option | Alias | Description |
@@ -30,6 +30,9 @@ flags.
 | `--version` | | Display the installed package version without loading project configuration |
 | `--approve <subject>` | | Record approval for a declared artifact, then run: the approved gate is re-evaluated in the same invocation. Requires a ticket and `--pipeline` |
 | `--approve-only` | | With `--approve`, write the decision and exit without running. The `lancenuit approve` subcommand always implies it |
+| `--reject <subject>` | | Reject the artifact of a subject whose gate declares a rework step, then run: the rework step replays with the reason. Requires a ticket, `--pipeline`, and `--reason`; cannot be combined with `--approve`, `--approve-only`, or `--clean`. See [human-control.md](human-control.md#reject-and-rework) |
+| `--reason <text>` | | Why the artifact is rejected, read by the rework step through `pendingRejection`. Required by `--reject`, non-empty, at most 2000 characters |
+| `--reject-only` | | With `--reject`, write the rejection and exit without running, worktree, or project lock. The `lancenuit reject <ticket> <subject> --reason <text> --pipeline <name>` subcommand always implies it |
 | `--close` | | Mark the latest failed, stopped, or aborted run of `--pipeline` as closed by hand, keeping its status. Requires a ticket and `--pipeline` (`lancenuit close <ticket> --pipeline <name>`). See [human-control.md](human-control.md#close-a-run-finished-by-hand) |
 | `--reopen` | | Remove the closure written by `--close` (`lancenuit reopen <ticket> --pipeline <name>`) |
 | `--inspect` | | Display a ticket's run state with its sub-runs (`forEachPipeline` children) listed under their parent; combine with `--run` to select a run |

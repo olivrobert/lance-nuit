@@ -49,6 +49,12 @@ export const WRAPPER_COMMANDS: readonly WrapperCommand[] = [
     desc: "Record approval for a subject declared by the pipeline, without running (use `run --approve <subject>` to approve and resume).",
   },
   {
+    verb: "reject",
+    flag: "--reject",
+    usage: "reject <id> <subject> --reason <text> --pipeline <name>",
+    desc: "Reject the artifact of a subject whose gate declares a rework step, without running (use `run --reject <subject> --reason <text>` to reject and resume).",
+  },
+  {
     verb: "close",
     flag: "--close",
     usage: "close <id> --pipeline <name>",

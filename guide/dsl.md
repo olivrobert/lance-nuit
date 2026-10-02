@@ -387,6 +387,9 @@ The rules:
 - **Resume.** A `done` step declaring `input` is re-admitted, and so is a
   `skipped` one — unless it was taken out by `--step`, `--skip`, or `--start-at`.
   A re-admitted step whose outputs are all fresh costs nothing.
+- **Rework.** A step named as a gate's `rework` replays while a rejection of
+  that gate is pending, independently of its inputs; without one, its inputs
+  decide as above. See [human-control.md](human-control.md#reject-and-rework).
 - **Provenance is merged, not replaced.** A step that revises an artifact updates
   its record, so `plan-audit` (`input: [spec, plan]`, `output: [planAudit, plan]`)
   does not break the provenance of `plan`.

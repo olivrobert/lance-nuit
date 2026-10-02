@@ -68,6 +68,12 @@ export interface RunnerArgs {
   approve?: string;
   /** Record --approve, then exit without running a pipeline. */
   approveOnly: boolean;
+  /** Reject the artifact behind a subject so its rework step reruns. */
+  reject?: string;
+  /** Why the artifact is rejected; handed to the rework step's prompt. */
+  reason?: string;
+  /** Record --reject, then exit without running a pipeline. */
+  rejectOnly: boolean;
   /** Mark the latest run of `--pipeline` as closed by hand, then exit. */
   close: boolean;
   /** Remove a closure written by --close, then exit. */
@@ -266,6 +272,24 @@ export const FLAGS: FlagSpec[] = [
     key: "approveOnly",
     kind: "boolean",
     desc: "With --approve, write the decision and exit without running the pipeline.",
+  },
+  {
+    long: "--reject",
+    key: "reject",
+    kind: "string",
+    desc: "Reject the artifact of a subject whose gate declares a rework step, so that step reruns with --reason.",
+  },
+  {
+    long: "--reason",
+    key: "reason",
+    kind: "string",
+    desc: "With --reject, why the artifact is rejected; the rework step's prompt reads it.",
+  },
+  {
+    long: "--reject-only",
+    key: "rejectOnly",
+    kind: "boolean",
+    desc: "With --reject, write the decision and exit without running the pipeline.",
   },
   {
     long: "--close",

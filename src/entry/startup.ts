@@ -2,7 +2,7 @@
 //
 // Everything that happens BEFORE the first step runs: argument parsing, the
 // no-pipeline commands, run-argument validation, boot, the one-per-process
-// pipeline load, the approval decision, and the dispatch decision point.
+// pipeline load, the approval or rejection decision, and the dispatch decision point.
 //
 // Each phase RETURNS its outcome instead of calling `process.exit`. The entry
 // point owns the single exit, which is what makes these phases testable: a test
@@ -11,7 +11,12 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { runBoot } from "../boot/step.js";
-import { describeRecordedApproval, resolveApprovableArtifact } from "../commands/approval-subject.js";
+import {
+  describeRecordedApproval,
+  describeRecordedRejection,
+  rejectSubject,
+  resolveApprovableArtifact,
+} from "../commands/approval-subject.js";
 import { COMMANDS } from "../commands/command.js";
 import { runDispatch } from "../dispatch/loop.js";
 import { selectDispatch, validateDispatchArgs } from "../dispatch/strategy.js";
@@ -25,7 +30,7 @@ import { parseRunnerArgs } from "../cli/parse.js";
 import { liveFeedFromEnvironment } from "../output/live-feed.js";
 import { setRunnerLiveFeed } from "../runtime/live-feed.js";
 import { log } from "../runtime/logging.js";
-import { type DecisionSubject, type RecordedApproval, recordApproval } from "../state/decisions.js";
+import { type ApprovalDecision, type RecordedApproval, recordApproval } from "../state/decisions.js";
 import { resolveLatestRunSnapshot, runLockHolder } from "../state/stores/run-storage.js";
 import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
 import { createDefaultRunnerRegistries } from "./registries.js";
@@ -42,8 +47,8 @@ export interface ReadyRun {
   pipelinePath: string;
   stateStore: FileRunStateStore;
   worktreeMode: boolean;
-  /** Set when `--approve` recorded a decision that the run must journal. */
-  approvedSubject?: DecisionSubject;
+  /** Set when `--approve` or `--reject` recorded a decision that the run must journal. */
+  recordedDecision?: ApprovalDecision;
 }
 
 export type StartupOutcome = { kind: "exit"; code: number } | { kind: "run"; ready: ReadyRun };
@@ -101,7 +106,7 @@ export function checkRunCwd(cwd: string = process.cwd()): string | undefined {
 }
 
 export type ApprovalOutcome =
-  | { kind: "ok"; subject?: DecisionSubject }
+  | { kind: "ok"; decision?: ApprovalDecision }
   | { kind: "done" }
   | { kind: "error"; message: string };
 
@@ -124,14 +129,45 @@ export async function applyApproval(
     return { kind: "error", message: errorMessage(error) };
   }
   if (args.approveOnly) return { kind: "done" };
+  return resumeAfterDecision(recorded, "approval", pipelineDef, args, context);
+}
+
+/**
+ * Record the `--reject` decision, then resume so the rework step replays with the
+ * reason. `--reject-only` never reaches this point: `rejectionCommand` records it
+ * before boot, without the worktree or the project lock.
+ */
+export async function applyRejection(
+  args: RunnerArgs,
+  pipelineDef: Pipeline,
+  context: PipelineContext,
+): Promise<ApprovalOutcome> {
+  if (!args.reject) return { kind: "ok" };
+  let recorded: RecordedApproval;
+  try {
+    recorded = await rejectSubject(pipelineDef, args.reject, args.reason ?? "", context);
+    log(describeRecordedRejection(recorded, context.paths.decisionsDir));
+  } catch (error) {
+    return { kind: "error", message: errorMessage(error) };
+  }
+  return resumeAfterDecision(recorded, "rejection", pipelineDef, args, context);
+}
+
+function resumeAfterDecision(
+  recorded: RecordedApproval,
+  verb: "approval" | "rejection",
+  pipelineDef: Pipeline,
+  args: RunnerArgs,
+  context: PipelineContext,
+): ApprovalOutcome {
   const holder = latestRunHolder(pipelineDef.name, args, context);
   if (holder) {
-    log(`The run is already being resumed (pid ${holder}): approval recorded, no second run started.`);
+    log(`The run is already being resumed (pid ${holder}): ${verb} recorded, no second run started.`);
     return { kind: "done" };
   }
   // Only a decision this invocation wrote is journaled: a kept one was recorded,
   // and possibly consumed, by whoever wrote it.
-  return { kind: "ok", ...(recorded.written ? { subject: recorded.decision.subject } : {}) };
+  return { kind: "ok", ...(recorded.written ? { decision: recorded.decision } : {}) };
 }
 
 /**
@@ -207,6 +243,14 @@ export async function startup(argv: string[]): Promise<StartupOutcome> {
     return { kind: "exit", code: 1 };
   }
   if (approval.kind === "done") return { kind: "exit", code: 0 };
+  const rejection = await applyRejection(args, pipelineDef, context);
+  if (rejection.kind === "error") {
+    log(rejection.message);
+    return { kind: "exit", code: 1 };
+  }
+  if (rejection.kind === "done") return { kind: "exit", code: 0 };
+  // The parser refuses --approve beside --reject, so at most one decision is set.
+  const recordedDecision = approval.decision ?? rejection.decision;
 
   // Dispatch strategies (work-item loops, watch mode) run each ticket in
   // its own durable run directory for per-ticket drill-down.
@@ -228,6 +272,14 @@ export async function startup(argv: string[]): Promise<StartupOutcome> {
 
   return {
     kind: "run",
-    ready: { args, context, pipelineDef, pipelinePath, stateStore, worktreeMode, approvedSubject: approval.subject },
+    ready: {
+      args,
+      context,
+      pipelineDef,
+      pipelinePath,
+      stateStore,
+      worktreeMode,
+      ...(recordedDecision ? { recordedDecision } : {}),
+    },
   };
 }

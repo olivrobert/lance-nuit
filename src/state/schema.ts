@@ -111,6 +111,7 @@ export const RunStopStateSchema = z.looseObject({
   artifact: z.string().optional(),
   kind: z.enum(STOP_KINDS).optional(),
   detail: z.string(),
+  reworkable: z.boolean().optional(),
 });
 
 export const RunOutcomeStateSchema = z.looseObject({

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Item, LaunchRecord } from "../read-model/types.js";
+import { MAX_REJECTION_REASON } from "../read-model/index.js";
 import { actionable, buildArgv, isBusy, MAX_BUDGET_USD, verbsFor } from "./verbs.js";
 
 /** A stopped item at a gate, in a worktree, as the read model would build it. */
@@ -262,4 +263,54 @@ test("actionable: an item is served with its offers and whether it is busy", () 
   expect(served.verbs).toEqual([]);
   expect(actionable(quiet()).busy).toBe(false);
   expect(names(actionable(quiet()).verbs)).toEqual(["rerun", "close", "fresh"]);
+});
+
+test("argv: reject and rerun needs a reworkable gate and a bounded reason the server passes as one argument", () => {
+  const reworkable = item({ stop: { subject: "plan", kind: "needs-decision", detail: "gate", reworkable: true } });
+  expect(argvOf(buildArgv(reworkable, "reject-and-rerun", { subject: "plan", reason: "  split step 2  " }))).toEqual([
+    "run",
+    "DEMO-1",
+    "--pipeline",
+    "feature",
+    "--reject",
+    "plan",
+    "--reason",
+    "split step 2",
+    "--worktree",
+  ]);
+  expect(buildArgv(item(), "reject-and-rerun", { subject: "plan", reason: "no" })).toMatchObject({
+    ok: false,
+    status: 409,
+  });
+  expect(buildArgv(reworkable, "reject-and-rerun", { subject: "spec", reason: "no" })).toMatchObject({
+    ok: false,
+    status: 400,
+  });
+  for (const reason of [undefined, 42, "   ", "--fresh", "x".repeat(MAX_REJECTION_REASON + 1)]) {
+    expect(buildArgv(reworkable, "reject-and-rerun", { subject: "plan", reason })).toMatchObject({
+      ok: false,
+      status: 400,
+    });
+  }
+});
+
+test("offers: a reworkable gate offers a rejection, a pending rejection only a rerun", () => {
+  const stop = { subject: "plan", kind: "needs-decision" as const, detail: "gate", reworkable: true };
+  const offers = verbsFor(quiet({ stop }));
+  expect(names(offers)).toEqual(["approve-and-rerun", "approve", "reject-and-rerun", "close", "fresh"]);
+  expect(offers[2]?.command).toBe('lancenuit run DEMO-1 --pipeline feature --reject plan --reason "<reason>"');
+
+  const approval = {
+    subject: "plan",
+    state: "rejected" as const,
+    decidedBy: "human",
+    decidedAt: "2026-09-05T09:00:00Z",
+    reason: "split step 2",
+    round: 1,
+  };
+  const rejected = quiet({ stop, approval });
+  const pending = verbsFor(rejected);
+  expect(names(pending)).toEqual(["rerun", "close", "fresh"]);
+  expect(pending[0]?.primary).toBe(true);
+  expect(argvOf(buildArgv(rejected, "rerun"))).toEqual(["run", "DEMO-1", "--pipeline", "feature"]);
 });

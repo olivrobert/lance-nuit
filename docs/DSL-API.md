@@ -44,6 +44,8 @@ export interface Dsl {
     reject: typeof reject;
     /** True when the recorded approval decision still matches the artifact bytes. */
     decisionMatchesArtifact: typeof decisionMatchesArtifact;
+    /** Reason and round of a rejection the rework has not answered yet, for its prompt. */
+    pendingRejection: typeof pendingRejection;
     /** Freshness of an artifact against the inputs recorded when it was produced. */
     freshness: typeof freshness;
 }
@@ -71,6 +73,10 @@ export interface Pipeline {
     /** Reason a subject cannot be approved for the current artifact, undefined when
      * it can. Absent for a subject approvable whatever the verdict. */
     approvalGuards?: ReadonlyMap<string, (ctx: PipelineContext) => Promise<string | undefined>>;
+    /** Step that reworks the artifact of a rejected subject, and the number of
+     * rejection rounds allowed. `--reject <subject>` is refused for a subject
+     * absent here: nothing would replay and the gate would stop forever. */
+    reworks?: ReadonlyMap<string, PipelineRework>;
     steps: PipelineStep[];
 }
 
@@ -605,6 +611,10 @@ export interface RunStopState {
     kind?: RunStopKind;
     /** Reason without the console decoration (`escalated:` prefix, `--approve` hint). */
     detail: string;
+    /** The gate declares a rework step, so `--reject <subject>` is accepted. Only
+     *  the runner loads the pipeline; a reader such as the dashboard learns from
+     *  this flag whether rejecting is a way out. */
+    reworkable?: boolean;
 }
 ```
 
@@ -1011,6 +1021,17 @@ export interface HumanReviewOptions<T> {
      * none, and `--approve` then refuses a subject the current verdict does not offer.
      */
     approval?: ReviewApproval | ReviewApprovalChoice<T>;
+    /**
+     * Step that rewrites the artifact when a human rejects it (`--reject <subject>
+     * --reason <text>`). It must run before the gate and declare the artifact as an
+     * output; its prompt reads the reason through `pendingRejection`. Once rejected,
+     * the gate stops until a human approves a new version, even one `blocked` lets
+     * through. `maxRounds` (default 3) bounds how many versions can be rejected.
+     */
+    rework?: {
+        step: string;
+        maxRounds?: number;
+    };
     /** Base branch to restore. Absent = no branch created, nothing to undo. */
     abandonBranch?: (ctx: PipelineContext) => string;
     /** Labels shown in run logs. Defaults derive from `id`. */
@@ -1110,6 +1131,15 @@ export declare function reject(reason: string, stop?: RunStopState): InputPredic
 /** A decision is valid only when it names the expected artifact, which still exists
  * and has the approved hash; modifying the artifact invalidates approval. */
 export declare function decisionMatchesArtifact(ctx: PipelineContext, subject: DecisionSubject, artifact: Artifact<unknown>): Promise<boolean>;
+
+/** Pending rejection of `subject`, for the prompt of the step that reworks it.
+ *  Undefined once the artifact was rewritten, or when nobody rejected it. */
+export declare function pendingRejection(ctx: PipelineContext, subject: DecisionSubject): Promise<{
+    reason: string;
+    round: number;
+    decidedBy: string;
+    decidedAt: string;
+} | undefined>;
 
 /** Freshness reported by the public `freshness()` helper. `adoptable` is an
  *  internal admission state and never leaves the runner. */

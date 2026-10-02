@@ -64,7 +64,7 @@ async function handleAction({ req, res }: RouteRequest, verb: string, deps: UiDe
     return;
   }
 
-  const argv = buildArgv(item, verb, { subject: payload.subject, budget: payload.budget });
+  const argv = buildArgv(item, verb, { subject: payload.subject, budget: payload.budget, reason: payload.reason });
   if (!argv.ok) {
     sendError(res, argv.status, argv.reason, { item: actionable(item) });
     return;

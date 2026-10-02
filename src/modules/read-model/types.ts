@@ -29,8 +29,10 @@ export type ItemFailKind = "judgment" | "incident";
 export type ItemFailCause = "blocked";
 
 /** Freshness of the approval that lifts the pending gate. `absent` also covers
- *  "not required": the two are indistinguishable on disk. */
-export type ApprovalState = "absent" | "fresh" | "stale";
+ *  "not required": the two are indistinguishable on disk. `rejected` is a
+ *  rejection the rework has not answered yet; once the artifact changed, the
+ *  gate waits on a new decision and the state falls back to `absent`. */
+export type ApprovalState = "absent" | "fresh" | "stale" | "rejected";
 
 export interface ItemProject {
   /** Last segment of the project path. */
@@ -49,6 +51,8 @@ export interface ItemStop {
   subject?: string;
   kind?: ItemStopKind;
   detail: string;
+  /** The gate declares a rework step, so the artifact can be rejected. */
+  reworkable?: boolean;
 }
 
 export interface ItemFailure {
@@ -64,6 +68,9 @@ export interface ItemApproval {
   state: ApprovalState;
   decidedAt?: string;
   decidedBy?: string;
+  /** Present on a `rejected` state: why, and which rework round it opened. */
+  reason?: string;
+  round?: number;
 }
 
 /** Cost of the run. `usd` is absent when no attempt reported one; `estimated`

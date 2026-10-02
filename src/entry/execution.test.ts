@@ -56,6 +56,12 @@ test("a completed rerun_on_resume step without sources is announced as re-run, n
   expect(out).not.toContain("Re-checked on resume");
 });
 
+test("a completed rework step is announced as re-checked: it replays only on a pending rejection", () => {
+  const out = announce(makeRun([step("plan", { rework_for: ["plan"] })]));
+  expect(out).toContain("Re-checked on resume: plan");
+  expect(out).not.toContain("Resumed — already done");
+});
+
 test("rerun_on_resume outranks sources: the step is replayed unconditionally", () => {
   const out = announce(makeRun([step("both", { rerun_on_resume: true, sources: [specArtifact] })]));
   expect(out).toContain("Re-run on resume: both");

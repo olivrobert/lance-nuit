@@ -27,6 +27,7 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
     version: false,
     wrapperHelp: false,
     approveOnly: false,
+    rejectOnly: false,
     close: false,
     reopen: false,
     inspect: false,
@@ -105,6 +106,26 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
   if (args.approve && !args.ticket) {
     throw new CliError("Option --approve requires a ticket.");
   }
+  if (args.rejectOnly && !args.reject) {
+    throw new CliError("Option --reject-only requires --reject <subject>.");
+  }
+  if (args.reason !== undefined && !args.reject) {
+    throw new CliError("Option --reason requires --reject <subject>.");
+  }
+  if (args.reject && !args.ticket) {
+    throw new CliError("Option --reject requires a ticket.");
+  }
+  if (args.reject && args.reason === undefined) {
+    throw new CliError("Option --reject requires --reason <text>: the rework step reads it.");
+  }
+  if (args.reason !== undefined && !args.reason.trim()) {
+    throw new CliError("Option --reason expects a non-empty text.");
+  }
+  // One invocation records one answer: an approval and a rejection of the same
+  // gate contradict each other, and --clean would delete the run to resume.
+  if (args.reject && (args.approve || args.approveOnly || args.clean)) {
+    throw new CliError("--reject cannot be combined with --approve, --approve-only, or --clean.");
+  }
   if (args.close && args.reopen) {
     throw new CliError("Commands --close and --reopen are mutually exclusive.");
   }
@@ -128,7 +149,7 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
   }
   // A ceiling only means something for a run: silently ignoring it on an
   // inspection command would look like an approval that never happened.
-  if (args.budget != null && (args.inspect || args.logs || args.clean || args.approveOnly)) {
+  if (args.budget != null && (args.inspect || args.logs || args.clean || args.approveOnly || args.rejectOnly)) {
     throw new CliError("Option --budget applies to a run, not to an inspection command.");
   }
   // Approving an overrun is a decision about one run that stopped. Under --scan it
@@ -139,7 +160,7 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
   // Same reasoning as --budget: an authorization is a decision about the run it
   // is given to. On an inspection command it would look like an approval nobody
   // recorded; under --scan it would silently authorize every ticket swept.
-  if (args.allowUnmetered && (args.inspect || args.logs || args.clean || args.approveOnly)) {
+  if (args.allowUnmetered && (args.inspect || args.logs || args.clean || args.approveOnly || args.rejectOnly)) {
     throw new CliError("Option --allow-unmetered applies to a run, not to an inspection command.");
   }
   if (args.allowUnmetered && args.scan) {
