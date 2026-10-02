@@ -224,7 +224,7 @@ const SECTIONS: Section[] = [
   {
     title: "Human review",
     file: "builtin-steps/lib/human-review.d.ts",
-    names: ["ReviewKind", "ReviewApproval", "HumanReviewOptions", "humanReview"],
+    names: ["ReviewKind", "ReviewApproval", "ReviewApprovalChoice", "HumanReviewOptions", "humanReview"],
   },
   {
     title: "Provider-neutral authoring",

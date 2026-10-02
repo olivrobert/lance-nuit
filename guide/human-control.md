@@ -59,6 +59,39 @@ the pipeline does not require changing the review declaration. That single comma
 records the decision and resumes the run — only the `approve` subcommand (which
 forces `--approve-only`) writes the decision without running anything.
 
+### Approval by verdict
+
+`approval: { subject }` offers the same subject for every blocking verdict. When
+approving is the way out for some verdicts only, declare the subjects and let each
+blocking value pick one, or none:
+
+```ts
+humanReview({
+  id: "triage-review",
+  artifact: triage, // { verdict: "proceed" | "missing-info" | "decision" | "split", reason }
+  kind: "needs-decision",
+  blocked: (value) => value.verdict !== "proceed",
+  approval: {
+    subjects: ["triage-info", "triage-decision"],
+    // A split must become separate tickets: approving would keep one branch.
+    subjectFor: (value) =>
+      value.verdict === "missing-info" ? "triage-info"
+      : value.verdict === "decision" ? "triage-decision"
+      : undefined,
+  },
+  note: (value) => ({ headline: "🤖 Escalation — triage.", fields: [/* … */] }),
+  reason: (value) => value.reason,
+});
+```
+
+Every listed subject is declared on the pipeline, so the CLI resolves it without
+running anything, and a listed subject cannot be declared a second time by another
+review or `.approval()`. A verdict whose `subjectFor` returns `undefined` stops
+with its reason only: no `--approve` hint in the stop reason, no `Approve` field
+in the note, and no approve action on the dashboard, which offers **Rerun**
+instead. A decision recorded under another subject does not lift it. Returning a
+subject outside `subjects` is a pipeline bug and stops the gate with an error.
+
 ## Gate a child pipeline
 
 Omit `note` to declare an exit point in a pipeline that owns no work item — a child
@@ -143,7 +176,10 @@ lancenuit run PROJ-28 --pipeline delivery
 and writes `decisions/plan.json`. Changing the artifact invalidates the decision;
 the gate stops again. Subjects use only `A-Z`, `a-z`, digits, underscore, and `-`.
 The subject must be declared by the selected pipeline, and approval always names
-that pipeline with `--pipeline`.
+that pipeline with `--pipeline`. For a subject declared by an
+[approval by verdict](#approval-by-verdict), `run --approve` and `lancenuit
+approve` also read the artifact and refuse the subject unless the current
+verdict blocks and offers it; nothing is written and no run starts.
 
 ### Approving the same gate twice
 

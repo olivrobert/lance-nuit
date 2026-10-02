@@ -11,8 +11,9 @@
 // What this module unifies across exit points:
 //  - `blocked` describes ONLY the raw artifact verdict. This module adds "and no
 //    one approved" whenever `approval` is declared, replacing each `*PendingReview`.
-//  - the approval subject is declared from the gate (`declareApproval`), so the
-//    pipeline's `approvals` map need not repeat it.
+//  - the approval subjects are declared from the gate (`declareApproval`), so the
+//    pipeline's `approvals` map need not repeat them. A gate offers either one
+//    static subject or, per blocking value, one of a declared list or none.
 //  - the stop message is prefixed `escalated:` and suffixed with `--approve`, rather
 //    than rewritten in every gate.
 //
@@ -58,9 +59,22 @@ const KIND_LABEL: Record<ReviewKind, string> = {
   "needs-human": "needs-human — manual recovery; ticket does not return to auto-dev",
 };
 
-/** `--approve` subject that lifts this block, and wrapper command to type. */
+/** `--approve` subject that lifts this block, whatever the verdict. */
 export interface ReviewApproval {
   subject: string;
+}
+
+/**
+ * Approval decided per blocking value: `subjectFor` names the subject that lifts
+ * this verdict, or `undefined` when approving is not the way out (a split that
+ * must become separate tickets). Such a verdict stops with its reason only.
+ *
+ * `subjects` lists every subject `subjectFor` may return: the CLI resolves
+ * `--approve <subject>` before any artifact exists, so the list cannot be derived.
+ */
+export interface ReviewApprovalChoice<T> {
+  subjects: readonly string[];
+  subjectFor: (value: T, ctx: PipelineContext) => string | undefined | Promise<string | undefined>;
 }
 
 export interface HumanReviewOptions<T> {
@@ -99,7 +113,12 @@ export interface HumanReviewOptions<T> {
    * decision. `reason` remains for the note, not the gate.
    */
   gateCheck?: (ctx: PipelineContext) => InputPredicateResult | Promise<InputPredicateResult>;
-  approval?: ReviewApproval;
+  /**
+   * Subject that lifts the block. `{ subject }` is offered for every verdict;
+   * `{ subjects, subjectFor }` lets each blocking value offer its own subject or
+   * none, and `--approve` then refuses a subject the current verdict does not offer.
+   */
+  approval?: ReviewApproval | ReviewApprovalChoice<T>;
   /** Base branch to restore. Absent = no branch created, nothing to undo. */
   abandonBranch?: (ctx: PipelineContext) => string;
   /** Labels shown in run logs. Defaults derive from `id`. */
@@ -110,8 +129,8 @@ export interface HumanReviewOptions<T> {
 
 /** Unlock command for the human to type. Derived from the subject actually declared
  *  by the gate, so no escalation template writes it and survives a rename wrongly. */
-function approveCommand(approval: ReviewApproval, ticket: string | undefined, pipelineName: string): string {
-  return `lancenuit run ${ticket ?? "<ticket>"} --pipeline ${pipelineName} --approve ${approval.subject}`;
+function approveCommand(subject: string, ticket: string | undefined, pipelineName: string): string {
+  return `lancenuit run ${ticket ?? "<ticket>"} --pipeline ${pipelineName} --approve ${subject}`;
 }
 
 /**
@@ -125,14 +144,14 @@ function approveCommand(approval: ReviewApproval, ticket: string | undefined, pi
 function withReviewFields(
   note: WorkItemNote,
   kind: ReviewKind,
-  approval: ReviewApproval | undefined,
+  subject: string | undefined,
   ticket: string | undefined,
   pipelineName: string,
 ): WorkItemNote {
   const at = note.fields.findIndex((existing) => existing.label === "State");
   const fields = [...note.fields];
   fields.splice(at < 0 ? fields.length : at, 0, { label: "Type", value: KIND_LABEL[kind] });
-  if (approval) fields.push({ label: "Approve", value: approveCommand(approval, ticket, pipelineName) });
+  if (subject) fields.push({ label: "Approve", value: approveCommand(subject, ticket, pipelineName) });
   return { ...note, fields };
 }
 
@@ -144,18 +163,51 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
   const escalateId = opts.ids?.escalate ?? `escalate-${opts.id}`;
   const abandonId = opts.ids?.abandon ?? `abandon-${opts.id}-branch`;
   const gateId = opts.ids?.gate ?? `${opts.id}-gate`;
+  const approval = opts.approval;
+  const choice = approval && "subjects" in approval ? approval : undefined;
+  const staticSubject = approval && !("subjects" in approval) ? approval.subject : undefined;
+  if (choice && (!Array.isArray(choice.subjects) || choice.subjects.length === 0)) {
+    throw new Error(`humanReview("${opts.id}"): approval.subjects must be a non-empty array`);
+  }
   // The builder binds this metadata before building the step. Looking it up at
   // execution time keeps approval notes and stop reasons correct when a pipeline
   // is renamed, without copying the name into every review declaration.
   let gate: ActionStepBuilder;
-  const approvalCommand = (ctx: PipelineContext): string | undefined =>
-    opts.approval
-      ? approveCommand(opts.approval, ctx.ticket, inferredPipelineName(gate) ?? failPipelineName())
-      : undefined;
+  const approvalCommand = (subject: string | undefined, ctx: PipelineContext): string | undefined =>
+    subject ? approveCommand(subject, ctx.ticket, inferredPipelineName(gate) ?? failPipelineName()) : undefined;
 
   function failPipelineName(): never {
     throw new Error(`humanReview("${opts.id}"): pipeline name was not bound during assembly`);
   }
+
+  /** Subject that lifts this blocking value. Gate, note and CLI guard all read it
+   *  here, so `--approve` never accepts a subject the gate would ignore. */
+  const offeredSubject = async (value: T, ctx: PipelineContext): Promise<string | undefined> => {
+    if (!choice) return staticSubject;
+    const subject = await choice.subjectFor(value, ctx);
+    // The subject becomes a filename under `decisions/`: an undeclared one is a
+    // pipeline bug, not a verdict that cannot be approved.
+    if (subject !== undefined && !choice.subjects.includes(subject)) {
+      throw new Error(
+        `humanReview("${opts.id}"): approval.subjectFor returned "${subject}", which is not declared ` +
+          `(subjects: ${choice.subjects.join(", ")})`,
+      );
+    }
+    return subject;
+  };
+
+  /** Value of a raw blocking verdict; undefined when the artifact is absent,
+   *  unreadable (the check did not happen) or does not block. */
+  const blockingValue = async (ctx: PipelineContext): Promise<T | undefined> => {
+    let value: T | undefined;
+    try {
+      value = await opts.artifact.read(ctx);
+    } catch {
+      return undefined;
+    }
+    if (value === undefined) return undefined;
+    return (await opts.blocked(value, ctx)) ? value : undefined;
+  };
 
   /** Block remains: raw verdict AND no valid approval. `decisionMatchesArtifact`
    *  provides the hash lock; approval is invalidated when the artifact changes,
@@ -165,7 +217,7 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
     // A review without approval has a pure verdict and can safely share the
     // artifact read between escalation and its gate. Approval checks remain
     // uncached because a decision may be recorded between those two steps.
-    if (!opts.approval) {
+    if (!approval) {
       const cached = cachedPending.get(ctx);
       if (cached) return cached;
       const result = computePending(ctx);
@@ -176,17 +228,13 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
   };
 
   const computePending = async (ctx: PipelineContext): Promise<boolean> => {
-    let value: T | undefined;
-    try {
-      value = await opts.artifact.read(ctx);
-    } catch {
-      // Unreadable artifact: treat as absent; the check did not happen.
-      return false;
-    }
+    const value = await blockingValue(ctx);
     if (value === undefined) return false;
-    if (!(await opts.blocked(value, ctx))) return false;
-    if (!opts.approval) return true;
-    return !(await decisionMatchesArtifact(ctx, opts.approval.subject, opts.artifact));
+    const subject = await offeredSubject(value, ctx);
+    // No subject offered: no decision file lifts it, even one left by an earlier
+    // approvable verdict under another declared subject.
+    if (subject === undefined) return true;
+    return !(await decisionMatchesArtifact(ctx, subject, opts.artifact));
   };
 
   // No note: no escalation step. The queue lookup that publishes it lives in a
@@ -203,7 +251,7 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
             withReviewFields(
               await escalation(value, ctx),
               opts.kind,
-              opts.approval,
+              await offeredSubject(value, ctx),
               ctx.ticket,
               inferredPipelineName(gate) ?? failPipelineName(),
             ),
@@ -227,8 +275,8 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
   /** What the stop is about, for a reader of `state.json` that must not parse the
    *  console sentence: the subject that lifts it, the artifact under review, the
    *  expected recovery, and the reason as the exit point wrote it. */
-  const stopInfo = (detail: string): RunStopState => ({
-    ...(opts.approval ? { subject: opts.approval.subject } : {}),
+  const stopInfo = (detail: string, subject: string | undefined): RunStopState => ({
+    ...(subject ? { subject } : {}),
     artifact: `artifacts/${opts.artifact.name}`,
     kind: opts.kind,
     detail,
@@ -239,17 +287,20 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
       const result = await opts.gateCheck(ctx);
       // A custom gate owns its reason; it still stops for this exit point, so
       // describe it here unless the author already did.
-      if (typeof result === "boolean" || result.ok || result.stop) return result;
-      return { ...result, ...(result.reason ? { stop: stopInfo(result.reason) } : {}) };
+      if (typeof result === "boolean" || result.ok || result.stop || !result.reason) return result;
+      const offered = await blockingValue(ctx);
+      const subject = choice ? offered && (await offeredSubject(offered, ctx)) : staticSubject;
+      return { ...result, stop: stopInfo(result.reason, subject) };
     }
     if (!(await pending(ctx))) return true;
     const value = await opts.artifact.require(ctx);
     const detail = await opts.reason(value, ctx);
-    const command = approvalCommand(ctx);
+    const subject = await offeredSubject(value, ctx);
+    const command = approvalCommand(subject, ctx);
     // `--approve` on a run records the decision AND resumes: there is no second
     // command to type. Only the `approve` subcommand is approval-only.
     const commandHint = command ? ` — lift with "${command}"` : "";
-    return reject(`escalated: ${detail}${commandHint}`, stopInfo(detail));
+    return reject(`escalated: ${detail}${commandHint}`, stopInfo(detail, subject));
   };
 
   gate = actionStep({
@@ -262,8 +313,26 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
 
   // The `--approve <subject> → artifact` mapping comes from the gate that reads it:
   // the CLI needs it without running the pipeline, so the pipeline need not repeat it.
-  if (opts.approval) {
-    declareApproval(gate, { subject: opts.approval.subject, artifact: opts.artifact as Artifact<unknown> });
+  // A per-verdict approval also hands the CLI the gate's own rule as a guard.
+  if (choice) {
+    declareApproval(gate, {
+      subjects: choice.subjects,
+      artifact: opts.artifact as Artifact<unknown>,
+      guard: async (subject, ctx) => {
+        const value = await blockingValue(ctx);
+        const offered = value === undefined ? undefined : await offeredSubject(value, ctx);
+        if (offered === subject) return undefined;
+        const why =
+          value === undefined
+            ? "nothing blocks"
+            : offered === undefined
+              ? "this verdict cannot be approved"
+              : `offered: ${offered}`;
+        return `Approval subject "${subject}" is not offered by the current verdict of artifacts/${opts.artifact.name} (${why}).`;
+      },
+    });
+  } else if (staticSubject) {
+    declareApproval(gate, { subjects: [staticSubject], artifact: opts.artifact as Artifact<unknown> });
   }
 
   steps.push(gate);

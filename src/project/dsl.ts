@@ -6,7 +6,12 @@
  * and persisted types therefore do not accidentally become author-facing APIs.
  */
 
-export type { HumanReviewOptions, ReviewApproval, ReviewKind } from "../builtin-steps/lib/human-review.js";
+export type {
+  HumanReviewOptions,
+  ReviewApproval,
+  ReviewApprovalChoice,
+  ReviewKind,
+} from "../builtin-steps/lib/human-review.js";
 export { humanReview } from "../builtin-steps/lib/human-review.js";
 export type {
   PromptFileFactory,

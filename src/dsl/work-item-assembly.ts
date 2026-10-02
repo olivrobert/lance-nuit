@@ -1,12 +1,16 @@
+import type { PipelineContext } from "../model/context.js";
 import type { PipelineWorkItemSource } from "../model/definition.js";
 import type { Artifact } from "./artifact.js";
 
 type AssemblyTarget = object;
 
-/** Approval subject carried by a step and surfaced on the pipeline during assembly. */
+/** Approval subjects carried by a step and surfaced on the pipeline during assembly. */
 export interface StepApprovalDeclaration {
-  subject: string;
+  subjects: readonly string[];
   artifact: Artifact<unknown>;
+  /** Reason `subject` cannot be approved for the current artifact, undefined when
+   *  it can. Absent when every subject is approvable whatever the verdict. */
+  guard?: (subject: string, ctx: PipelineContext) => Promise<string | undefined>;
 }
 
 const declaredSources = new WeakMap<AssemblyTarget, PipelineWorkItemSource>();

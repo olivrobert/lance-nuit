@@ -3,12 +3,12 @@
 // No hardcoded subject list exists anywhere—that is the point of these tests.
 
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveApprovalArtifact } from "../../src/commands/approval-subject.js";
+import { resolveApprovableArtifact, resolveApprovalArtifact } from "../../src/commands/approval-subject.js";
 import { artifact, textArtifact } from "../../src/dsl/artifact.js";
-import { bashStep, pipeline } from "../../src/dsl.js";
+import { bashStep, humanReview, pipeline } from "../../src/dsl.js";
 import { buildPipelineContext } from "../../src/pipeline/context.js";
 import {
   decisionActor,
@@ -198,4 +198,43 @@ test("a nested text artifact approval is readable by the gate", async () => {
   const { decision } = await recordApproval(context, "plan", plan);
   expect(decision.artifact).toBe("artifacts/reports/plan.json");
   expect(await decisionMatchesArtifact(context, "plan", plan)).toBe(true);
+});
+
+test("a subject the current verdict does not offer is refused and nothing is written", async () => {
+  const context = ticketContext();
+  const triage = artifact("triage.json", (value) => value as { verdict: "decision" | "split" });
+  const def = pipeline("triaged")
+    .add(
+      humanReview({
+        id: "triage",
+        artifact: triage,
+        kind: "needs-decision",
+        blocked: () => true,
+        approval: {
+          subjects: ["triage-decision"],
+          subjectFor: (value) => (value.verdict === "split" ? undefined : "triage-decision"),
+        },
+        reason: () => "triage blocks",
+      }),
+    )
+    .build();
+  writeFileSync(context.paths.artifact("triage.json"), JSON.stringify({ verdict: "split" }));
+
+  expect(resolveApprovableArtifact(def, "triage-decision", context)).rejects.toThrow(
+    'Approval subject "triage-decision" is not offered by the current verdict of artifacts/triage.json (this verdict cannot be approved).',
+  );
+  expect(existsSync(join(context.paths.decisionsDir!, "triage-decision.json"))).toBe(false);
+  // Same errors as the static lookup for an undeclared subject.
+  expect(resolveApprovableArtifact(def, "split", context)).rejects.toThrow(
+    'Approval subject "split" is not declared by pipeline "triaged" (declared: triage-decision).',
+  );
+
+  writeFileSync(context.paths.artifact("triage.json"), JSON.stringify({ verdict: "decision" }));
+  expect((await resolveApprovableArtifact(def, "triage-decision", context)).name).toBe("triage.json");
+});
+
+test("a static subject is accepted whatever the verdict", async () => {
+  const context = ticketContext();
+  const def = pipeline("budgeted").approval("budget", budgetArtifact).add(step()).build();
+  expect((await resolveApprovableArtifact(def, "budget", context)).name).toBe("budget.json");
 });
