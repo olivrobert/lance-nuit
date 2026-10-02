@@ -61,6 +61,7 @@ function makeCtx(
           session: r.session,
           timedOut: r.timedOut,
           failReason: r.failReason,
+          budgetExceeded: r.budgetExceeded,
         };
       },
       runFixLoop: async () => {
@@ -349,4 +350,31 @@ test("on-failure: an abort requested during a rerun ends the loop without anothe
   expect(out.failed).toBe(false);
   // Not settled by the loop: the interruption owns the step's final status.
   expect(step.status).toBe("running");
+});
+
+test("a non-blocking rerun withheld by the budget gate stays failed", async () => {
+  const step = failingStep({ max_retries: 3 }, { blocking: false });
+  const run = makeRun(step, 1);
+  const { ctx, calls } = makeCtx(run, step, [], { budget: { cumulative: 5 } });
+
+  const out = await rerunHandler(ctx);
+
+  expect(calls.exec).toBe(0);
+  expect(out.failed).toBe(true);
+  expect(step.status).toBe("failed");
+  expect(step.errors).toBe("initial failure");
+});
+
+test("a rerun killed by the live guard stays failed and gives its quota back", async () => {
+  const step = failingStep({ max_retries: 1 }, { blocking: false });
+  const run = makeRun(step, 5);
+  const { ctx } = makeCtx(run, step, [
+    { ok: false, budgetExceeded: true, failReason: "process killed: budget exceeded" },
+  ]);
+
+  const out = await rerunHandler(ctx);
+
+  expect(out.failed).toBe(true);
+  expect(step.status).toBe("failed");
+  expect(step.retries).toBe(0);
 });

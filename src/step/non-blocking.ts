@@ -38,6 +38,11 @@ export function absorbNonBlocking(run: Run, step: RunStep, output: RunOutput, re
  * end here — a direct `updateStep(failed)` would let a non-blocking step fail
  * the run.
  *
+ * `costStopped` overrides `blocking: false`: a cost stop (a live guard's kill, or
+ * a gate that withheld a retry or a repair) is the run's decision, not a verdict
+ * on the step. Absorbed as `done`, the withheld work would never run again — a
+ * resume skips done steps, even after `--budget` approved the spend.
+ *
  * `absorbDetail` completes the absorb log line; `failSuffix` completes the
  * step.failed event of a blocking step.
  */
@@ -47,8 +52,9 @@ export function settleStepFailure(
   output: RunOutput,
   reason: string | undefined,
   labels: { absorbDetail?: string; failSuffix: string },
+  costStopped = false,
 ): { failed: boolean } {
-  if (step.def.blocking === false) {
+  if (step.def.blocking === false && !costStopped) {
     absorbNonBlocking(run, step, output, reason, labels.absorbDetail);
     return { failed: false };
   }
