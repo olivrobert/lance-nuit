@@ -548,6 +548,25 @@ test("resume selectors apply to a step added to the definition after the snapsho
   expect(explicitlySkipped.excluded).toBe(true);
 });
 
+test("--start-at leaves a done step before it to the resume re-check instead of excluding it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-start-at-done-"));
+  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-start" });
+  const path = pipelineFile(root);
+  const dir = resolveRunDir("p", "T-start", undefined, true, ctx);
+  const run = await loadOrCreateRun(path, "T-start", undefined, undefined, dir, false, undefined, ctx);
+  updateStep(run, run.steps[0]!, "done");
+  saveRun(run);
+
+  const resumed = await loadOrCreateRun(path, "T-start", undefined, undefined, dir, false, "c", ctx);
+  const [a, b] = resumed.steps;
+  // The step loop re-admits a `done` step declaring `input` (step-loop.test.ts):
+  // an exclusion here would turn that freshness re-check off.
+  expect(a!.status).toBe("done");
+  expect(a!.excluded).toBeUndefined();
+  expect(b!.status).toBe("skipped");
+  expect(b!.excluded).toBe(true);
+});
+
 // Invariant: the journal owns the attempts. A resume that cannot read it must
 // fail, not come back with zero attempts and a budget that forgot their price.
 test("invariant: a resume over an unreadable journal fails instead of forgetting the attempts", async () => {
