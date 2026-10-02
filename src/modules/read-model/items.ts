@@ -20,7 +20,7 @@ import { createArtifactRef } from "../../model/artifact-ports.js";
 import type { PersistedRun } from "../../model/persisted.js";
 import { isClosableStatus, isClosureCurrent, readClosureAt } from "../../state/closure.js";
 import { runProvesUnpricedSpend } from "../../state/cost-accounting.js";
-import { approvalFreshness, isValidSubjectToken, readDecisionAt } from "../../state/decisions.js";
+import { approvalFreshness, isValidSubjectToken, readDecisionAt, rejectionPending } from "../../state/decisions.js";
 import { hasUnfinishedWork } from "../../state/run-predicates.js";
 import type { HistoryEntry } from "../../state/stats/history-reader.js";
 import { readHistory } from "../../state/stats/history-reader.js";
@@ -140,6 +140,7 @@ function stopOf(state: PersistedRun): ItemStop {
       ...(stop.subject ? { subject: stop.subject } : {}),
       ...(stop.kind ? { kind: stop.kind } : {}),
       detail: stop.detail,
+      ...(stop.reworkable ? { reworkable: true } : {}),
     };
   }
   return { detail: state.stopped_reason ?? state.outcome?.reason ?? "" };
@@ -175,7 +176,8 @@ function costOf(state: PersistedRun): ItemCost {
  * Gates are sequential, so a stopped run has exactly one. Freshness compares the
  * hash locked in the decision with the artifact as it stands NOW in the
  * effective directory: an artifact rewritten since the approval makes the
- * decision stale, which is precisely what the runner will conclude too.
+ * decision stale, which is precisely what the runner will conclude too. A
+ * rejection stays visible only while the rework has not changed the artifact.
  */
 async function approvalOf(project: ProjectEntry, ticket: string, subject: string): Promise<ItemApproval | undefined> {
   // The subject reaches a file path; an invalid one is dropped rather than
@@ -198,7 +200,17 @@ async function approvalOf(project: ProjectEntry, ticket: string, subject: string
     // An artifact that cannot be read can no longer prove the approval fresh.
     body = undefined;
   }
-  // `absent` here is a decision nobody approved (`rejected`): no approval holds.
+  if (rejectionPending(decision, body)) {
+    return {
+      subject,
+      state: "rejected",
+      decidedAt: decision.decidedAt,
+      decidedBy: decision.decidedBy,
+      ...(decision.reason ? { reason: decision.reason } : {}),
+      ...(decision.round ? { round: decision.round } : {}),
+    };
+  }
+  // `absent` here is a rejection the rework already answered: no decision holds.
   const freshness = approvalFreshness(decision, body);
   if (freshness === "absent") return { subject, state: "absent" };
   return {

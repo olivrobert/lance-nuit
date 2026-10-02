@@ -48,6 +48,7 @@ export function headlineOf(item: Item): string {
 export const VERB_LABELS: Record<string, string> = {
   "approve-and-rerun": "approve and rerun",
   approve: "approve only",
+  "reject-and-rerun": "reject and rework",
   rerun: "rerun",
   fresh: "start fresh",
   budget: "raise budget",

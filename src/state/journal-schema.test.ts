@@ -23,7 +23,8 @@ test("parseJournalEntry: every line of the type inventory is a known event", () 
   const entries = lines("all-event-types.jsonl").map(parseJournalEntry);
   expect(entries.filter((entry) => entry?.kind !== "known")).toEqual([]);
   const types = entries.map((entry) => (entry?.kind === "known" ? entry.event.type : "?"));
-  expect([...types].sort()).toEqual([...JOURNAL_EVENT_TYPES].sort());
+  // A type may appear more than once (decision.recorded: approved and rejected).
+  expect([...new Set(types)].sort()).toEqual([...JOURNAL_EVENT_TYPES].sort());
 });
 
 test("parseJournalEntry: a real journal yields no invalid entry", () => {

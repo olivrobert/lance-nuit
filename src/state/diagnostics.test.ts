@@ -13,7 +13,7 @@ import {
 } from "../model/storage-ports.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { diagnoseRunJournals, inspectTicket, logsForTicket } from "./diagnostics.js";
-import { recordApproval } from "./decisions.js";
+import { recordApproval, recordRejection } from "./decisions.js";
 
 function snapshot(runId: string, pipeline: string, updatedAt: string): PersistedRun {
   return {
@@ -292,4 +292,40 @@ test("inspectTicket tells whether the gate a stopped run waits on is already app
 
   writeFileSync(ctx.paths.artifact("plan.md"), "# Plan v2\n");
   expect(await inspect()).toMatch(/approval: plan — stale, the artifact changed since human on .+ approved it\n/);
+});
+
+test("inspectTicket tells whether a rejection still waits on its rework", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "inspect-rejection-"));
+  const base = buildPipelineContext();
+  const ctx = buildPipelineContext({
+    cwd,
+    ticket: "PROJ-1",
+    config: { ...base.config, specPath: ".lance-nuit/work-items" },
+  });
+  const plan = textArtifact("plan.md");
+  mkdirSync(ctx.paths.artifactsDir!, { recursive: true });
+  writeFileSync(ctx.paths.artifact("plan.md"), "# Plan\n");
+  const stopped: PersistedRun = {
+    ...snapshot("feature-stopped", "feature", "2026-07-03T00:00:00.000Z"),
+    status: "STOPPED",
+    outcome: {
+      phase: "plan-gate",
+      reason: "escalated: plan",
+      logPath: null,
+      resumable: true,
+      stop: { subject: "plan", detail: "plan", reworkable: true },
+    },
+  };
+  const stateStore = new FakeStateStore([{ state: stopped }]);
+  const inspect = () => inspectTicket(ctx, "PROJ-1", undefined, { stateStore });
+
+  await recordRejection(ctx, "plan", plan, "split step 2", 3);
+  expect(await inspect()).toMatch(
+    /approval: plan — rejected in round 1 by human on .+: split step 2; resume the run to rework it\n/,
+  );
+
+  writeFileSync(ctx.paths.artifact("plan.md"), "# Plan v2\n");
+  expect(await inspect()).toContain(
+    "approval: plan — reworked after rejection round 1; approve it or reject it again\n",
+  );
 });

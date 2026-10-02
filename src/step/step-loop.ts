@@ -183,10 +183,13 @@ export async function executeRunSteps(
 
     for (const step of run.steps) {
       if (isAborted()) break;
-      // Reconsider a settled step on resume when it asked for it, or when it
-      // declares `input`: its outputs may have been produced from bytes that have
-      // since changed. A re-admitted step whose outputs are all fresh costs zero.
-      const reconsider = resuming && (step.def.rerun_on_resume || (step.def.sources?.length ?? 0) > 0);
+      // Reconsider a settled step on resume when it asked for it, when it
+      // declares `input` (its outputs may have been produced from bytes that have
+      // since changed), or when it reworks an artifact a human may have rejected.
+      // A re-admitted step with nothing to redo costs zero.
+      const reconsider =
+        resuming &&
+        (step.def.rerun_on_resume || (step.def.sources?.length ?? 0) > 0 || (step.def.rework_for?.length ?? 0) > 0);
       // An operator exclusion (`--step`, `--skip`, `--start-at`) is a decision, not
       // a freshness verdict: it survives the resume that re-admits the rest.
       if (step.status === "skipped" && !(reconsider && step.def.sources && !step.excluded)) continue;

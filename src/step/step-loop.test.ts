@@ -33,6 +33,9 @@ import { makeRunStep, type StepStateInput } from "../state/run-step.ts";
 import { admitStep, buildContext, executeRunSteps, resolveOutcome, type StepLoopDeps } from "./step-loop.ts";
 import { commandRegistries } from "../commands/registries.js";
 import { createAbortScope } from "../runtime/abort.js";
+import { humanReview } from "../builtin-steps/lib/human-review.js";
+import { bashStep as dslBashStep, pipeline } from "../dsl.js";
+import { pendingRejection, recordRejection } from "../state/decisions.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 
 function makeRun(steps: RunStep[], maxCost?: number): Run {
@@ -1462,4 +1465,86 @@ test("executeRunSteps: an abort requested on one scope leaves a run under anothe
   // Both loops left the scope they registered on.
   expect(scopeA.activeRuns()).toEqual([]);
   expect(scopeB.activeRuns()).toEqual([]);
+});
+
+// --- Reject and rework -------------------------------------------------------
+
+const reviewedPlan = textArtifact("plan.md");
+
+/** Writer of the reviewed plan, then its humanReview gate declaring the rework. */
+function reworkRun(writerState: StepStateInput): Run {
+  const built = pipeline("p")
+    .add(
+      dslBashStep({
+        id: "write",
+        name: "Write",
+        command: async (c) => `rework: ${(await pendingRejection(c, "plan"))?.reason}`,
+      }).output(reviewedPlan),
+      humanReview<string>({
+        id: "plan",
+        artifact: reviewedPlan,
+        kind: "needs-decision",
+        blocked: () => false,
+        approval: { subject: "plan" },
+        rework: { step: "write" },
+        reason: () => "plan to review",
+      }),
+    )
+    .build();
+  return makeRun(built.steps.map((def) => makeRunStep(def, def.id === "write" ? writerState : {})));
+}
+
+function reworkContext(initial: Record<string, string>) {
+  const { values, ctx } = artifactContext(initial);
+  return {
+    values,
+    ctx: buildPipelineContext({
+      ...commandRegistries(),
+      cwd: mkdtempSync(join(tmpdir(), "rework-")),
+      ticket: "PROJ-1",
+      artifacts: ctx.artifacts,
+    }),
+  };
+}
+
+test("resume: a rejected artifact replays its rework step with the reason, then the gate asks again", async () => {
+  const { values, ctx } = reworkContext({ "plan.md": "v1" });
+  await recordRejection(ctx, "plan", reviewedPlan, "split step 2", 3);
+  const run = reworkRun({ status: "done", control: { duration_ms: 1 } });
+
+  const { deps, calls } = fakeDeps();
+  const commands: string[] = [];
+  deps.executeStep = async (step, command) => {
+    calls.ids.push(step.id);
+    commands.push(command);
+    values.set("plan.md", "v2");
+    return { output: "", ok: true, stats: { duration_ms: 1 } };
+  };
+  const outcome = await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+
+  expect(calls.ids).toEqual(["write"]);
+  expect(commands).toEqual(["rework: split step 2"]);
+  expect(outcome.stopped).toBe(true);
+  expect(run.steps.find((step) => step.id === "plan-gate")?.status).not.toBe("done");
+});
+
+test("resume: a rework interrupted after its outputs were erased replays, and the gate never passes in between", async () => {
+  const { values, ctx } = reworkContext({ "plan.md": "v1" });
+  await recordRejection(ctx, "plan", reviewedPlan, "split step 2", 3);
+  const run = reworkRun({ status: "done", control: { duration_ms: 1 } });
+
+  const failing = fakeDeps([{ ok: false }]);
+  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, failing.deps, ctx);
+  expect(values.has("plan.md")).toBe(false);
+  expect(run.steps.find((step) => step.id === "plan-gate")?.status).not.toBe("done");
+
+  // Even recorded as done, a rework whose artifact is absent must replay rather
+  // than let the gate read the erased artifact as an answer.
+  const write = run.steps.find((step) => step.id === "write")!;
+  write.status = "done";
+  const { deps, calls } = fakeDeps();
+  const outcome = await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  expect(calls.ids).toEqual(["write"]);
+  expect(outcome.stopped || outcome.failed).toBe(true);
+  expect(run.steps.find((step) => step.id === "plan-gate")?.status).not.toBe("done");
 });

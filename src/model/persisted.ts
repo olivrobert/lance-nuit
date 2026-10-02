@@ -45,6 +45,10 @@ export interface RunStopState {
   kind?: RunStopKind;
   /** Reason without the console decoration (`escalated:` prefix, `--approve` hint). */
   detail: string;
+  /** The gate declares a rework step, so `--reject <subject>` is accepted. Only
+   *  the runner loads the pipeline; a reader such as the dashboard learns from
+   *  this flag whether rejecting is a way out. */
+  reworkable?: boolean;
 }
 
 /** Homogeneous issue exposed for PASS, FAIL, STOPPED, and ABORTED.

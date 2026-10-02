@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { artifact } from "../../dsl/artifact.js";
-import { createInternalWorkItemSourceStep, pipeline } from "../../dsl.js";
+import { bashStep, createInternalWorkItemSourceStep, pipeline } from "../../dsl.js";
 import type { ArtifactRef, WorkItemArtifactStore } from "../../model/artifact-ports.js";
 import type { PipelineContext } from "../../model/context.js";
 import type { PipelineStep } from "../../model/definition.js";
@@ -487,4 +487,184 @@ test("approval by verdict: an invalid subject token fails at build", () => {
       )
       .build(),
   ).toThrow('Pipeline "evil": invalid approval subject "../escape"');
+});
+
+// ── Reject and rework ────────────────────────────────────────────────────────
+
+/** Rejection of the current verdict bytes (or of `rejectedBody` when the
+ *  artifact was rewritten since), as `recordRejection` writes it. */
+function rejectAs(f: Fixture, subject: string, rejectedBody: string, round = 1): void {
+  mkdirSync(f.ctx.paths.decisionsDir!, { recursive: true });
+  writeFileSync(
+    join(f.ctx.paths.decisionsDir!, `${subject}.json`),
+    JSON.stringify({
+      schemaVersion: 1,
+      decision: "rejected",
+      subject,
+      artifact: "artifacts/verdict.json",
+      artifactSha256: createHash("sha256").update(rejectedBody).digest("hex"),
+      decidedAt: "2026-08-01T00:00:00.000Z",
+      decidedBy: "human",
+      reason: "redo it",
+      round,
+    }),
+  );
+}
+
+/** A writer step that produces the reviewed artifact, then the gate reworking it. */
+function buildReworked(
+  overrides: Partial<Parameters<typeof humanReview<Verdict>>[0]> = {},
+  writer = bashStep({ id: "write", name: "Write", command: "true" }).output(verdictArtifact),
+) {
+  return pipeline("test")
+    .add(
+      writer,
+      humanReview<Verdict>({
+        id: "demo",
+        artifact: verdictArtifact,
+        kind: "needs-decision",
+        blocked: (value) => value.blocked === true,
+        approval: { subject: "sujet" },
+        rework: { step: "write" },
+        reason: () => "blocking verdict",
+        ...overrides,
+      }),
+    )
+    .build();
+}
+
+test("rework: the pipeline exposes the rework step of each subject, and the step knows what it reworks", () => {
+  const built = buildReworked();
+  expect(built.reworks?.get("sujet")).toEqual({ stepId: "write", maxRounds: 3 });
+  expect(stepOf(built.steps, "write").rework_for).toEqual(["sujet"]);
+
+  const choice = buildReworked({ approval: byVerdict, rework: { step: "write", maxRounds: 1 } });
+  expect([...choice.reworks!.entries()]).toEqual([
+    ["triage-info", { stepId: "write", maxRounds: 1 }],
+    ["triage-decision", { stepId: "write", maxRounds: 1 }],
+  ]);
+  expect(stepOf(choice.steps, "write").rework_for).toEqual(["triage-info", "triage-decision"]);
+});
+
+test("rework: an invalid declaration fails the pipeline build", () => {
+  expect(() => buildReworked({ approval: undefined })).toThrow(
+    'humanReview("demo"): rework needs an approval subject to reject',
+  );
+  expect(() => buildReworked({ rework: { step: "write", maxRounds: 0 } })).toThrow(
+    'humanReview("demo"): rework.maxRounds must be a positive integer',
+  );
+  expect(() => buildReworked({ rework: { step: "missing" } })).toThrow(
+    'Pipeline "test": rework step "missing" of subject "sujet" is not declared',
+  );
+  expect(() => buildReworked({}, bashStep({ id: "write", name: "Write", command: "true" }))).toThrow(
+    'Pipeline "test": rework step "write" of subject "sujet" does not declare verdict.json as an output',
+  );
+  const after = pipeline("test").add(
+    humanReview<Verdict>({
+      id: "demo",
+      artifact: verdictArtifact,
+      kind: "needs-decision",
+      blocked: () => true,
+      approval: { subject: "sujet" },
+      rework: { step: "write" },
+      reason: () => "blocking verdict",
+    }),
+    bashStep({ id: "write", name: "Write", command: "true" }).output(verdictArtifact),
+  );
+  expect(() => after.build()).toThrow(
+    'Pipeline "test": rework step "write" of subject "sujet" must run before its gate',
+  );
+});
+
+test("rework: a rejected artifact the rework left unchanged stops the gate again", async () => {
+  const steps = buildReworked().steps;
+  const f = fixture({ blocked: true });
+  rejectAs(f, "sujet", JSON.stringify({ blocked: true }));
+
+  const gate = await admit(stepOf(steps, "demo-gate"), f.ctx);
+  expect(gate.action).toBe("stop");
+  expect(gate.action === "pass" ? undefined : gate.stop).toEqual({
+    subject: "sujet",
+    artifact: "artifacts/verdict.json",
+    kind: "needs-decision",
+    detail: "the rework did not change the artifact rejected in round 1",
+    reworkable: true,
+  });
+});
+
+test("rework: a rework that produced no artifact stops the gate", async () => {
+  const steps = buildReworked().steps;
+  const f = fixture({});
+  rejectAs(f, "sujet", JSON.stringify({ blocked: true }));
+
+  const gate = await admit(stepOf(steps, "demo-gate"), f.ctx);
+  expect(gate.action === "pass" ? undefined : gate.stop?.detail).toBe(
+    "the rework produced no artifact after rejection round 1",
+  );
+});
+
+test("rework: a reworked artifact asks again even when its verdict no longer blocks", async () => {
+  const steps = buildReworked().steps;
+  const f = fixture({ blocked: false });
+  rejectAs(f, "sujet", JSON.stringify({ blocked: true }), 2);
+
+  const gate = await admit(stepOf(steps, "demo-gate"), f.ctx);
+  expect(gate.action).toBe("stop");
+  expect(gate.action === "pass" ? "" : gate.reason).toBe(
+    "escalated: the artifact was reworked after rejection round 2 and needs a new decision (approve or reject again)" +
+      ' — lift with "lancenuit run PROJ-1 --pipeline test --approve sujet"' +
+      ' or reject with "lancenuit reject PROJ-1 sujet --reason "..." --pipeline test"',
+  );
+
+  // Only an approval, which replaces the decision file, lifts it.
+  const approved = fixture({ blocked: false, approved: true });
+  expect((await admit(stepOf(steps, "demo-gate"), approved.ctx)).action).toBe("pass");
+});
+
+test("rework: a per-verdict guard accepts the rejected subject whatever the reworked verdict offers", async () => {
+  const built = buildReworked({ approval: byVerdict });
+  const f = fixture({ body: blockedAs("split") });
+  expect(await built.approvalGuards!.get("triage-decision")!(f.ctx)).toContain("this verdict cannot be approved");
+
+  rejectAs(f, "triage-decision", JSON.stringify(blockedAs("decision")));
+  expect(await built.approvalGuards!.get("triage-decision")!(f.ctx)).toBeUndefined();
+  const gate = await admit(stepOf(built.steps, "demo-gate"), f.ctx);
+  expect(gate.action === "pass" ? undefined : gate.stop?.subject).toBe("triage-decision");
+});
+
+test("rework: only a gate declaring rework marks its stop reworkable and offers reject in the note", async () => {
+  const plain = await admit(
+    stepOf(build({ approval: { subject: "sujet" } }), "demo-gate"),
+    fixture({ blocked: true }).ctx,
+  );
+  expect(plain.action === "pass" ? undefined : plain.stop?.reworkable).toBeUndefined();
+
+  const reworked = await admit(stepOf(buildReworked().steps, "demo-gate"), fixture({ blocked: true }).ctx);
+  expect(reworked.action === "pass" ? undefined : reworked.stop?.reworkable).toBe(true);
+
+  const notes = async (rework: boolean): Promise<string> => {
+    const gateway = createFakeWorkItemGateway({ items: [{ ref: TICKET, queues: ["featureTodo"], state: "todo" }] });
+    const { ctx: base } = fixture({ blocked: true });
+    const ctx = buildPipelineContext({ cwd: base.cwd, ticket: TICKET, artifacts: base.artifacts, workItem: gateway });
+    const steps = pipeline("test")
+      .add(createInternalWorkItemSourceStep({ dir: () => "/tmp/work-items", queue: "featureTodo" }))
+      .add(
+        bashStep({ id: "write", name: "Write", command: "true" }).output(verdictArtifact),
+        humanReview<Verdict>({
+          id: "demo",
+          artifact: verdictArtifact,
+          kind: "needs-decision",
+          blocked: () => true,
+          approval: { subject: "sujet" },
+          ...(rework ? { rework: { step: "write" } } : {}),
+          note: () => ({ headline: "🤖 Escalation — demo.", fields: [] }),
+          reason: () => "blocking verdict",
+        }),
+      )
+      .build().steps;
+    await stepOf(steps, "escalate-demo").action!(ctx);
+    return gateway.bodiesOf(TICKET)[0]!;
+  };
+  expect(await notes(true)).toContain('Reject : lancenuit reject PROJ-1 sujet --reason "..." --pipeline test');
+  expect(await notes(false)).not.toContain("Reject");
 });
