@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { artifact } from "../dsl/artifact.js";
-import { bashStep, pipeline } from "../dsl.js";
+import { bashStep, humanReview, pipeline } from "../dsl.js";
 import type { RunnerArgs } from "../model/cli-options.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { pipelineRunsDir } from "../state/stores/run-storage.js";
@@ -69,4 +69,29 @@ test("--approve on a run another runner is already resuming starts no second run
   expect(await applyApproval(approveArgs(), def, context)).toEqual({ kind: "done" });
   // --fresh asks for a new run on purpose: the held one is not a duplicate of it.
   expect(await applyApproval(approveArgs({ fresh: true }), def, context)).toEqual({ kind: "ok" });
+});
+
+test("--approve refuses a subject the current verdict does not offer", async () => {
+  const context = approvedContext();
+  const triage = artifact("triage.json", (value) => value as { verdict: "decision" | "split" });
+  const triaged = pipeline("triaged")
+    .add(
+      humanReview({
+        id: "triage",
+        artifact: triage,
+        kind: "needs-decision",
+        blocked: () => true,
+        approval: {
+          subjects: ["triage-decision"],
+          subjectFor: (value) => (value.verdict === "split" ? undefined : "triage-decision"),
+        },
+        reason: () => "triage blocks",
+      }),
+    )
+    .build();
+  writeFileSync(context.paths.artifact("triage.json"), JSON.stringify({ verdict: "split" }));
+
+  const outcome = await applyApproval(approveArgs({ approve: "triage-decision" }), triaged, context);
+  expect(outcome.kind).toBe("error");
+  expect(existsSync(join(context.paths.decisionsDir!, "triage-decision.json"))).toBe(false);
 });

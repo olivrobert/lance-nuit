@@ -31,7 +31,12 @@ import type { Pipeline } from "./model/definition.js";
 import type { decisionMatchesArtifact } from "./state/decisions.js";
 import type { freshness } from "./state/provenance.js";
 
-export type { HumanReviewOptions, ReviewApproval, ReviewKind } from "./builtin-steps/lib/human-review.js";
+export type {
+  HumanReviewOptions,
+  ReviewApproval,
+  ReviewApprovalChoice,
+  ReviewKind,
+} from "./builtin-steps/lib/human-review.js";
 export { humanReview } from "./builtin-steps/lib/human-review.js";
 export type { EffortLevel, JsonSchema } from "./contracts/backends.js";
 export { artifact, textArtifact } from "./dsl/artifact.js";
@@ -134,7 +139,7 @@ export interface Dsl {
   bashStep: typeof bashStep;
   actionStep: typeof actionStep;
   workItemEscalateStep: typeof workItemEscalateStepFactory;
-  /** Unified human-review helper; `approval.subject` is bound to this pipeline automatically. */
+  /** Unified human-review helper; approval subjects are bound to this pipeline automatically. */
   humanReview: typeof humanReviewFactory;
   workItemDeliveryStep: typeof workItemDeliveryStepFactory;
   requireCapabilitiesStep: typeof requireCapabilitiesStep;

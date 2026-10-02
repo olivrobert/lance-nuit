@@ -1,3 +1,4 @@
+import type { PipelineContext } from "../model/context.js";
 import type { Pipeline } from "../model/definition.js";
 import { isValidSubjectToken } from "../state/decisions.js";
 import type { Artifact } from "./artifact.js";
@@ -30,6 +31,8 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
   private p: Pipeline;
 
   private readonly approvals = new Map<string, Artifact<unknown>>();
+
+  private readonly approvalGuards = new Map<string, (ctx: PipelineContext) => Promise<string | undefined>>();
 
   private readonly stepBuilders: StepBuilder[] = [];
 
@@ -100,6 +103,9 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
     ) {
       throw new Error(`Pipeline "${this.p.name}": approval("${subject}") requires an artifact descriptor`);
     }
+    // A second declaration would be refused by the guard whenever the verdict does
+    // not offer the subject, contradicting the declaration that accepts it.
+    if (this.approvalGuards.has(subject)) throw this.guardedTwice(subject);
     const existing = this.approvals.get(subject);
     if (existing && existing.name !== artifactDescriptor.name) {
       throw new Error(
@@ -111,13 +117,26 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
     return this;
   }
 
+  private guardedTwice(subject: string): Error {
+    return new Error(
+      `Pipeline "${this.p.name}": approval subject "${subject}" is guarded by a human review and cannot be declared twice`,
+    );
+  }
+
   private appendEntries(steps: readonly StepBuilder[]): void {
     for (const step of steps) this.appendStep(step);
   }
 
   private appendStep(step: StepBuilder): void {
     const approval = approvalDeclaration(step);
-    if (approval) this.approval(approval.subject, approval.artifact);
+    if (approval) {
+      const { artifact, guard } = approval;
+      for (const subject of approval.subjects) {
+        if (guard && this.approvals.has(subject)) throw this.guardedTwice(subject);
+        this.approval(subject, artifact);
+        if (guard) this.approvalGuards.set(subject, (ctx) => guard(subject, ctx));
+      }
+    }
     const source = workItemSourceDeclaration(step);
     if (source) {
       if (this.p.work_item_source) {
@@ -139,6 +158,7 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
       return step.build();
     });
     if (this.approvals.size > 0) this.p.approvals = new Map(this.approvals);
+    if (this.approvalGuards.size > 0) this.p.approvalGuards = new Map(this.approvalGuards);
     return this.p;
   }
 }
