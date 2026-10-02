@@ -622,6 +622,7 @@ each is looked up in the worktree first, then in the main clone:
 | `worktree-init.sh` | worktree created or reused, `full` mode only | warning, run continues |
 | `worktree-setup.sh` / `worktree-setup-light.sh` | before the lock and the stack preflight | warning, run continues |
 | `worktree-ready.sh` | after the stack preflight, before the first step | run stops |
+| `worktree-stop.sh` | run ends without `PASS` (gate stop, failure, budget, interruption) | warning, run outcome and exit code unchanged |
 | `worktree-teardown.sh` | `lancenuit worktree clean` | worktree kept |
 
 `worktree-setup.sh` runs before any service exists: it writes what the stack
@@ -633,6 +634,17 @@ resumes included, so keep it idempotent. Only the runner that entered the
 worktree runs it; child runners inherit a ready worktree. Setup and ready hooks
 show only their marker lines (`→`, `⚠`, `✓`, `✗`) live and print the last lines
 of their output when they fail.
+
+`worktree-stop.sh` lets a stopped work item release the RAM and ports its stack
+holds. It runs once, after the final report, and must only stop services (for
+example `docker compose stop`), never drop volumes: unlike `worktree-teardown.sh`,
+the worktree and its state stay for the resume. Only the runner that entered the
+worktree runs it, so a failing child pipeline never stops its parent's stack. Its
+failure is a warning and never replaces the run's own stop reason. A first Ctrl+C
+during the hook lets it finish; a second one kills it. Neither changes the run's
+exit code. Resume starts the services again through the usual boot path:
+`stackPreflight` when it is configured, then `worktree-ready.sh`. Without a
+preflight, the setup hook is the place that starts them.
 
 The worktree root defaults to `~/.lance-nuit/worktrees/<project>/<ticket>` and is
 configurable with `WORKTREES_ROOT`.

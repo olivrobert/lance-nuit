@@ -42,7 +42,10 @@ export interface SupervisedCommandResult {
   killReason?: string;
 }
 
-export type SupervisedCommandOptions = Pick<SupervisedSpawnOptions, "cwd" | "env" | "timeoutMs" | "signal" | "stdio">;
+export type SupervisedCommandOptions = Pick<
+  SupervisedSpawnOptions,
+  "cwd" | "env" | "timeoutMs" | "signal" | "stdio" | "scope"
+>;
 
 /** Spawn a detached CLI while sharing timeout, kill state, and timer cleanup. */
 export function spawnSupervisedProcess(
