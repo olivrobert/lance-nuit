@@ -46,6 +46,44 @@ describe("Claude JSONL events", () => {
     expect(parsed.stats.cost_estimated).toBe(true);
   });
 
+  test("output tokens come from the result event, not from the message start", () => {
+    // The real CLI shape: each `assistant` event carries `output_tokens` as it
+    // stood when the message started, and only `result` reports what was written.
+    const parsed = parseClaudeEvents(
+      [
+        assistant("sonnet", [{ type: "text", text: "a" }], "m1"),
+        assistant("sonnet", [{ type: "text", text: "b" }], "m2"),
+        JSON.stringify({ type: "result", duration_ms: 5, total_cost_usd: 0.1, usage: { output_tokens: 928 } }),
+      ].join("\n"),
+    );
+    expect(parsed.stats.output_tokens).toBe(928);
+    expect(parsed.stats.input_tokens).toBe(8);
+  });
+
+  test("the result output is priced when the CLI reports no cost", () => {
+    const events = [assistant("claude-sonnet-4-5", [{ type: "text", text: "a" }])];
+    const without = parseClaudeEvents(
+      [...events, JSON.stringify({ type: "result", duration_ms: 5, total_cost_usd: 0 })].join("\n"),
+    );
+    const settled = parseClaudeEvents(
+      [
+        ...events,
+        JSON.stringify({ type: "result", duration_ms: 5, total_cost_usd: 0, usage: { output_tokens: 10_000 } }),
+      ].join("\n"),
+    );
+    expect(settled.stats.total_cost_usd ?? 0).toBeGreaterThan(without.stats.total_cost_usd ?? 0);
+  });
+
+  test("a result reporting fewer output tokens than the messages never lowers the count", () => {
+    const parsed = parseClaudeEvents(
+      [
+        assistant("sonnet", [{ type: "text", text: "a" }]),
+        JSON.stringify({ type: "result", duration_ms: 5, total_cost_usd: 0.1, usage: { output_tokens: 1 } }),
+      ].join("\n"),
+    );
+    expect(parsed.stats.output_tokens).toBe(2);
+  });
+
   test("a reported $0 with no tokens at all stays an exact zero", () => {
     const parsed = parseClaudeEvents(JSON.stringify({ type: "result", duration_ms: 5, total_cost_usd: 0 }));
     expect(parsed.stats.total_cost_usd).toBe(0);

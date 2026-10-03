@@ -75,7 +75,7 @@ export function createNodeCodexHost(hostOptions: NodeCodexHostOptions = {}): Cod
               },
               totals.model,
             );
-            reportLiveAttemptCost(estimated ?? undefined);
+            reportLiveAttemptCost(estimated ?? undefined, totals.model);
             if (control.killed) return;
             // Proof, not suspicion: this attempt HAS consumed tokens and no rate
             // covers its model, so its spend can never be compared to the ceiling.

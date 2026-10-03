@@ -161,7 +161,10 @@ function Lane({ lane }: { lane: RunTimelineLane }): JSX.Element {
   const broken = step.status === "failed" || step.status === "aborted";
   return (
     <>
-      <div className={styles.name} title={step.retries ? `${step.id} · ${step.retries} retries` : step.id}>
+      <div
+        className={styles.name}
+        title={step.retries ? `${step.id} · ${step.retries} ${step.retries === 1 ? "retry" : "retries"}` : step.id}
+      >
         <code className={broken ? styles.brokenText : ""}>{step.id}</code>
         {step.status === "running" ? <span className="small mute">running</span> : null}
       </div>
