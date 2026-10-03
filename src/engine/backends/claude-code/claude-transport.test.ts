@@ -1,7 +1,59 @@
 import { describe, expect, test } from "bun:test";
 import { parseClaudeEvents } from "./events.js";
 import { mapClaudeExecutionResult } from "./result.js";
-import { executeClaudeWithTransportRetry, retryOptionsForSession, transportBackoffDelays } from "./transport.js";
+import {
+  executeClaudeWithTransportRetry,
+  type RateLimitWait,
+  rateLimitMaxWaitMs,
+  retryOptionsForSession,
+  transportBackoffDelays,
+} from "./transport.js";
+
+const HOUR = 60 * 60 * 1000;
+const NOW = 1_785_400_000_000;
+
+function quotaSpawn(resetsAtMs: number) {
+  return {
+    output: [
+      JSON.stringify({ type: "rate_limit_event", rate_limit_info: { resetsAt: resetsAtMs / 1000 } }),
+      JSON.stringify({ type: "result", is_error: true, api_error_status: 429, result: "session limit" }),
+    ].join("\n"),
+    code: 1,
+    killed: false,
+    durationMs: 1,
+  };
+}
+
+const success = { output: JSON.stringify({ type: "result", duration_ms: 1 }), code: 0, killed: false, durationMs: 1 };
+
+function fakeWait(maxWaitMs: number): RateLimitWait & { slept: number[]; logs: string[] } {
+  const slept: number[] = [];
+  const logs: string[] = [];
+  return {
+    maxWaitMs,
+    now: () => NOW,
+    sleep: async (ms) => {
+      slept.push(ms);
+    },
+    log: (m) => logs.push(m),
+    slept,
+    logs,
+  };
+}
+
+function runWith(spawns: Array<ReturnType<typeof quotaSpawn>>, wait: RateLimitWait) {
+  let calls = 0;
+  const run = executeClaudeWithTransportRetry(
+    { bin: "claude", args: [] },
+    async () => spawns[Math.min(calls++, spawns.length - 1)]!,
+    (output) => parseClaudeEvents(output),
+    [],
+    undefined,
+    undefined,
+    wait,
+  );
+  return run.then((result) => ({ result, calls }));
+}
 
 describe("Claude transport", () => {
   test("does not retry 429 and retries overload 529", () => {
@@ -63,6 +115,43 @@ describe("Claude transport", () => {
       if (previous === undefined) delete process.env.RUNNER_TRANSPORT_BACKOFF_MS;
       else process.env.RUNNER_TRANSPORT_BACKOFF_MS = previous;
     }
+  });
+
+  test("waits for a usage limit to reset, then retries the spawn", async () => {
+    const wait = fakeWait(6 * HOUR);
+    const { result, calls } = await runWith([quotaSpawn(NOW + 2 * HOUR), success], wait);
+    expect(calls).toBe(2);
+    expect(parseClaudeEvents(result.output).transportError).toBeUndefined();
+    // One minute past the announced reset, so the retry does not race the provider's clock.
+    expect(wait.slept).toEqual([2 * HOUR + 60_000]);
+    expect(wait.logs).toHaveLength(1);
+    expect(wait.logs[0]).toContain("usage limit reached");
+    expect(result.priorAttemptsDurationMs).toBe(1 + 2 * HOUR + 60_000);
+  });
+
+  test.each([
+    ["the reset is past the ceiling", 6 * HOUR, NOW + 7 * HOUR],
+    ["waiting is disabled", 0, NOW + 60_000],
+  ])("returns a usage limit at once when %s", async (_label, maxWaitMs, resetsAt) => {
+    const wait = fakeWait(maxWaitMs);
+    const { result, calls } = await runWith([quotaSpawn(resetsAt)], wait);
+    expect(calls).toBe(1);
+    expect(wait.slept).toEqual([]);
+    expect(parseClaudeEvents(result.output).transportError?.status).toBe(429);
+  });
+
+  test("stops waiting after three resets that did not reopen the quota", async () => {
+    const wait = fakeWait(6 * HOUR);
+    const { calls } = await runWith([quotaSpawn(NOW - 1000)], wait);
+    expect(calls).toBe(4);
+    expect(wait.slept).toEqual([60_000, 60_000, 60_000]);
+  });
+
+  test("reads the wait ceiling from the environment, falling back on a bad value", () => {
+    expect(rateLimitMaxWaitMs({})).toBe(6 * HOUR);
+    expect(rateLimitMaxWaitMs({ RUNNER_RATE_LIMIT_MAX_WAIT_MS: "0" })).toBe(0);
+    expect(rateLimitMaxWaitMs({ RUNNER_RATE_LIMIT_MAX_WAIT_MS: "60000" })).toBe(60_000);
+    expect(rateLimitMaxWaitMs({ RUNNER_RATE_LIMIT_MAX_WAIT_MS: "soon" })).toBe(6 * HOUR);
   });
 
   test("converts a created session into a resume on transport retry", () => {

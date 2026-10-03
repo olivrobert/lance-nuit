@@ -191,6 +191,23 @@ describe("Claude result mapping", () => {
     expect(logs).toEqual(["  ⚠ API Claude: Not logged in · Please run /login"]);
   });
 
+  test("reports a usage limit as blocked with its reset time so a resume replays the step", () => {
+    const resetsAt = 1_785_405_000;
+    const result = mapClaudeExecutionResult({
+      output: [
+        JSON.stringify({ type: "rate_limit_event", rate_limit_info: { resetsAt } }),
+        JSON.stringify({ type: "result", is_error: true, api_error_status: 429, result: "session limit" }),
+      ].join("\n"),
+      code: 1,
+      killed: false,
+      durationMs: 1,
+    });
+    expect(result.failCause).toBe("blocked");
+    expect(result.failReason).toBe(
+      `API Claude 429: session limit (resets at ${new Date(resetsAt * 1000).toISOString()})`,
+    );
+  });
+
   test("leaves other transport errors without a blocked cause", () => {
     const result = mapClaudeExecutionResult({
       output: JSON.stringify({

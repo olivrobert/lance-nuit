@@ -17,7 +17,7 @@ import { normalizeClaudeStepOptions } from "./normalize.js";
 import { DEFAULT_PRICING_KEY, MODEL_PRICING } from "./pricing.js";
 import { mapClaudeExecutionResult } from "./result.js";
 import { findSessionFile, sessionFileSizeKb } from "./session.js";
-import { executeClaudeWithTransportRetry } from "./transport.js";
+import { defaultRateLimitWait, executeClaudeWithTransportRetry } from "./transport.js";
 import type { ClaudeBackendHost, ClaudeOptions, ClaudeStepOptions } from "./types.js";
 export const capabilities: AgentCapabilities = {
   structuredOutput: true,
@@ -114,6 +114,7 @@ export class ClaudeBackend implements AgentBackend {
       // retrying with the same --session-id would be rejected by the CLI.
       (id) => this.locateSession(id) != null,
       (id) => readSessionCostBaseline(id, this.locateSession),
+      defaultRateLimitWait(this.host.log),
     );
     return mapClaudeExecutionResult(raw, {
       outputFormat: request.outputFormat,
