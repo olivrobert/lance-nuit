@@ -26,6 +26,7 @@ import type {
   ProjectsResponse,
   RunResponse,
   StatsRead,
+  RunJourney,
   StepDetail,
   TerminalInfo,
   TerminalsResponse,
@@ -133,6 +134,11 @@ export function fetchStepDetail(
 ): Promise<StepDetail> {
   const query = `?id=${encodeURIComponent(stepId)}${attempt !== undefined ? `&attempt=${attempt}` : ""}`;
   return getJson<StepDetail>(itemUrl(item.project.name, item.ticket, `/step${query}`));
+}
+
+/** Every attempt and pause of the item's run. */
+export function fetchRunJourney(item: Pick<Item, "project" | "ticket">): Promise<RunJourney> {
+  return getJson<RunJourney>(itemUrl(item.project.name, item.ticket, "/journey"));
 }
 
 /** Address of one image of a work item as raw bytes, for an `<img src>`: a

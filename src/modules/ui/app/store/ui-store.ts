@@ -86,8 +86,11 @@ export function toggleDir(itemKey: string, path: string, open: boolean): void {
   });
 }
 
-export function openStepOf(state: UiState, itemKey: string): OpenStep | null {
-  return state.openSteps[itemKey] ?? null;
+/** The step open in one item's timeline: `null` once the reader closed it,
+ *  `undefined` while they have neither opened nor closed one, so the timeline
+ *  may choose for them. */
+export function openStepOf(state: UiState, itemKey: string): OpenStep | null | undefined {
+  return state.openSteps[itemKey];
 }
 
 /** Open `step` in one item's timeline, or close the panel with `null`. */

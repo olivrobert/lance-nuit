@@ -114,7 +114,7 @@ export interface SheetSearch {
   file?: string;
 }
 
-const SHEET_TABS: readonly SheetTab[] = ["diagnostic", "report", "run", "document", "files"];
+const SHEET_TABS: readonly SheetTab[] = ["report", "run", "document", "files"];
 
 /** Only the params the sheet knows, each of the right shape. The router's
  *  default parser JSON-decodes values, so a file named `1` arrives as a number

@@ -45,6 +45,14 @@
   --run: #315d9b;
   --run-bg: #edf3fc;
   --stale: #8b5f20;
+  /* The Run tab's attempt tones. The run's main model carries the colour,
+     everything else steps back from it: a reader finds where the money went
+     before reading a label. A wait is cream, the moon's paper. */
+  --tone-agent: #4a57a8;
+  --tone-model: #3a8296;
+  --tone-command: #9aa1bf;
+  --tone-replay: #cdd2e6;
+  --pause: #f7ecd6;
   /* One monospace stack for code, logs and the embedded terminal. xterm draws
      on a canvas and cannot inherit a font, so the terminal screen reads this
      property by name. */
