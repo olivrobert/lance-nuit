@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { JSX } from "react";
 import { stepDetailQuery } from "../../api/queries.js";
 import type { Item, StepAttemptView, StepDetail, TextExcerpt } from "../../api/types.js";
+import { useOpenAgentSession } from "../../hooks/useOpenAgentSession.js";
 import { fmtCost, fmtDuration } from "../../lib/format.js";
 import { setOpenStep } from "../../store/ui-store.js";
 import { useSheetNavigation } from "./sheet-context.js";
@@ -39,6 +40,38 @@ function FileLink({ path, label }: { path: string; label?: string }): JSX.Elemen
   );
 }
 
+/** The agent conversation an attempt left, reopened as a fork in a terminal.
+ *  While the run goes on, the server opens it read-only: the run keeps working
+ *  in the same directory. */
+function SessionLink({
+  item,
+  detail,
+  attempt,
+}: {
+  item: Item;
+  detail: StepDetail;
+  attempt: StepAttemptView;
+}): JSX.Element {
+  const { pending, open } = useOpenAgentSession(item);
+  if (!attempt.hasSession) {
+    const why =
+      attempt.status === "running" ? "The session is recorded when the attempt finishes." : "No agent session.";
+    return <span title={why}>—</span>;
+  }
+  const readOnly = item.group === "running" ? " — read-only (plan mode) while the run goes on" : "";
+  return (
+    <button
+      type="button"
+      className={styles.link}
+      disabled={pending}
+      title={`Resume a fork of the agent session of attempt ${attempt.attempt} in a terminal${readOnly}`}
+      onClick={() => void open({ step: detail.stepId, attempt: attempt.attempt })}
+    >
+      {pending ? "Opening…" : "Open"}
+    </button>
+  );
+}
+
 function Attempts({ item, detail }: { item: Item; detail: StepDetail }): JSX.Element {
   return (
     <table className={styles.attempts}>
@@ -50,6 +83,7 @@ function Attempts({ item, detail }: { item: Item; detail: StepDetail }): JSX.Ele
           <th className={styles.num}>Duration</th>
           <th className={styles.num}>Cost</th>
           <th>Model</th>
+          <th>Session</th>
           <th>Reason</th>
         </tr>
       </thead>
@@ -71,6 +105,9 @@ function Attempts({ item, detail }: { item: Item; detail: StepDetail }): JSX.Ele
             <td className={styles.num}>{fmtDuration(attempt.durationMs)}</td>
             <td className={styles.num}>{attemptCost(attempt)}</td>
             <td>{attempt.model ? <code>{attempt.model}</code> : "—"}</td>
+            <td>
+              <SessionLink item={item} detail={detail} attempt={attempt} />
+            </td>
             <td className={styles.reason} title={attempt.reason ?? ""}>
               {firstLine(attempt.reason)}
             </td>

@@ -11,7 +11,7 @@ import { type ProjectEntry, type ReadModelOptions, readProjects } from "./projec
 import { readRecap } from "./recap.js";
 import { type ReportRead, readReport } from "./report.js";
 import { readStats } from "./stats.js";
-import { readStepDetail } from "./step-detail.js";
+import { readStepDetail, readStepSession } from "./step-detail.js";
 import { readCoderSession, readSteps } from "./steps.js";
 import type {
   CoderSessionRead,
@@ -39,6 +39,8 @@ export interface ReadModel {
   /** One step opened from the timeline; `attempt` defaults to the last one. */
   step(project: string, ticket: string, stepId: string, attempt?: number): StepDetail | undefined;
   coderSession(project: string, ticket: string): CoderSessionRead | undefined;
+  /** The agent session one attempt of a step left, to reopen as a fork. */
+  stepSession(project: string, ticket: string, stepId: string, attempt: number): CoderSessionRead | undefined;
   recap(project: string, ticket: string): RunRecap | undefined;
   report(project: string, ticket: string): ReportRead | undefined;
   file(project: string, ticket: string, path: string): FileRead;
@@ -57,6 +59,7 @@ export function createReadModel(options: ReadModelOptions = {}): ReadModel {
     steps: (project, ticket) => readSteps(project, ticket, options),
     step: (project, ticket, stepId, attempt) => readStepDetail(project, ticket, stepId, attempt, options),
     coderSession: (project, ticket) => readCoderSession(project, ticket, options),
+    stepSession: (project, ticket, stepId, attempt) => readStepSession(project, ticket, stepId, attempt, options),
     recap: (project, ticket) => readRecap(project, ticket, options),
     report: (project, ticket) => readReport(project, ticket, options),
     file: (project, ticket, path) => readFile(project, ticket, path, options),
