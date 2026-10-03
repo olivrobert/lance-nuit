@@ -17,7 +17,9 @@ item normally looks like this:
     └── <run-id>/
         ├── state.json
         ├── events.jsonl       # append-only event journal and live feed
-        └── steps/<step>/attempt-001/output.log
+        └── steps/<step>/attempt-001/
+            ├── output.log
+            └── command.txt    # the rendered command or prompt the attempt was given
 ```
 
 `ctx.paths.artifactsDir`, `ctx.paths.reportsDir`, and
@@ -84,9 +86,12 @@ retries, sessions, profile attribution, usage/cost control data, the highest
 attempt number allocated per step (`last_attempt`), and the run-level verdict,
 totals, and cost decisions. It does **not** carry the attempts or the last
 rendered command: the attempts are projected from the journal on resume, and the
-command is the whole agent prompt, kept in memory only (`state/run-repository.ts`
+command is the whole agent prompt, kept in memory (`state/run-repository.ts`
 is the one writer of the snapshot, and `model/run.ts` marks both fields as
-runtime-only). The pipeline definition and configuration are reloaded when a run
+runtime-only). Each attempt also copies the command it was given to
+`command.txt` beside its log, once, when it starts; that copy is diagnostic,
+read only by the dashboard, and an attempt whose copy cannot be written still
+runs. The pipeline definition and configuration are reloaded when a run
 resumes, while persisted step state (including the profile and session) is
 retained for correct attribution. Which of the two files is believed when they
 disagree is settled per concept in [Which record is authoritative](#which-record-is-authoritative).

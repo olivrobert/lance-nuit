@@ -5,6 +5,7 @@
 // own ledger: nothing here adds a step's cost to another, so the total on
 // screen is the one the budget was enforced against. The layout of the
 // timeline is `timelineLanes`, a pure function; this file only draws it.
+// A lane opens its step underneath it (`StepPanel.tsx`).
 
 import type { JSX } from "react";
 import type { Item, RunRecap, RunRecapStep, RunStepsView, WorkItemTree } from "../../api/types.js";
@@ -16,8 +17,10 @@ import {
   timelineLanes,
 } from "../../lib/run-timeline.js";
 import { fmtCost, fmtDuration, fmtTokens } from "../../lib/format.js";
+import { type OpenStep, openStepOf, setOpenStep, useUi } from "../../store/ui-store.js";
 import styles from "./Run.module.css";
 import { Screenshots } from "./Screenshots.js";
+import { StepPanel } from "./StepPanel.js";
 import { Steps } from "./Steps.js";
 
 /** Local wall-clock time, `HH:MM`: the reader compares it with their morning,
@@ -112,6 +115,7 @@ function AxisLabels({ timeline }: { timeline: RunTimeline }): JSX.Element {
 
 function TimelineGrid({ item, timeline }: { item: Item; timeline: RunTimeline }): JSX.Element {
   const { short } = timeline;
+  const open = useUi((state) => openStepOf(state, item.key));
   return (
     <div className={styles.timelineWrap}>
       <div className={styles.timeline}>
@@ -122,7 +126,7 @@ function TimelineGrid({ item, timeline }: { item: Item; timeline: RunTimeline })
         <div className={`${styles.hd} ${styles.num}`}>Duration</div>
         <div className={`${styles.hd} ${styles.num}`}>Cost</div>
         {timeline.lanes.map((lane) => (
-          <Lane key={lane.step.id} lane={lane} />
+          <Lane key={lane.step.id} item={item} lane={lane} {...(open?.stepId === lane.step.id ? { open } : {})} />
         ))}
         {short.count > 0 ? (
           <>
@@ -156,7 +160,7 @@ function TimelineGrid({ item, timeline }: { item: Item; timeline: RunTimeline })
   );
 }
 
-function Lane({ lane }: { lane: RunTimelineLane }): JSX.Element {
+function Lane({ item, lane, open }: { item: Item; lane: RunTimelineLane; open?: OpenStep }): JSX.Element {
   const { step } = lane;
   const broken = step.status === "failed" || step.status === "aborted";
   return (
@@ -165,7 +169,15 @@ function Lane({ lane }: { lane: RunTimelineLane }): JSX.Element {
         className={styles.name}
         title={step.retries ? `${step.id} · ${step.retries} ${step.retries === 1 ? "retry" : "retries"}` : step.id}
       >
-        <code className={broken ? styles.brokenText : ""}>{step.id}</code>
+        <button
+          type="button"
+          className={styles.toggle}
+          aria-expanded={open !== undefined}
+          onClick={() => setOpenStep(item.key, open ? null : { stepId: step.id })}
+        >
+          <span className={styles.chevron}>{open ? "▾" : "▸"}</span>
+          <code className={broken ? styles.brokenText : ""}>{step.id}</code>
+        </button>
         {step.status === "running" ? <span className="small mute">running</span> : null}
       </div>
       <div>
@@ -173,6 +185,11 @@ function Lane({ lane }: { lane: RunTimelineLane }): JSX.Element {
       </div>
       <div className={styles.num}>{fmtDuration(lane.wallMs)}</div>
       <div className={styles.num}>{stepCost(step)}</div>
+      {open ? (
+        <div className={styles.opened}>
+          <StepPanel item={item} stepId={step.id} {...(open.attempt !== undefined ? { attempt: open.attempt } : {})} />
+        </div>
+      ) : null}
     </>
   );
 }

@@ -46,7 +46,7 @@ import {
 } from "../state/provenance.js";
 import { appendRunEvent, relativeRunPath } from "../state/run-journal.js";
 import { closeAttempt } from "../state/attempt-closure.js";
-import { logicalAttemptLogPath, nextAttemptLogPath } from "../state/run-timeline.js";
+import { logicalAttemptLogPath, nextAttemptLogPath, writeAttemptCommand } from "../state/run-timeline.js";
 import { saveRun } from "../state/run-repository.js";
 import { recordStepVerdict } from "../state/run-transitions.js";
 import {
@@ -293,6 +293,14 @@ export async function runTrackedAttempt<R extends AttemptRecord>(options: RunTra
   // `nextAttemptLogPath` has just pushed the running attempt; it is the object
   // every closer identifies the attempt by.
   const attempt = step.attempts!.at(-1)!;
+  if (command) {
+    try {
+      writeAttemptCommand(stepLogPath, command);
+    } catch {
+      // A diagnostic copy of the prompt: losing it costs the dashboard a view,
+      // failing the attempt over it would cost the run.
+    }
+  }
   appendRunEvent(run, "step.attempt.started", {
     stepId: step.id,
     attempt: attempt.attempt,

@@ -2,7 +2,7 @@
 //
 // Step logs and informative markdown rendering for a run.
 
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isLogicalSegment } from "../model/artifact-ports.js";
 import type { Run, RunStep } from "../model/run.js";
@@ -62,6 +62,17 @@ export function attemptLogPath(run: Run, step: RunStep, attempt: number): string
   const dir = join(run.run_dir, dirname(logicalAttemptLogPath(step.id, attempt)));
   mkdirSync(dir, { recursive: true });
   return join(dir, "output.log");
+}
+
+/** What an attempt was given, beside what it printed. The snapshot does not
+ *  keep the rendered prompt (it would be rewritten on every transition), so this
+ *  file is the only place a reader can still see it once the run is over. */
+export const ATTEMPT_COMMAND_FILE = "command.txt";
+
+/** Write the rendered command — the agent prompt, the fix prompt, or the shell
+ *  command — next to the attempt log. */
+export function writeAttemptCommand(stepLogPath: string, command: string): void {
+  writeFileSync(join(dirname(stepLogPath), ATTEMPT_COMMAND_FILE), command, { encoding: "utf-8" });
 }
 
 /** Allocate and register the next attempt before spawning. */
