@@ -141,8 +141,13 @@ export function absorbStepFailure(run: Run, step: RunStep, reason: string): void
 
 /** Finalize bookkeeping when the process receives SIGINT/SIGTERM.
  *  `estimatedCostUsd` carries the killed attempt's live spend estimate: without
- *  it the budget ledger loses everything the interrupted agent consumed. */
-export function abortRun(run: Run, signal: "SIGINT" | "SIGTERM", options: { estimatedCostUsd?: number } = {}): void {
+ *  it the budget ledger loses everything the interrupted agent consumed. `model`
+ *  is the model that attempt reported, for a step that recorded none before. */
+export function abortRun(
+  run: Run,
+  signal: "SIGINT" | "SIGTERM",
+  options: { estimatedCostUsd?: number; model?: string } = {},
+): void {
   const reason = `${signal}: run interrupted manually`;
   const now = new Date().toISOString();
   const activeStep = run.steps.find((step) => step.status === "running");
@@ -167,7 +172,7 @@ export function abortRun(run: Run, signal: "SIGINT" | "SIGTERM", options: { esti
       const control: StepControl = {
         duration_ms: duration,
         ...(abortedCost != null ? { total_cost_usd: abortedCost } : {}),
-        model: activeStep.control?.model,
+        model: activeStep.control?.model ?? options.model,
         provider: activeStep.control?.provider ?? activeStep.session?.provider,
         cost_estimated: true,
       };

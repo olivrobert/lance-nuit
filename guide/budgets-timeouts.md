@@ -188,6 +188,12 @@ spawn. When the final attempt itself ends without a usage event, the spawn's
 figure is the discarded attempts' cost alone and is flagged `cost_unknown`: a
 lower bound, not the price.
 
+The Claude CLI streams each message's usage as it stood when the message
+started, so its output tokens are known only from the final `result` event. A
+finished attempt records that figure. The live estimate — the mid-flight budget
+gate and the spend charged to an interrupted attempt — sees input and cache
+tokens in full but almost none of the output, and reads low.
+
 ### Unknown spend stops a capped run
 
 A ceiling can only be enforced against spend the runner could price, so a capped
