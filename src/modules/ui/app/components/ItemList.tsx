@@ -1,6 +1,11 @@
 // The review inbox, read in morning order: what needs you, what is running,
 // then one section per night (`timeline` decides which, and how each is named).
 //
+// Two tabs split those sections: `Inbox` holds what needs you and what is
+// running, under a card saying what the latest night did; `History` holds the
+// nights. The view is the inbox's address, like the selection: the tabs report
+// a click, `InboxScreen` moves the address.
+//
 // `Needs you` and `Running` are plain sections: they are never collapsed. The
 // nights are native `<details>`, which brings open/close and its keyboard for
 // free. Their open state lives here, keyed on the stable section id, so a poll
@@ -20,7 +25,15 @@ import type { CSSProperties, JSX } from "react";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Item } from "../api/types.js";
 import { cx } from "../lib/cx.js";
-import { rowShowsTag, rowTime, timeline, type TimelineSection, type TimelineSectionId } from "../lib/inbox-timeline.js";
+import type { InboxView } from "../lib/inbox.js";
+import {
+  type NightSummary,
+  rowShowsTag,
+  rowTime,
+  timeline,
+  type TimelineSection,
+  type TimelineSectionId,
+} from "../lib/inbox-timeline.js";
 import { reasonOf } from "../lib/items.js";
 import { fmtCost } from "../lib/format.js";
 import { setQuery } from "../store/ui-store.js";
@@ -99,12 +112,68 @@ function SectionHead({ section }: { section: TimelineSection }): JSX.Element {
   );
 }
 
+const VIEWS: readonly (readonly [InboxView, string])[] = [
+  ["inbox", "Inbox"],
+  ["history", "History"],
+];
+
+function ViewTabs({
+  view,
+  counts,
+  onView,
+}: {
+  view: InboxView;
+  counts: Record<InboxView, number>;
+  onView(view: InboxView): void;
+}): JSX.Element {
+  return (
+    <div className={styles.views} role="tablist" aria-label="View">
+      {VIEWS.map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={view === id}
+          className={cx(view === id && styles.on)}
+          onClick={() => onView(id)}
+        >
+          {label}
+          <span className={cx(styles.count, id === "inbox" && counts.inbox > 0 && styles.hot)}>{counts[id]}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function NightCard({ night, onHistory }: { night: NightSummary; onHistory(): void }): JSX.Element {
+  const cost = fmtCost(night.cost);
+  return (
+    <section className={styles.night} aria-label={night.label}>
+      <div>
+        <strong>{night.label}</strong>
+        {night.range ? <small>{night.range}</small> : null}
+      </div>
+      <div className={styles.figures}>
+        <span>{runs(night.runs)}</span>
+        <span className={styles.ok}>{`${night.delivered} delivered`}</span>
+        {night.closed > 0 ? <span>{`${night.closed} closed`}</span> : null}
+        {cost === "—" ? null : <span>{cost}</span>}
+      </div>
+      <button type="button" className={styles.more} onClick={onHistory}>
+        Open history
+      </button>
+    </section>
+  );
+}
+
 function EmptyList({
+  view,
   total,
   query,
   filter,
   onShowAll,
 }: {
+  view: InboxView;
   total: number;
   query: string;
   filter: string | null;
@@ -117,6 +186,18 @@ function EmptyList({
         <button type="button" onClick={() => setQuery("")}>
           Clear search
         </button>
+      </div>
+    );
+  }
+  if (view === "inbox" && total > 0) {
+    return (
+      <div className={styles.empty}>
+        <p className={styles.zero}>Nothing needs you.</p>
+        <p>
+          {filter
+            ? `No decision, no failure, nothing running in ${filter}.`
+            : "No decision, no failure, nothing running."}
+        </p>
       </div>
     );
   }
@@ -134,9 +215,9 @@ function EmptyList({
 }
 
 /** Keeps `--list-head` on the list equal to its sticky header's height, so the
- *  section headers stick right under it however many lines the chips wrap to.
- *  The header is held through a callback ref: it mounts and unmounts with the
- *  sections, and the observer has to follow it. */
+ *  section headers stick right under it however many lines the chips wrap to,
+ *  and the jump chips come and go with the sections. The header is held
+ *  through a callback ref, so the observer starts once it is in the DOM. */
 function useHeadHeight(): [(element: HTMLElement | null) => void, number] {
   const [head, setHead] = useState<HTMLElement | null>(null);
   const [height, setHeight] = useState(0);
@@ -151,7 +232,12 @@ function useHeadHeight(): [(element: HTMLElement | null) => void, number] {
 }
 
 export interface ItemListProps {
-  /** The rows the chip and the search leave on screen. */
+  view: InboxView;
+  /** Rows of each view the chip and the search leave, for the tabs. */
+  counts: Record<InboxView, number>;
+  /** The latest night, for the card on top of the inbox view. */
+  night: NightSummary | null;
+  /** The rows of the view the chip and the search leave on screen. */
   rows: readonly Item[];
   /** Every item, whatever the filters: the empty state says which filter hid them. */
   total: number;
@@ -160,15 +246,27 @@ export interface ItemListProps {
   selected: string | null;
   onSelect(key: string): void;
   onShowAll(): void;
+  onView(view: InboxView): void;
 }
 
-export function ItemList({ rows, total, filter, query, selected, onSelect, onShowAll }: ItemListProps): JSX.Element {
+export function ItemList({
+  view,
+  counts,
+  night,
+  rows,
+  total,
+  filter,
+  query,
+  selected,
+  onSelect,
+  onShowAll,
+  onView,
+}: ItemListProps): JSX.Element {
   // Only what the reader toggled; a section they never touched follows its default.
   const [opened, setOpened] = useState<Partial<Record<TimelineSectionId, boolean>>>({});
   const sectionRefs = useRef(new Map<TimelineSectionId, HTMLElement>());
   const now = new Date();
   const sections = timeline(rows, now);
-  const hasHead = sections.length > 0 || query.trim() !== "";
   const [head, headHeight] = useHeadHeight();
   const showProject = !filter && new Set(rows.map((item) => item.project.name)).size > 1;
   // A section collapsed by default still opens when it is the only one: a
@@ -213,22 +311,24 @@ export function ItemList({ rows, total, filter, query, selected, onSelect, onSho
       style={{ "--list-head": `${headHeight}px` } as CSSProperties}
       aria-label="Runs"
     >
-      {hasHead ? (
-        <header ref={head}>
-          {query.trim() ? (
-            <div className="small mute">{`${rows.length} match${rows.length === 1 ? "" : "es"}`}</div>
-          ) : null}
-          {sections.length > 0 ? (
-            <nav className={styles.jumps} aria-label="Jump to">
-              {sections.map((section) => (
-                <button key={section.id} type="button" onClick={() => jump(section.id)}>
-                  {section.label}
-                  <span className={styles.n}>{section.items.length}</span>
-                </button>
-              ))}
-            </nav>
-          ) : null}
-        </header>
+      <header ref={head}>
+        <ViewTabs view={view} counts={counts} onView={onView} />
+        {query.trim() ? (
+          <div className="small mute">{`${rows.length} match${rows.length === 1 ? "" : "es"}`}</div>
+        ) : null}
+        {sections.length > 0 ? (
+          <nav className={styles.jumps} aria-label="Jump to">
+            {sections.map((section) => (
+              <button key={section.id} type="button" onClick={() => jump(section.id)}>
+                {section.label}
+                <span className={styles.n}>{section.items.length}</span>
+              </button>
+            ))}
+          </nav>
+        ) : null}
+      </header>
+      {view === "inbox" && night && !query.trim() ? (
+        <NightCard night={night} onHistory={() => onView("history")} />
       ) : null}
       {sections.map((section) =>
         section.id === "needs" || section.id === "running" ? (
@@ -258,7 +358,9 @@ export function ItemList({ rows, total, filter, query, selected, onSelect, onSho
           </details>
         ),
       )}
-      {rows.length === 0 ? <EmptyList total={total} query={query} filter={filter} onShowAll={onShowAll} /> : null}
+      {rows.length === 0 ? (
+        <EmptyList view={view} total={total} query={query} filter={filter} onShowAll={onShowAll} />
+      ) : null}
     </aside>
   );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Item } from "../api/types.js";
-import { newlyWaiting, visibleItems, waitingCount, waitingKeys } from "./inbox.js";
+import { newlyWaiting, viewOf, visibleItems, waitingCount, waitingKeys } from "./inbox.js";
 import { makeItem } from "./testing.js";
 
 describe("visibleItems", () => {
@@ -100,5 +100,17 @@ describe("newlyWaiting", () => {
 
   test("never announces a completed run", () => {
     expect(newlyWaiting(new Set(), [done])).toEqual([]);
+  });
+});
+
+describe("viewOf", () => {
+  test("files every finished run in the history and the rest in the inbox", () => {
+    expect(viewOf(makeItem({ group: "decision" }))).toBe("inbox");
+    expect(viewOf(makeItem({ group: "failure", status: "FAIL" }))).toBe("inbox");
+    expect(viewOf(makeItem({ group: "running", status: "RUNNING" }))).toBe("inbox");
+    expect(viewOf(makeItem({ group: "done", status: "PASS" }))).toBe("history");
+    expect(
+      viewOf(makeItem({ group: "done", status: "FAIL", closed: { at: "2026-09-25T08:00:00Z", by: "olivier" } })),
+    ).toBe("history");
   });
 });

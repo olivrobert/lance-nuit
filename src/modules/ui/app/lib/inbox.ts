@@ -1,8 +1,19 @@
-// The inbox as a list: which rows show, how many wait for the reader, and which
-// ones started waiting since the previous poll.
+// The inbox as a list: which view a row is filed in, which rows show, how many
+// wait for the reader, and which ones started waiting since the previous poll.
 
 import type { Item } from "../api/types.js";
 import { isWaiting, reasonOf } from "./items.js";
+
+/** The two views of the list: `inbox` holds what needs the reader or is still
+ *  running, `history` every finished run. Finished runs are most of the rows,
+ *  and they buried the few that ask for something. */
+export type InboxView = "inbox" | "history";
+
+/** The view a row is filed in. A live launch already puts its item in the
+ *  `running` group, and a closed run in `done`. */
+export function viewOf(item: Item): InboxView {
+  return item.group === "done" ? "history" : "inbox";
+}
 
 /** What the sidebar filters on: a project chip and the search box. */
 export interface ItemFilters {

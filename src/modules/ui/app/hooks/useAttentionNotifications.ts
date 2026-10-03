@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { itemsQuery } from "../api/queries.js";
 import type { Item } from "../api/types.js";
 import { inboxTarget } from "../lib/inbox-address.js";
-import { newlyWaiting, waitingKeys } from "../lib/inbox.js";
+import { newlyWaiting, viewOf, waitingKeys } from "../lib/inbox.js";
 import { reasonOf } from "../lib/items.js";
 
 /** `unsupported` covers both a browser without the API and a page served over
@@ -58,7 +58,7 @@ export function useAttentionNotifications(): void {
     const fresh = newlyWaiting(previous.current, items);
     previous.current = waitingKeys(items);
     if (fresh.length === 0 || !document.hidden || currentPermission() !== "granted") return;
-    const open = (item: Item): void => void navigate(inboxTarget({ chip: null, item: item.key }));
+    const open = (item: Item): void => void navigate(inboxTarget({ view: viewOf(item), chip: null, item: item.key }));
     for (const item of fresh) announce(item, open);
   }, [items, navigate]);
 }
