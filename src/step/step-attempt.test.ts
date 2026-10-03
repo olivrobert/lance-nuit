@@ -190,6 +190,17 @@ test("abort on a step without totals yet: the step total is the aborted attempt 
   expect(step.control?.cost_estimated).toBe(true);
 });
 
+test("abort keeps the model the killed attempt reported when the step recorded none", () => {
+  const step = makeStep();
+  const run = makeRun(step, 10);
+  nextAttemptLogPath(run, step, "fix");
+
+  abortRun(run, "SIGINT", { estimatedCostUsd: 0.4, model: "claude-opus-5-5" });
+
+  expect(step.attempts[0]?.control?.model).toBe("claude-opus-5-5");
+  expect(step.control?.model).toBe("claude-opus-5-5");
+});
+
 test("abort on a step already charged: the estimate is added and the total flagged as estimated", () => {
   const step = makeStep(
     { runner: "agent", backend: { id: "claude" } },
