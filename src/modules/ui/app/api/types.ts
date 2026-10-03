@@ -27,7 +27,10 @@ export type {
   LaunchRecord,
   ProjectEntry,
   RunEventView,
+  RunJourney,
+  RunJourneyAttempt,
   RunModelCost,
+  RunPause,
   RunRecap,
   RunRecapStep,
   RunReport,
@@ -131,7 +134,7 @@ export interface Assumptions {
 
 /** Sheet tabs. `auto` is not a tab: it means "follow the item's state", and is
  *  resolved by `currentSheetTab`. */
-export type SheetTab = "diagnostic" | "report" | "run" | "document" | "files";
+export type SheetTab = "report" | "run" | "document" | "files";
 export type RequestedSheetTab = SheetTab | "auto";
 
 /** `GET /api/projects/<name>/pipelines`. */

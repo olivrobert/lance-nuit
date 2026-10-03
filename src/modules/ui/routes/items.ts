@@ -1,7 +1,7 @@
 // modules/ui/routes/items.ts
 //
-// `/api/items`: the inbox, one item's detail, the files of its work item, and
-// one step of its run.
+// `/api/items`: the inbox, one item's detail, the files of its work item, one
+// step of its run, and the run's journey.
 //
 // A project and a ticket are never used to build a path here: the read model
 // answers from the projects it lists itself, so an unlisted project or an
@@ -109,6 +109,20 @@ async function handleStep(request: RouteRequest, project: string, ticket: string
 }
 
 /**
+ * Every attempt and pause of the item's run, for the Run tab. Read on demand
+ * like a step, for the same reason: it parses the whole journal.
+ */
+async function handleJourney(request: RouteRequest, project: string, ticket: string, deps: UiDeps): Promise<void> {
+  if (!(await requireItem(request, project, ticket, deps))) return;
+  const journey = deps.readModel.journey(project, ticket);
+  if (!journey) {
+    sendError(request.res, 404, "no run");
+    return;
+  }
+  sendJson(request.res, 200, journey);
+}
+
+/**
  * One image of a work item, as raw bytes, for an `<img src>`.
  *
  * The one binary answer of the API. It may be cached privately for a short
@@ -159,6 +173,7 @@ export const itemsRoute: Route = {
     else if (tail[0] === "file") await handleFile(request, project, ticket, deps);
     else if (tail[0] === "raw") await handleRaw(request, project, ticket, deps);
     else if (tail[0] === "step") await handleStep(request, project, ticket, deps);
+    else if (tail[0] === "journey") await handleJourney(request, project, ticket, deps);
     else sendNotFound(res);
   },
 };

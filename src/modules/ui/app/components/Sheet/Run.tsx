@@ -1,248 +1,124 @@
 // The Run tab: where the time and the money of a run went.
 //
-// Three figures, a timeline of the steps over the run span, and the cost split
-// by model. Every figure is read from `RunRecap`, which translates the runner's
-// own ledger: nothing here adds a step's cost to another, so the total on
-// screen is the one the budget was enforced against. The layout of the
-// timeline is `timelineLanes`, a pure function; this file only draws it.
-// A lane opens its step underneath it (`StepPanel.tsx`).
+// A quiet summary (`RunSummary.tsx`), the run's invocations and the waits
+// between them as one thin strip, then the timeline of every attempt
+// (`RunTimeline.tsx`). The attempts and pauses come from the journal on their
+// own query, mounted only while this tab is shown; the totals come from the
+// recap and the item, which translate the runner's ledger, so the cost on screen
+// is the one the budget was enforced against. The layout is `buildTimeline`, a
+// pure function; these files only draw it.
 
-import type { JSX } from "react";
-import type { Item, RunRecap, RunRecapStep, RunStepsView, WorkItemTree } from "../../api/types.js";
-import {
-  costByModel,
-  NOTABLE_MS,
-  type RunTimeline,
-  type RunTimelineLane,
-  timelineLanes,
-} from "../../lib/run-timeline.js";
-import { fmtCost, fmtDuration, fmtTokens } from "../../lib/format.js";
-import { type OpenStep, openStepOf, setOpenStep, useUi } from "../../store/ui-store.js";
+import { useQuery } from "@tanstack/react-query";
+import { type JSX, useState } from "react";
+import { runJourneyQuery } from "../../api/queries.js";
+import type { Item, RunRecap, RunStepsView, WorkItemTree } from "../../api/types.js";
+import { fmtClock, fmtDuration } from "../../lib/format.js";
+import { failedBeforeRun } from "../../lib/items.js";
+import { buildTimeline, type RunEpisode, type RunTimeline } from "../../lib/run-timeline.js";
+import { Callout, LaunchFailureCallout } from "./Callout.js";
+import { showsDecision } from "./Decision.js";
 import styles from "./Run.module.css";
+import { RunSummary } from "./RunSummary.js";
+import { type EpisodeHighlight, RunTimelineCard } from "./RunTimeline.js";
 import { Screenshots } from "./Screenshots.js";
-import { StepPanel } from "./StepPanel.js";
 import { Steps } from "./Steps.js";
 
-/** Local wall-clock time, `HH:MM`: the reader compares it with their morning,
- *  not with the runner's UTC journal. */
-function clock(ms: number | undefined): string {
-  if (ms === undefined || !Number.isFinite(ms)) return "—";
-  const date = new Date(ms);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+const OUTCOME: Record<Item["status"], string> = {
+  PASS: "passed",
+  FAIL: "failed",
+  ABORTED: "aborted",
+  STOPPED: "stopped",
+  RUNNING: "running",
+};
+
+function iso(timeline: RunTimeline, at: number): string {
+  return new Date(timeline.startMs + at).toISOString();
 }
 
-function percent(part: number, whole: number): string {
-  return `${Math.round((part / whole) * 100)} %`;
+function episodeTitle(episode: RunEpisode): string {
+  const length = fmtDuration(episode.to - episode.from);
+  if (episode.kind === "pause") return `Wait · ${length}`;
+  return `${episode.index === 0 ? "Initial run" : `Resume ${episode.index}`} · ${length}`;
 }
 
-function stepCost(step: RunRecapStep): string {
-  if (typeof step.costUsd !== "number" && !step.costUnknown) return "—";
-  return fmtCost({
-    ...(typeof step.costUsd === "number" ? { usd: step.costUsd } : {}),
-    estimated: step.costEstimated === true,
-    ...(step.costUnknown ? { unknown: true } : {}),
-  });
+interface EpisodeStoryProps {
+  item: Item;
+  timeline: RunTimeline;
+  episode: RunEpisode;
+  previous: RunEpisode | undefined;
+  next: RunEpisode | undefined;
 }
 
-function costNote(item: Item): string {
-  if (item.cost?.unknown) return "a floor: some spend could not be priced";
-  if (item.cost?.estimated) return "estimated from rate tables";
-  return typeof item.cost?.usd === "number" ? "as the providers reported it" : "";
-}
-
-function Figures({ item, recap, timeline }: { item: Item; recap: RunRecap; timeline: RunTimeline }): JSX.Element {
-  const { wallMs } = timeline.totals;
-  const tokens = recap.tokens;
-  const tokensIn = tokens ? tokens.input + tokens.cacheRead + tokens.cacheWrite : 0;
-  const end = timeline.startMs !== undefined ? timeline.startMs + timeline.spanMs : undefined;
+/** How a stretch began and ended: the decision that resumed it, and the stop
+ *  or the outcome that closed it. */
+function EpisodeStory({ item, timeline, episode, previous, next }: EpisodeStoryProps): JSX.Element {
+  if (episode.kind === "pause") return <span>{episode.pause.reason ?? "runner exited"}</span>;
+  const decision = previous?.kind === "pause" ? previous.pause.decision : undefined;
+  let opened: JSX.Element | null = null;
+  if (episode.index > 0 && decision) {
+    opened = <span className={decision === "approved" ? styles.ok : styles.warn}>{`${decision}, `}</span>;
+  } else if (episode.index > 0) {
+    opened = <span className={styles.warn}>resumed without a decision, </span>;
+  }
+  const waiting = episode.last ? timeline.waiting : undefined;
+  let closed: JSX.Element;
+  if (next?.kind === "pause") closed = <span>{`stopped: ${next.pause.reason ?? "runner exited"}`}</span>;
+  else if (waiting) closed = <span>{`stopped: ${waiting.reason ?? "waiting"}`}</span>;
+  else closed = <span className={item.status === "PASS" ? styles.ok : ""}>{OUTCOME[item.status]}</span>;
   return (
-    <dl className={styles.figures}>
-      <div title="From the first to the last write of the run, pauses included">
-        <dt>Elapsed</dt>
-        <dd>
-          {fmtDuration(wallMs)}
-          {wallMs !== undefined ? <small>{`${clock(timeline.startMs)} → ${clock(end)}`}</small> : null}
-        </dd>
-      </div>
-      <div>
-        <dt>Cost</dt>
-        <dd>
-          {fmtCost(item.cost)}
-          <small>{costNote(item)}</small>
-        </dd>
-      </div>
-      <div
-        title={tokens ? `cache read ${fmtTokens(tokens.cacheRead)} · cache write ${fmtTokens(tokens.cacheWrite)}` : ""}
-      >
-        <dt>Tokens in / out</dt>
-        <dd>
-          {tokens ? `${fmtTokens(tokensIn)} / ${fmtTokens(tokens.output)}` : "—"}
-          {tokens && tokensIn > 0 ? <small>{`${percent(tokens.cacheRead, tokensIn)} read from cache`}</small> : null}
-        </dd>
-      </div>
-    </dl>
+    <span>
+      {opened}
+      {closed}
+    </span>
   );
 }
 
-function Track({ lane }: { lane: RunTimelineLane }): JSX.Element {
-  const { bar } = lane;
-  const kind = lane.agent ? styles.agent : styles.command;
-  const broken = lane.step.status === "failed" || lane.step.status === "aborted" ? styles.broken : "";
+interface JourneyProps {
+  item: Item;
+  timeline: RunTimeline;
+  onHighlight: (highlight: EpisodeHighlight | null) => void;
+}
+
+/** The run's invocations and the waits between them, each as wide as the time
+ *  it took. A run that ran in one go has nothing to show here. */
+function Journey({ item, timeline, onHighlight }: JourneyProps): JSX.Element | null {
+  const { episodes, waiting } = timeline;
+  if (episodes.length < 2 && !waiting) return null;
   return (
-    <div className={styles.track}>
-      <span className={styles.axis} />
-      {bar ? (
-        <span className={`${styles.wall} ${kind} ${broken}`} style={{ left: `${bar.left}%`, width: `${bar.width}%` }} />
+    <ol className={styles.journey} aria-label="Run episodes">
+      {episodes.map((episode, index) => {
+        const open = episode.kind === "run" && episode.last && (timeline.live || waiting !== undefined);
+        const span = `${fmtClock(iso(timeline, episode.from))} → ${open ? "…" : fmtClock(iso(timeline, episode.to))}`;
+        return (
+          <li
+            key={`${episode.kind}-${episode.from}`}
+            className={episode.kind === "pause" ? `${styles.episode} ${styles.pause}` : styles.episode}
+            style={{ flexGrow: Math.max(episode.to - episode.from, 1) }}
+            onPointerEnter={() => onHighlight({ kind: episode.kind, from: episode.from, to: episode.to })}
+            onPointerLeave={() => onHighlight(null)}
+          >
+            <span className={styles.segment} />
+            <b>{episodeTitle(episode)}</b>
+            <span>{span}</span>
+            <EpisodeStory
+              item={item}
+              timeline={timeline}
+              episode={episode}
+              previous={episodes[index - 1]}
+              next={episodes[index + 1]}
+            />
+          </li>
+        );
+      })}
+      {waiting ? (
+        <li className={`${styles.episode} ${styles.pause} ${styles.waiting}`}>
+          <span className={styles.segment} />
+          <b>Waiting</b>
+          <span>{`since ${fmtClock(waiting.stoppedAt)}`}</span>
+          <span>{waiting.reason ?? ""}</span>
+        </li>
       ) : null}
-    </div>
-  );
-}
-
-function AxisLabels({ timeline }: { timeline: RunTimeline }): JSX.Element {
-  const start = timeline.startMs;
-  return (
-    <div className={styles.axisLabels}>
-      {start !== undefined
-        ? [0, 25, 50, 75, 100].map((at) => (
-            <span key={at} style={{ left: `${at}%` }}>
-              {clock(start + (timeline.spanMs * at) / 100)}
-            </span>
-          ))
-        : null}
-    </div>
-  );
-}
-
-function TimelineGrid({ item, timeline }: { item: Item; timeline: RunTimeline }): JSX.Element {
-  const { short } = timeline;
-  const open = useUi((state) => openStepOf(state, item.key));
-  return (
-    <div className={styles.timelineWrap}>
-      <div className={styles.timeline}>
-        <div className={styles.hd}>Step</div>
-        <div className={styles.hd}>
-          <AxisLabels timeline={timeline} />
-        </div>
-        <div className={`${styles.hd} ${styles.num}`}>Duration</div>
-        <div className={`${styles.hd} ${styles.num}`}>Cost</div>
-        {timeline.lanes.map((lane) => (
-          <Lane key={lane.step.id} item={item} lane={lane} {...(open?.stepId === lane.step.id ? { open } : {})} />
-        ))}
-        {short.count > 0 ? (
-          <>
-            <div className="mute">{`${short.count} short steps`}</div>
-            <div>
-              <div className={styles.track}>
-                <span className={styles.axis} />
-                {short.ticks.map((left, index) => (
-                  // Ticks carry no identity beyond their position and order.
-                  // biome-ignore lint/suspicious/noArrayIndexKey: positions may repeat
-                  <span key={index} className={styles.tick} style={{ left: `${left}%` }} />
-                ))}
-              </div>
-            </div>
-            <div className={`${styles.num} mute`}>{`< ${fmtDuration(NOTABLE_MS)}`}</div>
-            <div className={`${styles.num} mute`}>—</div>
-          </>
-        ) : null}
-        <div>
-          <b>Total</b>
-        </div>
-        <div />
-        <div className={styles.num}>
-          <b>{fmtDuration(timeline.totals.wallMs)}</b>
-        </div>
-        <div className={styles.num}>
-          <b>{fmtCost(item.cost)}</b>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Lane({ item, lane, open }: { item: Item; lane: RunTimelineLane; open?: OpenStep }): JSX.Element {
-  const { step } = lane;
-  const broken = step.status === "failed" || step.status === "aborted";
-  return (
-    <>
-      <div
-        className={styles.name}
-        title={step.retries ? `${step.id} · ${step.retries} ${step.retries === 1 ? "retry" : "retries"}` : step.id}
-      >
-        <button
-          type="button"
-          className={styles.toggle}
-          aria-expanded={open !== undefined}
-          onClick={() => setOpenStep(item.key, open ? null : { stepId: step.id })}
-        >
-          <span className={styles.chevron}>{open ? "▾" : "▸"}</span>
-          <code className={broken ? styles.brokenText : ""}>{step.id}</code>
-        </button>
-        {step.status === "running" ? <span className="small mute">running</span> : null}
-      </div>
-      <div>
-        <Track lane={lane} />
-      </div>
-      <div className={styles.num}>{fmtDuration(lane.wallMs)}</div>
-      <div className={styles.num}>{stepCost(step)}</div>
-      {open ? (
-        <div className={styles.opened}>
-          <StepPanel item={item} stepId={step.id} {...(open.attempt !== undefined ? { attempt: open.attempt } : {})} />
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-function Legend({ timeline }: { timeline: RunTimeline }): JSX.Element {
-  return (
-    <div className={styles.legend}>
-      <span>
-        <i className={`${styles.agent} ${styles.swatch}`} />
-        agent step
-      </span>
-      <span>
-        <i className={`${styles.command} ${styles.swatch}`} />
-        command
-      </span>
-      {timeline.skipped.length > 0 ? (
-        <span>
-          {`${timeline.skipped.length} skipped: `}
-          {timeline.skipped.map((id, index) => (
-            <span key={id}>
-              {index > 0 ? ", " : ""}
-              <code>{id}</code>
-            </span>
-          ))}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function CostByModel({ recap }: { recap: RunRecap }): JSX.Element | null {
-  const models = costByModel(recap);
-  if (models.length === 0) return null;
-  const max = Math.max(...models.map((entry) => entry.costUsd ?? 0), 0);
-  return (
-    <section>
-      <h3 className={styles.heading}>Cost by model</h3>
-      <div className={styles.models}>
-        {models.map((entry) => (
-          <div key={entry.model} className={styles.modelRow}>
-            <code>{entry.model}</code>
-            <span className={styles.modelBar}>
-              {max > 0 && (entry.costUsd ?? 0) > 0 ? (
-                <span style={{ width: `${((entry.costUsd ?? 0) / max) * 100}%` }} />
-              ) : null}
-            </span>
-            <span className={styles.num}>
-              {typeof entry.costUsd === "number" ? fmtCost({ usd: entry.costUsd, estimated: false }) : "—"}
-            </span>
-          </div>
-        ))}
-      </div>
-    </section>
+    </ol>
   );
 }
 
@@ -255,24 +131,29 @@ export interface RunProps {
 }
 
 export function Run({ item, recap, steps, tree }: RunProps): JSX.Element {
-  const timeline = recap ? timelineLanes(steps, recap) : null;
+  const { data: journey, dataUpdatedAt } = useQuery(runJourneyQuery(item));
+  // Hover state of this tab alone: nothing else reads it, and a poll that
+  // repaints the tab keeps it.
+  const [highlight, setHighlight] = useState<EpisodeHighlight | null>(null);
+  // A live run ends at the last poll, not at the render: the tab redraws on
+  // each poll, and a clock read during render would make it impure.
+  const timeline = journey ? buildTimeline(journey, recap, dataUpdatedAt) : null;
+  const ran = timeline !== null && timeline.attempts > 0;
+  // A launch that died before its run has no step to list: its box says it all.
+  const stepless = !ran && failedBeforeRun(item);
   return (
     <div className={styles.run}>
-      {item.status === "RUNNING" || !recap ? <Steps steps={steps} /> : null}
-      {recap && timeline ? (
+      <LaunchFailureCallout item={item} />
+      {showsDecision(item) ? null : <Callout item={item} includeActions={false} />}
+      {journey && timeline && ran ? (
         <>
-          <Figures item={item} recap={recap} timeline={timeline} />
-          {timeline.lanes.length > 0 || timeline.short.count > 0 ? (
-            <div className={styles.timelineBlock}>
-              <TimelineGrid item={item} timeline={timeline} />
-              <Legend timeline={timeline} />
-            </div>
-          ) : (
-            <p className="mute small">No step has run yet.</p>
-          )}
-          <CostByModel recap={recap} />
+          <RunSummary item={item} recap={recap} journey={journey} timeline={timeline} />
+          <Journey item={item} timeline={timeline} onHighlight={setHighlight} />
+          <RunTimelineCard item={item} recap={recap} timeline={timeline} highlight={highlight} />
         </>
-      ) : null}
+      ) : stepless ? null : (
+        <Steps steps={steps} />
+      )}
       <Screenshots item={item} tree={tree} />
     </div>
   );
