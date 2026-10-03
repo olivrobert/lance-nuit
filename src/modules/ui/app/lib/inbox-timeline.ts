@@ -1,9 +1,9 @@
 // The inbox in morning reading order: what needs you, what is running, then one
-// section per night, and the time each row shows.
+// section per night, the time each row shows, and what the latest night did.
 
 import type { Item, ItemCost } from "../api/types.js";
 import { fmtAge } from "./format.js";
-import { GROUPS, isWaiting } from "./items.js";
+import { GROUPS, isDelivered, isWaiting } from "./items.js";
 
 /** Local hour a night starts at: a run belongs to the night that began at the
  *  latest such hour at or before its `updatedAt`. A constant until the boundary
@@ -182,4 +182,32 @@ export function rowTime(item: Item, sectionId: TimelineSectionId, now: Date): st
   if (sectionId === "week") return `${WEEKDAYS[at.getDay()]} ${fmtClock(at)}`;
   if (sectionId === "earlier") return `${at.getDate()} ${MONTHS[at.getMonth()]}`;
   return fmtClock(at);
+}
+
+/** What the latest night with a finished run did, for the card at the top of
+ *  the inbox view: the history holds the rows, the inbox only the outcome. */
+export interface NightSummary {
+  label: string;
+  range?: string;
+  runs: number;
+  /** Runs that delivered: see `isDelivered`. */
+  delivered: number;
+  /** Runs somebody closed by hand. */
+  closed: number;
+  cost: ItemCost;
+}
+
+/** The newest section the finished runs fall in, `null` when there is none.
+ *  `finished` are the rows of the history view. */
+export function nightSummary(finished: readonly Item[], now: Date): NightSummary | null {
+  const [night] = timeline(finished, now);
+  if (!night) return null;
+  return {
+    label: night.label,
+    ...(night.range ? { range: night.range } : {}),
+    runs: night.items.length,
+    delivered: night.items.filter(isDelivered).length,
+    closed: night.items.filter((item) => item.closed !== undefined).length,
+    cost: night.cost,
+  };
 }

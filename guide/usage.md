@@ -183,11 +183,18 @@ from the dashboard or in `~/.lance-nuit/ui/projects.json`.
 
 ### Review inbox
 
-The list holds every run, in the order a morning reader goes through it:
+Two tabs split the runs. **Inbox** holds what still needs a look, in the order
+a morning reader goes through it:
 
 - **Needs you**: runs stopped for a decision, then technical failures;
-- **Running**: runs in progress;
-- one section per night for the finished runs. A night starts at 18:00 local
+- **Running**: runs in progress.
+
+A card above them sums up the latest night with a finished run: its run count,
+how many delivered, how many were closed by hand, and its cost. An empty inbox
+says so instead of showing an empty list. The tab count turns to an accent
+color when the inbox is not empty.
+
+**History** holds every finished run, one section per night. A night starts at 18:00 local
   time and runs until 18:00 the next day. The current night is **Tonight** once
   it started today and **Last night** in the morning, the one before it
   **Yesterday** (or **Last night** in the evening), the six nights before that
@@ -206,7 +213,8 @@ project badge only when no project is selected and the rows span several
 projects.
 
 The chips above the list jump to a section, opening it when it is folded; they
-do not filter. The search box and the project chips filter every section. The
+do not filter. The search box and the project chips filter every section of
+both tabs, and the tab counts follow them. The
 folded or open state of a night survives the periodic refresh. `j` or `↓` and
 `k` or `↑` move the selection over the rows on screen, `/` focuses the search,
 and `Escape` in the search clears it and returns to the list. These keys are
@@ -214,14 +222,18 @@ ignored while typing in a field, while a dialog is open, on the terminal
 screen, and with a modifier key. Outside the list, in the sheet or a file view,
 the arrows keep scrolling the page; only `j` and `k` move the selection there.
 
-The address bar follows the project chip and the open item, so a reload or a
-pasted link lands on the same place: `#/projects/<project>` for a chip,
-`#/projects/<project>/tickets/<ticket>` for an item under it, and
-`#/tickets/<project>/<ticket>` for an item with every project shown. The open
+The address bar follows the tab, the project chip and the open item, so a
+reload or a pasted link lands on the same place: `#/projects/<project>` for a
+chip, `#/projects/<project>/tickets/<ticket>` for an item under it, and
+`#/tickets/<project>/<ticket>` for an item with every project shown. Each of
+these addresses also exists under `#/history` for the **History** tab. An item
+opens in the tab it belongs to, whatever the link says: a run that finishes
+while it is open moves to **History** with it. Clicking a tab opens its first
+run waiting for you, or else its first run. The open
 tab and explorer file ride along as `?tab=<tab>&file=<path>`, so a link can
 point at one file of one item; they are dropped when another item opens.
-Changing project adds a browser history entry, so **Back** returns to the
-previous one; moving from item to item, tab to tab or file to file does not. A
+Changing project or tab adds a browser history entry, so **Back** returns to
+the previous one; moving from item to item, tab to tab or file to file does not. A
 link to a project the dashboard no longer lists opens every project instead,
 and an address the dashboard does not know opens the inbox.
 

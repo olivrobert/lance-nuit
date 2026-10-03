@@ -1,5 +1,5 @@
-/* The review inbox: the sticky header with its jump chips, the sticky section
-   headers under it, and the rows.
+/* The review inbox: the sticky header with its view tabs and jump chips, the
+   card of the latest night, the sticky section headers, and the rows.
 
    A row is a `<button>` rather than a `<div>` so it is keyboard-reachable, which
    is why so much of `.it` is undoing the button defaults from `tokens.css`.
@@ -25,6 +25,87 @@
   padding: 10px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
+}
+
+.views {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.views button {
+  min-height: 0;
+  padding: 5px 10px;
+  border-color: var(--line);
+}
+
+/* `:not(:disabled)` for the same reason as on `.it`: the global hover rule
+   would otherwise repaint the current tab. */
+.views .on,
+.views .on:hover:not(:disabled) {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 650;
+}
+
+.count {
+  margin-left: 6px;
+  padding: 0 6px;
+  color: var(--mute);
+  border-radius: 999px;
+  background: var(--tint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Something waits for the reader: the one number that should catch the eye. */
+.count.hot {
+  color: var(--panel);
+  background: var(--stop);
+}
+
+.night {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  margin: 10px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-subtle);
+}
+
+.night small {
+  margin-left: 6px;
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ok {
+  color: var(--ok);
+}
+
+.more {
+  min-height: 0;
+  padding: 0;
+  color: var(--link);
+  border: 0;
+  background: none;
+  font-size: 12.5px;
+}
+
+.more:hover:not(:disabled) {
+  text-decoration: underline;
+  background: none;
 }
 
 .jumps {
@@ -210,6 +291,12 @@ summary.head::-webkit-details-marker {
 
 .empty p {
   margin: 0;
+}
+
+.empty .zero {
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 700;
 }
 
 /* Stacked under the banner rather than beside the sheet: the list gets a
