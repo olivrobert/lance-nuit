@@ -54,8 +54,13 @@ describe("fmtSize", () => {
 });
 
 describe("fmtDate", () => {
-  test("cuts an ISO timestamp to the minute", () => {
-    expect(fmtDate("2026-01-10T12:34:56.789Z")).toBe("2026-01-10 12:34");
+  test("cuts a timestamp to the minute, in the reader's time zone", () => {
+    const at = new Date(2026, 0, 10, 12, 34, 56);
+    expect(fmtDate(at.toISOString())).toBe("2026-01-10 12:34");
+  });
+
+  test("answers with a dash for a date that does not parse", () => {
+    expect(fmtDate("not a date")).toBe("—");
   });
 
   test("answers with a dash for an absent date", () => {
