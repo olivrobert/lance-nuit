@@ -13,6 +13,7 @@ import type { StatsRun, StatsTicket } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
 import { fmtCost, fmtDate, fmtDuration, shortRunId } from "../../lib/format.js";
 import { nextSort, type StatsColumn, type StatsSort, spanMs } from "../../lib/stats.js";
+import { viewOf } from "../../lib/inbox.js";
 import { inboxTarget } from "../../lib/inbox-address.js";
 import styles from "./Stats.module.css";
 
@@ -68,13 +69,13 @@ function Header({ sort, onSort }: { sort: StatsSort; onSort: (sort: StatsSort) =
 function TicketCell({ ticket }: { ticket: StatsTicket }): JSX.Element {
   const navigate = useNavigate();
   const { data: items } = useQuery(itemsQuery);
-  const inInbox = items?.some((item) => item.key === ticket.key) ?? false;
-  if (inInbox) {
+  const item = items?.find((entry) => entry.key === ticket.key);
+  if (item) {
     return (
       <button
         type="button"
         className={styles.link}
-        onClick={() => void navigate(inboxTarget({ chip: null, item: ticket.key }))}
+        onClick={() => void navigate(inboxTarget({ view: viewOf(item), chip: null, item: item.key }))}
       >
         {ticket.ticket}
       </button>

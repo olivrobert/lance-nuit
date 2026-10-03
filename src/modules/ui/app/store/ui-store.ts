@@ -61,7 +61,7 @@ export const useUi = create<UiState>(() => ({
   openSteps: {},
   launchLogs: {},
   toast: null,
-  lastInbox: { chip: null, item: null },
+  lastInbox: { view: "inbox", chip: null, item: null },
 }));
 
 /** The directories open in one item's explorer, stable while none is toggled. */
@@ -106,7 +106,7 @@ export function setLaunchLogOpen(launchId: string, open: boolean): void {
 
 export function rememberInbox(address: InboxAddress): void {
   const last = useUi.getState().lastInbox;
-  if (last.chip === address.chip && last.item === address.item) return;
+  if (last.view === address.view && last.chip === address.chip && last.item === address.item) return;
   useUi.setState({ lastInbox: address });
 }
 
