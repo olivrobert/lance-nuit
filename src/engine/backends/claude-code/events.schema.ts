@@ -115,6 +115,7 @@ const ResultEventSchema = z.looseObject({
   duration_api_ms: looseNumber,
   num_turns: looseNumber,
   total_cost_usd: looseNumber,
+  usage: looseNested(ClaudeUsageSchema),
 });
 
 /** The fallback branch: an event type this release knows nothing about. */

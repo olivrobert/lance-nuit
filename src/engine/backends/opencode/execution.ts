@@ -83,7 +83,7 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
                 ? resolveOpencodeCost({ costReported, costUsd }, breakdown, options.model)
                 : resolveOpencodeCost({ costReported, costUsd }, breakdown, options.model, projectPricing);
             const spent = cost.costUsd;
-            reportLiveAttemptCost(spent);
+            reportLiveAttemptCost(spent, options.model);
             if (control.killed) return;
             // `unknown` is opencode's own verdict on this usage: tokens were spent
             // and neither the provider figure nor the project table could price
