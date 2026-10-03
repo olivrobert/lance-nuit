@@ -90,6 +90,7 @@ function hydrate(
   persisted: PersistedRun,
   options: LoadOrCreateRunOptions,
   projected: ProjectedRunState,
+  selectionTookWork: boolean,
 ): Run {
   const definitionIds = new Set(pipeline.steps.map((step) => step.id));
   const removedIds = persisted.steps.map((step) => step.id).filter((id) => !definitionIds.has(id));
@@ -114,9 +115,15 @@ function hydrate(
   // ABORTED with no step left in flight is a SIGINT in the same window. Loading
   // either as terminal strands it — the parent of a child run then fails on
   // every resume, and a top-level run replays from scratch in a new directory.
+  // A selection that took out the work a STOPPED or FAIL run still owed settles
+  // it now: the verdict on disk judged that work, so it cannot stand for the run
+  // the selection leaves. Loaded as terminal, `--skip` of the step it ended on
+  // would change nothing and leave a run no later invocation resumes.
   const awaitingVerdict =
     allSettled &&
-    (persisted.status === "RUNNING" || (persisted.status === "ABORTED" && persisted.outcome?.resumable !== false));
+    (selectionTookWork ||
+      persisted.status === "RUNNING" ||
+      (persisted.status === "ABORTED" && persisted.outcome?.resumable !== false));
   const terminal = persisted.status !== undefined && allSettled && !awaitingVerdict;
   return {
     name: persisted.name,
@@ -205,12 +212,14 @@ function applyUnmeteredAuthorization(run: Run, persisted: PersistedRun, options:
 }
 
 /** Apply resume selectors in one pass; both selectors operate only on steps that
- * still have executable work, preserving terminal history on a resumed run. */
+ * still have executable work, preserving terminal history on a resumed run.
+ * Returns whether they took any of that work out. */
 function applyStepFilters(
   steps: PersistedStepState[],
   stepFilter: string[] | undefined,
   skipFilter: string[] | undefined,
-): void {
+): boolean {
+  let tookWork = false;
   // `aborted` belongs here with `running`: an interrupted step is replayed on
   // resume, so it still has executable work and a selector must be able to take
   // it out of the selection. Leaving it out let `--step c` run the interrupted
@@ -225,8 +234,10 @@ function applyStepFilters(
     if (outsideSelection || explicitlySkipped) {
       state.status = "skipped";
       state.excluded = true;
+      tookWork = true;
     }
   }
+  return tookWork;
 }
 
 /** Composed steps in the replay range that cannot run again in place: a child
@@ -391,7 +402,7 @@ export async function loadOrCreateRun(
     // state restored from a previous attempt, and the definition steps the
     // snapshot does not know yet.
     seedNewDefinitionSteps(pipeline, saved);
-    applyStepFilters(saved.steps, stepFilter, skipFilter);
+    const selectionTookWork = applyStepFilters(saved.steps, stepFilter, skipFilter);
     const unreplayable = unreplayableSteps(saved.steps, replayIds);
     if (unreplayable.length > 0) {
       if (resolution?.acquiredRunLock || options.strictSnapshot?.releaseRunLock) releaseRunDir(dir);
@@ -402,7 +413,7 @@ export async function loadOrCreateRun(
     }
     requeueForReplay(saved.steps, replayIds);
     const projected = projectRunState(saved, readRunEvents({ run_dir: dir, runId: saved.runId, eventStore }));
-    const run = hydrate(pipeline, pipelinePath, saved, options, projected);
+    const run = hydrate(pipeline, pipelinePath, saved, options, projected, selectionTookWork);
     run.run_dir = dir;
     run.stateStore = stateStore;
     run.eventStore = eventStore;
