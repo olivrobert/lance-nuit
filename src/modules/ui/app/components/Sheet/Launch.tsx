@@ -7,9 +7,9 @@
 // reproduce what the server did.
 //
 // The log is fetched on demand, and whether it is open is kept by launch id in
-// the UI store, so the same tail is shown whether it was opened from the
-// diagnostic tab or from the "Last launch" block. A launch that failed before
-// its run shows its log without asking: the reason is nowhere else.
+// the UI store, so the same tail is shown whether it was opened from the "Last
+// launch" block or from the Run tab's launch-failure box. A launch that failed
+// before its run shows its log without asking: the reason is nowhere else.
 
 import type { JSX } from "react";
 import type { Item } from "../../api/types.js";
