@@ -318,11 +318,15 @@ export async function executeRunSteps(
     // "Unfinished work" is not only a pending step: an orchestration node whose
     // fan-out stopped mid-list is done with none of its items, and its own step
     // may already read `done` from a previous generation.
-    const finalDecision = hasUnfinishedWork(run) ? costDecision(run.max_cost_usd, budget) : "continue";
+    //
+    // The same holds for a guard stop restored from the snapshot: once a resume
+    // skipped the step the guard killed, the latch has nothing left to withhold.
+    const unfinished = hasUnfinishedWork(run);
+    const finalDecision = unfinished ? costDecision(run.max_cost_usd, budget) : "continue";
     return {
       failed,
       stopped,
-      budgetExceeded: budgetExceeded || budget.exceeded === true,
+      budgetExceeded: budgetExceeded || (budget.exceeded === true && unfinished),
       costUnaccounted: costUnaccounted || finalDecision === "unaccounted",
       // The retry and fix gates record their refusal on the shared ledger; the
       // admission gate and the orchestration gates report theirs directly.

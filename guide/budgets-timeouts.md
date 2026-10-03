@@ -46,6 +46,8 @@ A stop decided by the live cost guard (below) is durable too. The guard kills on
 an estimate, and the provider's final figure can land under the ceiling; the
 snapshot therefore records the stop itself, so a resume without `--budget` halts
 where the guard did instead of replaying — and repaying — the killed step.
+A resume that takes the killed step out with `--skip` (or `--steps`) leaves the
+stop nothing to withhold: once no work remains, the run finalizes on its steps.
 
 The killed step is left `failed`, even when it is declared `blocking: false`: a
 cost stop withholds the step's work rather than judging it, and a step absorbed as
