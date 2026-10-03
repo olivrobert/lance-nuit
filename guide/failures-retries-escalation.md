@@ -44,6 +44,23 @@ The Claude backend declares the same cause for its own authentication failures
 would fail identically. A step with `blocking: false` records a warning and lets
 later steps continue, blocked or not.
 
+### Usage limits
+
+A Claude usage limit (HTTP 429, or the CLI's `session limit` / `usage limit`
+message) is not repairable either, but it lifts on its own. When the CLI announces
+when the quota resets, the Claude backend waits until one minute past that time
+inside the same attempt, then spawns again: a night run that hits the limit
+finishes once it reopens instead of losing the rest of the night. The wait is
+logged, counts toward the attempt's duration but not its `timeout`, which bounds
+each spawn, and a `Ctrl+C` interrupts it like any other attempt.
+
+`RUNNER_RATE_LIMIT_MAX_WAIT_MS` caps the total wait of one attempt; it defaults to
+six hours, one full subscription window plus margin, and `0` disables waiting.
+At most three waits are made per attempt. A limit with no announced reset, one
+that resets past the cap, or one still in force after those waits is reported as
+`blocked`, with the reset time in the reason: the run stops cleanly, and running
+the same command once the quota is back replays the step.
+
 Only an agent verdict and a backend result can declare a block: those are the two
 boundaries that read the signal. A `fn` step that throws — including
 `new Error("BLOCKED: …")` — and a `bash` step that exits non-zero are technical
