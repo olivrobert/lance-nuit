@@ -266,7 +266,7 @@ The loop:
    the artifact is absent or still has the rejected bytes. It replays whatever its
    declared inputs say, and `pendingRejection(ctx, subject)` hands its prompt the
    reason and round. An author `when` still wins: a step it skips is not
-   reworked. Without a pending rejection, a rework step that already ran is
+   reworked. Without a pending rejection, a rework step that already completed is
    skipped with `no pending rejection`, unless it declares `input`: its
    [freshness](dsl.md#input-freshness) then decides, as for any other step.
 3. The gate stops again on any rejected subject, whatever `blocked` says: with

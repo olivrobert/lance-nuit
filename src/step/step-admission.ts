@@ -145,6 +145,12 @@ function admissionsToEvaluate(step: RunStep): readonly StepInputCondition[] {
   return conditions.filter((condition) => !condition.frozenOnStart);
 }
 
+/** The last pass started and did not complete: whatever outputs it left are
+ *  partial, so freshness cannot vouch for them. */
+function passLeftUnfinished(step: RunStep): boolean {
+  return step.status === "failed" || step.status === "aborted" || step.status === "running";
+}
+
 async function anyPendingRejection(ctx: PipelineContext, subjects: readonly string[]): Promise<boolean> {
   for (const subject of subjects) if (await pendingRejection(ctx, subject)) return true;
   return false;
@@ -238,13 +244,16 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
   // still sees the rejected artifact through `pendingRejection`.
   const reworks = step.def.rework_for ?? [];
   const rejected = reworks.length > 0 && (await anyPendingRejection(baseCtx, reworks));
-  if (reworks.length > 0 && !rejected && !declaresInput && step.control != null) {
+  // Only a `done` step produced what a missing rejection lets it keep: a failed or
+  // interrupted one also carries spend in `control`, yet produced nothing.
+  if (reworks.length > 0 && !rejected && !declaresInput && step.status === "done") {
     return applyInputDecision(run, step, input.output, "skip", SKIP_NO_REJECTION);
   }
 
   // A `--start-at` replay skips the freshness check too: it does not track the
-  // repository tree, which is what an operator fixes before replaying.
-  if (declaresInput && !rejected && step.replay !== true) {
+  // repository tree, which is what an operator fixes before replaying. So does a
+  // pass left unfinished: adopting what it wrote would settle a partial output.
+  if (declaresInput && !rejected && step.replay !== true && !passLeftUnfinished(step)) {
     const report = await stepFreshness(baseCtx, step.def);
     if (!report.mustRun) {
       // Adopt before skipping: an output produced before this record existed keeps
