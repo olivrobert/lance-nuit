@@ -8,8 +8,8 @@
 // in the diagnostic tab, the approval twice, the reply folded away), and a
 // reader had to know where to look.
 //
-// A run of ours still alive on the item is not waiting for anyone: the diagnostic
-// tab shows it running, and this panel is not drawn.
+// A run of ours still alive on the item is not waiting for anyone: the Run tab
+// shows it running, and this panel is not drawn.
 
 import type { JSX } from "react";
 import type { Item } from "../../api/types.js";

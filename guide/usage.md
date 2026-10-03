@@ -255,12 +255,13 @@ by a copy button for the value the report marks as copyable, such as the
 branch. Rerun, Start fresh, and Mark as closed then move under **More
 actions**. Without a report, the actions are the usual ones.
 
-The tabs are **Report**, **Run**, and **Files**, plus **Diagnostic** for a
-failure or a launch and **Document** when the run has a document to show. A
-tab with nothing to show is not listed. A finished run opens on **Report** when
-its current run wrote a valid `report.json`, and on **Run** otherwise; a
-running run opens on **Run**, a failure on **Diagnostic**, and a run waiting
-for a decision on its **Document**. A `report.json` the dashboard rejected
+The tabs are **Report**, **Run**, and **Files**, plus **Document** when the
+run has a document to show. A tab with nothing to show is not listed. A
+finished run opens on **Report** when its current run wrote a valid
+`report.json`, and on **Run** otherwise; a running run or a failure opens on
+**Run**, and a run waiting for a decision on its **Document**. A failure's Run
+tab leads with why it stopped and how to resume, and opens the step that
+failed; a launch that died before its run shows its log there instead. A `report.json` the dashboard rejected
 leaves one line with the reason in place of the Report tab.
 
 The **Report** tab shows, each block only when the report fills it: **Left for
@@ -281,40 +282,51 @@ its assumptions.
 
 ### Run tab
 
-The **Run** tab shows where the time went:
+The **Run** tab shows where the time and the money went:
 
-- three figures: the time elapsed between the first and last write of the
-  snapshot (pauses included, with the clock times), the cost, and the tokens
-  in and out (with the share read from cache);
-- a timeline: one lane per step that took at least a second, cost money,
-  failed, or is still running, placed over the run span by its start and end.
-  The bar is the step's wall time; the Duration and Cost columns repeat it with
-  the step's cost. Shorter
-  steps share one lane of ticks, and skipped steps are listed under it.
-  Clicking a lane opens its step underneath: each attempt with its status,
-  duration, cost, model and failure reason (the error the extractor or the
-  verdict returned), the tail of the chosen attempt's output, the prompt or
-  command it was given, and the artifacts whose provenance names the step,
-  each opening in the Files tab. Attempts run before the runner kept
+- a summary: how the run ended, three facts (the duration, with the time spent
+  waiting on a human; the cost against the run's budget, with the share of
+  input read from cache; the attempts, with the models they ran on), and up
+  to four takeaways: the step that took the most work time, the one that cost
+  the most, the time spent replaying steps that had already passed, and the
+  refusals;
+- the run's episodes, when it was stopped and resumed: each invocation of the
+  runner and each wait between two, as wide as the time it took, with the
+  decision that resumed it and the stop or the outcome that closed it.
+  Pointing at an episode highlights it on the timeline;
+- a timeline: one lane per step that took at least a second, cost money, was
+  refused, or is still running, each attempt a bar placed by its own start
+  and end. The bar's tone says what the attempt was: the run's main model,
+  another model, a command, a replay of a step that had passed, a refusal, or
+  still running. Waits between invocations are drawn as columns and, by
+  default, compressed to a narrow width so the work stays readable; **Real
+  time** draws them at their wall-clock length. The Duration column is the
+  step's work time, waits excluded; the Cost column is the step's ledger
+  figure. Shorter steps share one row of dots, and skipped steps are listed
+  under the timeline. Clicking a bar opens that attempt underneath its lane,
+  and clicking a step's name opens its last attempt: each attempt with its
+  status, duration, cost, model and failure reason (the error the extractor
+  or the verdict returned), the tail of the chosen attempt's output, the
+  prompt or command it was given, and the artifacts whose provenance names the
+  step, each opening in the Files tab. Attempts run before the runner kept
   `command.txt` show no prompt; a step that declares no `input` lists no
   artifact. An attempt that left a resumable agent session has an **Open**
   link in its Session column, which reopens that conversation in a terminal
   (see [Reopen an agent session](#reopen-an-agent-session)), even while the
   run goes on;
-- the cost by model. A step that composes pipelines (`runPipeline`,
-  `forEachPipeline`) ran no model of its own: its cost is split by the models
-  its child runs used;
 - the screenshots found under the work item's `reports/`, grouped by
   directory, unless the run's report lists its own screenshots. A `summary.md`
   or `report.md` next to the images opens in the Files tab.
 
-Every figure comes from the run's `state.json`, the ledger the budget is
-enforced against. The tab only displays those figures and never sums them.
-The opened step is read on request by
-`GET /api/items/<project>/<ticket>/step?id=<step>&attempt=<n>`, from the run
-journal rather than the snapshot. Images are served as raw bytes by
-`GET /api/items/<project>/<ticket>/raw?path=<relative path>`, and only files
-with an image extension are served this way.
+The run's cost and each step's cost come from the run's `state.json`, the
+ledger the budget is enforced against; the tab never sums them. The attempts,
+their times and the waits come from the run journal, read on request by
+`GET /api/items/<project>/<ticket>/journey` while the tab is shown: the
+snapshot keeps only a step's last attempt. A run that has no journal yet shows
+the steps from the snapshot instead. The opened step is read the same way by
+`GET /api/items/<project>/<ticket>/step?id=<step>&attempt=<n>`. Images are
+served as raw bytes by `GET /api/items/<project>/<ticket>/raw?path=<relative path>`,
+and only files with an image extension are served this way.
 
 ### Launch an interactive run
 

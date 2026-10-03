@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fmtAge, fmtClock, fmtCost, fmtDate, fmtDuration, fmtSize, fmtTokens, shortRunId } from "./format.js";
+import { fmtAge, fmtClock, fmtCost, fmtDate, fmtDuration, fmtModel, fmtSize, fmtTokens, shortRunId } from "./format.js";
 
 const NOW = Date.parse("2026-01-10T12:00:00.000Z");
 
@@ -125,5 +125,14 @@ describe("shortRunId", () => {
     expect(shortRunId("20260925T141236.406Z-feature-a22f24")).toBe("20260925T141236");
     expect(shortRunId("run-1")).toBe("run-1");
     expect(shortRunId("abcdefghijklmnop")).toBe("abcdefghijkl");
+  });
+});
+
+describe("fmtModel", () => {
+  test("names a Claude model by family and version, and keeps any other id as it is", () => {
+    expect(fmtModel("claude-opus-5-5")).toBe("Opus 5.5");
+    expect(fmtModel("haiku-4-5-20251001")).toBe("Haiku 4.5");
+    expect(fmtModel("gpt-5.1-codex")).toBe("gpt-5.1-codex");
+    expect(fmtModel(undefined)).toBe("—");
   });
 });

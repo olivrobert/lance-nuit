@@ -1,6 +1,6 @@
 // The steps of a run, as a strip of bars and the counts beneath it.
 //
-// Shown by the diagnostic tab, and by the Run tab while the run is in flight.
+// Shown by the Run tab when the run has no journal to draw its timeline from.
 // Everything below is read from `RunStepsView` alone — no step is ever
 // inferred from the item's status, because a snapshot and a journal can
 // disagree, and the journal is the one that wrote these steps.

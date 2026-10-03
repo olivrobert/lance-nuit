@@ -35,7 +35,7 @@ function RunningCallout({ item }: { item: Item }): JSX.Element | null {
 
 export interface CalloutProps {
   item: Item;
-  /** The diagnostic tab already carries the action row in its header. */
+  /** The sheet's header already carries the action row. */
   includeActions?: boolean;
 }
 
