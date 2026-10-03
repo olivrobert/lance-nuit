@@ -289,8 +289,9 @@ Files.
 The **Files** tab lists each directory with the markdown documents first, then
 the other files, then the runner's own files (`*.json`, `*.sha`,
 `.provenance/`, `runs/`) folded under **Machine files**. **Run details**, below
-the tab content, holds the run's identity, its last launch, its approval, and
-its assumptions.
+the tab content, holds what the header does not show: the project directory
+and provider, the full run id, the worktree and branch, the last launch, the
+approval, and the assumptions.
 
 ### Run tab
 
