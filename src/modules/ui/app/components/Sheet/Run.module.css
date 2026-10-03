@@ -92,6 +92,34 @@
   font-variant-numeric: tabular-nums;
 }
 
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chevron {
+  flex: none;
+  width: 10px;
+  color: var(--mute);
+  font-size: 10px;
+}
+
+/* The opened step spans the four columns, flush with the grid's borders. */
+.timeline > .opened {
+  display: block;
+  grid-column: 1 / -1;
+  padding: 0;
+}
+
 .name code {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -231,4 +259,8 @@
   .modelBar {
     display: none;
   }
+}
+
+.toggle:hover code {
+  text-decoration: underline;
 }

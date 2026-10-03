@@ -42,7 +42,9 @@ Attempt output is stored at:
 runs/<pipeline>/<run-id>/
 ├── state.json
 ├── events.jsonl
-└── steps/<step>/attempt-001/output.log
+└── steps/<step>/attempt-001/
+    ├── output.log
+    └── command.txt   # the rendered command or prompt, written when the attempt starts
 ```
 
 The event journal is append-only and is also the live feed; a resume does not

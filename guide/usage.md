@@ -290,7 +290,14 @@ The **Run** tab shows where the time went:
   failed, or is still running, placed over the run span by its start and end.
   The bar is the step's wall time; the Duration and Cost columns repeat it with
   the step's cost. Shorter
-  steps share one lane of ticks, and skipped steps are listed under it;
+  steps share one lane of ticks, and skipped steps are listed under it.
+  Clicking a lane opens its step underneath: each attempt with its status,
+  duration, cost, model and failure reason (the error the extractor or the
+  verdict returned), the tail of the chosen attempt's output, the prompt or
+  command it was given, and the artifacts whose provenance names the step,
+  each opening in the Files tab. Attempts run before the runner kept
+  `command.txt` show no prompt; a step that declares no `input` lists no
+  artifact;
 - the cost by model. A step that composes pipelines (`runPipeline`,
   `forEachPipeline`) ran no model of its own: its cost is split by the models
   its child runs used;
@@ -300,7 +307,9 @@ The **Run** tab shows where the time went:
 
 Every figure comes from the run's `state.json`, the ledger the budget is
 enforced against. The tab only displays those figures and never sums them.
-Images are served as raw bytes by
+The opened step is read on request by
+`GET /api/items/<project>/<ticket>/step?id=<step>&attempt=<n>`, from the run
+journal rather than the snapshot. Images are served as raw bytes by
 `GET /api/items/<project>/<ticket>/raw?path=<relative path>`, and only files
 with an image extension are served this way.
 

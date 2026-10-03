@@ -11,6 +11,7 @@ import { type ProjectEntry, type ReadModelOptions, readProjects } from "./projec
 import { readRecap } from "./recap.js";
 import { type ReportRead, readReport } from "./report.js";
 import { readStats } from "./stats.js";
+import { readStepDetail } from "./step-detail.js";
 import { readCoderSession, readSteps } from "./steps.js";
 import type {
   CoderSessionRead,
@@ -21,6 +22,7 @@ import type {
   RunRecap,
   RunStepsView,
   StatsRead,
+  StepDetail,
   WorkItemTree,
 } from "./types.js";
 
@@ -34,6 +36,8 @@ export interface ReadModel {
   item(project: string, ticket: string): Promise<Item | undefined>;
   tree(project: string, ticket: string): WorkItemTree | undefined;
   steps(project: string, ticket: string): RunStepsView | undefined;
+  /** One step opened from the timeline; `attempt` defaults to the last one. */
+  step(project: string, ticket: string, stepId: string, attempt?: number): StepDetail | undefined;
   coderSession(project: string, ticket: string): CoderSessionRead | undefined;
   recap(project: string, ticket: string): RunRecap | undefined;
   report(project: string, ticket: string): ReportRead | undefined;
@@ -51,6 +55,7 @@ export function createReadModel(options: ReadModelOptions = {}): ReadModel {
     item: (project, ticket) => readItem(project, ticket, options),
     tree: (project, ticket) => readTree(project, ticket, options),
     steps: (project, ticket) => readSteps(project, ticket, options),
+    step: (project, ticket, stepId, attempt) => readStepDetail(project, ticket, stepId, attempt, options),
     coderSession: (project, ticket) => readCoderSession(project, ticket, options),
     recap: (project, ticket) => readRecap(project, ticket, options),
     report: (project, ticket) => readReport(project, ticket, options),

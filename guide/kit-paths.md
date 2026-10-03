@@ -88,7 +88,7 @@ run cwd. For a ticket, artifacts and state are stored under:
 ├── decisions/
 └── runs/<pipeline>/<runId>/
     ├── state.json
-    └── steps/<step>/attempt-XXX/output.log
+    └── steps/<step>/attempt-XXX/{output.log,command.txt}
 ```
 
 The top-level `.lance-nuit/runs/` fallback is used only for runs without a ticket.
