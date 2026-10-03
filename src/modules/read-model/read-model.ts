@@ -9,6 +9,7 @@ import { listItems, readItem } from "./items.js";
 import { readLaunchesFor } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects } from "./projects.js";
 import { readRecap } from "./recap.js";
+import { readRunJourney } from "./run-journey.js";
 import { type ReportRead, readReport } from "./report.js";
 import { readStats } from "./stats.js";
 import { readStepDetail, readStepSession } from "./step-detail.js";
@@ -19,6 +20,7 @@ import type {
   ImageRead,
   Item,
   Launch,
+  RunJourney,
   RunRecap,
   RunStepsView,
   StatsRead,
@@ -42,6 +44,8 @@ export interface ReadModel {
   /** The agent session one attempt of a step left, to reopen as a fork. */
   stepSession(project: string, ticket: string, stepId: string, attempt: number): CoderSessionRead | undefined;
   recap(project: string, ticket: string): RunRecap | undefined;
+  /** Every attempt and pause of the run, for the Run tab. */
+  journey(project: string, ticket: string): RunJourney | undefined;
   report(project: string, ticket: string): ReportRead | undefined;
   file(project: string, ticket: string, path: string): FileRead;
   image(project: string, ticket: string, path: string): ImageRead;
@@ -61,6 +65,7 @@ export function createReadModel(options: ReadModelOptions = {}): ReadModel {
     coderSession: (project, ticket) => readCoderSession(project, ticket, options),
     stepSession: (project, ticket, stepId, attempt) => readStepSession(project, ticket, stepId, attempt, options),
     recap: (project, ticket) => readRecap(project, ticket, options),
+    journey: (project, ticket) => readRunJourney(project, ticket, options),
     report: (project, ticket) => readReport(project, ticket, options),
     file: (project, ticket, path) => readFile(project, ticket, path, options),
     image: (project, ticket, path) => readImage(project, ticket, path, options),

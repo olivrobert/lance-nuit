@@ -6,7 +6,7 @@ import { makeItem, makeLaunch, TREE, STEPS, detailOf } from "./testing.js";
 
 describe("defaultSheetTab", () => {
   test("each group opens on the tab that answers its question", () => {
-    expect(defaultSheetTab(makeItem({ group: "failure" }))).toBe("diagnostic");
+    expect(defaultSheetTab(makeItem({ group: "failure" }))).toBe("run");
     expect(defaultSheetTab(makeItem({ group: "running" }))).toBe("run");
     expect(defaultSheetTab(makeItem({ group: "decision" }))).toBe("document");
     expect(defaultSheetTab(makeItem({ group: "done" }))).toBe("run");
@@ -26,7 +26,7 @@ describe("currentSheetTab", () => {
     const item = makeItem({ group: "done" });
     expect(currentSheetTab(item, detailOf(withDocument, null, item), "auto")).toBe("document");
     expect(currentSheetTab(item, detailOf(TREE, null, item), "run")).toBe("files");
-    expect(currentSheetTab(item, detailOf(null, null, item), "run")).toBe("diagnostic");
+    expect(currentSheetTab(item, detailOf(null, null, item), "run")).toBe("run");
   });
 
   test("run with steps but no recap yet is kept", () => {
@@ -44,26 +44,21 @@ describe("currentSheetTab", () => {
     expect(currentSheetTab(item, detailOf(TREE, null), "document")).toBe("files");
   });
 
-  test("document with no tree at all falls back to diagnostic", () => {
+  test("document with no tree at all falls back to run", () => {
     const item = makeItem({ group: "decision" });
-    expect(currentSheetTab(item, detailOf(null, null), "document")).toBe("diagnostic");
-    expect(currentSheetTab(item, null, "auto")).toBe("diagnostic");
+    expect(currentSheetTab(item, detailOf(null, null), "document")).toBe("run");
+    expect(currentSheetTab(item, null, "auto")).toBe("run");
   });
 
   test("files with no tree falls back to the item's default", () => {
     expect(currentSheetTab(makeItem({ group: "running" }), detailOf(null, STEPS), "files")).toBe("run");
   });
 
-  test("diagnostic is refused to an item that neither failed nor was launched", () => {
-    const item = makeItem({ group: "decision" });
-    expect(currentSheetTab(item, detailOf(withDocument, STEPS), "diagnostic")).toBe("document");
-  });
-
-  test("diagnostic is kept for a failure, and for any item carrying a launch", () => {
+  test("run is kept without steps for a failure, and for any item carrying a launch", () => {
     const failed = makeItem({ group: "failure", status: "FAIL" });
-    expect(currentSheetTab(failed, detailOf(withDocument, STEPS), "diagnostic")).toBe("diagnostic");
+    expect(currentSheetTab(failed, detailOf(withDocument, null, failed), "run")).toBe("run");
     const launched = makeItem({ group: "decision", launch: makeLaunch() });
-    expect(currentSheetTab(launched, detailOf(withDocument, STEPS), "diagnostic")).toBe("diagnostic");
+    expect(currentSheetTab(launched, detailOf(withDocument, null, launched), "run")).toBe("run");
   });
 
   test("a requested tab whose content exists is honoured", () => {
@@ -79,7 +74,7 @@ describe("currentSheetTab", () => {
     const cases: [Item["group"], SheetTab, SheetTab, SheetTab][] = [
       ["done", "report", "run", "run"],
       ["running", "run", "run", "run"],
-      ["failure", "diagnostic", "diagnostic", "diagnostic"],
+      ["failure", "run", "run", "run"],
       ["decision", "document", "document", "document"],
     ];
     const detailWith = (item: Item, read: Pick<ItemDetail, "report" | "reportError">): ItemDetail => ({

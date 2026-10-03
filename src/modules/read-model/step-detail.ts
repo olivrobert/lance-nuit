@@ -54,7 +54,8 @@ function safeLogPath(attempt: PersistedAttempt): string | undefined {
   return attempt.log_path && isSafeRelativePath(attempt.log_path) ? attempt.log_path : undefined;
 }
 
-function attemptView(attempt: PersistedAttempt, treePathOf: (inRun: string) => string): StepAttemptView {
+/** Dashboard view of one projected attempt, its log path made a tree path. */
+export function attemptView(attempt: PersistedAttempt, treePathOf: (inRun: string) => string): StepAttemptView {
   const control = attempt.control;
   const logPath = safeLogPath(attempt);
   return {

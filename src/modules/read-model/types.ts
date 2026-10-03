@@ -310,6 +310,37 @@ export interface StepDetail {
   stepDir?: string;
 }
 
+/** One attempt on the run's timeline: a step attempt, named after its step. */
+export interface RunJourneyAttempt extends StepAttemptView {
+  stepId: string;
+}
+
+/** A span the run spent stopped, from its last line to the resume. */
+export interface RunPause {
+  stoppedAt: string;
+  /** Absent while the run is still waiting. */
+  resumedAt?: string;
+  /** Why the run stopped, as `run.stopped` recorded it. */
+  reason?: string;
+  /** The human decision the resume carried, when it carried one. */
+  decision?: "approved" | "rejected";
+}
+
+/**
+ * The whole run in time, from the journal: every attempt of every step in the
+ * order they started, and the pauses between them.
+ */
+export interface RunJourney {
+  pipeline: string;
+  runId: string;
+  status: ItemStatus;
+  startedAt?: string;
+  /** Budget of the run, when one was set. */
+  maxCostUsd?: number;
+  attempts: RunJourneyAttempt[];
+  pauses: RunPause[];
+}
+
 /** An agent session of a run, and where it ran: the coder's — the conversation
  *  that wrote the code — or one attempt's of any step. It is reopened in the
  *  run's own working directory, because that is where the agent CLI stored it. */

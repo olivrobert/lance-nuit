@@ -1,0 +1,414 @@
+/* The Run tab's timeline card: a grid of lanes over a shared axis.
+
+   Every mark on a track spans the whole track and is placed by transform:
+   translated by its start (`--l`, in %), scaled by its length (`--s`, a
+   fraction). Switching the axis between compressed and real time then moves
+   the marks on the compositor instead of laying out every bar again. */
+
+.card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+}
+
+.toolbar h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--tint);
+}
+
+.segmented button {
+  min-height: 0;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mute);
+  font-size: 12.5px;
+  transition:
+    background-color 0.15s cubic-bezier(0.25, 1, 0.5, 1),
+    color 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.segmented button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.table {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr) 104px 84px;
+  min-width: 820px;
+}
+
+.row {
+  display: contents;
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  transition: background-color 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.head .cell {
+  padding-block: 6px;
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.num {
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.lane:hover > .cell {
+  background: var(--hover);
+}
+
+.lane.opened > .cell {
+  background: var(--panel-subtle);
+}
+
+.name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.name:hover:not(:disabled) {
+  background: none;
+}
+
+.name code {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name small {
+  overflow: hidden;
+  color: var(--mute);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bad {
+  color: var(--fail);
+}
+
+.minor code {
+  color: var(--mute);
+  font-weight: 400;
+}
+
+.name:hover code {
+  text-decoration: underline;
+}
+
+/* Axis: clock labels at the bottom, the waits' lengths above them. */
+.axis {
+  position: relative;
+  align-self: stretch;
+  height: 40px;
+  padding: 0;
+}
+
+.label,
+.pauseLabel {
+  position: absolute;
+  font-size: 11px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  animation: fade 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.label {
+  bottom: 6px;
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.label.start {
+  transform: none;
+}
+
+.label.end {
+  transform: translateX(-100%);
+}
+
+.pauseLabel {
+  top: 5px;
+  color: var(--stop);
+}
+
+.trackCell {
+  align-self: stretch;
+  padding-block: 0;
+}
+
+.track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 36px;
+}
+
+.grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+  opacity: 0.6;
+}
+
+.span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  transform: translateX(calc(var(--l) * 1%)) scaleX(var(--s));
+  transform-origin: 0 50%;
+  transition:
+    transform 0.32s cubic-bezier(0.25, 1, 0.5, 1),
+    opacity 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.pauseColumn {
+  top: 0;
+  bottom: 0;
+  background: var(--pause);
+  opacity: 0.7;
+  animation: fade 0.3s cubic-bezier(0.25, 1, 0.5, 1) backwards;
+}
+
+.pauseColumn.lit {
+  background: color-mix(in srgb, var(--moon) 35%, var(--pause));
+  opacity: 1;
+}
+
+.band {
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--tone-agent) 9%, transparent);
+  transition: none;
+  animation: fade 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* A bar grows from its start when it first appears: it shows the reading
+   direction once, and stays put on every later repaint. */
+.bar {
+  top: calc(50% - 5px);
+  height: 10px;
+  border-radius: 2px;
+  cursor: pointer;
+  animation: grow 0.42s cubic-bezier(0.25, 1, 0.5, 1) backwards;
+  animation-delay: calc(var(--i) * 22ms);
+}
+
+.track:hover .bar:not(:hover) {
+  opacity: 0.4;
+}
+
+.agent {
+  background: var(--tone-agent);
+}
+
+.other-model {
+  background: var(--tone-model);
+}
+
+.command {
+  background: var(--tone-command);
+}
+
+.replay {
+  background: var(--tone-replay);
+}
+
+.fail {
+  background: var(--fail);
+}
+
+.running {
+  background: var(--moon);
+}
+
+/* A dot is a point, not a span: translated only, its mark drawn around it. */
+.dot {
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  transform: translateX(calc(var(--l) * 1%));
+}
+
+.dot::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 4px);
+  left: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone-command);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.now {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--moon);
+  animation: pulse 2s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+
+.detail {
+  grid-column: 1 / -1;
+  padding: 0 16px 14px;
+  background: var(--panel-subtle);
+  animation: reveal 0.22s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.legend i {
+  display: inline-block;
+  width: 12px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 2px;
+}
+
+.legend i.pauseSwatch {
+  background: var(--pause);
+}
+
+/* Fixed, so the card's scroll and overflow never clip it; placed by the
+   pointer handler. */
+.tip {
+  position: fixed;
+  z-index: 20;
+  max-width: 300px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--night);
+  box-shadow: 0 6px 20px rgb(14 19 48 / 25%);
+  color: var(--night-ink);
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.tip[hidden] {
+  display: none;
+}
+
+.tip b {
+  font-weight: 600;
+}
+
+.tipReason {
+  color: #f3a8a3;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes grow {
+  from {
+    transform: translateX(calc(var(--l) * 1%)) scaleX(0);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .span,
+  .cell,
+  .segmented button {
+    transition: none;
+  }
+
+  .bar,
+  .pauseColumn,
+  .band,
+  .label,
+  .pauseLabel,
+  .now,
+  .detail {
+    animation: none;
+  }
+}
