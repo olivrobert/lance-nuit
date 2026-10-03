@@ -439,6 +439,27 @@ test("a bash step failing without tokens is still free", async () => {
   expect(budget.costUnknown).toBeUndefined();
 });
 
+test("each attempt keeps the command it was given next to its log, a fix pass its prompt", async () => {
+  const step = makeStep();
+  const run = makeRun(step);
+  const executeStep: ExecuteStep = async () => ({ output: "", ok: false, stats: { duration_ms: 1 } });
+  const fixWithAgent: FixWithAgent = async () => ({ ok: true, stats: { duration_ms: 1 } });
+
+  await runAttempt(run, step, { command: "make test", context: baseCtx, budget: { cumulative: 0 }, executeStep });
+  await runFixAttempt(run, step, {
+    prompt: "Repair the failing test",
+    budget: { cumulative: 0 },
+    fixWithAgent,
+    backendSpec: FIX_SPEC,
+    registry: REGISTRY,
+  });
+
+  expect(readFileSync(join(dirname(attemptLogPath(run, step, 1)), "command.txt"), "utf8")).toBe("make test");
+  expect(readFileSync(join(dirname(attemptLogPath(run, step, 2)), "command.txt"), "utf8")).toBe(
+    "Repair the failing test",
+  );
+});
+
 test("fail_cause follows fail_kind's life cycle: written on failure, cleared by the next attempt and by success", async () => {
   const step = makeStep({ runner: "agent", backend: { id: "claude" } });
   const run = makeRun(step, 10);

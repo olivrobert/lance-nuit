@@ -26,6 +26,7 @@ import type {
   ProjectsResponse,
   RunResponse,
   StatsRead,
+  StepDetail,
   TerminalInfo,
   TerminalsResponse,
 } from "./types.js";
@@ -121,6 +122,17 @@ export function fetchFile(
 ): Promise<FileView> {
   const query = `?path=${encodeURIComponent(path)}${render === "html" ? "&render=html" : ""}`;
   return getJson<FileView>(itemUrl(item.project.name, item.ticket, `/file${query}`));
+}
+
+/** One step of the item's run, opened from the timeline. Without `attempt` the
+ *  server picks the last one. */
+export function fetchStepDetail(
+  item: Pick<Item, "project" | "ticket">,
+  stepId: string,
+  attempt?: number,
+): Promise<StepDetail> {
+  const query = `?id=${encodeURIComponent(stepId)}${attempt !== undefined ? `&attempt=${attempt}` : ""}`;
+  return getJson<StepDetail>(itemUrl(item.project.name, item.ticket, `/step${query}`));
 }
 
 /** Address of one image of a work item as raw bytes, for an `<img src>`: a
