@@ -274,6 +274,9 @@ export interface StepAttemptView {
   reason?: string;
   /** Tree path of its output log, for the Files tab. */
   logPath?: string;
+  /** The attempt left an agent session its provider can resume, which the
+   *  dashboard can reopen as a fork. */
+  hasSession?: true;
 }
 
 /** A bounded slice of a text file: its head for a prompt, its tail for an
@@ -307,9 +310,9 @@ export interface StepDetail {
   stepDir?: string;
 }
 
-/** The agent session of a run's coder, and where it ran. The session is the
- *  conversation that wrote the code; it is reopened in the run's own working
- *  directory, because that is where the agent CLI stored it. */
+/** An agent session of a run, and where it ran: the coder's — the conversation
+ *  that wrote the code — or one attempt's of any step. It is reopened in the
+ *  run's own working directory, because that is where the agent CLI stored it. */
 export interface CoderSessionRead {
   pipeline: string;
   runId: string;

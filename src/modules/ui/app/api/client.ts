@@ -180,9 +180,20 @@ export function postRun(payload: RunPayload): Promise<ApiResult<RunResponse>> {
   return postJson<RunResponse>("/api/runs", payload);
 }
 
-/** Reopen the coder session of an item's run in a terminal of its own. */
-export function postCoderSession(project: string, ticket: string): Promise<ApiResult<RunResponse>> {
-  return postJson<RunResponse>("/api/sessions", { project, ticket });
+/** One attempt of a step, whose agent session is reopened. */
+export interface StepAttemptTarget {
+  step: string;
+  attempt: number;
+}
+
+/** Reopen an agent session of an item's run in a terminal of its own: the
+ *  coder's, or the one `target` left. */
+export function postAgentSession(
+  project: string,
+  ticket: string,
+  target?: StepAttemptTarget,
+): Promise<ApiResult<RunResponse>> {
+  return postJson<RunResponse>("/api/sessions", { project, ticket, ...target });
 }
 
 function terminalUrl(id: string, suffix = ""): string {

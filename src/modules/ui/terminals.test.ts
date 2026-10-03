@@ -256,7 +256,10 @@ test("viewers: a client that ends on its own leaves the registry, and closeAll d
   expect(attach.clients[1]?.closed).toBe(true);
 });
 
-const echoSession: SessionCommandBuilder = (session) => ({ ok: true, words: ["echo", `resume ${session.sessionId}`] });
+const echoSession: SessionCommandBuilder = (session, { readOnly }) => ({
+  ok: true,
+  words: ["echo", `resume ${session.sessionId}${readOnly ? " read-only" : ""}`],
+});
 
 function coderSession(cwd: string, overrides: Partial<CoderSessionRead> = {}): CoderSessionRead {
   return {
@@ -276,6 +279,7 @@ function sessionDeps(server: FakeTmuxServer, overrides: Partial<OpenSessionDeps>
   return {
     tmux: server.tmux(),
     findSession: (entry) => coderSession(entry.cwd),
+    findStepSession: (entry, _ticket, { stepId }) => coderSession(entry.cwd, { stepId }),
     findItem: async () => undefined,
     sessionCommand: echoSession,
     shell: "/bin/bash",
@@ -337,14 +341,66 @@ test("session: refused without a session, while the run runs, and once its direc
   expect(server.sessions.size).toBe(0);
 });
 
+test("session: a step attempt's session opens in a terminal of its own, read-only while the run runs", async () => {
+  const server = new FakeTmuxServer();
+  const entry = project();
+  const asked: unknown[] = [];
+  const running = sessionDeps(server, {
+    findStepSession: (where, ticket, target) => {
+      asked.push([ticket, target]);
+      return coderSession(where.cwd, { status: "RUNNING", stepId: target.stepId });
+    },
+  });
+  const opened = await openCoderSession(
+    { project: entry, ticket: "PROJ-12", step: "review", attempt: 2, by: "Olivier" },
+    running,
+  );
+
+  expect(asked).toEqual([["PROJ-12", { stepId: "review", attempt: 2 }]]);
+  expect(opened.ok ? opened.terminal : undefined).toMatchObject({
+    id: "ln-demo-app-PROJ-12__review-2",
+    kind: "session",
+    command: "echo 'resume 0b5f7c3e-1111-4222-8333-444455556666 read-only'",
+  });
+
+  const stopped = await openCoderSession(
+    { project: entry, ticket: "PROJ-12", step: "review", attempt: 1, by: "Olivier" },
+    sessionDeps(server),
+  );
+  expect(stopped.ok ? stopped.terminal.command : "").toBe("echo 'resume 0b5f7c3e-1111-4222-8333-444455556666'");
+});
+
+test("session: a step attempt that is malformed or left no session is refused", async () => {
+  const server = new FakeTmuxServer();
+  const entry = project();
+  const open = (step: unknown, attempt: unknown, overrides: Partial<OpenSessionDeps> = {}) =>
+    openCoderSession(
+      { project: entry, ticket: "PROJ-12", step, attempt, by: "Olivier" },
+      sessionDeps(server, overrides),
+    );
+  const statusOf = (result: Awaited<ReturnType<typeof open>>) => (result.ok ? 201 : result.status);
+
+  expect(statusOf(await open("review", undefined))).toBe(400);
+  expect(statusOf(await open("review", 0))).toBe(400);
+  expect(statusOf(await open("", 1))).toBe(400);
+  const none = await open("review", 1, { findStepSession: () => undefined });
+  expect(none.ok ? "" : none.reason).toBe("attempt 1 of step review has no agent session to reopen");
+  expect(server.sessions.size).toBe(0);
+});
+
 test("session command: a forked Claude resume, and nothing for another provider or a bad id", () => {
   const id = "0b5f7c3e-1111-4222-8333-444455556666";
-  expect(resumeCoderCommand({ provider: "codex", sessionId: id })).toMatchObject({ ok: false, status: 409 });
-  expect(resumeCoderCommand({ provider: "claude", sessionId: "x; rm -rf /" })).toMatchObject({ ok: false });
-  const built = resumeCoderCommand({ provider: "claude", sessionId: id });
+  const writable = { readOnly: false };
+  expect(resumeCoderCommand({ provider: "codex", sessionId: id }, writable)).toMatchObject({ ok: false, status: 409 });
+  expect(resumeCoderCommand({ provider: "claude", sessionId: "x; rm -rf /" }, writable)).toMatchObject({ ok: false });
+  const built = resumeCoderCommand({ provider: "claude", sessionId: id }, writable);
   if (!hasClaudeCli()) {
     expect(built).toEqual({ ok: false, status: 503, reason: "claude CLI not found" });
     return;
   }
   expect(built).toEqual({ ok: true, words: ["claude", "--resume", id, "--fork-session"] });
+  expect(resumeCoderCommand({ provider: "claude", sessionId: id }, { readOnly: true })).toEqual({
+    ok: true,
+    words: ["claude", "--resume", id, "--fork-session", "--permission-mode", "plan"],
+  });
 });

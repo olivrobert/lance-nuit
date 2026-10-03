@@ -22,8 +22,8 @@ import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import { isPathWithin } from "../../state/stores/path-safety.js";
 import { isSafeRelativePath, runTreePath } from "./explorer.js";
 import type { ReadModelOptions } from "./projects.js";
-import { resolveRun } from "./runs.js";
-import type { StepAttemptStatus, StepAttemptView, StepDetail, TextExcerpt } from "./types.js";
+import { type ResolvedRun, resolveRun } from "./runs.js";
+import type { CoderSessionRead, StepAttemptStatus, StepAttemptView, StepDetail, TextExcerpt } from "./types.js";
 
 /** Head of a prompt shown inline. A prompt embedding a whole plan can run to
  *  hundreds of kilobytes; the Files tab still opens the complete file. */
@@ -70,7 +70,13 @@ function attemptView(attempt: PersistedAttempt, treePathOf: (inRun: string) => s
     ...(control?.model ? { model: control.model } : {}),
     ...(attempt.errors ? { reason: attempt.errors } : {}),
     ...(logPath ? { logPath: treePathOf(logPath) } : {}),
+    ...(resumableSession(attempt) ? { hasSession: true as const } : {}),
   };
+}
+
+function resumableSession(attempt: PersistedAttempt): PersistedAttempt["session"] {
+  const session = attempt.session;
+  return session?.resumable === true && session.id !== "" ? session : undefined;
 }
 
 /** At most `limit` bytes of a file, from its start or from its end. */
@@ -125,13 +131,21 @@ function readProvenance(path: string): Partial<ArtifactProvenance> | undefined {
   }
 }
 
+/** The attempts of step `stepId` in `resolved`, or `undefined` when the run has
+ *  no such step: a step id travels from the browser, and only an id the
+ *  snapshot lists is ever looked up in the journal. */
+function attemptsOf(resolved: ResolvedRun, stepId: string): PersistedAttempt[] | undefined {
+  const { runDir, state } = resolved.run;
+  if (!state.steps.some((step) => step.id === stepId)) return undefined;
+  return projectStepAttempts(new FileRunEventStore().readAt(runDir)).get(stepId) ?? [];
+}
+
 /**
  * Step `stepId` of the run `project/ticket` is currently about.
  *
  * `attempt` selects whose command and output are read; the last attempt by
  * default. Returns `undefined` when the run cannot be resolved or the run has no
- * such step: a step id travels from the browser, and only an id the snapshot
- * lists is ever looked up in the journal.
+ * such step.
  */
 export function readStepDetail(
   projectName: string,
@@ -142,11 +156,11 @@ export function readStepDetail(
 ): StepDetail | undefined {
   const resolved = resolveRun(projectName, ticket, options);
   if (!resolved) return undefined;
+  const attempts = attemptsOf(resolved, stepId);
+  if (!attempts) return undefined;
   const { runDir, state, pipeline } = resolved.run;
-  if (!state.steps.some((step) => step.id === stepId)) return undefined;
 
   const treePathOf = (inRun: string): string => runTreePath(resolved.workItemDir, runDir, inRun);
-  const attempts = projectStepAttempts(new FileRunEventStore().readAt(runDir)).get(stepId) ?? [];
   const selected =
     attemptNumber === undefined ? attempts.at(-1) : attempts.find((attempt) => attempt.attempt === attemptNumber);
   const logPath = selected ? safeLogPath(selected) : undefined;
@@ -161,6 +175,36 @@ export function readStepDetail(
     ...(logPath ? fileExcerpts(runDir, logPath, treePathOf) : {}),
     produced: producedBy(resolved.workItemDir, stepId),
     ...(firstLog ? { stepDir: treePathOf(dirname(dirname(firstLog))) } : {}),
+  };
+}
+
+/**
+ * The agent session attempt `attemptNumber` of step `stepId` left, or
+ * `undefined` when there is no such run, step or attempt, or the attempt has no
+ * session its provider can resume. An attempt still running has none yet: the
+ * journal records its session when it finishes.
+ */
+export function readStepSession(
+  projectName: string,
+  ticket: string,
+  stepId: string,
+  attemptNumber: number,
+  options: ReadModelOptions = {},
+): CoderSessionRead | undefined {
+  const resolved = resolveRun(projectName, ticket, options);
+  if (!resolved) return undefined;
+  const attempt = attemptsOf(resolved, stepId)?.find((entry) => entry.attempt === attemptNumber);
+  const session = attempt ? resumableSession(attempt) : undefined;
+  if (!session) return undefined;
+  return {
+    pipeline: resolved.run.pipeline,
+    runId: resolved.run.state.runId ?? "",
+    status: resolved.status,
+    stepId,
+    provider: session.provider,
+    sessionId: session.id,
+    cwd: resolved.cwd,
+    worktree: resolved.run.state.worktree === true,
   };
 }
 

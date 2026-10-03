@@ -1,7 +1,7 @@
 // modules/ui/routes/sessions.ts
 //
-// `POST /api/sessions`: reopen the coder session of an item's run in a new tmux
-// session.
+// `POST /api/sessions`: reopen an agent session of an item's run in a new tmux
+// session — the coder's, or with `step` and `attempt` the one that attempt left.
 
 import { readJsonBody } from "../http/body.js";
 import { sendError, sendJson, sendNotFound } from "../http/respond.js";
@@ -36,10 +36,12 @@ export const sessionsRoute: Route = {
 
     const { terminals, readModel } = deps;
     const opened = await openCoderSession(
-      { project, ticket: payload.ticket, by },
+      { project, ticket: payload.ticket, step: payload.step, attempt: payload.attempt, by },
       {
         tmux: terminals.tmux,
         findSession: (entry, ticket) => readModel.coderSession(entry.name, ticket),
+        findStepSession: (entry, ticket, { stepId, attempt }) =>
+          readModel.stepSession(entry.name, ticket, stepId, attempt),
         findItem: (entry, ticket) => readModel.item(entry.name, ticket),
         sessionCommand: terminals.sessionCommand,
         shell: terminals.shell,

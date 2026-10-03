@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { OUTPUT_EXCERPT_BYTES, readStepDetail } from "./step-detail.ts";
+import { OUTPUT_EXCERPT_BYTES, readStepDetail, readStepSession } from "./step-detail.ts";
 import {
   cleanupTempDirs,
   makeProject,
@@ -226,4 +226,44 @@ test("step detail: a journal log path leaving the run is never opened", () => {
 
   expect(detail?.attempts[0]?.logPath).toBeUndefined();
   expect(detail?.output).toBeUndefined();
+});
+
+test("step session: an attempt's resumable session, where its run ran; none for an attempt without one", () => {
+  const project = listedProject();
+  const session = { provider: "claude", id: "6bd3dbb0-0923-4814-9958-449272a0d545", resumable: true };
+  const runDir = writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "RUNNING",
+    steps: [{ id: "triage", status: "done", retries: 1 }],
+  });
+  const finished = (attempt: number, extra: Record<string, unknown>) => ({
+    ts: "2026-09-05T07:00:00.000Z",
+    type: "step.attempt.finished",
+    stepId: "triage",
+    attempt,
+    kind: "step",
+    status: "done",
+    ...extra,
+  });
+  writeRunEvents(runDir, [
+    finished(1, { session: { ...session, resumable: false } }),
+    finished(2, { session }),
+    { ts: "2026-09-05T07:01:00.000Z", type: "step.attempt.started", stepId: "triage", attempt: 3, kind: "step" },
+  ]);
+
+  expect(readStepSession("demo-app", "DEMO-1", "triage", 2)).toEqual({
+    pipeline: "feature",
+    runId: "r-1",
+    status: "RUNNING",
+    stepId: "triage",
+    provider: "claude",
+    sessionId: session.id,
+    cwd: project,
+    worktree: false,
+  });
+  expect(readStepSession("demo-app", "DEMO-1", "triage", 1)).toBeUndefined();
+  expect(readStepSession("demo-app", "DEMO-1", "triage", 3)).toBeUndefined();
+  expect(readStepSession("demo-app", "DEMO-1", "other", 2)).toBeUndefined();
+  const attempts = readStepDetail("demo-app", "DEMO-1", "triage", undefined)?.attempts;
+  expect(attempts?.map((attempt) => attempt.hasSession ?? false)).toEqual([false, true, false]);
 });

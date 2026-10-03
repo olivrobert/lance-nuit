@@ -297,7 +297,10 @@ The **Run** tab shows where the time went:
   command it was given, and the artifacts whose provenance names the step,
   each opening in the Files tab. Attempts run before the runner kept
   `command.txt` show no prompt; a step that declares no `input` lists no
-  artifact;
+  artifact. An attempt that left a resumable agent session has an **Open**
+  link in its Session column, which reopens that conversation in a terminal
+  (see [Reopen an agent session](#reopen-an-agent-session)), even while the
+  run goes on;
 - the cost by model. A step that composes pipelines (`runPipeline`,
   `forEachPipeline`) ran no model of its own: its cost is split by the models
   its child runs used;
@@ -370,6 +373,25 @@ The fork leaves the run's conversation untouched, so a later
 can be reopened this way; the request is refused when the run's directory no
 longer exists (a removed worktree). A coder session already open for the item is
 reused.
+
+### Reopen an agent session
+
+The **Session** column of an opened step does the same for one attempt of any
+step: **Open** forks the conversation that attempt left, in its own tmux session
+`ln-<project>-<ticket>__<step>-<attempt>`, in the run's working directory. A
+session is recorded when its attempt finishes, so an attempt still running has
+none yet.
+
+Unlike the coder session, it opens while the run is in progress. The run keeps
+working in the same directory, so the fork is then started in Claude's plan
+mode, which keeps the agent from editing files:
+
+```bash
+claude --resume <session-id> --fork-session --permission-mode plan
+```
+
+Plan mode is a guard, not a sandbox: you can leave it from the session itself,
+and what you then change lands under the running step.
 
 **Security.** The embedded terminal is a shell. Every terminal request needs a
 declared name and a same-origin request, every `/api/*` request must carry
