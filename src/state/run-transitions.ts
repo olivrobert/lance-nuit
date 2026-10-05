@@ -42,6 +42,7 @@ import type { Run, RunStep } from "../model/run.js";
 import { closeAttempt } from "./attempt-closure.js";
 import { aggregateControl, aggregateUsage } from "./cost-accounting.js";
 import { appendRunEvent, relativeRunPath } from "./run-journal.js";
+import { isSettledStatus } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
 import { latestAttemptLog } from "./run-timeline.js";
 import { deriveRunStatus, isResumableStatus } from "./run-verdict.js";
@@ -69,7 +70,7 @@ export function updateStep(run: Run, step: RunStep, status: RunStep["status"], e
   }
   // A `--start-at` replay is owed until the step settles: a failed or
   // interrupted replay must still run on a resume that no longer names it.
-  if (status === "done" || status === "skipped") delete step.replay;
+  if (isSettledStatus(status)) delete step.replay;
   // Persist failure reason unless an error_extractor already supplied one.
   if (status === "failed" && errors && !step.errors) step.errors = errors;
   const attemptLog = latestAttemptLog(run, step);

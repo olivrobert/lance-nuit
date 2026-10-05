@@ -203,6 +203,37 @@ test("resume selectors apply to an aborted step, not only to pending ones", asyn
   expect(skipB.steps[1]!.status).toBe("skipped");
 });
 
+test("resume selectors leave a step the journal finished as done, even when the snapshot still calls it running", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-selectors-journal-"));
+  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-journal" });
+  const path = pipelineFile(root);
+  const dir = resolveRunDir("p", "T-journal", undefined, true, ctx);
+  const run = await loadOrCreateRun(path, "T-journal", undefined, undefined, dir, false, undefined, ctx);
+  updateStep(run, run.steps[0]!, "done");
+  updateStep(run, run.steps[1]!, "running");
+  // A hard death between `updateStep`'s journal append and its snapshot write.
+  appendRunEvent(run, "step.status.changed", { stepId: "b", status: "done" });
+  expect(readRunSnapshot(join(dir, "state.json"))!.steps[1]!.status).toBe("running");
+
+  for (const [stepFilter, skipFilter] of [
+    [undefined, ["b"]],
+    [["c"], undefined],
+  ] as const) {
+    const resumed = await loadOrCreateRun(
+      path,
+      "T-journal",
+      stepFilter?.slice(),
+      skipFilter?.slice(),
+      dir,
+      false,
+      undefined,
+      ctx,
+    );
+    expect(resumed.steps[1]!.status).toBe("done");
+    expect(resumed.steps[1]!.excluded).toBeUndefined();
+  }
+});
+
 test("resume: an attempt priced in the journal but missing from the snapshot still counts", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-journal-cost-"));
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-4" });

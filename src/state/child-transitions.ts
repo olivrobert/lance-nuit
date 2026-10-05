@@ -46,6 +46,7 @@ import type { PipelineLot } from "../model/context.js";
 import type { PersistedPipelineChildRef, PersistedPipelineOrchestrationState } from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
+import { isSettledStatus } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
 
 /** The call a node wants to make, as the definition currently describes it. */
@@ -95,7 +96,7 @@ export function declareChild(
 
 /** A reference the next generation must not touch again. */
 export function isChildSettled(ref: PersistedPipelineChildRef): boolean {
-  return ref.status === "done" || ref.status === "skipped";
+  return isSettledStatus(ref.status);
 }
 
 /**

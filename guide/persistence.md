@@ -96,12 +96,14 @@ resumes, while persisted step state (including the profile and session) is
 retained for correct attribution. Which of the two files is believed when they
 disagree is settled per concept in [Which record is authoritative](#which-record-is-authoritative).
 
-Resume is a boot step (`boot/resume.ts`): it loads the definition, applies the
-`--step`/`--skip`/`--start-at` selectors, and assembles the in-memory run from the
-definition and the projected state. `--start-at X` requeues `X` and every later
-step on the persisted states, before the projection, so the run is hydrated live
-with totals derived from the steps even when the snapshot had passed; attempts,
-retries and spend are kept. `state/` only reads, projects and reconciles
+Resume is a boot step (`boot/resume.ts`): it loads the definition, projects the
+persisted state, applies the `--step`/`--skip`/`--start-at` selectors to the
+projected steps, and assembles the in-memory run from the definition and those
+steps. The selectors come after the projection so they judge what the journal
+knows: a step the snapshot still calls `running` but the journal finished stays
+`done` instead of becoming an exclusion. `--start-at X` requeues `X` and every
+later step, so the run is hydrated live with totals derived from the steps even
+when the snapshot had passed; attempts, retries and spend are kept. `state/` only reads, projects and reconciles
 (`state/run-projection.ts`): it reconciles each persisted step with the attempts
 the journal holds and settles the attempts a crash left running, without ever
 knowing about a pipeline definition.
