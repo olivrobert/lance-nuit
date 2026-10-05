@@ -19,6 +19,7 @@ import { pendingRejection } from "../state/decisions.js";
 import { recordCostStop } from "../state/cost-stop-events.js";
 import { adoptOutputs, stepFreshness } from "../state/provenance.js";
 import { appendRunEvent } from "../state/run-journal.js";
+import { owesWork } from "../state/run-predicates.js";
 import { stopRun, updateStep } from "../state/run-transitions.js";
 import { absorbNonBlocking } from "./non-blocking.js";
 
@@ -148,7 +149,7 @@ function admissionsToEvaluate(step: RunStep): readonly StepInputCondition[] {
 /** The last pass started and did not complete: whatever outputs it left are
  *  partial, so freshness cannot vouch for them. */
 function passLeftUnfinished(step: RunStep): boolean {
-  return step.status === "failed" || step.status === "aborted" || step.status === "running";
+  return step.status !== "pending" && owesWork(step.status);
 }
 
 async function anyPendingRejection(ctx: PipelineContext, subjects: readonly string[]): Promise<boolean> {
