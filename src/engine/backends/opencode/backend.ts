@@ -6,6 +6,7 @@ import type {
   AgentResult,
   AgentSession,
 } from "../../../contracts/index.js";
+import { withoutRunnerInternalEnv } from "../../../exec/self-spawn.js";
 import { buildOpencodeArgs, buildOpencodeEnv } from "./args.js";
 import { ensureOpencodeConfig } from "./config.js";
 import { executeOpencode } from "./execution.js";
@@ -114,7 +115,7 @@ export class OpencodeBackend implements AgentBackend {
       {
         bin,
         args,
-        env: buildOpencodeEnv(options, process.env),
+        env: buildOpencodeEnv(options, withoutRunnerInternalEnv(process.env)),
         ...(request.cwd ? { cwd: request.cwd } : {}),
         ...(options.model ? { model: options.model } : {}),
         ...(request.timeoutMs != null ? { timeoutMs: request.timeoutMs } : {}),
