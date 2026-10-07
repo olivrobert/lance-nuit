@@ -23,6 +23,8 @@ export interface PipelineOrchestrationInput {
   /** The parent's abort scope. Every child run executes under it, which is how
    *  an interruption of the process reaches runs that never see `run.aborted`. */
   abort: AbortScope;
+  /** `--replay-interrupted` of the invocation, passed down to every child run. */
+  replayInterrupted?: boolean;
   /** Shared output fan-out for parent and recursively executed child runs. */
   output: RunOutput;
 }

@@ -117,6 +117,7 @@ test("llmStep: options build the canonical definition", () => {
       timeout: 120,
       blocking: false,
       rerunOnResume: true,
+      replayInterrupted: true,
       onFail: {
         fix: fixPrompt,
         retries: 2,
@@ -136,6 +137,7 @@ test("llmStep: options build the canonical definition", () => {
     escalate_effort: "high",
     escalate_after: 1,
   });
+  expect(options.replay_interrupted).toBe(true);
 });
 
 test("bashStep: options build the canonical definition", () => {
@@ -151,6 +153,7 @@ test("bashStep: options build the canonical definition", () => {
     timeout: 30,
     blocking: false,
     rerunOnResume: true,
+    replayInterrupted: true,
     onFail: { retries: 2 },
   }).build();
 
@@ -160,6 +163,7 @@ test("bashStep: options build the canonical definition", () => {
   expect(options.timeout).toBe(30);
   expect(options.blocking).toBe(false);
   expect(options.rerun_on_resume).toBe(true);
+  expect(options.replay_interrupted).toBe(true);
   expect(options.on_failure).toEqual({ max_retries: 2 });
 });
 

@@ -122,6 +122,11 @@ export interface ExecuteRunStepsOptions {
    *  under its parent's. Absent, the execution gets a private scope: nothing but
    *  `run.aborted` can interrupt it. */
   abort?: AbortScope;
+  /** `--replay-interrupted` of this invocation; composed children inherit it. */
+  replayInterrupted?: boolean;
+  /** `--start-at` of this invocation. It names a top-level step, so children do
+   *  not inherit it. */
+  startAt?: string;
 }
 
 export async function executeRunSteps(
@@ -198,7 +203,15 @@ export async function executeRunSteps(
       // would leave it on base/develop and attach commits to the wrong branch.
       if (step.status === "done" && !reconsider) continue;
 
-      const admission: StepAdmission = await admitStep({ run, step, baseCtx, budget, output: loopDeps.output });
+      const admission: StepAdmission = await admitStep({
+        run,
+        step,
+        baseCtx,
+        budget,
+        output: loopDeps.output,
+        replayInterrupted: opts.replayInterrupted,
+        startAt: opts.startAt,
+      });
       if (isAborted()) break;
       if (admission.kind === "skip") continue;
       if (admission.kind === "budget-exceeded") {
@@ -237,6 +250,7 @@ export async function executeRunSteps(
           budget,
           resuming,
           abort,
+          replayInterrupted: opts.replayInterrupted,
           output: loopDeps.output,
         });
         if (isAborted()) break;

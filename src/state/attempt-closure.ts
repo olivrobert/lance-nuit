@@ -66,6 +66,8 @@ export interface AttemptOutcome {
   reason?: string;
   /** Logical or run-relative log path; the attempt keeps its own when absent. */
   logPath?: string;
+  /** The runner died mid-attempt; only crash settlement sets it. */
+  interrupted?: true;
 }
 
 /**
@@ -104,6 +106,7 @@ export function closeAttempt(
   const { control, usage } = charged;
   if (outcome.reason !== undefined) attempt.errors = outcome.reason;
   if (outcome.logPath !== undefined) attempt.log_path = outcome.logPath;
+  if (outcome.interrupted) attempt.interrupted = true;
 
   // Every field is passed unconditionally, never through a conditional spread:
   // excess-property checking does not reach a spread, so a misspelled field name
@@ -124,6 +127,7 @@ export function closeAttempt(
     usage,
     logPath: attempt.log_path,
     reason: attempt.errors,
+    interrupted: attempt.interrupted,
   });
   return charged;
 }

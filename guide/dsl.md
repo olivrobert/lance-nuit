@@ -345,6 +345,31 @@ except for `runPipeline`/`forEachPipeline` **that has already created a child**:
 composition decision is frozen by the snapshot, otherwise a resume could make an
 already-declared call disappear. Other guards on the same step are replayed.
 
+### Interrupted steps
+
+When the runner dies during an attempt (crash, OOM, `SIGKILL`, power loss), the
+next invocation resumes the run with that step still owing work. Its side
+effects — a push, a merge request, a tracker comment — may already have
+happened, so the resumed run does not replay it silently: admission stops the
+run as `STOPPED` (resumable) before the step runs again, naming the step and the
+two ways to authorize the replay. The check comes after `when`, freshness and
+rework, so a step those guards now skip replays nothing and asks nothing.
+
+The replay is authorized when any of these holds:
+
+- the step declares `replayInterrupted: true` — its side effects are safe to
+  repeat;
+- the step declares `rerunOnResume: true`, which already declares it idempotent;
+- the step is the one this invocation names in `--start-at`;
+- the invocation carries `--replay-interrupted`, which covers this invocation
+  and the runs it composes, and is never persisted: a replay that dies again
+  asks again.
+
+An authorized replay prints `↻ <step> — replaying after an interrupted attempt`,
+and the final report marks the step `↻ replayed after interruption`. A step
+interrupted by `SIGINT`/`SIGTERM` is closed `aborted` by the runner itself and
+is not covered by this rule.
+
 ### Input freshness
 
 `input` declares the artifacts a step reads, symmetrically to `output`. It is the
@@ -390,7 +415,8 @@ The rules:
   by `--start-at` is the exception: it runs even when its outputs are fresh,
   because freshness does not track the repository tree an operator fixed. So
   does a step whose last pass failed or was interrupted: what that pass wrote
-  is never adopted.
+  is never adopted. A pass the runner died in needs an authorization before it
+  is replayed; see [Interrupted steps](#interrupted-steps).
 - **Rework.** A step named as a gate's `rework` replays while a rejection of
   that gate is pending, independently of its inputs; without one, its inputs
   decide as above. See [human-control.md](human-control.md#reject-and-rework).
