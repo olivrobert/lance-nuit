@@ -27,6 +27,7 @@ import { sha256Text } from "../state/hash.ts";
 import { writeProvenance } from "../state/provenance.ts";
 import { readRunEvents } from "../state/run-journal.ts";
 import { finalizeRun } from "../state/run-transitions.ts";
+import { settleStepFailure } from "./non-blocking.ts";
 import { isPersistedRunResumable, pendingSteps } from "../state/run-predicates.ts";
 import { readRunSnapshot } from "../state/run-snapshot.ts";
 import { makeRunStep, type StepStateInput } from "../state/run-step.ts";
@@ -1261,6 +1262,161 @@ test("resume: a done step whose declared input changed is replayed", async () =>
   await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["spec"]);
+});
+
+// --- Absorbed non-blocking step on resume ------------------------------------
+//
+// A `blocking: false` step whose failure was absorbed is `done` without its
+// outputs. Without a record of the inputs it was absorbed at, every resume would
+// read those outputs as missing and pay the check again.
+
+const SKIP_ABSORBED = "failure absorbed, inputs unchanged since";
+
+/** Non-blocking check over `ticket.md` producing `spec.md`, then a gate. */
+function absorbedRun(check: Partial<PipelineStep> = {}): { run: Run; check: RunStep; gate: RunStep } {
+  const checkStep = bashStep("check", "cmd", {
+    sources: [ticketArtifact],
+    outputs: [specArtifact],
+    blocking: false,
+    ...check,
+  });
+  const gate = bashStep("gate", "test -f ok");
+  return { run: makeRun([checkStep, gate]), check: checkStep, gate };
+}
+
+/** First invocation: the check fails and is absorbed, the gate fails the run. */
+async function absorbThenFailGate(run: Run, ctx: PipelineContext, deps?: StepLoopDeps): Promise<void> {
+  const first = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
+  await executeRunSteps(run, "PROJ-1", undefined, { resuming: false }, deps ?? first.deps, ctx);
+}
+
+test("executeRunSteps: an absorbed step records its inputs as its fix left them", async () => {
+  const { ctx, values } = artifactContext({ "ticket.md": "v1" });
+  const { run, check } = absorbedRun({
+    on_failure: { fix_prompt: "fix", max_retries: 1, replay_after_fix: false },
+  });
+  const { deps } = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
+  deps.runFixLoop = async (r, step, _command, _output, _ctx, _budget, reason, opts) => {
+    // `replayAfterFix: false`: the fix rewrites the input it audits, then settles.
+    values.set("ticket.md", "fixed by the audit");
+    return settleStepFailure(r, step, opts.output, reason, { failSuffix: "" });
+  };
+
+  await absorbThenFailGate(run, ctx, deps);
+
+  expect(check.status).toBe("done");
+  expect(check.errors).toBe("audit failed");
+  expect(check.absorbed_inputs).toEqual({ "artifacts/ticket.md": sha256Text("fixed by the audit") });
+  const saved = readRunSnapshot(join(run.run_dir, "state.json"));
+  expect(saved?.steps[0]?.absorbed_inputs).toEqual({ "artifacts/ticket.md": sha256Text("fixed by the audit") });
+});
+
+test("resume: an absorbed step whose inputs did not move is not re-run", async () => {
+  const { ctx } = artifactContext({ "ticket.md": "v1" });
+  const { run, check, gate } = absorbedRun();
+  await absorbThenFailGate(run, ctx);
+  expect(gate.status).toBe("failed");
+
+  const { deps, calls } = fakeDeps();
+  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+
+  expect(calls.ids).toEqual(["gate"]);
+  expect(check.status).toBe("done");
+  expect(check.errors).toBe("audit failed");
+  const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
+  expect(skipped).toMatchObject({ stepId: "check", reason: SKIP_ABSORBED });
+});
+
+test("resume: an absorbed step whose fix rewrote its input is not re-run", async () => {
+  const { ctx, values } = artifactContext({ "ticket.md": "v1" });
+  const { run, check } = absorbedRun({
+    on_failure: { fix_prompt: "fix", max_retries: 1, replay_after_fix: false },
+  });
+  const first = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
+  first.deps.runFixLoop = async (r, step, _command, _output, _ctx, _budget, reason, opts) => {
+    values.set("ticket.md", "fixed by the audit");
+    return settleStepFailure(r, step, opts.output, reason, { failSuffix: "" });
+  };
+  await absorbThenFailGate(run, ctx, first.deps);
+
+  const { deps, calls } = fakeDeps();
+  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+
+  expect(calls.ids).toEqual(["gate"]);
+  expect(check.status).toBe("done");
+  expect(check.errors).toBe("audit failed");
+});
+
+test("resume: an absorbed step whose input an earlier step rewrote runs again", async () => {
+  const { ctx, values } = artifactContext({ "ticket.md": "v1" });
+  const producer = bashStep("make", "cmd", { outputs: [ticketArtifact], rerun_on_resume: true });
+  const check = bashStep("check", "cmd", { sources: [ticketArtifact], outputs: [specArtifact], blocking: false });
+  const gate = bashStep("gate", "test -f ok");
+  const run = makeRun([producer, check, gate]);
+  /** The attempt erases declared outputs before spawn: the fake writes them back. */
+  const writing = (deps: StepLoopDeps, written: Record<string, [string, string]>): StepLoopDeps => {
+    const execute = deps.executeStep;
+    return {
+      ...deps,
+      executeStep: async (step, command, budget, context) => {
+        const output = written[step.id];
+        if (output) values.set(output[0], output[1]);
+        return execute(step, command, budget, context);
+      },
+    };
+  };
+  const first = fakeDeps([{ ok: true }, { ok: false, failReason: "audit failed" }, { ok: false }]);
+  await executeRunSteps(
+    run,
+    "PROJ-1",
+    undefined,
+    { resuming: false },
+    writing(first.deps, { make: ["ticket.md", "v1"] }),
+    ctx,
+  );
+  expect(check.absorbed_inputs).toEqual({ "artifacts/ticket.md": sha256Text("v1") });
+
+  const { deps, calls } = fakeDeps();
+  await executeRunSteps(
+    run,
+    "PROJ-1",
+    undefined,
+    { resuming: true },
+    writing(deps, { make: ["ticket.md", "v2"], check: ["spec.md", "checked"] }),
+    ctx,
+  );
+
+  expect(calls.ids).toEqual(["make", "check", "gate"]);
+  // The new pass succeeded: nothing absorbed is left to vouch for.
+  expect(check.errors).toBeUndefined();
+  expect(check.absorbed_inputs).toBeUndefined();
+});
+
+test("resume: an absorbed step requeued by --start-at runs", async () => {
+  const { ctx } = artifactContext({ "ticket.md": "v1" });
+  const { run, check } = absorbedRun();
+  await absorbThenFailGate(run, ctx);
+  check.status = "pending";
+  check.replay = true;
+
+  const { deps, calls } = fakeDeps();
+  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+
+  expect(calls.ids).toEqual(["check", "gate"]);
+});
+
+test("resume: an absorbed step without recorded inputs runs as before", async () => {
+  // A snapshot written before the record existed, or an interruption between the
+  // absorption and the record: the freshness path decides, and outputs are missing.
+  const { ctx } = artifactContext({ "ticket.md": "v1" });
+  const { run, check } = absorbedRun();
+  await absorbThenFailGate(run, ctx);
+  delete check.absorbed_inputs;
+
+  const { deps, calls } = fakeDeps();
+  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+
+  expect(calls.ids).toEqual(["check", "gate"]);
 });
 
 test("a step revising an output another step produced is not adopted on its extra input", async () => {

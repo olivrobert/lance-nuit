@@ -17,11 +17,12 @@ import { emitRunnerEvent } from "../runtime/events.js";
 import { costDecision, type RunBudget } from "../state/budget.js";
 import { controlForRun, runProvesUnpricedSpend } from "../state/cost-accounting.js";
 import { inheritChildBudgetStop } from "../state/cost-stop-events.js";
+import { fingerprintInputs, pureInputsOf } from "../state/provenance.js";
 
 import { latestAttemptLog } from "../state/run-timeline.js";
 import { saveRun } from "../state/run-repository.js";
 import { hasUnfinishedWork } from "../state/run-predicates.js";
-import { type RunOutcome, updateStep } from "../state/run-transitions.js";
+import { type RunOutcome, recordAbsorbedInputs, updateStep } from "../state/run-transitions.js";
 import { runFixLoop } from "./fix-loop.js";
 import { executePipelineOrchestration } from "./pipeline-orchestration.js";
 import { admitStep, checkInputs, type StepAdmission } from "./step-admission.js";
@@ -291,6 +292,13 @@ export async function executeRunSteps(
         output: loopDeps.output,
       });
       if (isAborted()) break;
+      // `updateStep(running)` cleared `errors` for this pass, so a `done` step
+      // carrying one absorbed its failure. Fingerprinted here, after any fix that
+      // rewrote the inputs and before a later step can: a resume then re-checks
+      // the step only when something else changed them.
+      if ((step.def.sources?.length ?? 0) > 0 && step.status === "done" && step.errors !== undefined) {
+        recordAbsorbedInputs(run, step, await fingerprintInputs(baseCtx, pureInputsOf(step.def)));
+      }
       if (action === "failed") {
         failed = true;
         break;

@@ -8,6 +8,7 @@ import {
   adoptOutputs,
   fingerprintInputs,
   freshness,
+  inputsUnchanged,
   mergeProvenance,
   outputFreshness,
   PROVENANCE_PREFIX,
@@ -168,6 +169,30 @@ test("stepFreshness: pure inputs exclude what the step revises in place", async 
   expect(report.states).toEqual({ "spec.md": "adoptable", "plan.md": "missing" });
   expect(report.summary).toBe("missing");
   expect(report.mustRun).toBe(true);
+});
+
+test("inputsUnchanged: equal maps match, a changed byte or a different key set does not", async () => {
+  const { ctx, store } = fixture();
+  store.values.set("ticket.md", "one");
+  const step = { sources: [ticket, spec], outputs: [plan] };
+  const recorded = { "artifacts/ticket.md": sha256Text("one"), "artifacts/spec.md": null };
+
+  // An input absent at absorption and still absent is unchanged.
+  expect(await inputsUnchanged(ctx, step, recorded)).toBe(true);
+
+  store.values.set("ticket.md", "two");
+  expect(await inputsUnchanged(ctx, step, recorded)).toBe(false);
+
+  store.values.set("ticket.md", "one");
+  store.values.set("spec.md", "now present");
+  expect(await inputsUnchanged(ctx, step, recorded)).toBe(false);
+
+  store.values.delete("spec.md");
+  // The definition gained or lost an input since the absorption.
+  expect(await inputsUnchanged(ctx, { sources: [ticket], outputs: [plan] }, recorded)).toBe(false);
+  expect(await inputsUnchanged(ctx, { sources: [ticket, spec, plan], outputs: [] }, recorded)).toBe(false);
+  // Inputs the step revises in place are not compared.
+  expect(await inputsUnchanged(ctx, { sources: [ticket, spec, plan], outputs: [plan] }, recorded)).toBe(true);
 });
 
 test("adoptOutputs: an output without a record keeps its content and gains fingerprints", async () => {
