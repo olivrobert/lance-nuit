@@ -50,6 +50,26 @@ test("OpencodeBackend: a run carries the model, the working directory and the ru
   expect(result.session).toEqual({ provider: "opencode", id: "ses_42", resumable: true });
 });
 
+test("OpencodeBackend: the CLI does not inherit runner-internal variables", async () => {
+  const touched = ["RUNNER_LOCK_HELD", "RUNNER_IN_WORKTREE"] as const;
+  const previous = touched.map((name) => process.env[name]);
+  for (const name of touched) process.env[name] = "1";
+  try {
+    const { host, seen } = recordingHost();
+    await createOpencodeBackend({}, host).run({ prompt: "p", cwd: "/repo", outputFormat: "json" });
+
+    const call = seen();
+    for (const name of touched) expect(call.env[name]).toBeUndefined();
+    expect(call.env.OPENCODE_DISABLE_CLAUDE_CODE).toBe("1");
+  } finally {
+    touched.forEach((name, i) => {
+      const value = previous[i];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    });
+  }
+});
+
 test("OpencodeBackend: the role picks the agent, which is the only permission control opencode offers", async () => {
   const agentFor = async (role?: string, options: Record<string, unknown> = {}) => {
     const { host, seen } = recordingHost();

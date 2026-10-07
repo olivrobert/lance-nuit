@@ -10,12 +10,33 @@
 // spawn helper. The child remains in the parent's group (not `detached`), so the
 // terminal can still pass Ctrl+C and supervision can stop it while the parent waits.
 
+import { LIVE_FEED_ENV_VARS } from "../runtime/live-feed.js";
 import { spawnSupervisedProcess } from "./process-runner.js";
 
 /** Environment set on every child launched by a dispatch strategy to avoid recursion. */
 export const DISPATCH_CHILD_ENV = {
   RUNNER_DISABLE_DISPATCH: "1",
 } as const;
+
+/**
+ * Variables carrying the parent run's state (held lock, worktree mode, journal,
+ * dispatch recursion guard). Only the children selfSpawnRunner starts may inherit
+ * them: a step or an agent seeing them would start a runner that skips the lock and
+ * the worktree guards and writes into the parent's journal.
+ */
+export const RUNNER_INTERNAL_ENV_VARS = [
+  "RUNNER_LOCK_HELD",
+  "RUNNER_IN_WORKTREE",
+  ...LIVE_FEED_ENV_VARS,
+  ...Object.keys(DISPATCH_CHILD_ENV),
+] as const;
+
+/** Environment for a process started by a step or an agent backend. */
+export function withoutRunnerInternalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const stripped = { ...env };
+  for (const name of RUNNER_INTERNAL_ENV_VARS) delete stripped[name];
+  return stripped;
+}
 
 export interface SelfSpawnOptions {
   timeoutMs?: number;

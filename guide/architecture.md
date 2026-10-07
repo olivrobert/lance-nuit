@@ -297,6 +297,13 @@ A child runner inherits the parent context and uses `RUNNER_DISABLE_DISPATCH` to
 avoid recursively selecting the same dispatch strategy. The parent coordinates; the
 child executes the actual steps.
 
+Only the dispatch children the runner spawns itself inherit its internal state:
+`RUNNER_LOCK_HELD`, `RUNNER_IN_WORKTREE`, `RUNNER_EVENTS_FILE`/`RUNNER_LIVE_FEED`
+and `RUNNER_DISABLE_DISPATCH`. Bash steps, admission commands and agent backends
+get the environment without them (`RUNNER_BIN` and `RUNNER_DIR` stay), so a runner
+started from a step takes the lock, applies the worktree guards and writes its own
+journal.
+
 ## 5. The step lifecycle
 
 ```text
