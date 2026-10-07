@@ -18,6 +18,7 @@ import {
   type FakeWorkItemSeed,
   type FakeWorkItemSeedItem,
 } from "../modules/work-item/fake.ts";
+import { parseRunnerArgs } from "../cli/parse.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { type DispatchDeps, runDispatch } from "./loop.ts";
 import { resolveScanLimit, scanStrategy } from "./scan.ts";
@@ -336,6 +337,42 @@ function bugTodoItems(count: number): FakeWorkItemSeed {
 /** Scan without the between-ticket checkout: these tests run in a bare temporary
  *  directory, where a real `git checkout` would halt the loop. */
 const scanWithoutCheckout: typeof scanStrategy = { ...scanStrategy, betweenTickets: () => true };
+
+test("step selectors given with --scan reach every child", async () => {
+  for (const argv of [
+    ["--scan", "-k", "second"],
+    ["--scan", "--steps", "a,b"],
+  ]) {
+    const { env } = scanEnv({ seed: bugTodoItems(2) });
+    env.passthrough = parseRunnerArgs(argv).passthrough;
+    const spawned: string[][] = [];
+    const { result } = await captureLogs(() =>
+      runDispatch(
+        scanWithoutCheckout,
+        env,
+        deps({
+          spawn: (args) => {
+            spawned.push(args);
+            return 0;
+          },
+        }),
+      ),
+    );
+    expect(result).toBe(0);
+    const base = env.ctx.config.baseBranch;
+    expect(spawned).toEqual(
+      ["PROJ-1", "PROJ-2"].map((ticket) => [
+        ticket,
+        "--pipeline",
+        env.pipelinePath,
+        ...env.passthrough,
+        "--base-branch",
+        base,
+      ]),
+    );
+    expect(env.passthrough).toEqual(argv[1] === "-k" ? ["--skip", "second"] : ["--steps", "a,b"]);
+  }
+});
 
 test("record: written before discovery, with discovered null", async () => {
   const { env, store } = scanEnv({ seed: bugTodoItems(1) });

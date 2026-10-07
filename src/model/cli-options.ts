@@ -146,7 +146,8 @@ export type CommandScope = "create";
  *  - `--fresh` / `--allow-dirty` / `--base-branch`: parent decisions invisible to the child → forwarded.
  *  - `--worktree`: the child inherits cwd (chdir) + `RUNNER_IN_WORKTREE` → NOT forwarded.
  *  - `--watch`: forwarded only by the multi-work-item strategy (tmux pane per child), not here.
- *  - `--pipeline` / step selectors: explicitly set by the spawn caller.
+ *  - `--steps` / `--skip`: the operator's selection applies to every ticket → forwarded.
+ *  - `--start-at`: refused under `--scan` (cli/parse.ts); `--pipeline`: set by the spawn caller.
  */
 export const FLAGS: FlagSpec[] = [
   {
@@ -178,9 +179,17 @@ export const FLAGS: FlagSpec[] = [
     short: "-s",
     key: "stepFilter",
     kind: "list",
+    passthrough: true,
     desc: "List of steps to run (all others are skipped).",
   },
-  { long: "--skip", short: "-k", key: "skipFilter", kind: "list", desc: "List of steps to skip." },
+  {
+    long: "--skip",
+    short: "-k",
+    key: "skipFilter",
+    kind: "list",
+    passthrough: true,
+    desc: "List of steps to skip.",
+  },
   {
     long: "--start-at",
     short: "-a",
