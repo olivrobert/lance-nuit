@@ -4,7 +4,15 @@ import { join } from "node:path";
 import { listItems } from "./items.ts";
 import { isPidAlive } from "../dashboard-home/index.ts";
 import { latestLaunchByItem, readLaunches, readLaunchesFor } from "./launches.ts";
-import { cleanupTempDirs, makeProject, makeTempDir, writeProjectsFile, writeRun } from "./test-harness.ts";
+import {
+  cleanupTempDirs,
+  DEAD_PID,
+  makeProject,
+  makeTempDir,
+  writeProjectsFile,
+  writeRun,
+  writeRunLock,
+} from "./test-harness.ts";
 import type { LaunchRecord } from "./types.ts";
 
 afterEach(() => cleanupTempDirs());
@@ -77,6 +85,24 @@ test("items: a live launch puts a stopped item in the running group, a finished 
   expect(first?.launch).toMatchObject({ id: "20260905T080000000Z-DEMO-1-rerun", alive: true });
   expect(second?.group).toBe("failure");
   expect(second?.launch).toMatchObject({ exitCode: 1, alive: false });
+});
+
+test("items: an exited launch does not keep a dead RUNNING run in the running group", async () => {
+  const home = makeTempDir("read-model-home-");
+  const project = makeProject("demo-app");
+  writeProjectsFile(home, [project]);
+  const runDir = writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "RUNNING",
+    updatedAt: "2026-09-05T08:00:00.000Z",
+  });
+  writeRunLock(runDir, DEAD_PID);
+  writeLaunch(home, record({ id: "20260905T080000000Z-DEMO-1-rerun", exitCode: 137 }));
+
+  const [item] = await listItems({ env: { ...process.env, PIPELINE_HOME: home } });
+  expect(item?.group).toBe("failure");
+  expect(item?.status).toBe("ABORTED");
+  expect(item?.launch).toMatchObject({ exitCode: 137, alive: false });
 });
 
 test("items: a run stopped by its budget carries the flag the budget verb needs", async () => {

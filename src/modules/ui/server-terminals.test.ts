@@ -10,6 +10,7 @@ import {
   writeProjectsFile,
   writeRun,
   writeRunEvents,
+  writeRunLock,
 } from "../read-model/test-harness.js";
 import { USER_COOKIE } from "./cookies.js";
 import { type RunningUiServer, startUiServer, type UiServerOptions } from "./server.js";
@@ -175,7 +176,7 @@ test("runs: a bad body, ticket or pipeline is 400, an unknown project 404, a bus
   expect((await launch(url, { worktree: "yes" })).status).toBe(400);
   expect((await launch(url, { project: "nope" })).status).toBe(404);
 
-  writeRun(project, "PROJ-7", "feature", { runId: "r-1", status: "RUNNING", steps: [] });
+  writeRunLock(writeRun(project, "PROJ-7", "feature", { runId: "r-1", status: "RUNNING", steps: [] }), process.ppid);
   const busy = await launch(url, { ticket: "PROJ-7" });
   expect(busy.status).toBe(409);
   expect(((await busy.json()) as { error: string }).error).toContain("in progress");
@@ -328,11 +329,12 @@ test("sessions: the coder session opens in the run's directory, 409 while runnin
     status: "FAIL",
     steps: [{ id: "code", status: "failed", retries: 0, profile: "coder", session: coder }],
   });
-  writeRun(project, "PROJ-7", "feature", {
+  const live = writeRun(project, "PROJ-7", "feature", {
     runId: "r-2",
     status: "RUNNING",
     steps: [{ id: "code", status: "running", retries: 0, profile: "coder", session: coder }],
   });
+  writeRunLock(live, process.ppid);
   writeRun(project, "PROJ-8", "feature", { runId: "r-3", status: "FAIL", steps: [] });
 
   expect((await openSession(url, {}, "Stranger")).status).toBe(403);
@@ -363,6 +365,7 @@ test("sessions: a finished attempt's session opens while the run runs, read-only
       { id: "code", status: "running", retries: 0, profile: "coder" },
     ],
   });
+  writeRunLock(runDir, process.ppid);
   writeRunEvents(runDir, [
     { ts: "2026-09-05T07:00:00.000Z", type: "step.attempt.started", stepId: "triage", attempt: 1, kind: "step" },
     {

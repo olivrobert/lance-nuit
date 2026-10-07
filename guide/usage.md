@@ -189,6 +189,12 @@ a morning reader goes through it:
 - **Needs you**: runs stopped for a decision, then technical failures;
 - **Running**: runs in progress.
 
+**Running** holds only a run a live runner holds (its `runner.lock` names a
+live process) or a dashboard launch still alive. A run whose snapshot still
+says `RUNNING` but whose runner died without a verdict (crash, `kill -9`,
+reboot) is listed under **Needs you** as `ABORTED`, as a later `lancenuit run`
+would see it.
+
 A card above them sums up the latest night with a finished run: its run count,
 how many delivered, how many were closed by hand, and its cost. An empty inbox
 says so instead of showing an empty list. The tab count turns to an accent
@@ -266,6 +272,15 @@ names a primary link leads with it (typically **Open merge request**), followed
 by a copy button for the value the report marks as copyable, such as the
 branch. Rerun, Start fresh, and Mark as closed then move under **More
 actions**. Without a report, the actions are the usual ones.
+
+A run whose runner died without a verdict offers **Start fresh** but not
+**Mark as closed**: `lancenuit close` refuses a snapshot that still says
+`RUNNING`. It offers **Rerun from failure**, or **Replay interrupted step**
+when the runner died inside a step attempt. That verb runs
+`lancenuit run <ticket> --pipeline <pipeline> --replay-interrupted`, because a
+plain resume stops on such a step (see
+[Interrupted steps](dsl.md#interrupted-steps)); a run a plain resume already
+stopped on that step offers it instead of **Rerun** too.
 
 The tabs are **Report**, **Run**, and **Files**, plus **Document** when the
 run has a document to show. A tab with nothing to show is not listed. A

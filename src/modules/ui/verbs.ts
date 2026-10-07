@@ -22,6 +22,7 @@ export const VERBS = [
   "approve",
   "reject-and-rerun",
   "rerun",
+  "replay-interrupted",
   "fresh",
   "budget",
   "close",
@@ -112,6 +113,8 @@ function argvOf(item: Item, verb: Verb, budget: string, reason = ""): string[] {
       return [...run, "--reject", gate, "--reason", reason, ...worktree];
     case "rerun":
       return [...run, ...worktree];
+    case "replay-interrupted":
+      return [...run, "--replay-interrupted", ...worktree];
     case "budget":
       return [...run, "--budget", budget, ...worktree];
     case "fresh":
@@ -164,11 +167,24 @@ export function buildArgv(item: Item, verb: Verb, input: ActionInput = {}): Argv
       return { ok: true, argv: argvOf(item, verb, "", reason) };
     }
     case "rerun": {
+      // The runner stops a plain resume on a step it died inside, so this rerun
+      // would only bring the operator back to the same stop.
+      if (item.interruptedStep) {
+        return {
+          ok: false,
+          status: 409,
+          reason: `the runner died inside step "${item.interruptedStep}": replay it explicitly`,
+        };
+      }
       const blocked = item.status === "STOPPED" && (!gate || approvedGate(item) || rejectedGate(item));
       const failed = item.status === "FAIL" || item.status === "ABORTED";
       if (!blocked && !failed) return { ok: false, status: 409, reason: "only a blocked or failed run can be resumed" };
       return { ok: true, argv: argvOf(item, verb, "") };
     }
+    case "replay-interrupted":
+      if (!item.interruptedStep || item.closed)
+        return { ok: false, status: 409, reason: "no open run of this item died inside a step attempt" };
+      return { ok: true, argv: argvOf(item, verb, "") };
     case "budget": {
       if (!item.budgetExceeded) return { ok: false, status: 409, reason: "this run was not stopped by its budget" };
       const budget = formatBudget(input.budget);
@@ -183,6 +199,13 @@ export function buildArgv(item: Item, verb: Verb, input: ActionInput = {}): Argv
       const waiting = item.status === "STOPPED" || item.status === "FAIL" || item.status === "ABORTED";
       if (!waiting || item.closed)
         return { ok: false, status: 409, reason: "only an open failed or stopped run can be closed" };
+      // `lancenuit close` refuses a snapshot still saying RUNNING.
+      if (item.interrupted)
+        return {
+          ok: false,
+          status: 409,
+          reason: "the runner died without a verdict: rerun or start fresh instead",
+        };
       return { ok: true, argv: argvOf(item, verb, "") };
     }
     case "reopen":
@@ -227,11 +250,15 @@ export function verbsFor(item: Item): VerbAction[] {
     verbs.push(offer(item, "approve", "Approve only"));
     if (item.stop?.reworkable) verbs.push(offer(item, "reject-and-rerun", "Reject and rework"));
   }
-  if (stopped && (!pendingGate(item) || approvedGate(item) || rejectedGate(item)))
-    verbs.push(offer(item, "rerun", "Rerun", { primary: true }));
-  if (failed) verbs.push(offer(item, "rerun", "Rerun from failure", { primary: true }));
+  if (item.interruptedStep) {
+    verbs.push(offer(item, "replay-interrupted", "Replay interrupted step", { primary: true }));
+  } else {
+    if (stopped && (!pendingGate(item) || approvedGate(item) || rejectedGate(item)))
+      verbs.push(offer(item, "rerun", "Rerun", { primary: true }));
+    if (failed) verbs.push(offer(item, "rerun", "Rerun from failure", { primary: true }));
+  }
   if (item.budgetExceeded) verbs.push(offer(item, "budget", "Raise budget"));
-  if (stopped || failed) verbs.push(offer(item, "close", "Mark as closed"));
+  if ((stopped || failed) && !item.interrupted) verbs.push(offer(item, "close", "Mark as closed"));
   if (item.status !== "RUNNING") verbs.push(offer(item, "fresh", "Start fresh", { danger: true }));
   return verbs;
 }
