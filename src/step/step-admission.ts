@@ -86,14 +86,15 @@ function applyInputDecision(
   stop?: RunStopState,
 ): Exclude<StepAdmission, { kind: "ready" } | { kind: "budget-exceeded" } | { kind: "cost-unaccounted" }> {
   if (action === "skip") {
-    const alreadyRan = step.control != null;
+    // Not `control`: a failed or interrupted pass carries its spend there too, yet never completed.
+    const alreadyCompleted = step.status === "done";
     // The console line is transient; the journal is what a later diagnosis reads.
     appendRunEvent(run, "step.skipped", { stepId: step.id, reason, freshness });
-    updateStep(run, step, alreadyRan ? "done" : "skipped");
+    updateStep(run, step, alreadyCompleted ? "done" : "skipped");
     output.emit({
       type: "runner.message",
       level: "info",
-      message: `⊘ ${step.def.name} — ${alreadyRan ? "already completed" : "skipped"}: ${reason}`,
+      message: `⊘ ${step.def.name} — ${alreadyCompleted ? "already completed" : "skipped"}: ${reason}`,
     });
     return { kind: "skip" };
   }

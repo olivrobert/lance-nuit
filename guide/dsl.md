@@ -344,6 +344,10 @@ Admission is reevaluated on every resume, including for an already-attempted ste
 except for `runPipeline`/`forEachPipeline` **that has already created a child**: its
 composition decision is frozen by the snapshot, otherwise a resume could make an
 already-declared call disappear. Other guards on the same step are replayed.
+A step that its `when` skips on resume stays `done` ("already completed") only if
+its last pass completed. A step whose last pass failed or was interrupted becomes
+`skipped`: the spend of that pass stays counted, and its previous error is
+dropped from the report and the dashboard.
 
 ### Interrupted steps
 

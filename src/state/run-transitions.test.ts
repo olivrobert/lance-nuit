@@ -416,6 +416,45 @@ test("recordStepVerdict: set on failure, cleared on success and by the next atte
   expect(step.fail_cause).toBeUndefined();
 });
 
+test("updateStep: a skipped step drops the failure of the pass it abandons and keeps its spend", () => {
+  const run: Run = {
+    name: "p",
+    pipeline: "p",
+    pipeline_path: "p.ts",
+    run_dir: mkdtempSync(join(tmpdir(), "transitions-skipped-")),
+    steps: [
+      makeRunStep(
+        { id: "plan", name: "Plan", command: "true", runner: "bash" },
+        {
+          status: "failed",
+          errors: "agent exited 1",
+          fail_kind: "technical",
+          fail_cause: "blocked",
+          control: { duration_ms: 5, total_cost_usd: 0.3 },
+        },
+      ),
+    ],
+  };
+  const step = run.steps[0]!;
+
+  updateStep(run, step, "skipped");
+
+  expect(step.errors).toBeUndefined();
+  expect(step.fail_kind).toBeUndefined();
+  expect(step.fail_cause).toBeUndefined();
+  expect(step.control).toEqual({ duration_ms: 5, total_cost_usd: 0.3 });
+  const saved = JSON.parse(snapshotOf(run)).steps[0];
+  expect(saved).toMatchObject({ status: "skipped", control: { total_cost_usd: 0.3 } });
+  expect(saved.errors).toBeUndefined();
+  expect(saved.fail_kind).toBeUndefined();
+  expect(saved.fail_cause).toBeUndefined();
+  const report = buildRunReport(run, outcome);
+  expect(report.statusCounts.skipped).toBe(1);
+  expect(report.statusCounts.done).toBe(0);
+  expect(report.steps[0]!.detail).toBeUndefined();
+  expect(report.totalControl.total_cost_usd).toBe(0.3);
+});
+
 test("absorbStepFailure: the step is done, the reason stays, the journal event is unchanged", () => {
   const run = twoStepRun("transitions-absorb-");
   const step = run.steps[1]!;

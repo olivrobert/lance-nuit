@@ -172,7 +172,34 @@ for (const state of UNFINISHED_PASSES) {
     expect(admission.kind).toBe("ready");
     expect(events.some((event) => event.type === "step.skipped")).toBe(false);
   });
+
+  test(`resume: a step left ${state.status} that its when now skips ends skipped, not already completed`, async () => {
+    const { ctx } = reworkContext({});
+    const step = reworkStep(
+      { rework_for: undefined, inputs: [skipIf(() => true, "deliverable exists")] },
+      { ...state },
+    );
+
+    const { admission, events } = await admitRework(step, ctx);
+    expect(admission.kind).toBe("skip");
+    expect(step.status).toBe("skipped");
+    expect(events.filter((event) => event.type === "step.status.changed").at(-1)).toMatchObject({
+      status: "skipped",
+    });
+  });
 }
+
+test("resume: a done step that its when now skips stays done", async () => {
+  const { ctx } = reworkContext({});
+  const step = reworkStep(
+    { rework_for: undefined, inputs: [skipIf(() => true, "deliverable exists")] },
+    { status: "done", control: { duration_ms: 1 } },
+  );
+
+  const { admission } = await admitRework(step, ctx);
+  expect(admission.kind).toBe("skip");
+  expect(step.status).toBe("done");
+});
 
 // ── Interrupted attempt ──────────────────────────────────────────────────────
 
