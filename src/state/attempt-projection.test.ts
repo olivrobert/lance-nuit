@@ -202,3 +202,27 @@ test("attempt projection: validates the integration contract", async () => {
   const next = nextAttemptLogPath(resumed, resumedStep, "step");
   expect(next).toContain("attempt-003");
 });
+
+test("projectStepAttempts: a finish carrying interrupted marks the attempt, one without it does not", () => {
+  const attempts = projectStepAttempts([
+    event("step.attempt.started", "2026-08-01T10:00:01.000Z", { stepId: "a", attempt: 1, kind: "step" }),
+    event("step.attempt.finished", "2026-08-01T10:00:02.000Z", {
+      stepId: "a",
+      attempt: 1,
+      kind: "step",
+      status: "failed",
+      interrupted: true,
+    }),
+    event("step.attempt.started", "2026-08-01T10:00:03.000Z", { stepId: "a", attempt: 2, kind: "step" }),
+    event("step.attempt.finished", "2026-08-01T10:00:04.000Z", {
+      stepId: "a",
+      attempt: 2,
+      kind: "step",
+      status: "done",
+    }),
+  ]);
+
+  const [interrupted, replayed] = attempts.get("a") ?? [];
+  expect(interrupted?.interrupted).toBe(true);
+  expect(replayed).not.toHaveProperty("interrupted");
+});

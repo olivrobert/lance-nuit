@@ -132,6 +132,10 @@ export interface PersistedAttempt {
   control?: StepControl;
   usage?: StepUsage;
   errors?: string;
+  /** The runner died while this attempt was running (crash, OOM, SIGKILL): any
+   *  side effect it had may already have happened, so replaying the step needs an
+   *  authorization. Written by crash settlement only. */
+  interrupted?: true;
 }
 
 /** Persisted step state. The definition (command, on_failure, ...) is reloaded

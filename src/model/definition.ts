@@ -132,6 +132,10 @@ export interface PipelineStep {
    *  restore the Git state (HEAD on the feature/fix branch) that a skip would leave
    *  wrong (HEAD left on base/develop → commits on the wrong branch). */
   rerun_on_resume?: boolean;
+  /** Replay this step on resume when the runner died during its last attempt,
+   *  without asking: its side effects are safe to repeat. Implied by
+   *  `rerun_on_resume`. */
+  replay_interrupted?: boolean;
   /** Approval subjects this step reworks when a human rejects them. On resume the
    *  step replays while one of them has a pending rejection, whatever its input
    *  freshness says: a rejection is not an input, it is the reason to run. */

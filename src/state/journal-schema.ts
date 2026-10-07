@@ -160,6 +160,7 @@ const EVENT_SCHEMAS = {
     usage: tolerant(StepUsageSchema),
     logPath: optionalNullableString,
     reason: optionalString,
+    interrupted: tolerant(z.boolean()),
   }),
   "step.cost.unaccounted": z.looseObject({
     ...base,

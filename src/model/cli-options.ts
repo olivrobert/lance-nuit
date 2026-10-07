@@ -38,6 +38,10 @@ export interface RunnerArgs {
    *  still obeys the ceiling, and no unknown marker is cleared. Persisted on the
    *  selected run, so later resumes need no flag. */
   allowUnmetered: boolean;
+  /** Authorize replaying a step whose attempt the runner died in. Valid for this
+   *  invocation only and never persisted: a replay that crashes again must ask
+   *  again. */
+  replayInterrupted: boolean;
   allowDirty: boolean;
   worktree: boolean;
   /** Check the config `steps` section against all pipelines, then exit. */
@@ -235,6 +239,14 @@ export const FLAGS: FlagSpec[] = [
     // to every item it launches. A composed child receives it through its budget
     // scope instead (`boot/resume.ts`).
     desc: "Authorize spend the runner could not price, and resume a run stopped by cost-unaccounted. The ceiling still applies to the priced spend.",
+  },
+  {
+    long: "--replay-interrupted",
+    key: "replayInterrupted",
+    kind: "boolean",
+    // Not forwarded to self-spawned children: replaying a step whose side effects
+    // may already have happened is a decision about one run.
+    desc: "Authorize this invocation to replay a step the runner died in (crash, OOM, SIGKILL). Never persisted.",
   },
   {
     long: "--allow-dirty",

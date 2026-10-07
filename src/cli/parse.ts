@@ -19,6 +19,7 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
     fresh: false,
     scan: false,
     allowUnmetered: false,
+    replayInterrupted: false,
     allowDirty: false,
     worktree: false,
     lintConfig: false,
@@ -165,6 +166,14 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
   }
   if (args.allowUnmetered && args.scan) {
     throw new CliError("Option --allow-unmetered authorizes one run: rerun that ticket explicitly instead of --scan.");
+  }
+  if (args.replayInterrupted && (args.inspect || args.logs || args.clean || args.approveOnly || args.rejectOnly)) {
+    throw new CliError("Option --replay-interrupted applies to a run, not to an inspection command.");
+  }
+  if (args.replayInterrupted && args.scan) {
+    throw new CliError(
+      "Option --replay-interrupted authorizes one run: rerun that ticket explicitly instead of --scan.",
+    );
   }
   if (args.runId && args.fresh) {
     throw new CliError(

@@ -100,6 +100,8 @@ export type RunJournalKnownEvent =
       logPath?: string | null;
       /** The attempt keeps it as `errors`; the journal names it `reason`. */
       reason?: string;
+      /** Closed by crash settlement: the runner died mid-attempt. */
+      interrupted?: boolean;
     })
   /** One attempt spent tokens at an unknown price. Per attempt, unlike the
    *  per-generation `run.cost.unaccounted`. */

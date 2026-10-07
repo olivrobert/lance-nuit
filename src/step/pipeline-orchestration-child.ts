@@ -222,7 +222,7 @@ export async function executeChild(
       childRun,
       ticket,
       input.baseBranch,
-      { resuming: hadSnapshot, abort },
+      { resuming: hadSnapshot, abort, replayInterrupted: input.replayInterrupted },
       stepLoopDeps(input.output),
       childCtx,
     );

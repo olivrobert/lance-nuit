@@ -334,6 +334,123 @@ test("resume: a fix pass left running by a crash is closed as failed and unprice
   expect(readRunEvents(dir).filter((event) => event.type === "step.attempt.finished")).toHaveLength(2);
 });
 
+test("resume: an attempt left running by a crash is projected as interrupted on every later resume", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-interrupted-attempt-"));
+  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6b" });
+  const path = pipelineFile(root);
+  const dir = resolveRunDir("p", "T-6b", undefined, true, ctx);
+  const run = await loadOrCreateRun(path, "T-6b", undefined, undefined, dir, false, undefined, ctx);
+  updateStep(run, run.steps[0]!, "running");
+  appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
+  saveRun(run);
+
+  const resumed = await loadOrCreateRun(path, "T-6b", undefined, undefined, dir, false, undefined, ctx);
+  expect(resumed.steps[0]!.attempts[0]).toMatchObject({ status: "failed", interrupted: true });
+  const finished = readRunEvents(dir).filter((event) => event.type === "step.attempt.finished");
+  expect(finished).toHaveLength(1);
+  expect(finished[0]).toMatchObject({ stepId: "a", attempt: 1, interrupted: true });
+
+  // Settlement wrote the marker once; the next resume reads it back from the journal.
+  const again = await loadOrCreateRun(path, "T-6b", undefined, undefined, dir, false, undefined, ctx);
+  expect(again.steps[0]!.attempts[0]).toMatchObject({ status: "failed", interrupted: true });
+});
+
+/** Leave step `id` as a runner death leaves it: `running`, its attempt started
+ *  and never finished. */
+function crashDuring(run: Awaited<ReturnType<typeof loadOrCreateRun>>, id: string): void {
+  const step = run.steps.find((candidate) => candidate.id === id)!;
+  updateStep(run, step, "running");
+  const attempt = step.attempts.length + 1;
+  appendRunEvent(run, "step.attempt.started", {
+    stepId: id,
+    attempt,
+    kind: "step",
+    logPath: `steps/${id}/${attempt}.log`,
+  });
+  saveRun(run);
+}
+
+test("resume: a step interrupted by a crash stops the run instead of replaying, until --replay-interrupted authorizes it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-interrupted-stop-"));
+  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6c" });
+  const path = pipelineFile(root);
+  const dir = resolveRunDir("p", "T-6c", undefined, true, ctx);
+  crashDuring(await loadOrCreateRun(path, "T-6c", undefined, undefined, dir, false, undefined, ctx), "a");
+
+  const resumed = await loadOrCreateRun(path, "T-6c", undefined, undefined, dir, false, undefined, ctx);
+  const first = countingDeps([]);
+  const outcome = await executeRunSteps(resumed, "T-6c", undefined, { resuming: true }, first.deps, ctx);
+  expect(outcome.stopped).toBe(true);
+  expect(first.spawned).toEqual([]);
+  const snapshot = readRunSnapshot(join(dir, "state.json"))!;
+  expect(snapshot.status).toBe("STOPPED");
+  expect(snapshot.outcome).toMatchObject({ phase: "a", resumable: true, stop: { kind: "needs-decision" } });
+  expect(snapshot.outcome?.reason).toMatch(/\ba\b.*--replay-interrupted/s);
+
+  // The stop wrote no attempt: the next plain resume asks again.
+  const again = await loadOrCreateRun(path, "T-6c", undefined, undefined, dir, false, undefined, ctx);
+  const second = countingDeps([]);
+  expect((await executeRunSteps(again, "T-6c", undefined, { resuming: true }, second.deps, ctx)).stopped).toBe(true);
+  expect(second.spawned).toEqual([]);
+
+  const authorized = await loadOrCreateRun(path, "T-6c", undefined, undefined, dir, false, undefined, ctx);
+  const third = countingDeps([]);
+  const replayed = await executeRunSteps(
+    authorized,
+    "T-6c",
+    undefined,
+    { resuming: true, replayInterrupted: true },
+    third.deps,
+    ctx,
+  );
+  expect(replayed.stopped).toBe(false);
+  expect(third.spawned).toEqual(["a", "b", "c"]);
+  expect(authorized.steps[0]!.status).toBe("done");
+});
+
+for (const option of ["replayInterrupted", "rerunOnResume"]) {
+  test(`resume: a step declaring ${option} is replayed after a crash without asking`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "resume-interrupted-declared-"));
+    const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6d" });
+    const path = join(root, "declared.ts");
+    writeFileSync(
+      path,
+      `export default ({ pipeline, actionStep }) => pipeline("p")
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", ${option}: true }))
+  .build();`,
+    );
+    const dir = resolveRunDir("p", "T-6d", undefined, true, ctx);
+    crashDuring(await loadOrCreateRun(path, "T-6d", undefined, undefined, dir, false, undefined, ctx), "a");
+
+    const resumed = await loadOrCreateRun(path, "T-6d", undefined, undefined, dir, false, undefined, ctx);
+    const loop = countingDeps([]);
+    const outcome = await executeRunSteps(resumed, "T-6d", undefined, { resuming: true }, loop.deps, ctx);
+    expect(outcome.stopped).toBe(false);
+    expect(loop.spawned).toEqual(["a"]);
+    expect(resumed.steps[0]!.status).toBe("done");
+  });
+}
+
+test("resume: a --start-at replay interrupted by a second crash stops the next resume that does not name it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-interrupted-start-at-"));
+  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6e" });
+  const path = pipelineFile(root);
+  const dir = resolveRunDir("p", "T-6e", undefined, true, ctx);
+  const initial = await loadOrCreateRun(path, "T-6e", undefined, undefined, dir, false, undefined, ctx);
+  for (const step of initial.steps) updateStep(initial, step, "done");
+  saveRun(initial);
+
+  crashDuring(await loadOrCreateRun(path, "T-6e", undefined, undefined, dir, false, "b", ctx), "b");
+
+  const resumed = await loadOrCreateRun(path, "T-6e", undefined, undefined, dir, false, undefined, ctx);
+  // The persisted requeue outlives the invocation that asked for it.
+  expect(resumed.steps[1]!.replay).toBe(true);
+  const loop = countingDeps([]);
+  const outcome = await executeRunSteps(resumed, "T-6e", undefined, { resuming: true }, loop.deps, ctx);
+  expect(outcome.stopped).toBe(true);
+  expect(loop.spawned).toEqual([]);
+});
+
 /** Same three steps, under a `.maxCost()` ceiling declared by the pipeline
  *  itself rather than approved on the command line. */
 /** The same three-step pipeline with or without a declared ceiling: `usd`

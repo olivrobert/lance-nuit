@@ -144,6 +144,7 @@ export function settleCrashedAttempts(run: Run): boolean {
         status: "failed",
         control: attempt.control,
         reason: attempt.errors ?? CRASHED_ATTEMPT_REASON,
+        interrupted: true,
       });
       if (closed) settled = true;
     }

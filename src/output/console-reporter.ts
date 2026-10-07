@@ -212,7 +212,10 @@ export function renderConsoleReport(report: RunReport, options: { cwd?: string }
     lines.push("", bold("Executed steps"));
     for (const step of visible.steps) {
       const { icon, tint } = STEP_ICON[step.status];
-      lines.push(`  ${tint(icon)} ${step.name}${stepMetrics(step)}`);
+      // Outside the dimmed metrics: a possibly duplicated side effect is a
+      // fact the operator must notice in the morning report.
+      const replayed = step.replayedAfterInterruption ? `  ${yellow("↻ replayed after interruption")}` : "";
+      lines.push(`  ${tint(icon)} ${step.name}${stepMetrics(step)}${replayed}`);
     }
   }
   const collapsed = [

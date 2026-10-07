@@ -4,6 +4,7 @@ import { backendSpecForStep } from "../contracts/backends.js";
 import type { StepStatus } from "../model/persisted.js";
 import type { RunStepView, RunView } from "../model/run.js";
 import { aggregateControl, aggregateUsage } from "../state/cost-accounting.js";
+import { replayedAfterInterruption } from "../state/run-predicates.js";
 
 export interface RunReportOutcome {
   failed: boolean;
@@ -43,6 +44,9 @@ export interface RunReportStep {
   control?: StepControl;
   usage?: StepUsage;
   detail?: string;
+  /** The runner died during an earlier attempt and the step ran again: its side
+   *  effects may have happened twice. */
+  replayedAfterInterruption?: true;
 }
 
 export interface RunReportResource {
@@ -329,6 +333,7 @@ export function buildRunReport(
       control: step.control,
       usage: step.usage,
       detail: step.errors,
+      ...(replayedAfterInterruption(step) ? { replayedAfterInterruption: true as const } : {}),
     })),
     statusCounts: statusCounts(run.steps),
     totalControl,
