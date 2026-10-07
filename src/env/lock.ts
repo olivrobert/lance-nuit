@@ -53,6 +53,15 @@
 //     election was broken by the residual race below: it removes its own lock
 //     (I2, so only its own) and retries instead of returning a lock it cannot
 //     vouch for.
+// I7. Liveness is pid *and* process start. The nonce (I3, I5) proves who
+//     published a file, but a dead holder cannot answer for its nonce, so it
+//     plays no part in liveness: a pid recycled by an unrelated live process
+//     would keep the lock forever. Every payload therefore carries the
+//     publisher's start token (`PID_START_FIELD`), and a live pid whose current
+//     token differs is a recycled pid, i.e. a dead holder. A payload without a
+//     token (older builds, bare-pid locks) or a token that cannot be read now
+//     keeps the pid-only probe: reclaiming the lock of a live runner would put
+//     two writers on the same tree, which is worse than refusing a stale one.
 //
 // Who may remove a lock file
 // --------------------------
@@ -95,6 +104,7 @@
 // a lock behind. Callers that must not fail on it — an exit handler, a run
 // directory that can simply be skipped — degrade around it themselves
 // (`runlock.ts`, `run-storage.ts`).
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -110,10 +120,11 @@ import {
 } from "node:fs";
 import { errnoCode, isErrno } from "../lib/errors.js";
 
-/** Payload constraint: a pid, and no field colliding with the nonce this module
- * publishes (I3). `lockNonce` is `NONCE_FIELD`, spelled out because a type
- * cannot compute its keys from a value. */
-export type LockPayload = { pid: number; lockNonce?: never };
+/** Payload constraint: a pid, and no field colliding with the nonce (I3) or the
+ * start token (I7) this module publishes. `lockNonce` and `pidStart` are
+ * `NONCE_FIELD` and `PID_START_FIELD`, spelled out because a type cannot compute
+ * its keys from a value. */
+export type LockPayload = { pid: number; lockNonce?: never; pidStart?: never };
 
 export interface LockAcquireOptions {
   /** Number of retries after cleaning up a stale lock. */
@@ -129,6 +140,10 @@ export type LockAcquireResult<T extends LockPayload> =
   | { ok: true }
   | { ok: false; holder: T; reclaiming?: never }
   | { ok: false; holder?: never; reclaiming: { pid: number } };
+
+/** Whether `pid` is still the process that published a lock; `expectedStart` is
+ * its recorded start token, when the payload carries one (I7). */
+export type LivenessProbe = (pid: number, expectedStart?: string) => boolean;
 
 interface ReclaimInfo {
   pid: number;
@@ -152,24 +167,78 @@ const LOCK_NONCE = randomUUID();
 /** Payload field carrying the nonce. Callers never set it: `acquireLock` adds it
  * on publication and strips it from the holder it reports back. */
 const NONCE_FIELD = "lockNonce";
+/** Payload field carrying the publisher's start token (I7). Like the nonce, it is
+ * added on publication and stripped from the reported holder. Exported because
+ * run-storage reads run locks itself. */
+export const PID_START_FIELD = "pidStart";
 
 /** A pid worth probing (I4). */
 function isValidPid(pid: unknown): pid is number {
   return typeof pid === "number" && Number.isInteger(pid) && pid > 0;
 }
 
-/** Liveness probe used when the caller provides none. Exported for tests. */
-export function defaultIsAlive(pid: number): boolean {
+function linuxStartToken(pid: number): string | null {
+  try {
+    const bootId = readFileSync("/proc/sys/kernel/random/boot_id", "utf-8").trim();
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf-8");
+    // Field 2 (comm) is parenthesized and may itself contain spaces or ')':
+    // fields are counted from the last ')'. Index 0 is then field 3, so
+    // starttime (field 22) is index 19 — once the leading space is trimmed.
+    const fields = stat
+      .slice(stat.lastIndexOf(")") + 1)
+      .trim()
+      .split(/\s+/);
+    const startTime = fields[19];
+    // The boot id makes the token survive pid reuse across a reboot, where the
+    // starttime counter restarts from zero.
+    return bootId && startTime ? `linux:${bootId}:${startTime}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function psStartToken(pid: number): string | null {
+  const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    encoding: "utf-8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
+  const started = result.status === 0 ? result.stdout.trim() : "";
+  return started ? `ps:${started}` : null;
+}
+
+/** Only this process's token is stable for its whole life; another pid's token
+ * is read afresh every time, since that pid may be recycled between two calls. */
+let ownStartToken: string | null | undefined;
+
+/**
+ * Opaque token identifying the incarnation of `pid`: two processes that held the
+ * same pid at different times get different tokens (I7). `null` when it cannot be
+ * read — no such process, `/proc` mounted with `hidepid`, no `ps`.
+ */
+export function processStartToken(pid: number): string | null {
+  if (!isValidPid(pid)) return null;
+  if (pid === process.pid && ownStartToken !== undefined) return ownStartToken;
+  const token = process.platform === "linux" ? linuxStartToken(pid) : psStartToken(pid);
+  if (pid === process.pid) ownStartToken = token;
+  return token;
+}
+
+/** Liveness probe used when the caller provides none. `expectedStart` is the
+ * holder's recorded start token, when its payload carries one (I7). Exported for
+ * tests and for run-storage, which reads run locks itself. */
+export function defaultIsAlive(pid: number, expectedStart?: string): boolean {
   if (!isValidPid(pid)) return false;
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
     // EPERM: the process exists but belongs to another user, so the owner is
     // alive and keeps the lock. Any other failure (ESRCH) is a dead owner and the
     // stale lock can be reclaimed.
-    return isErrno(error, "EPERM");
+    if (!isErrno(error, "EPERM")) return false;
   }
+  if (expectedStart === undefined) return true;
+  const current = processStartToken(pid);
+  return current === null || current === expectedStart;
 }
 
 /** Marker property carrying the offending path, so callers can tell an unusable
@@ -353,30 +422,37 @@ function takeOwn(path: string, payload: string): boolean {
 /** Bytes published for `info`: the caller's payload plus this incarnation's
  * nonce (I3). */
 function publishedPayload<T extends LockPayload>(info: T): string {
-  return JSON.stringify({ ...info, [NONCE_FIELD]: LOCK_NONCE });
+  const start = processStartToken(info.pid);
+  return JSON.stringify({
+    ...info,
+    [NONCE_FIELD]: LOCK_NONCE,
+    ...(start === null ? {} : { [PID_START_FIELD]: start }),
+  });
 }
 
 interface Holder<T> {
-  /** The caller's payload, without the nonce this module added. */
+  /** The caller's payload, without the nonce and start token this module added. */
   info: T;
   /** Published by this process incarnation. */
   own: boolean;
+  /** Start token recorded for `info.pid` (I7), absent from older payloads. */
+  start?: string;
 }
 
 function holderOf<T extends LockPayload>(raw: string | null): Holder<T> | null {
   const parsed = parseInfo<Record<string, unknown>>(raw);
   if (!parsed || typeof parsed !== "object") return null;
-  const { [NONCE_FIELD]: nonce, ...info } = parsed;
-  return { info: info as T, own: nonce === LOCK_NONCE };
+  const { [NONCE_FIELD]: nonce, [PID_START_FIELD]: start, ...info } = parsed;
+  return { info: info as T, own: nonce === LOCK_NONCE, ...(typeof start === "string" ? { start } : {}) };
 }
 
 /** Whether the lock is held by a process that still exists (I4). */
-function isHeld<T extends LockPayload>(holder: Holder<T> | null, isAlive: (pid: number) => boolean): boolean {
+function isHeld<T extends LockPayload>(holder: Holder<T> | null, isAlive: LivenessProbe): boolean {
   if (!holder || !isValidPid(holder.info.pid)) return false;
   // Our own pid on a payload we did not publish: the publisher is dead and we
   // recycled its pid. Probing would answer "alive" — ourselves.
   if (holder.info.pid === process.pid) return holder.own;
-  return isAlive(holder.info.pid);
+  return isAlive(holder.info.pid, holder.start);
 }
 
 /** Ownership, as `releaseLock` and `heldByThisProcess` both understand it: the
@@ -408,7 +484,9 @@ function waitBeforeRetry(attempt: number, baseDelayMs: number): void {
   Atomics.wait(cell, 0, 0, delay);
 }
 
-function liveReclaim(reclaim: ReclaimInfo | null, isAlive: (pid: number) => boolean): reclaim is ReclaimInfo {
+// The marker carries no start token: it lives for a few syscalls, and a
+// reclaimer whose pid was recycled meanwhile is the documented out-of-scope case.
+function liveReclaim(reclaim: ReclaimInfo | null, isAlive: LivenessProbe): reclaim is ReclaimInfo {
   return !!reclaim && isValidPid(reclaim.pid) && isAlive(reclaim.pid);
 }
 
@@ -457,7 +535,7 @@ function markerIsStillOurs(reclaimFile: string, marker: Observed): boolean {
 export function acquireLock<T extends LockPayload>(
   lockFile: string,
   info: T,
-  isAlive: (pid: number) => boolean = defaultIsAlive,
+  isAlive: LivenessProbe = defaultIsAlive,
   options: LockAcquireOptions = {},
 ): LockAcquireResult<T> {
   const retries = Math.max(0, Math.floor(options.retries ?? 3));

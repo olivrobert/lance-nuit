@@ -1,5 +1,5 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { processStartToken } from "../../src/env/lock.ts";
 
 const runnerEntry = resolve(import.meta.dir, "../../src/runner.ts");
 setDefaultTimeout(30_000);
@@ -126,4 +127,73 @@ test("explicit --run rejects damaged state without changing another latest run",
   expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("2\n");
   expect(readFileSync(oldState, "utf8")).toBe(damaged);
   expect(existsSync(oldLock) ? readFileSync(oldLock, "utf8") : undefined).toBe(oldLockBefore);
+});
+
+/** A live process that is not a runner, killed whatever the test outcome. */
+function withSleeper(run: (pid: number) => void): void {
+  const sleeper = spawn("sleep", ["30"]);
+  try {
+    const pid = sleeper.pid;
+    if (pid === undefined) throw new Error("sleep did not start");
+    run(pid);
+  } finally {
+    sleeper.kill();
+  }
+}
+
+function runsAfterFirstFailure(cwd: string) {
+  const runsRoot = join(cwd, ".lance-nuit", "work-items", "STRICT-1", "runs", "strict-resume");
+  expect(runRunner(cwd, "STRICT-1").status).toBe(1);
+  expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("1\n");
+  const runId = readlinkSync(join(runsRoot, "latest"));
+  const runDir = join(runsRoot, runId);
+  return {
+    runsRoot,
+    runId,
+    lock: join(runDir, "runner.lock"),
+    events: join(runDir, "events.jsonl"),
+    runs: readdirSync(runsRoot).filter((name) => name !== "latest"),
+  };
+}
+
+test("a recycled pid in runner.lock does not make the implicit resume start over", () => {
+  const cwd = scratchProject();
+  const first = runsAfterFirstFailure(cwd);
+  withSleeper((pid) => {
+    // The dead runner's pid was recycled: only the pid changes, the recorded start
+    // token is still the dead runner's.
+    writeFileSync(first.lock, JSON.stringify({ ...JSON.parse(readFileSync(first.lock, "utf8")), pid }));
+    const eventsBefore = readFileSync(first.events, "utf8");
+
+    const resumed = runRunner(cwd, "STRICT-1");
+    expect(`${resumed.stdout}${resumed.stderr}`).not.toContain("held by another runner process");
+    expect(JSON.parse(readFileSync(first.lock, "utf8")).pid).not.toBe(pid);
+    expect(readFileSync(first.events, "utf8").length).toBeGreaterThan(eventsBefore.length);
+    expect(resumed.status).toBe(1);
+    expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("1\n");
+    expect(readdirSync(first.runsRoot).filter((name) => name !== "latest")).toEqual(first.runs);
+    expect(readlinkSync(join(first.runsRoot, "latest"))).toBe(first.runId);
+  });
+});
+
+test("a run held by a live runner stops the implicit resume with the options", () => {
+  const cwd = scratchProject();
+  const first = runsAfterFirstFailure(cwd);
+  withSleeper((pid) => {
+    writeFileSync(first.lock, JSON.stringify({ pid, pidStart: processStartToken(pid) }));
+    const lockBefore = readFileSync(first.lock, "utf8");
+    const eventsBefore = readFileSync(first.events, "utf8");
+
+    const refused = runRunner(cwd, "STRICT-1");
+    const output = `${refused.stdout}${refused.stderr}`;
+    expect(refused.status).toBe(1);
+    expect(output).toContain("held by another runner process");
+    expect(output).toContain(`pid ${pid}`);
+    expect(output).toContain("--run");
+    expect(output).toContain("--fresh");
+    expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("1\n");
+    expect(readdirSync(first.runsRoot).filter((name) => name !== "latest")).toEqual(first.runs);
+    expect(readFileSync(first.lock, "utf8")).toBe(lockBefore);
+    expect(readFileSync(first.events, "utf8")).toBe(eventsBefore);
+  });
 });

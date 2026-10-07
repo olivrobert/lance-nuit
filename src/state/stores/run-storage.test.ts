@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { processStartToken } from "../../env/lock.js";
 import { releaseRunDir, runLockHolder, tryClaimRunDir } from "./run-storage.js";
 
 /** Above `pid_max` on every supported platform: `kill(pid, 0)` reports ESRCH, so
@@ -84,6 +86,23 @@ test("tryClaimRunDir: a stale lock carrying our own recycled pid is claimed, not
   expect(lockedPid(dir)).toBe(process.pid);
   // Republished by us: ownership is pid *and* nonce (see env/lock.ts).
   expect(typeof JSON.parse(readFileSync(join(dir, "runner.lock"), "utf-8")).lockNonce).toBe("string");
+});
+
+// The runner that wrote the lock died and an unrelated process inherited its pid:
+// the recorded start token (here a real one, of another process) no longer
+// matches, so the fast path must not refuse it as a live holder.
+test("tryClaimRunDir: a lock whose pid was recycled by an unrelated live process is reclaimed", () => {
+  const sleeper = spawn("sleep", ["30"]);
+  try {
+    const dir = runDir();
+    writeLock(dir, JSON.stringify({ pid: sleeper.pid, lockNonce: "gone", pidStart: processStartToken(process.pid) }));
+
+    expect(runLockHolder(dir)).toBe(null);
+    expect(tryClaimRunDir(dir)).toBe(true);
+    expect(lockedPid(dir)).toBe(process.pid);
+  } finally {
+    sleeper.kill();
+  }
 });
 
 test("tryClaimRunDir: a corrupt lock does not permanently block the directory", () => {

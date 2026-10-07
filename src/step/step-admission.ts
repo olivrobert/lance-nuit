@@ -17,7 +17,7 @@ import type { RunOutput } from "../runtime/run-output.js";
 import { costDecision, type RunBudget } from "../state/budget.js";
 import { pendingRejection } from "../state/decisions.js";
 import { recordCostStop } from "../state/cost-stop-events.js";
-import { adoptOutputs, stepFreshness } from "../state/provenance.js";
+import { adoptOutputs, inputsUnchanged, stepFreshness } from "../state/provenance.js";
 import { appendRunEvent } from "../state/run-journal.js";
 import { lastPassInterrupted, owesWork } from "../state/run-predicates.js";
 import { stopRun, updateStep } from "../state/run-transitions.js";
@@ -25,6 +25,9 @@ import { absorbNonBlocking } from "./non-blocking.js";
 
 /** Reason logged when declared inputs still match every produced output. */
 const SKIP_UP_TO_DATE = "outputs up to date with declared inputs";
+
+/** Reason logged when an absorbed failure's inputs still match those it settled at. */
+const SKIP_ABSORBED_UNCHANGED = "failure absorbed, inputs unchanged since";
 
 /** Reason logged when a rework step already ran and nobody rejected its output since. */
 const SKIP_NO_REJECTION = "no pending rejection";
@@ -275,6 +278,17 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
   // repository tree, which is what an operator fixes before replaying. So does a
   // pass left unfinished: adopting what it wrote would settle a partial output.
   if (declaresInput && !rejected && step.replay !== true && !passLeftUnfinished(step)) {
+    // An absorbed failure wrote no outputs, so freshness would read them missing
+    // and re-run the check on every resume. Its own fix may also have rewritten
+    // its inputs; the record was taken after that fix, so only a change from
+    // elsewhere re-admits it. Nothing to adopt: there are no outputs.
+    if (
+      step.status === "done" &&
+      step.absorbed_inputs &&
+      (await inputsUnchanged(baseCtx, step.def, step.absorbed_inputs))
+    ) {
+      return applyInputDecision(run, step, input.output, "skip", SKIP_ABSORBED_UNCHANGED);
+    }
     const report = await stepFreshness(baseCtx, step.def);
     if (!report.mustRun) {
       // Adopt before skipping: an output produced before this record existed keeps
