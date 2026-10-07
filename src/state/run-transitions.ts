@@ -72,6 +72,13 @@ export function updateStep(run: Run, step: RunStep, status: RunStep["status"], e
   } else {
     step.finished_at = new Date().toISOString();
   }
+  if (status === "skipped") {
+    // A skipped step did not fail: it must not keep showing the failure of the
+    // pass it abandoned. Its spend stays in `control`, still owed to the budget.
+    delete step.errors;
+    delete step.fail_kind;
+    delete step.fail_cause;
+  }
   // A `--start-at` replay is owed until the step settles: a failed or
   // interrupted replay must still run on a resume that no longer names it.
   if (isSettledStatus(status)) delete step.replay;

@@ -683,11 +683,11 @@ test("input skip: validates the contract", async () => {
   expect(calls.ids).toEqual(["b"]);
 });
 
-test("step-loop: validates the integration contract", async () => {
+test("resume: a failed step its when now skips ends skipped and keeps the spend of its pass", async () => {
   // Regression for PROJ-327: `plan` was killed before its verdict in the previous run (plan.md
   // written, costing $5.40) and then, on resume, its idempotency precondition sees
-  // its own artifact. Status must reflect the work performed; otherwise status
-  // analysis reads "never executed" for a step that cost $5.40.
+  // its own artifact. The pass never completed, so the step is skipped, not done;
+  // its $5.40 stays counted in `control` so budget and totals still see it.
   const steps = [
     bashStep(
       "plan",
@@ -704,12 +704,13 @@ test("step-loop: validates the integration contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: true }]);
   const out = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
   expect(out.failed).toBe(false);
-  expect(steps[0]!.status).toBe("done");
+  expect(steps[0]!.status).toBe("skipped");
   expect(steps[0]!.control?.total_cost_usd).toBe(5.4);
   expect(calls.ids).toEqual(["b"]);
 });
 
-test("step-loop: validates the integration contract", async () => {
+test("resume: a failed step its when now skips is not replayed and leaves its artifact untouched", async () => {
+  // The failed pass spent $5.40 and never completed: skipped, its spend kept in `control`.
   const dir = mkdtempSync(join(tmpdir(), "artifact-resume-"));
   const artifact = join(dir, "plan.md");
   const original = "# plan already produced\n";
@@ -732,8 +733,33 @@ test("step-loop: validates the integration contract", async () => {
 
   expect(out.failed).toBe(false);
   expect(calls.exec).toBe(0);
-  expect(plan.status).toBe("done");
+  expect(plan.status).toBe("skipped");
+  expect(plan.control?.total_cost_usd).toBe(5.4);
   expect(readFileSync(artifact, "utf-8")).toBe(original);
+});
+
+test("resume: a failed step its when now skips is persisted skipped without its previous error", async () => {
+  const step = bashStep(
+    "plan",
+    "echo plan",
+    { inputs: [skipIf(() => true, "deliverable exists")] },
+    {
+      status: "failed",
+      errors: "agent exited 1",
+      fail_kind: "technical",
+      control: { duration_ms: 5, total_cost_usd: 0.3 },
+    },
+  );
+  const run = makeRun([step]);
+  const { deps } = fakeDeps();
+
+  await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+
+  const persisted = readRunSnapshot(join(run.run_dir, "state.json"))!.steps.find((s) => s.id === "plan")!;
+  expect(persisted.status).toBe("skipped");
+  expect(persisted.errors).toBeUndefined();
+  expect(persisted.fail_kind).toBeUndefined();
+  expect(persisted.control?.total_cost_usd).toBe(0.3);
 });
 
 test("input skip without control: validates the contract", async () => {
