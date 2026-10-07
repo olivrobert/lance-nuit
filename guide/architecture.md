@@ -428,7 +428,8 @@ Pricing is optional; exact provider-reported cost wins over token estimation.
 Run and step transitions during execution have one owner, `state/run-transitions.ts`:
 the step status with its timestamps and reason (`updateStep`), the verdict an
 attempt established (`recordStepVerdict`), an absorbed non-blocking failure
-(`absorbStepFailure`), a clean stop (`stopRun`), a manual interruption
+(`absorbStepFailure`) and the inputs it settled at (`recordAbsorbedInputs`),
+a clean stop (`stopRun`), a manual interruption
 (`abortRun`), and the final verdict, outcome, totals and `run.finished` event
 (`finalizeRun`). Each operation writes the fields that must change together and
 the journal event that records them. After an interruption only `finalizeRun`

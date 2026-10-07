@@ -15,6 +15,8 @@
 //                         (`fail_kind`, `fail_cause`), before its status moves;
 // - `absorbStepFailure`   a `blocking: false` failure kept as the reason of a
 //                         `done` step;
+// - `recordAbsorbedInputs` the inputs that absorbed failure settled at, which
+//                         a resume compares before checking the step again;
 // - `stopRun`             a clean stop that preserves the work left to do;
 // - `abortRun`            a SIGINT/SIGTERM interruption, from the signal handler;
 // - `finalizeRun`         the verdict, the outcome and the totals of a run whose
@@ -65,6 +67,8 @@ export function updateStep(run: Run, step: RunStep, status: RunStep["status"], e
     // And for the cause: a step replayed once the external obstacle is lifted
     // must not stay marked blocked.
     delete step.fail_cause;
+    // And for the inputs an absorbed failure settled at: a new pass decides anew.
+    delete step.absorbed_inputs;
   } else {
     step.finished_at = new Date().toISOString();
   }
@@ -138,6 +142,18 @@ export function absorbStepFailure(run: Run, step: RunStep, reason: string): void
   if (run.aborted) return;
   step.errors = reason;
   updateStep(run, step, "done");
+}
+
+/**
+ * Record the fingerprints of the pure inputs an absorbed failure settled at. A
+ * resume skips the step while they still match, so a check whose failure was
+ * absorbed — its own fix included — is not paid again for outputs it never
+ * wrote. Only a `done` step carries the record; `updateStep(running)` drops it.
+ */
+export function recordAbsorbedInputs(run: Run, step: RunStep, fingerprints: Record<string, string | null>): void {
+  if (run.aborted || step.status !== "done") return;
+  step.absorbed_inputs = { ...fingerprints };
+  saveRun(run);
 }
 
 /** Finalize bookkeeping when the process receives SIGINT/SIGTERM.

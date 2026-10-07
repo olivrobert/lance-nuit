@@ -14,10 +14,17 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireLock, defaultIsAlive, heldByThisProcess, isLockPathError, releaseLock } from "./lock.ts";
+import {
+  acquireLock,
+  defaultIsAlive,
+  heldByThisProcess,
+  isLockPathError,
+  processStartToken,
+  releaseLock,
+} from "./lock.ts";
 
 // Regression coverage for the lock protocol is deterministic: the interleavings
 // that matter are two syscalls wide, so they are produced here by interposing on
@@ -512,4 +519,71 @@ test("isLockPathError: environment failures only", () => {
   expect(isLockPathError(new TypeError("info.pid is not a function"))).toBe(false);
   expect(isLockPathError(new Error("plain"))).toBe(false);
   expect(isLockPathError(undefined)).toBe(false);
+});
+
+// A pid recycled after a crash or a reboot belongs to a live process that never
+// published the lock. The sleeper starts during the test, so its start token
+// differs from the test process's: a real mismatch, not an artificial string.
+function withSleeper(run: (pid: number) => void): void {
+  const sleeper = spawn("sleep", ["30"]);
+  try {
+    const pid = sleeper.pid;
+    if (pid === undefined) throw new Error("sleep did not start");
+    run(pid);
+  } finally {
+    sleeper.kill();
+  }
+}
+
+test("processStartToken differs between two real processes", () => {
+  withSleeper((pid) => {
+    const child = processStartToken(pid);
+    const own = processStartToken(process.pid);
+    expect(child).not.toBeNull();
+    expect(own).not.toBeNull();
+    expect(child).not.toBe(own);
+    if (process.platform === "linux") expect(child?.endsWith(":0")).toBe(false);
+  });
+});
+
+test("defaultIsAlive: a live pid whose start token differs from the recorded one is not the holder", () => {
+  withSleeper((pid) => {
+    expect(defaultIsAlive(pid)).toBe(true);
+    expect(defaultIsAlive(pid, processStartToken(pid) ?? "")).toBe(true);
+    expect(defaultIsAlive(pid, processStartToken(process.pid) ?? "")).toBe(false);
+  });
+});
+
+test("acquireLock reclaims a lock whose pid was recycled by an unrelated live process", () => {
+  withSleeper((pid) => {
+    const f = lf();
+    writeFileSync(f, JSON.stringify({ pid, lockNonce: "gone", pidStart: processStartToken(process.pid) }));
+    expect(acquireLock(f, info(process.pid)).ok).toBe(true);
+    expect(JSON.parse(readFileSync(f, "utf-8")).pid).toBe(process.pid);
+  });
+});
+
+test("a token-less lock held by a live pid still refuses", () => {
+  withSleeper((pid) => {
+    const f = lf();
+    writeFileSync(f, JSON.stringify({ pid, lockNonce: "gone" }));
+    const r = acquireLock(f, info(process.pid));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.holder?.pid).toBe(pid);
+  });
+});
+
+test("acquireLock publishes the publisher start token", () => {
+  const f = lf();
+  const r = acquireLock(f, info(process.pid));
+  expect(r.ok).toBe(true);
+  expect(JSON.parse(readFileSync(f, "utf-8")).pidStart).toBe(processStartToken(process.pid));
+});
+
+test("a refused acquisition never reports the start token inside the holder", () => {
+  const f = lf();
+  acquireLock(f, info(123), () => true);
+  const r = acquireLock(f, info(456), () => true);
+  expect(r.ok).toBe(false);
+  if (!r.ok) expect(r.holder && "pidStart" in r.holder).toBe(false);
 });

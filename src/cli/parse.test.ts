@@ -51,6 +51,19 @@ test("--allow-unmetered is refused on an inspection command and under --scan", (
   expect(() => parseRunnerArgs(["--scan", "--allow-unmetered"])).toThrow(/authorizes one run/);
 });
 
+test("--replay-interrupted is a run flag, refused on an inspection command and under --scan", () => {
+  const args = parseRunnerArgs(["FOO-1", "--replay-interrupted"]);
+  expect(args.replayInterrupted).toBe(true);
+  // An authorization for this invocation only: a dispatch sweep must not grant it
+  // to every item it launches.
+  expect(args.passthrough).toEqual([]);
+  expect(parseRunnerArgs(["FOO-1"]).replayInterrupted).toBe(false);
+  expect(() => parseRunnerArgs(["FOO-1", "--inspect", "--replay-interrupted"])).toThrow(
+    /applies to a run, not to an inspection command/,
+  );
+  expect(() => parseRunnerArgs(["--scan", "--replay-interrupted"])).toThrow(/authorizes one run/);
+});
+
 test("--reject records a rejection with its reason, --reject-only exits after recording", () => {
   const args = parseRunnerArgs(["FOO-1", "-p", "feature", "--reject", "plan", "--reason", "split step 2"]);
   expect(args).toMatchObject({ reject: "plan", reason: "split step 2", rejectOnly: false });

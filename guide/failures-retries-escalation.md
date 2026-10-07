@@ -292,6 +292,12 @@ suffixed with `(fix applied, not replayed)`: nothing re-checked the code, so
 reports never read the repair as a verified success. A failed repair keeps the
 original reason unchanged.
 
+The single check and its single repair also hold across resumes: the runner
+records the step's inputs as the repair left them, so a later resume — a raised
+budget, an interruption, a failure further down — does not check again unless
+an earlier step changed those inputs. See
+[dsl.md](dsl.md#input-freshness) (**Absorbed failure**).
+
 The option is refused at load time on a blocking step — an unverified repair
 must never open a gate — and with `retries` other than `1`, since a second
 repair would have no new failure to work from.

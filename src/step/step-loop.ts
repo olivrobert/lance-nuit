@@ -17,11 +17,12 @@ import { emitRunnerEvent } from "../runtime/events.js";
 import { costDecision, type RunBudget } from "../state/budget.js";
 import { controlForRun, runProvesUnpricedSpend } from "../state/cost-accounting.js";
 import { inheritChildBudgetStop } from "../state/cost-stop-events.js";
+import { fingerprintInputs, pureInputsOf } from "../state/provenance.js";
 
 import { latestAttemptLog } from "../state/run-timeline.js";
 import { saveRun } from "../state/run-repository.js";
 import { hasUnfinishedWork } from "../state/run-predicates.js";
-import { type RunOutcome, updateStep } from "../state/run-transitions.js";
+import { type RunOutcome, recordAbsorbedInputs, updateStep } from "../state/run-transitions.js";
 import { runFixLoop } from "./fix-loop.js";
 import { executePipelineOrchestration } from "./pipeline-orchestration.js";
 import { admitStep, checkInputs, type StepAdmission } from "./step-admission.js";
@@ -122,6 +123,11 @@ export interface ExecuteRunStepsOptions {
    *  under its parent's. Absent, the execution gets a private scope: nothing but
    *  `run.aborted` can interrupt it. */
   abort?: AbortScope;
+  /** `--replay-interrupted` of this invocation; composed children inherit it. */
+  replayInterrupted?: boolean;
+  /** `--start-at` of this invocation. It names a top-level step, so children do
+   *  not inherit it. */
+  startAt?: string;
 }
 
 export async function executeRunSteps(
@@ -198,7 +204,15 @@ export async function executeRunSteps(
       // would leave it on base/develop and attach commits to the wrong branch.
       if (step.status === "done" && !reconsider) continue;
 
-      const admission: StepAdmission = await admitStep({ run, step, baseCtx, budget, output: loopDeps.output });
+      const admission: StepAdmission = await admitStep({
+        run,
+        step,
+        baseCtx,
+        budget,
+        output: loopDeps.output,
+        replayInterrupted: opts.replayInterrupted,
+        startAt: opts.startAt,
+      });
       if (isAborted()) break;
       if (admission.kind === "skip") continue;
       if (admission.kind === "budget-exceeded") {
@@ -237,6 +251,7 @@ export async function executeRunSteps(
           budget,
           resuming,
           abort,
+          replayInterrupted: opts.replayInterrupted,
           output: loopDeps.output,
         });
         if (isAborted()) break;
@@ -291,6 +306,13 @@ export async function executeRunSteps(
         output: loopDeps.output,
       });
       if (isAborted()) break;
+      // `updateStep(running)` cleared `errors` for this pass, so a `done` step
+      // carrying one absorbed its failure. Fingerprinted here, after any fix that
+      // rewrote the inputs and before a later step can: a resume then re-checks
+      // the step only when something else changed them.
+      if ((step.def.sources?.length ?? 0) > 0 && step.status === "done" && step.errors !== undefined) {
+        recordAbsorbedInputs(run, step, await fingerprintInputs(baseCtx, pureInputsOf(step.def)));
+      }
       if (action === "failed") {
         failed = true;
         break;

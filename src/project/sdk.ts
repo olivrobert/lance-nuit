@@ -35,6 +35,7 @@ export interface StepOptionsBase {
   readonly timeout?: number;
   readonly blocking?: boolean;
   readonly rerunOnResume?: boolean;
+  readonly replayInterrupted?: boolean;
   readonly onFail?: OnFailPolicy;
 }
 

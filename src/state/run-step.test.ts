@@ -6,6 +6,7 @@ import type { PipelineStep } from "../model/definition.ts";
 import type { Run } from "../model/run.ts";
 import { saveRun } from "./run-repository.ts";
 import { makeRunStep } from "./run-step.ts";
+import { PersistedStepStateSchema } from "./schema.ts";
 
 const def: PipelineStep = { id: "a", name: "A", command: "true", runner: "bash" };
 
@@ -69,6 +70,27 @@ test("saveRun: preserves the timeout retry quota across a snapshot round trip", 
   const saved = JSON.parse(readFileSync(join(dir, "state.json"), "utf-8"));
   expect(saved.steps[0].timeout_retries).toBe(2);
   expect(makeRunStep(def, saved.steps[0]).timeout_retries).toBe(2);
+});
+
+test("saveRun: preserves the absorbed input fingerprints across a snapshot round trip", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runstep-absorbed-inputs-"));
+  const absorbed = { "artifacts/plan.md": "b".repeat(64), "artifacts/absent.md": null };
+  const run: Run = {
+    name: "p",
+    pipeline: "p",
+    pipeline_path: "p.ts",
+    run_dir: dir,
+    steps: [makeRunStep(def, { status: "done", errors: "audit failed", absorbed_inputs: absorbed })],
+  };
+
+  saveRun(run);
+
+  const saved = JSON.parse(readFileSync(join(dir, "state.json"), "utf-8"));
+  expect(saved.steps[0].absorbed_inputs).toEqual(absorbed);
+  expect(PersistedStepStateSchema.parse(saved.steps[0]).absorbed_inputs).toEqual(absorbed);
+  expect(makeRunStep(def, saved.steps[0]).absorbed_inputs).toEqual(absorbed);
+  // Only SHA-256 hex or null is a fingerprint.
+  expect(() => PersistedStepStateSchema.parse({ ...saved.steps[0], absorbed_inputs: { x: "nope" } })).toThrow();
 });
 
 test("saveRun: preserves the attempt-numbering floor across a snapshot round trip", () => {

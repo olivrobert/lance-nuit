@@ -83,6 +83,10 @@ export interface StepOptionsBase {
   timeout?: number;
   blocking?: boolean;
   rerunOnResume?: boolean;
+  /** Safe to replay automatically on resume after the runner died mid-attempt
+   *  (crash, OOM, SIGKILL). Without it the resumed run stops and asks. Implied by
+   *  `rerunOnResume`. */
+  replayInterrupted?: boolean;
   onFail?: OnFail;
 }
 

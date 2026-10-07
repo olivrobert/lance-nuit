@@ -65,6 +65,8 @@ function applyFinished(attempt: PersistedAttempt, event: AttemptFinishedEvent): 
 
   const logPath = text(event.logPath);
   if (logPath) attempt.log_path = logPath;
+
+  if (event.interrupted === true) attempt.interrupted = true;
 }
 
 /**

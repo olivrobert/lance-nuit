@@ -11,6 +11,7 @@ import {
   abortRun,
   absorbStepFailure,
   finalizeRun,
+  recordAbsorbedInputs,
   recordStepVerdict,
   type RunOutcome,
   stopRun,
@@ -430,6 +431,31 @@ test("absorbStepFailure: the step is done, the reason stays, the journal event i
   expect(changed.at(-1)).toMatchObject({ stepId: "b", status: "done" });
   expect(changed.at(-1)).not.toHaveProperty("reason");
   expect(JSON.parse(snapshotOf(run)).steps[1]).toMatchObject({ status: "done", errors: "lint warnings" });
+});
+
+test("recordAbsorbedInputs: stores the fingerprints on a done step, updateStep(running) clears them, an aborted run refuses", () => {
+  const run = twoStepRun("transitions-absorbed-inputs-");
+  const step = run.steps[1]!;
+  const fingerprints = { "artifacts/plan.md": "a".repeat(64), "artifacts/absent.md": null };
+
+  // Only a settled absorption is a verdict worth keeping.
+  recordAbsorbedInputs(run, step, fingerprints);
+  expect(step.absorbed_inputs).toBeUndefined();
+
+  updateStep(run, step, "running");
+  absorbStepFailure(run, step, "audit failed");
+  recordAbsorbedInputs(run, step, fingerprints);
+  expect(step.absorbed_inputs).toEqual(fingerprints);
+  expect(step.absorbed_inputs).not.toBe(fingerprints);
+  expect(JSON.parse(snapshotOf(run)).steps[1].absorbed_inputs).toEqual(fingerprints);
+
+  updateStep(run, step, "running");
+  expect(step.absorbed_inputs).toBeUndefined();
+
+  absorbStepFailure(run, step, "audit failed");
+  run.aborted = true;
+  recordAbsorbedInputs(run, step, fingerprints);
+  expect(step.absorbed_inputs).toBeUndefined();
 });
 
 test("stopRun: the run stops, the remaining work is preserved, finalization keeps STOPPED", () => {
