@@ -177,6 +177,15 @@ export const PersistedStepStateSchema = z.looseObject({
   last_attempt: nonNegativeInt.optional(),
   excluded: z.literal(true).optional(),
   replay: z.literal(true).optional(),
+  absorbed_inputs: z
+    .record(
+      z.string(),
+      z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .nullable(),
+    )
+    .optional(),
   orchestration: PersistedPipelineOrchestrationStateSchema.optional(),
 });
 

@@ -175,6 +175,12 @@ export interface PersistedStepState {
    * it pending over the `done` its earlier pass journaled. Cleared when the step
    * settles (`done` or `skipped`). Absent by default; the schema is unchanged. */
   replay?: true;
+  /** Fingerprints of the pure inputs (keys `artifacts/<name>`, `null` when
+   * absent) once a `blocking: false` failure was absorbed, taken after its fix.
+   * A resume skips the step while they still match: its outputs are missing by
+   * construction, so freshness alone would re-run it every time. Cleared when the
+   * step runs again. Absent by default; the schema is unchanged otherwise. */
+  absorbed_inputs?: Record<string, string | null>;
   orchestration?: PersistedPipelineOrchestrationState;
 }
 

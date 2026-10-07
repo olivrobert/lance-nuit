@@ -391,6 +391,18 @@ The rules:
   because freshness does not track the repository tree an operator fixed. So
   does a step whose last pass failed or was interrupted: what that pass wrote
   is never adopted.
+- **Absorbed failure.** A `blocking: false` step whose failure was absorbed is
+  `done` without its outputs, so freshness alone would re-run it on every
+  resume. Once the failure is absorbed — after its fix, `replayAfterFix: false`
+  included — the runner records the fingerprints of its pure inputs. A resume
+  skips the step with `failure absorbed, inputs unchanged since` while they
+  still match, even when its own fix rewrote one of them. It runs again when an
+  earlier step changed an input, when the definition gained or lost one, under
+  `--start-at`, or when no record exists (a snapshot written before it, an
+  interruption right after the absorption). A failure absorbed at admission
+  (preflight, throwing admission) records nothing: it never ran, and is
+  re-examined on every resume. The record lives in the run snapshot, so a new
+  run of the same work item checks the step again.
 - **Rework.** A step named as a gate's `rework` replays while a rejection of
   that gate is pending, independently of its inputs; without one, its inputs
   decide as above. See [human-control.md](human-control.md#reject-and-rework).
