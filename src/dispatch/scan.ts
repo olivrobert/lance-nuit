@@ -53,6 +53,13 @@ function beginScanRecord(env: DispatchEnv, provider: string, queue: string, limi
   return writer;
 }
 
+/** The branch every ticket of this scan starts from: an explicit --base-branch,
+ *  otherwise the configured one. Children and the between-ticket checkout must
+ *  agree on it, or later tickets build on a base the operator did not ask for. */
+function scanBaseBranch(env: DispatchEnv): string {
+  return env.ctx.baseBranch ?? env.ctx.config.baseBranch;
+}
+
 export const scanStrategy: DispatchStrategy = {
   id: "scan",
   flag: "--scan",
@@ -131,9 +138,10 @@ export const scanStrategy: DispatchStrategy = {
     return { message: "ℹ No tickets to process.", code: 0 };
   },
 
-  /** Use an explicit --base-branch from passthrough, otherwise the config value. */
+  /** Give children the effective base branch, unless passthrough already carries
+   *  an explicit --base-branch. */
   childArgs(env: DispatchEnv): string[] {
-    return env.passthrough.includes("--base-branch") ? [] : ["--base-branch", env.ctx.config.baseBranch];
+    return env.passthrough.includes("--base-branch") ? [] : ["--base-branch", scanBaseBranch(env)];
   },
 
   banner(ticket: string): string {
@@ -144,11 +152,11 @@ export const scanStrategy: DispatchStrategy = {
     return `  ✓ ${ticket} already complete — resuming: skipped.`;
   },
 
-  /** Return to the base branch before the next ticket. A skipped ticket ran no
+  /** Return to the effective base branch before the next ticket. A skipped ticket ran no
    * work, so checking out again could unnecessarily fail on a dirty tree. */
   async betweenTickets(_ticket: string, env: DispatchEnv, info: { skipped: boolean }): Promise<boolean> {
     if (info.skipped) return true;
-    const base = env.ctx.config.baseBranch;
+    const base = scanBaseBranch(env);
     const co = await runSupervisedCommand("git", ["checkout", base], {
       cwd: env.ctx.cwd,
       timeoutMs: 120_000,
