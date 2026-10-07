@@ -7,6 +7,7 @@ import { closeSync, openSync, writeSync } from "node:fs";
 import type { RunnerResult } from "../contracts/backends.js";
 import { liveFeedFilePath } from "../runtime/live-feed.js";
 import { spawnSupervisedProcess } from "./process-runner.js";
+import { withoutRunnerInternalEnv } from "./self-spawn.js";
 import {
   captureProcessOutput,
   gracefulKill,
@@ -62,6 +63,7 @@ export interface AsyncBashOptions {
 export function runBashAsync(command: string, opts: AsyncBashOptions = {}): Promise<RunnerResult> {
   const supervised = spawnSupervisedProcess("bash", ["-c", command], {
     stdio: ["ignore", "pipe", "pipe"],
+    env: withoutRunnerInternalEnv(process.env),
     detached: true,
     timeoutMs: opts.timeoutMs,
     signal: opts.signal,
@@ -163,7 +165,11 @@ export function runBashStreaming(
     // Detached bash becomes its group leader, so gracefulKill also kills its
     // descendants (see killTree). Tradeoff: terminal SIGINT no longer applies;
     // hence the liveChildren registry.
-    const child = spawn("bash", ["-c", command], { stdio: ["pipe", "pipe", "pipe"], detached: true });
+    const child = spawn("bash", ["-c", command], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: withoutRunnerInternalEnv(process.env),
+      detached: true,
+    });
     trackChild(child, { group: true });
 
     let output = "";

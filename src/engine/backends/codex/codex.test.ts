@@ -254,6 +254,46 @@ test("CodexBackend: headless process → common result, session, and usage", asy
   });
 });
 
+test("CodexBackend: the CLI does not inherit runner-internal variables", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "codex-env-"));
+  const dump = join(dir, "env.txt");
+  const bin = join(dir, "fake-codex");
+  writeFileSync(
+    bin,
+    [
+      "#!/bin/sh",
+      `env > '${dump}'`,
+      'printf \'%s\\n\' \'{"type":"thread.started","thread_id":"fake-thread"}\'',
+      'printf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"{\\"success\\":true}"}}\'',
+      'printf \'%s\\n\' \'{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}\'',
+    ].join("\n"),
+  );
+  chmodSync(bin, 0o755);
+  const touched = ["RUNNER_LOCK_HELD", "RUNNER_IN_WORKTREE"] as const;
+  const previous = touched.map((name) => process.env[name]);
+  for (const name of touched) process.env[name] = "1";
+
+  try {
+    const result = await new CodexBackend({ bin, model: CODEX_MODEL.GPT_5_CODEX }).run({
+      prompt: "test",
+      cwd: dir,
+      outputFormat: "json",
+      timeoutMs: 5_000,
+    });
+
+    expect(result.ok).toBe(true);
+    const env = readFileSync(dump, "utf8");
+    for (const name of touched) expect(env).not.toContain(`${name}=`);
+  } finally {
+    touched.forEach((name, i) => {
+      const value = previous[i];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("CodexBackend: stops a priced turn that exceeds the remaining budget", async () => {
   const dir = mkdtempSync(join(tmpdir(), "codex-budget-"));
   const bin = join(dir, "fake-codex");

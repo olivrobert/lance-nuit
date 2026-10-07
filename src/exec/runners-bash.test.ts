@@ -84,6 +84,54 @@ test("live-feed filesystem failures do not fail Bash steps: validates the contra
   }
 });
 
+const STEP_VISIBLE_ENV = { RUNNER_BIN: "/opt/lance-nuit/runner.ts" };
+
+/** Puts the runner-internal variables a parent run holds into process.env, runs
+ *  `body`, then restores every touched variable. */
+async function withParentRunEnv(body: (internal: Record<string, string>) => Promise<void>): Promise<void> {
+  const feed = join(tmpdir(), `parent-feed-${process.pid}-${process.hrtime.bigint()}.jsonl`);
+  const internal = {
+    RUNNER_LOCK_HELD: "1",
+    RUNNER_IN_WORKTREE: "1",
+    RUNNER_EVENTS_FILE: feed,
+    RUNNER_LIVE_FEED: feed,
+    RUNNER_DISABLE_DISPATCH: "1",
+  };
+  const touched = { ...internal, ...STEP_VISIBLE_ENV };
+  const previous = Object.fromEntries(Object.keys(touched).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, touched);
+  try {
+    await body(internal);
+  } finally {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(feed, { force: true });
+  }
+}
+
+function expectStepEnv(output: string, internal: Record<string, string>): void {
+  for (const name of Object.keys(internal)) expect(output).not.toContain(`${name}=`);
+  expect(output).toContain(`RUNNER_BIN=${STEP_VISIBLE_ENV.RUNNER_BIN}`);
+}
+
+test("runBashStreaming hides the runner-internal variables from the step", async () => {
+  await withParentRunEnv(async (internal) => {
+    const r = await runBashStreaming("env", { timeoutMs: 5000 });
+    expect(r.ok).toBe(true);
+    expectStepEnv(r.output, internal);
+  });
+});
+
+test("runBashAsync hides the runner-internal variables from the command", async () => {
+  await withParentRunEnv(async (internal) => {
+    const r = await runBashAsync("env", { timeoutMs: 5000 });
+    expect(r.ok).toBe(true);
+    expectStepEnv(r.output, internal);
+  });
+});
+
 test("timeout: validates the contract", async () => {
   // The nested `bash -c` is a child of the runner; without detached group cleanup,
   // Only direct bash receives SIGTERM: the grandchild survives, keeps stdout/stderr

@@ -90,6 +90,6 @@ propagated only when the child cannot derive it from its environment.
 | Option | Propagated? | Why |
 |---|---|---|
 | `--fresh`, `--allow-dirty`, `--base-branch` | yes | parent decisions, invisible to the child |
-| `--worktree` | no | the child inherits the cwd (`chdir`) and `RUNNER_IN_WORKTREE`; it is rejected with `--scan` |
+| `--worktree` | no | the dispatch child inherits the cwd (`chdir`) and `RUNNER_IN_WORKTREE`; it is rejected with `--scan` |
 | `--watch` | no | scans do not propagate it to children |
 | `--pipeline`, step selectors | no | set explicitly by the spawn caller |

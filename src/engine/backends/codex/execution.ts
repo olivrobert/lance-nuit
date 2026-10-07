@@ -1,4 +1,5 @@
 import { runSupervisedStream, supervisorTimeout } from "../../../exec/process-runner.js";
+import { withoutRunnerInternalEnv } from "../../../exec/self-spawn.js";
 import { jsonRecords } from "../../../lib/json-values.js";
 import { clearLiveAttemptCost, reportLiveAttemptCost } from "../../../runtime/live-cost.js";
 import { budgetExceededReason, costUnaccountedReason, lineSplitter, liveMessageSink } from "../host-helpers.js";
@@ -53,7 +54,7 @@ export function createNodeCodexHost(hostOptions: NodeCodexHostOptions = {}): Cod
         options.args,
         {
           cwd: options.cwd,
-          env: { ...process.env },
+          env: withoutRunnerInternalEnv(process.env),
           stdio: ["ignore", "pipe", "pipe"],
           detached: true,
           timeoutMs: supervisorTimeout(options.timeoutMs),

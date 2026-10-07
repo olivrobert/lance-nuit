@@ -70,6 +70,42 @@ test("ClaudeBackend parses StructuredOutput verdicts through its public run API"
   expect(result.output).toBe("Analyse faite.");
 });
 
+test("ClaudeBackend: the CLI does not inherit runner-internal variables", () => {
+  const dir = mkdtempSync(join(tmpdir(), "claude-env-"));
+  const replay = join(dir, "replay.jsonl");
+  const dump = join(dir, "env.txt");
+  const fake = join(dir, "claude");
+  writeFileSync(
+    replay,
+    `${JSON.stringify({ type: "result", duration_ms: 1, structured_output: { success: true } })}\n`,
+  );
+  writeFileSync(fake, `#!/bin/sh\nenv > '${dump}'\ncat '${replay}'\n`);
+  chmodSync(fake, 0o755);
+  const source = [
+    ...INSTALL_FEED,
+    'import { claudeBackendFactory } from "./backend.ts";',
+    'const result = await claudeBackendFactory.create().run({ prompt: "test", outputFormat: "json" });',
+    "process.exit(result.ok ? 0 : 1);",
+  ].join("\n");
+  const child = spawnSync(process.execPath, ["-e", source], {
+    cwd: import.meta.dir,
+    encoding: "utf8",
+    env: {
+      ...backendEnv(),
+      CLAUDE_BIN: fake,
+      RUNNER_LIVE_FEED: join(dir, "live.jsonl"),
+      RUNNER_LOCK_HELD: "1",
+      RUNNER_IN_WORKTREE: "1",
+      CLAUDECODE: "1",
+    },
+  });
+  expect(child.status).toBe(0);
+  const env = readFileSync(dump, "utf8");
+  for (const name of ["RUNNER_LOCK_HELD", "RUNNER_IN_WORKTREE", "RUNNER_LIVE_FEED", "CLAUDECODE"]) {
+    expect(env).not.toContain(`${name}=`);
+  }
+});
+
 test("ClaudeBackend reports invalid and failed structured verdicts", () => {
   const failed = runBackend([{ type: "result", duration_ms: 1, structured_output: { success: false, reason: "KO" } }]);
   expect(failed.ok).toBe(false);

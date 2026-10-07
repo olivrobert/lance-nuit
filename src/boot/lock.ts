@@ -44,7 +44,8 @@ export const lockStep: BootStep = {
       process.exit(1);
     }
     // Side effects not represented by Partial<BootState>:
-    // - selfSpawnRunner inherits RUNNER_LOCK_HELD, so children do not re-lock;
+    // - selfSpawnRunner inherits RUNNER_LOCK_HELD, so dispatch children do not
+    //   re-lock; steps and agents do not get it, so a runner they start does;
     // - the lock is released on exit. installChildKillHandlers converts
     //   SIGINT/SIGTERM into process.exit, which triggers this handler.
     process.env.RUNNER_LOCK_HELD = "1";

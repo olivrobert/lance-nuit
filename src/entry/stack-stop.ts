@@ -4,7 +4,7 @@
 // the optional `worktree-stop.sh` hook. Resume starts them again through the
 // boot path (stack preflight, then `worktree-ready.sh`).
 //
-// Only the process that entered the worktree owns its stack: sub-runners
+// Only the process that entered the worktree owns its stack: dispatch children
 // inherit `RUNNER_IN_WORKTREE=1`, and a failing child pipeline must not stop
 // the services its parent is still using.
 //

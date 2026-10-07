@@ -1,4 +1,5 @@
 import { runSupervisedStream, supervisorTimeout } from "../../../exec/process-runner.js";
+import { withoutRunnerInternalEnv } from "../../../exec/self-spawn.js";
 import { asFiniteNumber as num, asRecord as rec } from "../../../lib/json-values.js";
 import { toolLabel } from "../../../lib/tool-label.js";
 import { activityEvent, contextEvent, contextTokensFromUsage } from "../../../runtime/context.js";
@@ -29,7 +30,7 @@ async function executeNode(
   const costBaseline = options.sessionCostBaselineUsd ?? 0;
   if (priorCost > 0) reportLiveAttemptCost(priorCost);
   else clearLiveAttemptCost();
-  const env = { ...process.env };
+  const env = withoutRunnerInternalEnv(process.env);
   delete env.CLAUDECODE;
   // Supervised spawn: tracked for shutdown, SIGTERM→SIGKILL escalation on
   // timeout/budget kill, so an unresponsive CLI cannot hang the step forever.
