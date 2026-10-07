@@ -345,6 +345,31 @@ except for `runPipeline`/`forEachPipeline` **that has already created a child**:
 composition decision is frozen by the snapshot, otherwise a resume could make an
 already-declared call disappear. Other guards on the same step are replayed.
 
+### Interrupted steps
+
+When the runner dies during an attempt (crash, OOM, `SIGKILL`, power loss), the
+next invocation resumes the run with that step still owing work. Its side
+effects — a push, a merge request, a tracker comment — may already have
+happened, so the resumed run does not replay it silently: admission stops the
+run as `STOPPED` (resumable) before the step runs again, naming the step and the
+two ways to authorize the replay. The check comes after `when`, freshness and
+rework, so a step those guards now skip replays nothing and asks nothing.
+
+The replay is authorized when any of these holds:
+
+- the step declares `replayInterrupted: true` — its side effects are safe to
+  repeat;
+- the step declares `rerunOnResume: true`, which already declares it idempotent;
+- the step is the one this invocation names in `--start-at`;
+- the invocation carries `--replay-interrupted`, which covers this invocation
+  and the runs it composes, and is never persisted: a replay that dies again
+  asks again.
+
+An authorized replay prints `↻ <step> — replaying after an interrupted attempt`,
+and the final report marks the step `↻ replayed after interruption`. A step
+interrupted by `SIGINT`/`SIGTERM` is closed `aborted` by the runner itself and
+is not covered by this rule.
+
 ### Input freshness
 
 `input` declares the artifacts a step reads, symmetrically to `output`. It is the
@@ -390,7 +415,20 @@ The rules:
   by `--start-at` is the exception: it runs even when its outputs are fresh,
   because freshness does not track the repository tree an operator fixed. So
   does a step whose last pass failed or was interrupted: what that pass wrote
-  is never adopted.
+  is never adopted. A pass the runner died in needs an authorization before it
+  is replayed; see [Interrupted steps](#interrupted-steps).
+- **Absorbed failure.** A `blocking: false` step whose failure was absorbed is
+  `done` without its outputs, so freshness alone would re-run it on every
+  resume. Once the failure is absorbed — after its fix, `replayAfterFix: false`
+  included — the runner records the fingerprints of its pure inputs. A resume
+  skips the step with `failure absorbed, inputs unchanged since` while they
+  still match, even when its own fix rewrote one of them. It runs again when an
+  earlier step changed an input, when the definition gained or lost one, under
+  `--start-at`, or when no record exists (a snapshot written before it, an
+  interruption right after the absorption). A failure absorbed at admission
+  (preflight, throwing admission) records nothing: it never ran, and is
+  re-examined on every resume. The record lives in the run snapshot, so a new
+  run of the same work item checks the step again.
 - **Rework.** A step named as a gate's `rework` replays while a rejection of
   that gate is pending, independently of its inputs; without one, its inputs
   decide as above. See [human-control.md](human-control.md#reject-and-rework).

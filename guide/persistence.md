@@ -191,9 +191,10 @@ A run directory is held by a single writer: `runner.lock` records the owning pid
 and a dead holder is reclaimed automatically. Reclaiming a stale lock goes through
 the same protocol as the project-wide runner lock, so two runners that find the
 same dead holder cannot both take the directory. `--run <runId>` fails when another
-live runner holds the target; an implicit resume of `latest` reports the holder
-and starts a new run instead, since the work in the held directory is intact and
-this invocation is simply not its writer.
+live runner holds the target, and so does an implicit resume of a resumable
+`latest`: it exits 1 with the holder pid and the options — wait and rerun, select
+another run with `--run <runId>`, or start a new one with `--fresh` — rather than
+silently start over and replay work already done and paid for.
 
 Two details of that lock file are worth knowing when reading one by hand:
 
@@ -203,6 +204,13 @@ Two details of that lock file are worth knowing when reading one by hand:
   a dead runner's pid to a new one cannot make the new process look like the
   holder, nor let it free a lock it never took. The field is written by the lock
   itself; nothing else reads it.
+- The payload also carries a `pidStart` field: a token identifying when the
+  holder process started (boot id and start time on Linux, `ps -o lstart`
+  elsewhere). A pid that is alive but whose current start token differs is a
+  recycled pid — the runner died and the operating system gave its pid to an
+  unrelated process — so the lock is stale and reclaimed. A lock without that
+  field, written by an older build, keeps the pid-only check, and so does a pid
+  whose start token cannot be read.
 - A refusal means the holder is alive. A lock whose holder is dead, whose payload
   is corrupt, or whose pid is not a usable one is reclaimed without asking, so
   there is no reason to delete a lock file by hand — doing it while its runner
@@ -275,7 +283,7 @@ projection of spend already accounted for when the attempt closed.
 | Concept | Authority | Derived from it | When the other record knows more |
 | --- | --- | --- | --- |
 | Step status, timestamps, reason | snapshot | — | A **terminal** `step.status.changed` (`done`, `failed`, `skipped`, `aborted`) over an **unfinished** snapshot status (`pending`, `running`) wins, with the event's instant, reason and fail cause. One-way only: a terminal snapshot is the later record, and a journal that walked the step back to `running` describes a pass the snapshot has since closed. A `pending` step carrying `replay` is not superseded: its terminal event is the pass `--start-at` asked to replay. Once that replay is `running`, a terminal event closes it as usual and drops `replay`. |
-| Attempts (number, kind, status, session, log path, own figures) | journal (`step.attempt.started` / `step.attempt.finished`) | in-memory `step.attempts`; the next attempt number | The snapshot holds none. A finish without its start is kept (the numbering must not shift); an attempt still `running` at load is settled by `settleCrashedAttempts` as failed and unpriced, through the same `closeAttempt` as any other ending, and the finish is journaled so the next resume projects it instead of deciding again. |
+| Attempts (number, kind, status, session, log path, own figures) | journal (`step.attempt.started` / `step.attempt.finished`) | in-memory `step.attempts`; the next attempt number | The snapshot holds none. A finish without its start is kept (the numbering must not shift); an attempt still `running` at load is settled by `settleCrashedAttempts` as failed and unpriced, through the same `closeAttempt` as any other ending, and the finish is journaled with `interrupted: true` so the next resume projects it instead of deciding again. That marker, on the step's last attempt, is what makes admission ask for an authorization before replaying the step ([Interrupted steps](dsl.md#interrupted-steps)). |
 | Attempt numbering floor | snapshot `last_attempt` | next attempt = max(`last_attempt`, journaled attempts, list length) + 1 | The journal cannot lower it. It is kept precisely for the journal that lost an attempt (a failed append, a rewritten file): without it a resume would reuse a number and append into an existing log. It stays until a replacement proves the same guarantee with an incomplete journal. |
 | Step spend total (`control`, `usage`) | snapshot | budget ledger seed on resume | The journal wins **only when its priced sum exceeds the snapshot's** (`projectStepSpend`): the finish event is appended before the snapshot, so a crash in that window leaves a priced attempt the step total never received. An attempt lost with no price in the journal does not change the total: the snapshot stays the record, and the attempt keeps its own figures where they were read. |
 | Run totals (`total_control`, `total_usage`) | derived from the steps | materialized by `finalizeRun` and `abortRun`; read through `controlForRun` / `usageForRun` | Trusted on a **terminal** snapshot only (finalized, and no executable step left under the current definition); dropped on a live resume (`restoreRunTotals`). Every charge that reaches the run — an attempt to the ledger, a child reconciliation — drops them too, so a total from a previous generation never hides spend incurred after it. |
@@ -285,6 +293,7 @@ projection of spend already accounted for when the attempt closed.
 | Composed child identity (`pipeline.child.started`) | journal | — | The reference's `runId` alone is not proof the child started; the start fact lives in the journal only, which is why an unreadable journal fails the resume instead of reading as empty. |
 | Composed child spend (`accountedCostUsd`, `accountedDurationMs`, `accountedUsage`) | parent snapshot | the parent node's `control` and `usage`, the parent ledger | What the parent already charged for this child (`chargeChildReconciliation`). A resumed child re-reports its whole history and is charged by difference; a reference reloaded from a snapshot written before the last reconciliation is charged the missing difference again, never twice. |
 | Location (`worktree`, `cwd`) | snapshot | — | Rewritten by every resume with the invocation's own location. |
+| Absorbed inputs (`absorbed_inputs`) | snapshot | — | Written by `recordAbsorbedInputs` after a `blocking: false` step that declares `input` absorbed its failure in an attempt, cleared by `updateStep(running)`. The journal does not carry it. Missing — an older snapshot, or an interruption between the absorption and the record — leaves the decision to freshness, which re-runs the step. |
 | Selection (`excluded`, `replay`, skipped steps) | snapshot, then the current selectors | — | `--step` / `--skip` / `--start-at` apply on top of the persisted state to every step that still owes work, including steps the definition gained since the snapshot. `--start-at X` also requeues `X` and every later step, whatever their status, as `pending` with `replay`, and lifts their `excluded` mark; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
 
 ### Interruption windows
@@ -296,7 +305,7 @@ above exist for:
 
 | Transition | Order | Event alone leaves | Resolved on resume by |
 | --- | --- | --- | --- |
-| Attempt start (`runTrackedAttempt`) | attempt pushed in memory → `step.attempt.started` → snapshot (`last_attempt`) | an attempt the journal calls `running` and the snapshot never numbered | `settleCrashedAttempts` closes it failed and unpriced, journals the finish; the number is taken from the journal |
+| Attempt start (`runTrackedAttempt`) | attempt pushed in memory → `step.attempt.started` → snapshot (`last_attempt`) | an attempt the journal calls `running` and the snapshot never numbered | `settleCrashedAttempts` closes it failed and unpriced, journals the finish with `interrupted: true`; the number is taken from the journal |
 | Attempt end (`finishAttempt`) | `closeAttempt` (`step.attempt.finished`, step total in memory) → verdict → ledger → snapshot | a priced attempt absent from the step total | `projectStepSpend` rebuilds the step total from the journal when it holds more |
 | Step status (`updateStep`) | `step.status.changed` → snapshot | a step the journal finished and the snapshot still runs | `reconcileStepStatus`, terminal event over unfinished snapshot |
 | Clean stop / interruption / verdict (`stopRun`, `abortRun`, `finalizeRun`) | event → snapshot | a `run.finished` (or `run.stopped`, `run.aborted`) with a snapshot that still says `RUNNING` | the settled-but-unfinalized rule: the run is resumed and finalized again, so the journal carries a second `run.finished`; readers take the last one |

@@ -67,7 +67,12 @@ async function main() {
     run,
     started.ready.args.ticket,
     started.ready.args.baseBranch,
-    { resuming, abort },
+    {
+      resuming,
+      abort,
+      replayInterrupted: started.ready.args.replayInterrupted,
+      startAt: started.ready.args.startAt,
+    },
     stepLoopDeps(outputs.output),
     context,
   );

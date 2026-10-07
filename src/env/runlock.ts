@@ -10,7 +10,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { errorMessage } from "../lib/errors.js";
 import { log } from "../runtime/logging.js";
-import { acquireLock, type LockAcquireResult, releaseLock } from "./lock.js";
+import { acquireLock, type LivenessProbe, type LockAcquireResult, releaseLock } from "./lock.js";
 
 export interface RunnerLockInfo {
   pid: number;
@@ -26,7 +26,7 @@ export function runnerLockPath(cwd: string): string {
 export function acquireRunnerLock(
   cwd: string,
   info: RunnerLockInfo,
-  isAlive?: (pid: number) => boolean,
+  isAlive?: LivenessProbe,
 ): LockAcquireResult<RunnerLockInfo> {
   const lockFile = runnerLockPath(cwd);
   mkdirSync(dirname(lockFile), { recursive: true });

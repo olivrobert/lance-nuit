@@ -168,6 +168,7 @@ export abstract class StepBuilder {
     if (options.timeout !== undefined) this.timeout(options.timeout);
     if (options.blocking !== undefined) this.blocking(options.blocking);
     if (options.rerunOnResume) this.rerunOnResume();
+    if (options.replayInterrupted) this.replayInterrupted();
     if (options.onFail !== undefined) this.onFail(options.onFail);
     return this;
   }
@@ -214,6 +215,11 @@ export abstract class StepBuilder {
 
   rerunOnResume(): this {
     this.step.rerun_on_resume = true;
+    return this;
+  }
+
+  replayInterrupted(): this {
+    this.step.replay_interrupted = true;
     return this;
   }
 

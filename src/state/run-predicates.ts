@@ -1,4 +1,4 @@
-import type { PersistedRun, PersistedStepState, StepStatus } from "../model/persisted.js";
+import type { PersistedAttempt, PersistedRun, PersistedStepState, StepStatus } from "../model/persisted.js";
 
 /**
  * A step in this status has nothing left to execute. Every rule about what a
@@ -13,6 +13,27 @@ export function isSettledStatus(status: StepStatus): boolean {
  *  pass failed or was interrupted. */
 export function owesWork(status: StepStatus): boolean {
   return !isSettledStatus(status);
+}
+
+interface StepAttempts {
+  status: StepStatus;
+  attempts?: readonly PersistedAttempt[];
+}
+
+/**
+ * The step still owes work and its latest attempt was cut short by the runner
+ * dying. Keyed on the attempt, never on `running` alone: an orchestration node is
+ * `running` for the whole life of its children and has no attempt of its own.
+ * The marker clears itself once the replay appends a new attempt.
+ */
+export function lastPassInterrupted(step: StepAttempts): boolean {
+  return owesWork(step.status) && step.attempts?.at(-1)?.interrupted === true;
+}
+
+/** An interrupted attempt was followed by another one: the step was replayed. */
+export function replayedAfterInterruption(step: { attempts?: readonly PersistedAttempt[] }): boolean {
+  const attempts = step.attempts ?? [];
+  return attempts.slice(0, -1).some((attempt) => attempt.interrupted === true);
 }
 
 /**

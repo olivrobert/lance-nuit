@@ -132,6 +132,10 @@ export interface PersistedAttempt {
   control?: StepControl;
   usage?: StepUsage;
   errors?: string;
+  /** The runner died while this attempt was running (crash, OOM, SIGKILL): any
+   *  side effect it had may already have happened, so replaying the step needs an
+   *  authorization. Written by crash settlement only. */
+  interrupted?: true;
 }
 
 /** Persisted step state. The definition (command, on_failure, ...) is reloaded
@@ -175,6 +179,12 @@ export interface PersistedStepState {
    * it pending over the `done` its earlier pass journaled. Cleared when the step
    * settles (`done` or `skipped`). Absent by default; the schema is unchanged. */
   replay?: true;
+  /** Fingerprints of the pure inputs (keys `artifacts/<name>`, `null` when
+   * absent) once a `blocking: false` failure was absorbed, taken after its fix.
+   * A resume skips the step while they still match: its outputs are missing by
+   * construction, so freshness alone would re-run it every time. Cleared when the
+   * step runs again. Absent by default; the schema is unchanged otherwise. */
+  absorbed_inputs?: Record<string, string | null>;
   orchestration?: PersistedPipelineOrchestrationState;
 }
 
