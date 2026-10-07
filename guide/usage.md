@@ -637,6 +637,9 @@ lancenuit run PROJ-28 --worktree
   the run finalizes as `PASS` and counts as complete — `--scan` will not pick the
   work item up again. Use `--fresh` to replay the whole pipeline instead.
 - `--scan` discovers work items, and `--limit` caps the number discovered.
+  `--steps` and `--skip` apply to each scanned ticket, so a ticket whose
+  remaining work they all exclude is complete for later scans. `--start-at` is
+  refused under `--scan`: replay one ticket explicitly instead.
 - `--allow-dirty` disables the clean-tree guard for the current run.
 - `--worktree` isolates the run in a dedicated Git worktree.
 

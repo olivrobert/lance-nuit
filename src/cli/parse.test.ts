@@ -96,3 +96,16 @@ test("--reject is refused without a ticket, without a reason, or beside another 
     parseRunnerArgs(["FOO-1", "--reject", "plan", "--reason", "no", "--reject-only", "--allow-unmetered"]),
   ).toThrow("Option --allow-unmetered applies to a run, not to an inspection command.");
 });
+
+test("--steps and --skip are forwarded to dispatch children", () => {
+  // Excluding a step is a property of the pipeline shape the operator wants on
+  // every ticket a --scan sweeps, so the child gets the raw value in long form.
+  expect(parseRunnerArgs(["--scan", "-k", "second"]).passthrough).toEqual(["--skip", "second"]);
+  expect(parseRunnerArgs(["--scan", "-s", "a,b"]).passthrough).toEqual(["--steps", "a,b"]);
+});
+
+test("--start-at is refused under --scan", () => {
+  expect(() => parseRunnerArgs(["--scan", "--start-at", "x"])).toThrow(/--start-at/);
+  expect(() => parseRunnerArgs(["--scan", "-a", "x"])).toThrow(/--start-at/);
+  expect(parseRunnerArgs(["FOO-1", "--start-at", "x"]).passthrough).toEqual([]);
+});
