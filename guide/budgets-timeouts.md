@@ -46,6 +46,8 @@ A stop decided by the live cost guard (below) is durable too. The guard kills on
 an estimate, and the provider's final figure can land under the ceiling; the
 snapshot therefore records the stop itself, so a resume without `--budget` halts
 where the guard did instead of replaying — and repaying — the killed step.
+A resume that takes the killed step out with `--skip` (or `--steps`) leaves the
+stop nothing to withhold: once no work remains, the run finalizes on its steps.
 
 The killed step is left `failed`, even when it is declared `blocking: false`: a
 cost stop withholds the step's work rather than judging it, and a step absorbed as
@@ -187,6 +189,12 @@ into the live estimate, so an interruption during the retry charges the whole
 spawn. When the final attempt itself ends without a usage event, the spawn's
 figure is the discarded attempts' cost alone and is flagged `cost_unknown`: a
 lower bound, not the price.
+
+The Claude CLI streams each message's usage as it stood when the message
+started, so its output tokens are known only from the final `result` event. A
+finished attempt records that figure. The live estimate — the mid-flight budget
+gate and the spend charged to an interrupted attempt — sees input and cache
+tokens in full but almost none of the output, and reads low.
 
 ### Unknown spend stops a capped run
 

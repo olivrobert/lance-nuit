@@ -2,8 +2,9 @@
 // for every address.
 //
 // The inbox routes share one pathless layout, `InboxScreen`: moving between
-// items or chips changes the params, not the screen, so the list keeps its
-// scroll. The layout's children carry no component — they only name the params
+// items, chips or views changes the params, not the screen, so the list keeps
+// its scroll. Every inbox address exists twice, once under `history/` for the
+// view of the finished runs. The layout's children carry no component — they only name the params
 // `lib/inbox-address.ts` reads. Search params are validated by pure functions
 // (`sheetSearchOf`, `statsSearchOf`), so a hand-edited link cannot put a value
 // of the wrong shape in front of a component.
@@ -33,6 +34,10 @@ const inboxChildren = [
   createRoute({ getParentRoute: () => inboxRoute, path: "projects/$project" }),
   createRoute({ getParentRoute: () => inboxRoute, path: "projects/$project/tickets/$ticket" }),
   createRoute({ getParentRoute: () => inboxRoute, path: "tickets/$itemProject/$ticket" }),
+  createRoute({ getParentRoute: () => inboxRoute, path: "history" }),
+  createRoute({ getParentRoute: () => inboxRoute, path: "history/projects/$project" }),
+  createRoute({ getParentRoute: () => inboxRoute, path: "history/projects/$project/tickets/$ticket" }),
+  createRoute({ getParentRoute: () => inboxRoute, path: "history/tickets/$itemProject/$ticket" }),
 ] as const;
 
 const statsRoute = createRoute({

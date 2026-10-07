@@ -223,6 +223,34 @@ test("api: one item carries its tree, its steps, and its recap", async () => {
   expect(body.recap?.steps.map((step) => step.id)).toEqual(["plan"]);
 });
 
+test("api: a step of the run opens on request; an unknown one is 404, a malformed query 400", async () => {
+  const { url } = await fixture();
+
+  const opened = await fetch(url("/api/items/demo-app/DEMO-1/step?id=plan"));
+  expect(opened.status).toBe(200);
+  expect((await opened.json()) as { stepId: string; attempts: unknown[] }).toMatchObject({
+    stepId: "plan",
+    attempts: [],
+  });
+  expect((await fetch(url("/api/items/demo-app/DEMO-1/step?id=review"))).status).toBe(404);
+  expect((await fetch(url("/api/items/demo-app/DEMO-1/step"))).status).toBe(400);
+  expect((await fetch(url("/api/items/demo-app/DEMO-1/step?id=plan&attempt=0"))).status).toBe(400);
+  expect((await fetch(url("/api/items/demo-app/DEMO-1/step?id=plan&attempt=1x"))).status).toBe(400);
+});
+
+test("api: the run's journey opens on request", async () => {
+  const { url } = await fixture();
+
+  const response = await fetch(url("/api/items/demo-app/DEMO-1/journey"));
+  expect(response.status).toBe(200);
+  expect((await response.json()) as { runId: string; attempts: unknown[]; pauses: unknown[] }).toMatchObject({
+    runId: "r-stopped",
+    attempts: [],
+    pauses: [],
+  });
+  expect((await fetch(url("/api/items/demo-app/NOPE-9/journey"))).status).toBe(404);
+});
+
 test("api: an unknown project or ticket is 404, never a filesystem lookup", async () => {
   const { url } = await fixture();
   expect((await fetch(url("/api/items/unknown/DEMO-1"))).status).toBe(404);

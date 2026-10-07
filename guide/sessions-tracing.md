@@ -42,7 +42,9 @@ Attempt output is stored at:
 runs/<pipeline>/<run-id>/
 ├── state.json
 ├── events.jsonl
-└── steps/<step>/attempt-001/output.log
+└── steps/<step>/attempt-001/
+    ├── output.log
+    └── command.txt   # the rendered command or prompt, written when the attempt starts
 ```
 
 The event journal is append-only and is also the live feed; a resume does not
@@ -87,9 +89,8 @@ writes to stderr directly through `log.warn`/`log.error`, and those sites are no
 only the phases that run before the fan-out exists (boot, dispatch, the entry
 point itself): a few helpers reached from inside a run are in the same position,
 notably the attempt lifecycle that warns when spend could not be priced (`Cost
-not computable … the ceiling is no longer guaranteed`), the warning about a stale
-report that could not be removed, and the notice that a resumable run directory
-is held by another process. Those lines reach the console with their glyph but
+not computable … the ceiling is no longer guaranteed`) and the warning about a
+stale report that could not be removed. Those lines reach the console with their glyph but
 **not** `events.jsonl`, so a post-mortem reading only the feed will not see them.
 A message never takes both paths, so nothing is ever printed twice.
 

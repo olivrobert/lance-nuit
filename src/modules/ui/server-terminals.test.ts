@@ -3,7 +3,14 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createDefaultWorkItemGatewayRegistry } from "../work-item/registry.ts";
-import { cleanupTempDirs, makeProject, makeTempDir, writeProjectsFile, writeRun } from "../read-model/test-harness.js";
+import {
+  cleanupTempDirs,
+  makeProject,
+  makeTempDir,
+  writeProjectsFile,
+  writeRun,
+  writeRunEvents,
+} from "../read-model/test-harness.js";
 import { USER_COOKIE } from "./cookies.js";
 import { type RunningUiServer, startUiServer, type UiServerOptions } from "./server.js";
 import type { PaneCommandBuilder, SessionCommandBuilder } from "./terminals.js";
@@ -23,7 +30,10 @@ afterEach(async () => {
 
 const echoCommand: PaneCommandBuilder = (run) => ({ ok: true, words: ["echo", `marker-${run.ticket}`] });
 
-const echoSession: SessionCommandBuilder = (session) => ({ ok: true, words: ["echo", `resume-${session.sessionId}`] });
+const echoSession: SessionCommandBuilder = (session, { readOnly }) => ({
+  ok: true,
+  words: ["echo", `resume-${session.sessionId}${readOnly ? "-read-only" : ""}`],
+});
 
 const as = (user: string) => ({ Cookie: `${USER_COOKIE}=${user}`, "Content-Type": "application/json" });
 
@@ -340,4 +350,44 @@ test("sessions: the coder session opens in the run's directory, 409 while runnin
     command: `echo resume-${coder.id}`,
   });
   expect(tmux.sessions.get("ln-demo-app-PROJ-12__coder")?.cwd).toBe(project);
+});
+
+test("sessions: a finished attempt's session opens while the run runs, read-only; a running one has none yet", async () => {
+  const { url, tmux, project } = await fixture();
+  const triage = { provider: "claude", id: "6bd3dbb0-0923-4814-9958-449272a0d545", resumable: true };
+  const runDir = writeRun(project, "PROJ-12", "feature", {
+    runId: "r-1",
+    status: "RUNNING",
+    steps: [
+      { id: "triage", status: "done", retries: 0, session: triage },
+      { id: "code", status: "running", retries: 0, profile: "coder" },
+    ],
+  });
+  writeRunEvents(runDir, [
+    { ts: "2026-09-05T07:00:00.000Z", type: "step.attempt.started", stepId: "triage", attempt: 1, kind: "step" },
+    {
+      ts: "2026-09-05T07:01:00.000Z",
+      type: "step.attempt.finished",
+      stepId: "triage",
+      attempt: 1,
+      kind: "step",
+      status: "done",
+      session: triage,
+    },
+    { ts: "2026-09-05T07:02:00.000Z", type: "step.attempt.started", stepId: "code", attempt: 1, kind: "step" },
+  ]);
+
+  expect((await openSession(url, { step: "code", attempt: 1 })).status).toBe(404);
+  expect((await openSession(url, { step: "unknown", attempt: 1 })).status).toBe(404);
+  expect((await openSession(url, { step: "triage" })).status).toBe(400);
+
+  const created = await openSession(url, { step: "triage", attempt: 1 });
+  expect(created.status).toBe(201);
+  const { terminal } = (await created.json()) as { terminal: Record<string, unknown> };
+  expect(terminal).toMatchObject({
+    id: "ln-demo-app-PROJ-12__triage-1",
+    kind: "session",
+    command: `echo resume-${triage.id}-read-only`,
+  });
+  expect(tmux.sessions.get("ln-demo-app-PROJ-12__triage-1")?.cwd).toBe(project);
 });

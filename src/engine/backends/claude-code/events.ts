@@ -114,6 +114,24 @@ export function addUsage(totals: UsageTotals, usage: unknown, model?: string): v
 }
 
 /**
+ * Raise the output count to the one the `result` event reports. An `assistant`
+ * event carries its usage as it stood when the message STARTED, so its
+ * `output_tokens` reads 1 or 2 whatever the message then wrote; only `result`
+ * holds the real figure, for this process alone even on a resumed session. The
+ * shortfall is billed at the model of the last message, the only one known to
+ * have written it. An attempt killed before `result` keeps the undercount.
+ */
+export function settleOutputTokens(totals: UsageTotals, reported: number | undefined, model?: string): void {
+  const shortfall = (reported ?? 0) - totals.output;
+  if (shortfall <= 0) return;
+  const key = model ?? "";
+  const bucket = totals.byModel.get(key) ?? newModelUsageTotals();
+  totals.byModel.set(key, bucket);
+  totals.output += shortfall;
+  bucket.output += shortfall;
+}
+
+/**
  * Estimated dollars for every message counted so far, each model's messages at
  * that model's rate. Messages without a model are priced at `fallbackModel`. Both
  * the live budget gate and the final parse call this, so the two can never
@@ -166,7 +184,9 @@ export function parseClaudeEvents(raw: string, fallbackModel?: string): ClaudePa
     resultCost: number | undefined,
     duration = 0,
     api: number | undefined,
-    turns: number | undefined;
+    turns: number | undefined,
+    reportedOutput: number | undefined,
+    lastMessageModel: string | undefined;
   for (const record of jsonRecords(raw)) {
     // An event type this release does not know reads as `{ type: null }`: it
     // contributes its `session_id` like any other event, and nothing else.
@@ -207,6 +227,7 @@ export function parseClaudeEvents(raw: string, fallbackModel?: string): ClaudePa
       if (usage && !seen.has(id)) {
         seen.add(id);
         addUsage(totals, usage, messageModel);
+        lastMessageModel = messageModel;
       }
     }
     if (obj.type === "result") {
@@ -220,11 +241,13 @@ export function parseClaudeEvents(raw: string, fallbackModel?: string): ClaudePa
       api = obj.duration_api_ms;
       turns = obj.num_turns;
       resultCost = obj.total_cost_usd;
+      reportedOutput = obj.usage?.output_tokens;
       if (obj.structured_output != null) structuredOutput = obj.structured_output;
       if (obj.result && structuredOutput == null && !text.trimEnd().endsWith(String(obj.result).trimEnd()))
         text += String(obj.result);
     }
   }
+  settleOutputTokens(totals, reportedOutput, lastMessageModel);
   // A reported `0` over consumed tokens is the CLI admitting it could not price
   // the turn, not a free turn — the same gap `resolveOpencodeCost` handles for
   // opencode. Claude ships its own rate table, so estimate from it instead of

@@ -177,8 +177,8 @@ function resumeAfterDecision(
  * pid of a live runner already holding the run `--approve` would resume.
  *
  * The same gate is often lifted from two places — the dashboard, an agent, a
- * terminal. Resolving a held run starts a NEW run beside it (`resolveRunDir`),
- * which for a repeated approval is a duplicate, not a resume.
+ * terminal. Resolving a held run fails (`resolveRunDir`), which for a repeated
+ * approval is a false error: the decision is recorded and the holder resumes.
  */
 function latestRunHolder(pipelineName: string, args: RunnerArgs, context: PipelineContext): number | null {
   if (args.fresh) return null;

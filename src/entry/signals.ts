@@ -8,7 +8,7 @@ import { forceKillAllChildren, killAllChildren, shutdownAllChildren } from "../e
 import { errorMessage } from "../lib/errors.js";
 import type { Run } from "../model/run.js";
 import type { AbortScope } from "../runtime/abort.js";
-import { liveAttemptCost } from "../runtime/live-cost.js";
+import { liveAttemptCost, liveAttemptModel } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
 import { emitRunStats } from "../state/stats/run-stats.js";
 import { abortRun } from "../state/run-transitions.js";
@@ -82,7 +82,7 @@ export function installChildKillHandlers(
               // Only the leaf with an active attempt receives the process-wide
               // live estimate. Parent orchestration nodes have no attempt of
               // their own and must not duplicate their child's spend.
-              abortRun(active, sig, { estimatedCostUsd: liveAttemptCost() });
+              abortRun(active, sig, { estimatedCostUsd: liveAttemptCost(), model: liveAttemptModel() });
               if (active === run) emitRunStats(active, { projRoot: process.cwd() });
             }
           } catch (error) {

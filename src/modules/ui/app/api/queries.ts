@@ -28,7 +28,9 @@ import {
   fetchMe,
   fetchPipelines,
   fetchProjects,
+  fetchRunJourney,
   fetchStats,
+  fetchStepDetail,
   fetchTerminal,
   fetchTerminals,
 } from "./client.js";
@@ -75,6 +77,9 @@ export const keys = {
   detail: (project: string, ticket: string) => ["inbox", "item", project, ticket] as const,
   file: (project: string, ticket: string, path: string, render: "html" | "raw") =>
     ["inbox", "item", project, ticket, "file", render, path] as const,
+  step: (project: string, ticket: string, stepId: string, attempt: number | "last") =>
+    ["inbox", "item", project, ticket, "step", stepId, attempt] as const,
+  journey: (project: string, ticket: string) => ["inbox", "item", project, ticket, "journey"] as const,
   launchLog: (id: string) => ["inbox", "launch-log", id] as const,
   terminals: ["terminals"] as const,
   terminal: (id: string) => ["terminals", id] as const,
@@ -135,6 +140,26 @@ export function assumptionsQuery(item: Pick<Item, "project" | "ticket">, path: s
         return null;
       }
     },
+    ...POLLED,
+  });
+}
+
+/** One step opened from the timeline. Polled like the rest of the sheet, but
+ *  only while the step is open: the read parses the whole run journal. */
+export function stepDetailQuery(item: Pick<Item, "project" | "ticket">, stepId: string, attempt?: number) {
+  return queryOptions({
+    queryKey: keys.step(item.project.name, item.ticket, stepId, attempt ?? "last"),
+    queryFn: () => fetchStepDetail(item, stepId, attempt),
+    ...POLLED,
+  });
+}
+
+/** The run's attempts and pauses. Polled like the rest of the sheet, but only
+ *  while the Run tab is shown: the read parses the whole run journal. */
+export function runJourneyQuery(item: Pick<Item, "project" | "ticket">) {
+  return queryOptions({
+    queryKey: keys.journey(item.project.name, item.ticket),
+    queryFn: () => fetchRunJourney(item),
     ...POLLED,
   });
 }

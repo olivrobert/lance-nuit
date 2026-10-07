@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Item } from "../api/types.js";
-import { rowShowsTag, rowTime, timeline, type TimelineSection } from "./inbox-timeline.js";
+import { nightSummary, rowShowsTag, rowTime, timeline, type TimelineSection } from "./inbox-timeline.js";
 import { makeItem, makeLaunch } from "./testing.js";
 
 describe("timeline", () => {
@@ -98,5 +98,34 @@ describe("timeline", () => {
     expect(rowTime(item, "earlier", now)).toBe("23 Sep");
     expect(rowTime(item, "needs", now)).toBe("2d ago");
     expect(rowTime(done("web/b", "nope"), "night-1", now)).toBe("—");
+  });
+});
+
+describe("nightSummary", () => {
+  const local = (day: number, hour: number): Date => new Date(2026, 8, day, hour);
+  const done = (key: string, at: Date, overrides: Partial<Item> = {}): Item =>
+    makeItem({ key, group: "done", status: "PASS", updatedAt: at.toISOString(), ...overrides });
+
+  test("counts the latest night only", () => {
+    const night = nightSummary(
+      [
+        done("web/a", local(25, 2), { cost: { usd: 1.5, estimated: false } }),
+        done("web/b", local(25, 3), { status: "FAIL", closed: { at: local(25, 7).toISOString(), by: "olivier" } }),
+        done("web/c", local(24, 2), { cost: { usd: 9, estimated: false } }),
+      ],
+      local(25, 8),
+    );
+    expect(night).toEqual({
+      label: "Last night",
+      range: "Thu 24 → Fri 25",
+      runs: 2,
+      delivered: 1,
+      closed: 1,
+      cost: { usd: 1.5, estimated: false },
+    });
+  });
+
+  test("is null without a finished run", () => {
+    expect(nightSummary([], local(25, 8))).toBeNull();
   });
 });

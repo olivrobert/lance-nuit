@@ -82,11 +82,10 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: Run) => vo
   // A fresh run requires a clean tree; a resumed run may legitimately sit on
   // a dirty tree because implementation may be in progress.
   //
-  // A merely resumABLE snapshot is not enough to answer that: when its run lock
-  // is held by another runner (a worktree sharing `runs/` with the main clone),
-  // `resolveRunDir` creates a NEW run, and a new run on a dirty tree is exactly
-  // what the guard exists to refuse. `wouldResumeLatest` answers what will
-  // actually happen, lock included.
+  // A resumable `latest` held by another runner (a worktree sharing `runs/` with
+  // the main clone) does not create a new run: `resolveRunDir` fails with the
+  // holder and the options. It still counts as resuming here, so the guard does
+  // not replace that diagnosis with a dirty-tree refusal.
   const resuming = !!target.dir || wouldResumeLatest(pipelineDef.name, args.ticket, args.fresh, context);
   let run: Run;
   try {

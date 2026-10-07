@@ -10,6 +10,9 @@
 //                 unmounted by a tab switch, and a draft must survive it.
 //   `openDirs`    explorer directories the reader opened, by item key, so they
 //                 survive a poll, a tab switch and a trip to another item.
+//   `openSteps`   the timeline step the reader opened, and the attempt chosen
+//                 in it, by item key: a poll repaints the timeline, and the
+//                 panel must stay where the reader left it.
 //   `launchLogs`  launch ids whose log the reader opened or closed; the two
 //                 places that show a launch share it. An id never toggled
 //                 follows the launch: a launch that failed before its run
@@ -32,10 +35,18 @@ export interface Toast {
   message: string;
 }
 
+/** A step opened from the timeline. Without `attempt`, the panel follows the
+ *  last one, so a step still retrying shows its newest attempt. */
+export interface OpenStep {
+  stepId: string;
+  attempt?: number;
+}
+
 interface UiState {
   query: string;
   replies: Readonly<Record<string, string>>;
   openDirs: Readonly<Record<string, readonly string[]>>;
+  openSteps: Readonly<Record<string, OpenStep | null>>;
   launchLogs: Readonly<Record<string, boolean>>;
   toast: Toast | null;
   lastInbox: InboxAddress;
@@ -47,9 +58,10 @@ export const useUi = create<UiState>(() => ({
   query: "",
   replies: {},
   openDirs: {},
+  openSteps: {},
   launchLogs: {},
   toast: null,
-  lastInbox: { chip: null, item: null },
+  lastInbox: { view: "inbox", chip: null, item: null },
 }));
 
 /** The directories open in one item's explorer, stable while none is toggled. */
@@ -74,6 +86,18 @@ export function toggleDir(itemKey: string, path: string, open: boolean): void {
   });
 }
 
+/** The step open in one item's timeline: `null` once the reader closed it,
+ *  `undefined` while they have neither opened nor closed one, so the timeline
+ *  may choose for them. */
+export function openStepOf(state: UiState, itemKey: string): OpenStep | null | undefined {
+  return state.openSteps[itemKey];
+}
+
+/** Open `step` in one item's timeline, or close the panel with `null`. */
+export function setOpenStep(itemKey: string, step: OpenStep | null): void {
+  useUi.setState((state) => ({ openSteps: { ...state.openSteps, [itemKey]: step } }));
+}
+
 export function setLaunchLogOpen(launchId: string, open: boolean): void {
   useUi.setState((state) =>
     state.launchLogs[launchId] === open ? state : { launchLogs: { ...state.launchLogs, [launchId]: open } },
@@ -82,7 +106,7 @@ export function setLaunchLogOpen(launchId: string, open: boolean): void {
 
 export function rememberInbox(address: InboxAddress): void {
   const last = useUi.getState().lastInbox;
-  if (last.chip === address.chip && last.item === address.item) return;
+  if (last.view === address.view && last.chip === address.chip && last.item === address.item) return;
   useUi.setState({ lastInbox: address });
 }
 

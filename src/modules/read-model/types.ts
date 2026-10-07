@@ -252,9 +252,98 @@ export interface RunStepsView {
   coderStep?: string;
 }
 
-/** The agent session of a run's coder, and where it ran. The session is the
- *  conversation that wrote the code; it is reopened in the run's own working
- *  directory, because that is where the agent CLI stored it. */
+/** How one attempt of a step ended, as the journal recorded it. */
+export type StepAttemptStatus = "running" | "done" | "failed" | "aborted";
+
+/** One attempt of a step: the first run of its command, or a fix pass. */
+export interface StepAttemptView {
+  attempt: number;
+  kind: "step" | "fix";
+  status: StepAttemptStatus;
+  startedAt?: string;
+  finishedAt?: string;
+  /** Duration the runner accounted for the attempt. */
+  durationMs?: number;
+  costUsd?: number;
+  costEstimated?: true;
+  /** The attempt spent tokens no pricing table could price. */
+  costUnknown?: true;
+  model?: string;
+  /** Why it failed or was aborted: the error extractor's text when the step
+   *  declares one, the exit code or the verdict's reason otherwise. */
+  reason?: string;
+  /** Tree path of its output log, for the Files tab. */
+  logPath?: string;
+  /** The attempt left an agent session its provider can resume, which the
+   *  dashboard can reopen as a fork. */
+  hasSession?: true;
+}
+
+/** A bounded slice of a text file: its head for a prompt, its tail for an
+ *  output. `truncated` says the file is longer than what was read. */
+export interface TextExcerpt {
+  text: string;
+  truncated: boolean;
+  /** Tree path of the whole file. */
+  path: string;
+}
+
+/**
+ * One step opened from the timeline: its attempts, and what the selected
+ * attempt was given and printed.
+ */
+export interface StepDetail {
+  pipeline: string;
+  runId: string;
+  stepId: string;
+  attempts: StepAttemptView[];
+  /** The attempt whose command and output are shown: the one asked for, the
+   *  last one by default. Absent when the step never started an attempt. */
+  attempt?: number;
+  /** Rendered prompt or shell command. Absent for an attempt run before the
+   *  runner kept a copy of it. */
+  command?: TextExcerpt;
+  output?: TextExcerpt;
+  /** Tree paths of the artifacts the runner recorded this step as producing. */
+  produced: string[];
+  /** Tree path of the step's directory of attempts. */
+  stepDir?: string;
+}
+
+/** One attempt on the run's timeline: a step attempt, named after its step. */
+export interface RunJourneyAttempt extends StepAttemptView {
+  stepId: string;
+}
+
+/** A span the run spent stopped, from its last line to the resume. */
+export interface RunPause {
+  stoppedAt: string;
+  /** Absent while the run is still waiting. */
+  resumedAt?: string;
+  /** Why the run stopped, as `run.stopped` recorded it. */
+  reason?: string;
+  /** The human decision the resume carried, when it carried one. */
+  decision?: "approved" | "rejected";
+}
+
+/**
+ * The whole run in time, from the journal: every attempt of every step in the
+ * order they started, and the pauses between them.
+ */
+export interface RunJourney {
+  pipeline: string;
+  runId: string;
+  status: ItemStatus;
+  startedAt?: string;
+  /** Budget of the run, when one was set. */
+  maxCostUsd?: number;
+  attempts: RunJourneyAttempt[];
+  pauses: RunPause[];
+}
+
+/** An agent session of a run, and where it ran: the coder's — the conversation
+ *  that wrote the code — or one attempt's of any step. It is reopened in the
+ *  run's own working directory, because that is where the agent CLI stored it. */
 export interface CoderSessionRead {
   pipeline: string;
   runId: string;

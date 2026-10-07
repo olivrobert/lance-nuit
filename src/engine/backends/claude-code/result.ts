@@ -2,7 +2,7 @@ import type { AgentResult } from "../../../contracts/index.js";
 import { extractVerdictDetails, type VerdictDetails, verdictFromStructured } from "../../../contracts/index.js";
 import { agentSession, killFields, resolveVerdictOutcome, type VerdictOutcomeError } from "../result-helpers.js";
 import { netCumulative } from "./cost-state.js";
-import { type ClaudeTransportError, isAuthFailure, parseClaudeEvents } from "./events.js";
+import { type ClaudeTransportError, isAuthFailure, isRateLimited, parseClaudeEvents } from "./events.js";
 import type { RawClaudeExecutionResult } from "./types.js";
 export interface ClaudeResultOptions {
   outputFormat?: "text" | "json";
@@ -20,12 +20,17 @@ function summary(error: ClaudeTransportError): string {
 /**
  * The fail reason the step loop classifies. An authentication failure carries
  * `cause: "blocked"` so the run stops like a `require` guard instead of spending
- * fix attempts on a backend that cannot talk to its provider at all. The cause is
+ * fix attempts on a backend that cannot talk to its provider at all. A usage limit
+ * the transport did not wait out is blocked too: every repair would hit it again,
+ * while a resume once the quota reopens replays the step. The cause is
  * a field, not a prefix on the message: the report prints that message.
  */
 function failReasonFor(error: ClaudeTransportError): VerdictOutcomeError {
   const text = summary(error);
-  return isAuthFailure(error) ? { text, cause: "blocked" } : { text };
+  if (isAuthFailure(error)) return { text, cause: "blocked" };
+  if (!isRateLimited(error)) return { text };
+  const reset = error.resetsAt != null ? ` (resets at ${new Date(error.resetsAt).toISOString()})` : "";
+  return { text: `${text}${reset}`, cause: "blocked" };
 }
 
 export function mapClaudeExecutionResult(

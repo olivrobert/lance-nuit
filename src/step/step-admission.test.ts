@@ -55,7 +55,10 @@ function reworkContext(initial: Record<string, string>): { values: Map<string, s
   return { values, ctx: buildPipelineContext({ cwd, ticket: "PROJ-1", artifacts: store }) };
 }
 
-function reworkStep(def: Partial<PipelineStep> = {}): RunStep {
+function reworkStep(
+  def: Partial<PipelineStep> = {},
+  state: Parameters<typeof makeRunStep>[1] = { status: "done", control: { duration_ms: 1 } },
+): RunStep {
   return makeRunStep(
     {
       id: "plan",
@@ -66,7 +69,7 @@ function reworkStep(def: Partial<PipelineStep> = {}): RunStep {
       rework_for: ["plan"],
       ...def,
     },
-    { status: "done", control: { duration_ms: 1 } },
+    state,
   );
 }
 
@@ -137,3 +140,36 @@ test("rework: an author when still decides first", async () => {
   expect(admission.kind).toBe("skip");
   expect(events.find((event) => event.type === "step.skipped")).toMatchObject({ reason: "deliverable exists" });
 });
+
+// ── Resume of a step whose last pass did not complete ────────────────────────
+
+/** A pass that closed an attempt but never completed: its spend is recorded,
+ *  so `control` is set, yet nothing it produced can be trusted. */
+const UNFINISHED_PASSES = [
+  {
+    status: "failed",
+    control: { duration_ms: 5, total_cost_usd: 0.3 },
+    errors: "agent exited 1",
+    fail_kind: "technical",
+  },
+  { status: "aborted", control: { duration_ms: 5, total_cost_usd: 0.3 } },
+] as const;
+
+for (const state of UNFINISHED_PASSES) {
+  test(`resume: a rework step left ${state.status}, with no pending rejection, runs again`, async () => {
+    const { ctx } = reworkContext({});
+    const step = reworkStep({}, { ...state });
+
+    const { admission } = await admitRework(step, ctx);
+    expect(admission.kind).toBe("ready");
+  });
+
+  test(`resume: a step left ${state.status} that declares input does not adopt the outputs its pass left`, async () => {
+    const { ctx } = reworkContext({ "plan.md": "partial", "spec.md": "s" });
+    const step = reworkStep({ rework_for: undefined, sources: [textArtifact("spec.md")] }, { ...state });
+
+    const { admission, events } = await admitRework(step, ctx);
+    expect(admission.kind).toBe("ready");
+    expect(events.some((event) => event.type === "step.skipped")).toBe(false);
+  });
+}
