@@ -42,6 +42,7 @@ import type { Run, RunStep } from "../model/run.js";
 import { closeAttempt } from "./attempt-closure.js";
 import { aggregateControl, aggregateUsage } from "./cost-accounting.js";
 import { appendRunEvent, relativeRunPath } from "./run-journal.js";
+import { isSettledStatus } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
 import { latestAttemptLog } from "./run-timeline.js";
 import { deriveRunStatus, isResumableStatus } from "./run-verdict.js";
@@ -69,7 +70,7 @@ export function updateStep(run: Run, step: RunStep, status: RunStep["status"], e
   }
   // A `--start-at` replay is owed until the step settles: a failed or
   // interrupted replay must still run on a resume that no longer names it.
-  if (status === "done" || status === "skipped") delete step.replay;
+  if (isSettledStatus(status)) delete step.replay;
   // Persist failure reason unless an error_extractor already supplied one.
   if (status === "failed" && errors && !step.errors) step.errors = errors;
   const attemptLog = latestAttemptLog(run, step);
@@ -141,8 +142,13 @@ export function absorbStepFailure(run: Run, step: RunStep, reason: string): void
 
 /** Finalize bookkeeping when the process receives SIGINT/SIGTERM.
  *  `estimatedCostUsd` carries the killed attempt's live spend estimate: without
- *  it the budget ledger loses everything the interrupted agent consumed. */
-export function abortRun(run: Run, signal: "SIGINT" | "SIGTERM", options: { estimatedCostUsd?: number } = {}): void {
+ *  it the budget ledger loses everything the interrupted agent consumed. `model`
+ *  is the model that attempt reported, for a step that recorded none before. */
+export function abortRun(
+  run: Run,
+  signal: "SIGINT" | "SIGTERM",
+  options: { estimatedCostUsd?: number; model?: string } = {},
+): void {
   const reason = `${signal}: run interrupted manually`;
   const now = new Date().toISOString();
   const activeStep = run.steps.find((step) => step.status === "running");
@@ -167,7 +173,7 @@ export function abortRun(run: Run, signal: "SIGINT" | "SIGTERM", options: { esti
       const control: StepControl = {
         duration_ms: duration,
         ...(abortedCost != null ? { total_cost_usd: abortedCost } : {}),
-        model: activeStep.control?.model,
+        model: activeStep.control?.model ?? options.model,
         provider: activeStep.control?.provider ?? activeStep.session?.provider,
         cost_estimated: true,
       };

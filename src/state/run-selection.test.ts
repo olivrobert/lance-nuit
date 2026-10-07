@@ -92,7 +92,7 @@ test("--run claims the lock so a second process cannot write the same run", () =
   expect(JSON.parse(readFileSync(join(runDir, "runner.lock"), "utf-8")).pid).toBe(process.pid);
 });
 
-test("wouldResumeLatest answers what resolveRunDir will actually do, lock included", () => {
+test("an implicit resume of a latest held by a live runner fails instead of starting over", () => {
   const context = fixtureContext();
   const runDir = writeRun(context, "feature", "DEMO-1", "run-live", {
     status: "RUNNING",
@@ -106,11 +106,17 @@ test("wouldResumeLatest answers what resolveRunDir will actually do, lock includ
   expect(wouldResumeLatest("feature", "DEMO-1", false, context)).toBe(true);
   expect(wouldResumeLatest("feature", "DEMO-1", true, context)).toBe(false);
 
-  // Held by a live runner: resolveRunDir starts a NEW run, so this invocation is
-  // not resuming and the clean-tree guard must apply to it.
+  // Held by a live runner: starting over would replay paid work, so the operator
+  // decides. The invocation still counts as a resume, so the clean-tree guard does
+  // not mask the held error with an unrelated one.
   writeFileSync(join(runDir, "runner.lock"), String(process.ppid));
-  expect(wouldResumeLatest("feature", "DEMO-1", false, context)).toBe(false);
-  expect(resolveRunDir("feature", "DEMO-1", undefined, false, context)).not.toBe(runDir);
+  expect(wouldResumeLatest("feature", "DEMO-1", false, context)).toBe(true);
+  expect(() => resolveRunDir("feature", "DEMO-1", undefined, false, context)).toThrow(
+    /held by another runner process \(pid \d+\).*--run.*--fresh/,
+  );
+  const pipelineDir = pipelineRunsDir("feature", "DEMO-1", context);
+  expect(readdirSync(pipelineDir).sort()).toEqual(["latest", "run-live"]);
+  expect(readlinkSync(join(pipelineDir, "latest"))).toBe("run-live");
 });
 
 test("run-storage rejects reserved pipeline names before path normalization", () => {

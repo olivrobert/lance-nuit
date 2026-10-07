@@ -17,7 +17,9 @@ item normally looks like this:
     └── <run-id>/
         ├── state.json
         ├── events.jsonl       # append-only event journal and live feed
-        └── steps/<step>/attempt-001/output.log
+        └── steps/<step>/attempt-001/
+            ├── output.log
+            └── command.txt    # the rendered command or prompt the attempt was given
 ```
 
 `ctx.paths.artifactsDir`, `ctx.paths.reportsDir`, and
@@ -84,19 +86,24 @@ retries, sessions, profile attribution, usage/cost control data, the highest
 attempt number allocated per step (`last_attempt`), and the run-level verdict,
 totals, and cost decisions. It does **not** carry the attempts or the last
 rendered command: the attempts are projected from the journal on resume, and the
-command is the whole agent prompt, kept in memory only (`state/run-repository.ts`
+command is the whole agent prompt, kept in memory (`state/run-repository.ts`
 is the one writer of the snapshot, and `model/run.ts` marks both fields as
-runtime-only). The pipeline definition and configuration are reloaded when a run
+runtime-only). Each attempt also copies the command it was given to
+`command.txt` beside its log, once, when it starts; that copy is diagnostic,
+read only by the dashboard, and an attempt whose copy cannot be written still
+runs. The pipeline definition and configuration are reloaded when a run
 resumes, while persisted step state (including the profile and session) is
 retained for correct attribution. Which of the two files is believed when they
 disagree is settled per concept in [Which record is authoritative](#which-record-is-authoritative).
 
-Resume is a boot step (`boot/resume.ts`): it loads the definition, applies the
-`--step`/`--skip`/`--start-at` selectors, and assembles the in-memory run from the
-definition and the projected state. `--start-at X` requeues `X` and every later
-step on the persisted states, before the projection, so the run is hydrated live
-with totals derived from the steps even when the snapshot had passed; attempts,
-retries and spend are kept. `state/` only reads, projects and reconciles
+Resume is a boot step (`boot/resume.ts`): it loads the definition, projects the
+persisted state, applies the `--step`/`--skip`/`--start-at` selectors to the
+projected steps, and assembles the in-memory run from the definition and those
+steps. The selectors come after the projection so they judge what the journal
+knows: a step the snapshot still calls `running` but the journal finished stays
+`done` instead of becoming an exclusion. `--start-at X` requeues `X` and every
+later step, so the run is hydrated live with totals derived from the steps even
+when the snapshot had passed; attempts, retries and spend are kept. `state/` only reads, projects and reconciles
 (`state/run-projection.ts`): it reconciles each persisted step with the attempts
 the journal holds and settles the attempts a crash left running, without ever
 knowing about a pipeline definition.
@@ -184,9 +191,10 @@ A run directory is held by a single writer: `runner.lock` records the owning pid
 and a dead holder is reclaimed automatically. Reclaiming a stale lock goes through
 the same protocol as the project-wide runner lock, so two runners that find the
 same dead holder cannot both take the directory. `--run <runId>` fails when another
-live runner holds the target; an implicit resume of `latest` reports the holder
-and starts a new run instead, since the work in the held directory is intact and
-this invocation is simply not its writer.
+live runner holds the target, and so does an implicit resume of a resumable
+`latest`: it exits 1 with the holder pid and the options — wait and rerun, select
+another run with `--run <runId>`, or start a new one with `--fresh` — rather than
+silently start over and replay work already done and paid for.
 
 Two details of that lock file are worth knowing when reading one by hand:
 
@@ -196,6 +204,13 @@ Two details of that lock file are worth knowing when reading one by hand:
   a dead runner's pid to a new one cannot make the new process look like the
   holder, nor let it free a lock it never took. The field is written by the lock
   itself; nothing else reads it.
+- The payload also carries a `pidStart` field: a token identifying when the
+  holder process started (boot id and start time on Linux, `ps -o lstart`
+  elsewhere). A pid that is alive but whose current start token differs is a
+  recycled pid — the runner died and the operating system gave its pid to an
+  unrelated process — so the lock is stale and reclaimed. A lock without that
+  field, written by an older build, keeps the pid-only check, and so does a pid
+  whose start token cannot be read.
 - A refusal means the holder is alive. A lock whose holder is dead, whose payload
   is corrupt, or whose pid is not a usable one is reclaimed without asking, so
   there is no reason to delete a lock file by hand — doing it while its runner

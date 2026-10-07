@@ -305,6 +305,13 @@ export function readTree(
   };
 }
 
+/** Tree path of a file of the run directory, as `readTree` lists it: under the
+ *  work item when the run lives there, under `run/` when it sits outside. */
+export function runTreePath(workItemDir: string, runDir: string, inRun: string): string {
+  if (runDirOutside(workItemDir, runDir)) return `${RUN_PREFIX}/${inRun}`;
+  return `${treePath(realRoot(workItemDir) ?? workItemDir, runDir)}/${inRun}`;
+}
+
 /** Lexical rejection, before any filesystem call: an absolute path, a traversal
  *  segment, or a NUL byte never even becomes a candidate. Shared with the report
  *  validator, whose paths are later opened through `readFile`. */

@@ -1,6 +1,6 @@
 import type { Environment } from "./args.js";
 import { type ClaudeResumeBaseline, netCumulative, readSessionCostBaseline } from "./cost-state.js";
-import { type ClaudeParsedEvents, isOverloaded } from "./events.js";
+import { type ClaudeParsedEvents, type ClaudeTransportError, isOverloaded, isRateLimited } from "./events.js";
 import type { ClaudeExecutionOptions, RawClaudeExecutionResult } from "./types.js";
 
 const DEFAULT = [30000, 120000];
@@ -14,6 +14,39 @@ export function transportBackoffDelays(env: Environment = process.env): number[]
     .map(Number)
     .filter((x) => Number.isFinite(x) && x >= 0);
 }
+// A subscription window lasts five hours: a night run that hits it mid-way can
+// still finish once it reopens, so the default wait covers one whole window.
+const DEFAULT_RATE_LIMIT_MAX_WAIT_MS = 6 * 60 * 60 * 1000;
+// The announced reset is the provider's clock, not ours: spawning right on it
+// risks a second refusal that would spend one of the few waits.
+const RATE_LIMIT_MARGIN_MS = 60_000;
+// Each wait ends on a fresh reset time; a provider that keeps announcing a past
+// or imminent reset must not turn the attempt into a polling loop.
+const MAX_RATE_LIMIT_WAITS = 3;
+
+/** How long a rate-limited spawn may sleep until its quota reopens. */
+export interface RateLimitWait {
+  /** Ceiling on the total time slept for one attempt; `0` never waits. */
+  maxWaitMs: number;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  log?: (message: string) => void;
+}
+export function rateLimitMaxWaitMs(env: Environment = process.env): number {
+  const raw = env.RUNNER_RATE_LIMIT_MAX_WAIT_MS?.trim();
+  if (!raw) return DEFAULT_RATE_LIMIT_MAX_WAIT_MS;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_RATE_LIMIT_MAX_WAIT_MS;
+}
+export function defaultRateLimitWait(log?: (message: string) => void): RateLimitWait {
+  return {
+    maxWaitMs: rateLimitMaxWaitMs(),
+    now: Date.now,
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    ...(log ? { log } : {}),
+  };
+}
+
 export function retryOptionsForSession(
   options: ClaudeExecutionOptions,
   exists: (id: string) => boolean = () => false,
@@ -38,8 +71,25 @@ export async function executeClaudeWithTransportRetry(
   delays = transportBackoffDelays(),
   sessionExists: (id: string) => boolean = () => false,
   readBaseline: (id: string) => ClaudeResumeBaseline | null = (id) => readSessionCostBaseline(id),
+  rateLimit: RateLimitWait = defaultRateLimitWait(),
 ): Promise<RawClaudeExecutionResult> {
   let attempt = options;
+  let overloads = 0;
+  let rateLimitWaits = 0;
+  let rateLimitWaitedMs = 0;
+  // The pause before the next spawn, or undefined when this error ends the attempt.
+  const pauseAfter = (error: ClaudeTransportError | undefined): number | undefined => {
+    if (!error) return undefined;
+    if (isOverloaded(error)) return overloads < delays.length ? delays[overloads++] : undefined;
+    // Without a reset time the wait would be a guess: the error goes back to the
+    // step, which stops the run as blocked.
+    if (!isRateLimited(error) || error.resetsAt == null || rateLimitWaits >= MAX_RATE_LIMIT_WAITS) return undefined;
+    const wait = Math.max(0, error.resetsAt - rateLimit.now()) + RATE_LIMIT_MARGIN_MS;
+    if (rateLimitWaitedMs + wait > rateLimit.maxWaitMs) return undefined;
+    rateLimitWaits++;
+    rateLimitWaitedMs += wait;
+    return wait;
+  };
   // Tokens burned by attempts discarded before an overload are real spend:
   // carry their cost forward so the budget ledger and stats still see it.
   let priorCost = 0;
@@ -49,7 +99,7 @@ export async function executeClaudeWithTransportRetry(
   // the previous spawn restored plus what it reported on top. Zero until a spawn
   // has run, or when the first spawn was a fresh session.
   let expectedLedger = 0;
-  for (let i = 0; ; i++) {
+  for (;;) {
     // Read the session ledger just before the spawn that will restore it. The
     // floor at `expectedLedger` covers a retry whose predecessor has not flushed
     // its `cost-state` yet: that spend is already charged here, so it must be
@@ -75,22 +125,28 @@ export async function executeClaudeWithTransportRetry(
       ...(priorDuration > 0 ? { priorAttemptsDurationMs: priorDuration } : {}),
       ...(baseline ? { resumeBaseline: baseline } : {}),
     });
-    if (!error || !isOverloaded(error) || i >= delays.length) return finish();
+    const pause = pauseAfter(error);
+    if (pause === undefined) return finish();
     // What THIS attempt spent, not what the session has spent: a resumed attempt
     // reports the cumulative ledger, and charging that would repay its ancestors.
     const reported = parsed.stats.total_cost_usd ?? 0;
     const estimated = parsed.stats.cost_estimated === true;
     const attemptCost = baseline && !estimated ? netCumulative(reported, baseline.costUsd) : reported;
     // A transport retry is fresh paid work. If this attempt consumed the whole
-    // remaining allowance, return its overload result instead of spawning once
+    // remaining allowance, return its transport error instead of spawning once
     // more with a zero-dollar budget and overspending before the first usage tick.
     if (attempt.budgetRemaining != null && attemptCost >= attempt.budgetRemaining) return finish();
     priorCost += attemptCost;
-    priorDuration += result.durationMs + (delays[i] ?? 0);
+    priorDuration += result.durationMs + pause;
     // An estimated cost was computed from tokens the CLI never wrote to its
     // ledger (no `result` event), so the ledger did not move.
     expectedLedger = (baseline?.costUsd ?? 0) + (estimated ? 0 : attemptCost);
-    await new Promise((r) => setTimeout(r, delays[i]));
+    // Only a rate-limited error carries `resetsAt`; an overload pause is short and silent.
+    if (error?.resetsAt != null)
+      rateLimit.log?.(
+        `  ⏸ Claude usage limit reached — waiting until ${new Date(error.resetsAt).toLocaleTimeString()} before retrying`,
+      );
+    await rateLimit.sleep(pause);
     attempt = retryOptionsForSession(attempt, sessionExists);
     // The next spawn publishes its live estimate on top of this: an abort during
     // the retry must charge the discarded attempts too, not only the current one.

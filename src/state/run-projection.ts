@@ -15,6 +15,7 @@ import type { Run } from "../model/run.js";
 import { closeAttempt } from "./attempt-closure.js";
 import { projectStepAttempts } from "./attempt-projection.js";
 import { projectStepSpend } from "./cost-accounting.js";
+import { isSettledStatus } from "./run-predicates.js";
 
 /** Persisted state of one step, reconciled with the attempts the journal holds. */
 export interface ProjectedStep {
@@ -84,7 +85,7 @@ function reconcileStepStatus(state: PersistedStepState, event: StepStatusEvent |
     errors: state.errors ?? (event.status === "failed" ? event.reason : undefined),
     fail_cause: state.fail_cause ?? event.failCause,
   };
-  if (event.status === "done" || event.status === "skipped") delete reconciled.replay;
+  if (isSettledStatus(event.status)) delete reconciled.replay;
   return reconciled;
 }
 

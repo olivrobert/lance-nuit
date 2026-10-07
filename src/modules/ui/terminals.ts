@@ -24,10 +24,11 @@
 // passes `operatorCommand`, a test passes a harmless one.
 //
 // A terminal is of one of two kinds. A `run` terminal starts a run through the
-// operator agent. A `session` terminal reopens the agent session of a run's
-// coder (`claude --resume --fork-session`) in the run's own directory, so a
-// human can ask the agent what it did, or carry on from there, without touching
-// the session the run itself may resume later.
+// operator agent. A `session` terminal reopens an agent session of a run — its
+// coder's, or the one an attempt of any step left — (`claude --resume
+// --fork-session`) in the run's own directory, so a human can ask the agent what
+// it did, or carry on from there, without touching the session the run itself
+// may resume later.
 
 import { existsSync } from "node:fs";
 import { isPipelineName } from "../../env/builtin-pipeline.js";
@@ -357,23 +358,36 @@ async function alreadyOpen(tmux: Tmux, id: string): Promise<StartRunResult> {
   };
 }
 
-/** The words typed into the pane to reopen a coder session, or why nothing can
- *  be typed. */
+/** The words typed into the pane to reopen an agent session, or why nothing
+ *  can be typed. `readOnly` asks for an agent that cannot edit files: the run
+ *  is still working in the same directory. */
 export type SessionCommandBuilder = (
   session: Pick<CoderSessionRead, "provider" | "sessionId">,
+  options: { readOnly: boolean },
 ) => { ok: true; words: string[] } | { ok: false; status: number; reason: string };
 
 export interface OpenSessionRequest {
   project: ProjectEntry;
   ticket: unknown;
+  /** With `attempt`, the step whose session is reopened; the coder's without. */
+  step?: unknown;
+  attempt?: unknown;
   /** Name from the identity cookie. */
   by: string;
+}
+
+/** One attempt of one step, whose session is reopened. */
+export interface StepAttemptRef {
+  stepId: string;
+  attempt: number;
 }
 
 export interface OpenSessionDeps {
   tmux: Tmux;
   /** The coder session of this project + ticket, when its run has one. */
   findSession(project: ProjectEntry, ticket: string): CoderSessionRead | undefined;
+  /** The session one attempt of a step left, when it left one. */
+  findStepSession(project: ProjectEntry, ticket: string, target: StepAttemptRef): CoderSessionRead | undefined;
   findItem(project: ProjectEntry, ticket: string): Promise<Item | undefined>;
   sessionCommand: SessionCommandBuilder;
   shell: string;
@@ -383,33 +397,56 @@ export interface OpenSessionDeps {
 /** Suffix of a session terminal's name, next to the run terminal of the same item. */
 const SESSION_SUFFIX = "__coder";
 
+/** The step attempt a request names, `null` when it names none (the coder's
+ *  session), `undefined` when what it names is malformed. The step id is only
+ *  matched against the run's own steps, and reaches tmux through `sessionName`. */
+function stepTarget(step: unknown, attempt: unknown): StepAttemptRef | null | undefined {
+  if (step === undefined && attempt === undefined) return null;
+  if (typeof step !== "string" || step.length === 0 || step.length > 200) return undefined;
+  if (typeof attempt !== "number" || !Number.isInteger(attempt) || attempt < 1) return undefined;
+  return { stepId: step, attempt };
+}
+
 /**
- * Reopen the coder session of an item's run in a new tmux session.
+ * Reopen an agent session of an item's run in a new tmux session: the coder's,
+ * or the one a step attempt left. Each has its own terminal, beside the run's.
  *
- * Refused while the run is in progress: the agent is still writing to that
- * conversation, and a fork taken now would miss what comes next. Refused too
- * when the run's directory is gone — a removed worktree — because the agent CLI
- * looks a session up from the directory it is started in.
+ * The coder's session is refused while the run is in progress: the agent may
+ * still be writing to that conversation, and a fork taken now would miss what
+ * comes next. A step attempt's session exists only once the attempt finished, so
+ * it opens during the run too — read-only, because the run keeps working in
+ * that directory. Both are refused when the run's directory is gone — a removed
+ * worktree — because the agent CLI looks a session up from the directory it is
+ * started in.
  */
 export async function openCoderSession(request: OpenSessionRequest, deps: OpenSessionDeps): Promise<StartRunResult> {
   const { project } = request;
   if (!isTicketToken(request.ticket)) return { ok: false, status: 400, reason: "field `ticket` is required" };
   const ticket = request.ticket;
+  const target = stepTarget(request.step, request.attempt);
+  if (target === undefined) {
+    return { ok: false, status: 400, reason: "fields `step` and `attempt` must name one attempt of a step" };
+  }
 
-  const session = deps.findSession(project, ticket);
-  if (!session) return { ok: false, status: 404, reason: "this item has no coder session to reopen" };
+  const session = target ? deps.findStepSession(project, ticket, target) : deps.findSession(project, ticket);
+  if (!session) {
+    const what = target ? `attempt ${target.attempt} of step ${target.stepId}` : "this item";
+    return { ok: false, status: 404, reason: `${what} has no agent session to reopen` };
+  }
   const item = await deps.findItem(project, ticket);
-  if (session.status === "RUNNING" || (item && isBusy(item))) {
+  const running = session.status === "RUNNING" || (item !== undefined && isBusy(item));
+  if (running && !target) {
     return { ok: false, status: 409, reason: "the run is in progress: its coder session opens once it stops" };
   }
   if (!isSafePath(session.cwd) || !existsSync(session.cwd)) {
     return { ok: false, status: 409, reason: `the run's directory no longer exists: ${session.cwd}` };
   }
 
-  const built = deps.sessionCommand(session);
+  const built = deps.sessionCommand(session, { readOnly: running });
   if (!built.ok) return built;
 
-  const id = sessionName(project.name, `${ticket}${SESSION_SUFFIX}`);
+  const suffix = target ? `__${target.stepId}-${target.attempt}` : SESSION_SUFFIX;
+  const id = sessionName(project.name, `${ticket}${suffix}`);
   const exists = await deps.tmux.hasSession(id);
   if (exists === undefined) return { ok: false, status: 503, reason: "tmux is not installed" };
   if (exists) return alreadyOpen(deps.tmux, id);
@@ -459,16 +496,21 @@ export const operatorCommand: PaneCommandBuilder = ({ ticket, pipeline, worktree
 const CLAUDE_SESSION_ID = /^[0-9A-Fa-f-]{1,64}$/;
 
 /**
- * Default session command: the interactive Claude CLI on a FORK of the coder's
+ * Default session command: the interactive Claude CLI on a FORK of an agent
  * session. The fork leaves the run's own conversation as it was, so a later
- * `resume_session` repair does not inherit what the human typed. Only Claude
- * is supported: the other backends' resume commands are non-interactive.
+ * `resume_session` repair does not inherit what the human typed. Read-only is
+ * Claude's plan mode, so the fork does not edit files under a running step.
+ * Only Claude is supported: the other backends' resume commands are
+ * non-interactive.
  */
-export const resumeCoderCommand: SessionCommandBuilder = ({ provider, sessionId }) => {
+export const resumeCoderCommand: SessionCommandBuilder = ({ provider, sessionId }, { readOnly }) => {
   if (provider !== "claude") {
     return { ok: false, status: 409, reason: `a ${provider} session cannot be reopened from the dashboard` };
   }
   if (!CLAUDE_SESSION_ID.test(sessionId)) return { ok: false, status: 409, reason: "the session id is malformed" };
   if (!hasClaudeCli()) return { ok: false, status: 503, reason: "claude CLI not found" };
-  return { ok: true, words: ["claude", "--resume", sessionId, "--fork-session"] };
+  return {
+    ok: true,
+    words: ["claude", "--resume", sessionId, "--fork-session", ...(readOnly ? ["--permission-mode", "plan"] : [])],
+  };
 };

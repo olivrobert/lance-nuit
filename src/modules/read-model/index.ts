@@ -37,8 +37,10 @@ export {
 } from "./projects.js";
 export { createReadModel, type ReadModel } from "./read-model.js";
 export { readRecap } from "./recap.js";
+export { readRunJourney } from "./run-journey.js";
 export { parseRunReport, type ReportRead, readReport } from "./report.js";
 export { readStats, STATS_ARCHIVE_FILE, STATS_CONFIG_FILE } from "./stats.js";
+export { readStepDetail, readStepSession } from "./step-detail.js";
 export { readCoderSession, readSteps } from "./steps.js";
 export { isTicketToken, ticketPrefixOf, validateTicketRef } from "./tickets.js";
 export type {
@@ -61,7 +63,10 @@ export type {
   Launch,
   LaunchRecord,
   RunEventView,
+  RunJourney,
+  RunJourneyAttempt,
   RunModelCost,
+  RunPause,
   RunRecap,
   RunRecapStep,
   RunStepStatus,
@@ -74,6 +79,10 @@ export type {
   StatsRun,
   StatsSource,
   StatsTicket,
+  StepAttemptStatus,
+  StepAttemptView,
+  StepDetail,
+  TextExcerpt,
   TicketKind,
   TicketOutcome,
   TreeDirectory,

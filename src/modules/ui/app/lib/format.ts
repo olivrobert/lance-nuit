@@ -39,12 +39,15 @@ export function fmtSize(bytes: number | undefined | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
-/** An ISO timestamp cut to the minute, kept in UTC on purpose: the runner writes
- *  UTC, and reformatting it locally would make two timestamps in the same sheet
- *  disagree. */
+/** A full date to the minute, in the reader's time zone like `fmtClock`: the
+ *  runner writes UTC, and printing it as is put two clocks hours apart on the
+ *  same sheet. */
 export function fmtDate(iso: string | undefined | null): string {
   if (!iso) return ABSENT;
-  return String(iso).slice(0, 16).replace("T", " ");
+  const at = new Date(iso);
+  if (!Number.isFinite(at.getTime())) return ABSENT;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
 
 /** A duration, to the second under a minute and to the minute beyond: the
@@ -64,6 +67,18 @@ export function fmtTokens(count: number | undefined | null): string {
   if (count < 1000) return String(count);
   if (count < 1_000_000) return `${(count / 1000).toFixed(1)} k`;
   return `${(count / 1_000_000).toFixed(2)} M`;
+}
+
+/** A model id as a reader names it: `claude-opus-5-5-20260101` reads `Opus 5.5`.
+ *  An id of another shape is shown as it is: a wrong guess at a name would be
+ *  worse than the raw id. */
+export function fmtModel(model: string | undefined | null): string {
+  if (!model) return ABSENT;
+  const bare = model.replace(/^claude-/, "").replace(/-\d{8}$/, "");
+  const match = /^([a-z]+)-(\d+)-(\d+)$/.exec(bare);
+  if (!match) return model;
+  const [, family = "", major, minor] = match;
+  return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${major}.${minor}`;
 }
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;

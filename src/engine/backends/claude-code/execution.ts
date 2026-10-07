@@ -114,7 +114,7 @@ async function executeNode(
           // killed attempt's spend into the budget ledger. The budget gate below
           // stays on this attempt alone: the transport already deducted the
           // discarded attempts from `budgetRemaining`.
-          reportLiveAttemptCost(priorCost + estimated);
+          reportLiveAttemptCost(priorCost + estimated, streamModel ?? options.claudeOptions?.model);
           // No accounting guard here, unlike codex and opencode: `pricingForModel`
           // always resolves — an unlisted Claude model falls back to the opus rate
           // — so this backend can never prove a live attempt unpriceable. Its

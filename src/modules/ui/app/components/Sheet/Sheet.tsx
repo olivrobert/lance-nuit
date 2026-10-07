@@ -36,7 +36,6 @@ import { DocumentView, Folder } from "../Explorer/index.js";
 import { Actions } from "./Actions.js";
 import { Approval } from "./Approval.js";
 import { Assumptions } from "./Assumptions.js";
-import { Callout, LaunchFailureCallout } from "./Callout.js";
 import { Decision, showsDecision } from "./Decision.js";
 import { Launch } from "./Launch.js";
 import { Meta } from "./Meta.js";
@@ -46,10 +45,8 @@ import styles from "./Sheet.module.css";
 import { SheetHeader } from "./SheetHeader.js";
 import { SheetContext, useSheet } from "./sheet-context.js";
 import { SheetTabs } from "./SheetTabs.js";
-import { Steps } from "./Steps.js";
 
-/** The one tab on screen. The header owns the action row, so the diagnostic
- *  callout is asked not to draw a second one. */
+/** The one tab on screen; the Run tab is the one every fallback ends on. */
 function TabContent(): JSX.Element {
   const { detail, tab } = useSheet();
   const { item, steps, recap, tree, report } = detail;
@@ -58,16 +55,6 @@ function TabContent(): JSX.Element {
     return (
       <section className={styles.primaryContent}>
         <Report item={item} report={report} {...(detail.reportWarnings ? { warnings: detail.reportWarnings } : {})} />
-      </section>
-    );
-  }
-  if (tab === "run") {
-    // A report that lists its captures shows them itself, labelled with their
-    // criteria; the Run tab keeps the raw gallery only when it does not.
-    const reportShowsCaptures = Boolean(report?.captures?.some((group) => group.files.length > 0));
-    return (
-      <section className={styles.primaryContent}>
-        <Run item={item} recap={recap} steps={steps} tree={reportShowsCaptures ? null : tree} />
       </section>
     );
   }
@@ -86,27 +73,12 @@ function TabContent(): JSX.Element {
     );
   }
 
-  // The error text is printed only when no step carried it already: the runner
-  // writes the same reason in both places, and showing it twice reads as two
-  // different failures.
-  const stepCarriesError = steps?.steps.some(
-    (step) => (step.status === "failed" || step.status === "aborted") && step.error,
-  );
-
+  // A report that lists its captures shows them itself, labelled with their
+  // criteria; the Run tab keeps the raw gallery only when it does not.
+  const reportShowsCaptures = Boolean(report?.captures?.some((group) => group.files.length > 0));
   return (
     <section className={styles.primaryContent}>
-      <h3>{item.failure?.phase ?? (item.group === "failure" ? "Failure details" : "Launch")}</h3>
-      <LaunchFailureCallout item={item} />
-      {item.group === "failure" ? (
-        <p className="mute">
-          Resume from this step once the cause is resolved. Completed work and existing approvals are kept.
-        </p>
-      ) : showsDecision(item) ? null : (
-        <Callout item={item} includeActions={false} />
-      )}
-      {item.group !== "decision" ? <Steps steps={steps} /> : null}
-      {item.failure?.reason && !stepCarriesError ? <pre>{item.failure.reason}</pre> : null}
-      {item.launch ? <Launch item={item} /> : null}
+      <Run item={item} recap={recap} steps={steps} tree={reportShowsCaptures ? null : tree} />
     </section>
   );
 }

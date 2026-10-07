@@ -190,6 +190,17 @@ test("abort on a step without totals yet: the step total is the aborted attempt 
   expect(step.control?.cost_estimated).toBe(true);
 });
 
+test("abort keeps the model the killed attempt reported when the step recorded none", () => {
+  const step = makeStep();
+  const run = makeRun(step, 10);
+  nextAttemptLogPath(run, step, "fix");
+
+  abortRun(run, "SIGINT", { estimatedCostUsd: 0.4, model: "claude-opus-5-5" });
+
+  expect(step.attempts[0]?.control?.model).toBe("claude-opus-5-5");
+  expect(step.control?.model).toBe("claude-opus-5-5");
+});
+
 test("abort on a step already charged: the estimate is added and the total flagged as estimated", () => {
   const step = makeStep(
     { runner: "agent", backend: { id: "claude" } },
@@ -426,6 +437,27 @@ test("a bash step failing without tokens is still free", async () => {
 
   expect(step.control?.cost_unknown).toBeUndefined();
   expect(budget.costUnknown).toBeUndefined();
+});
+
+test("each attempt keeps the command it was given next to its log, a fix pass its prompt", async () => {
+  const step = makeStep();
+  const run = makeRun(step);
+  const executeStep: ExecuteStep = async () => ({ output: "", ok: false, stats: { duration_ms: 1 } });
+  const fixWithAgent: FixWithAgent = async () => ({ ok: true, stats: { duration_ms: 1 } });
+
+  await runAttempt(run, step, { command: "make test", context: baseCtx, budget: { cumulative: 0 }, executeStep });
+  await runFixAttempt(run, step, {
+    prompt: "Repair the failing test",
+    budget: { cumulative: 0 },
+    fixWithAgent,
+    backendSpec: FIX_SPEC,
+    registry: REGISTRY,
+  });
+
+  expect(readFileSync(join(dirname(attemptLogPath(run, step, 1)), "command.txt"), "utf8")).toBe("make test");
+  expect(readFileSync(join(dirname(attemptLogPath(run, step, 2)), "command.txt"), "utf8")).toBe(
+    "Repair the failing test",
+  );
 });
 
 test("fail_cause follows fail_kind's life cycle: written on failure, cleared by the next attempt and by success", async () => {

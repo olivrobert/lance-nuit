@@ -17,7 +17,14 @@ import {
   unlinkSync,
 } from "node:fs";
 import { basename, join } from "node:path";
-import { acquireLock, defaultIsAlive, heldByThisProcess, isLockPathError, releaseLock } from "../../env/lock.js";
+import {
+  acquireLock,
+  defaultIsAlive,
+  heldByThisProcess,
+  isLockPathError,
+  PID_START_FIELD,
+  releaseLock,
+} from "../../env/lock.js";
 import { DEFAULT_SPEC_PATH, resolveTicketDir } from "../../env/tickets.js";
 import { errorMessage, isErrno } from "../../lib/errors.js";
 import { isLogicalSegment } from "../../model/artifact-ports.js";
@@ -113,11 +120,12 @@ interface RunLockInfo {
   pid: number;
 }
 
-/** Lock payload, or `null` when nothing readable claims the directory. Accepts
- *  the bare-pid form written before this lock moved to the shared protocol, so a
- *  runner started by an older build stays visible instead of being reclaimed
- *  under its feet. */
-function readRunLock(dir: string): RunLockInfo | null {
+/** Holder pid and its recorded start token, or `null` when nothing readable
+ *  claims the directory. Accepts the bare-pid form written before this lock moved
+ *  to the shared protocol, so a runner started by an older build stays visible
+ *  instead of being reclaimed under its feet; that form, like a payload from a
+ *  build without start tokens, has no `start` and keeps the pid-only probe. */
+function readRunLock(dir: string): { pid: number; start?: string } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(join(dir, RUN_LOCK_FILE), "utf-8"));
@@ -126,8 +134,11 @@ function readRunLock(dir: string): RunLockInfo | null {
     // which is what the stale-lock protocol reclaims.
     return null;
   }
-  const pid = typeof parsed === "number" ? parsed : (parsed as { pid?: unknown } | null)?.pid;
-  return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? { pid } : null;
+  const payload = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+  const pid = typeof parsed === "number" ? parsed : payload?.pid;
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
+  const start = payload?.[PID_START_FIELD];
+  return typeof start === "string" ? { pid, start } : { pid };
 }
 
 /** pid of a LIVE foreign process holding the run lock, `null` otherwise (no
@@ -135,7 +146,7 @@ function readRunLock(dir: string): RunLockInfo | null {
 export function runLockHolder(dir: string): number | null {
   const holder = readRunLock(dir);
   if (!holder || holder.pid === process.pid) return null;
-  return defaultIsAlive(holder.pid) ? holder.pid : null;
+  return defaultIsAlive(holder.pid, holder.start) ? holder.pid : null;
 }
 
 /** Single-writer guard for a run directory. Without it two runner processes can
@@ -192,7 +203,7 @@ function claimRunDirStrict(dir: string): RunDirClaim {
   // it even while its owner runs. Refusing here is a fast path only: a directory
   // that looks free still goes through the atomic claim below. Our own pid on a
   // lock that is not ours is stale by construction, so it is not probed.
-  if (holder && holder.pid !== process.pid && defaultIsAlive(holder.pid)) {
+  if (holder && holder.pid !== process.pid && defaultIsAlive(holder.pid, holder.start)) {
     return { ok: false, acquired: false, reason: "held" };
   }
   if (!acquireLock<RunLockInfo>(lockFile, { pid: process.pid }).ok) {
@@ -273,9 +284,9 @@ export interface RunDirResolution {
  * Would this invocation resume `latest` rather than create a new run?
  *
  * Read-only on purpose: the clean-tree guard needs the answer BEFORE any run
- * directory exists, and it must account for the run lock — a held lock makes
- * `resolveRunDir` start a fresh run, which is precisely the case where the guard
- * must apply.
+ * directory exists. The run lock does not change the answer: a resumable
+ * `latest` held by a live runner makes `resolveRunDir` fail rather than start a
+ * new run, so the guard must not run first and report a dirty tree instead.
  */
 export function wouldResumeLatest(
   pipelineName: string,
@@ -285,7 +296,7 @@ export function wouldResumeLatest(
 ): boolean {
   if (fresh) return false;
   const latest = resolveLatestRunSnapshot(pipelineName, ticket, context);
-  return !!latest && isPersistedRunResumable(latest.snapshot) && runLockHolder(latest.runDir) === null;
+  return !!latest && isPersistedRunResumable(latest.snapshot);
 }
 
 export function resolveRunDir(
@@ -317,23 +328,21 @@ export function resolveRunDirSelection(
   if (!fresh) {
     const latest = resolveLatestRunSnapshot(pipelineName, ticket, context);
     if (latest) {
-      // Only adopt a resumable run if no live process already owns it;
-      // otherwise fall through and create a fresh run directory.
       if (isPersistedRunResumable(latest.snapshot)) {
         const claim = claimRunDir(latest.runDir);
         if (claim.ok) return { dir: latest.runDir, selectedSnapshot: true, acquiredRunLock: claim.acquired };
-        // Silently starting over here looks like a lost run: the work is intact
-        // in the held directory, and this invocation is simply not the writer. An
-        // unusable lock path has already been reported by `claimRunDir`.
+        // Starting over here would replay work already done and paid for, and
+        // reset the spend accounting, while the held run is intact: the operator
+        // decides. An unusable lock path has already been reported by `claimRunDir`.
         if (claim.reason === "held") {
           const holder = runLockHolder(latest.runDir);
-          log.warn(
-            `Run ${basename(latest.runDir)} is held by another runner process${holder ? ` (pid ${holder})` : ""}:` +
-              ` starting a new run instead of resuming it.`,
+          throw new Error(
+            `Run ${basename(latest.runDir)} is held by another runner process${holder ? ` (pid ${holder})` : ""}.` +
+              ` Wait for it to finish and rerun, select another run with --run <runId>,` +
+              ` or start a new run with --fresh.`,
           );
-        } else {
-          log.warn(`Starting a new run instead of resuming ${basename(latest.runDir)}.`);
         }
+        log.warn(`Starting a new run instead of resuming ${basename(latest.runDir)}.`);
       }
     }
   }

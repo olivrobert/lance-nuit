@@ -8,7 +8,7 @@ import { loadOrCreateRun } from "./resume.js";
 import { pendingSteps, resumeDecision } from "../state/run-predicates.js";
 import { saveRun } from "../state/run-repository.js";
 import { readRunSnapshot } from "../state/run-snapshot.js";
-import { abortRun, finalizeRun, updateStep } from "../state/run-transitions.js";
+import { abortRun, finalizeRun, stopRun, updateStep } from "../state/run-transitions.js";
 import { nextAttemptLogPath } from "../state/run-timeline.js";
 import { controlForRun } from "../state/cost-accounting.js";
 import { resolveRunDir } from "../state/stores/run-storage.js";
@@ -128,6 +128,40 @@ test("resume: SIGINT after the last step but before finalizeRun keeps the same r
   expect(resumed.aborted).toBe(false);
 });
 
+for (const ending of ["STOPPED", "FAIL"] as const) {
+  test(`resume: --skip of the step a ${ending} run ended on settles it with a new verdict`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "resume-skip-last-"));
+    const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-5" });
+    const path = pipelineFile(root);
+    const dir = resolveRunDir("p", "T-5", undefined, true, ctx);
+    const run = await loadOrCreateRun(path, "T-5", undefined, undefined, dir, false, undefined, ctx);
+    updateStep(run, run.steps[0]!, "done");
+    updateStep(run, run.steps[1]!, "done");
+    if (ending === "STOPPED") {
+      updateStep(run, run.steps[2]!, "failed", "blocked: no credentials");
+      stopRun(run, run.steps[2]!, "blocked: no credentials");
+      finalizeRun(run, { stopped: true });
+    } else {
+      run.budget_exceeded = true;
+      updateStep(run, run.steps[2]!, "failed", "process killed: budget exceeded");
+      finalizeRun(run, { failed: true, budgetExceeded: true });
+    }
+    expect(readRunSnapshot(join(dir, "state.json"))!.status).toBe(ending);
+
+    // Skipping the last step left settles every step, but the verdict on disk
+    // judged the work the selection just took out: the run is live again.
+    const resumed = await loadOrCreateRun(path, "T-5", undefined, ["c"], undefined, false, undefined, ctx);
+    expect(resumed.run_dir).toBe(dir);
+    expect(resumed.status).toBe("RUNNING");
+    expect(resumed.stopped_reason).toBeUndefined();
+
+    const { deps, spawned } = countingDeps([]);
+    finalizeRun(resumed, await executeRunSteps(resumed, "T-5", undefined, { resuming: true }, deps, ctx));
+    expect(spawned).toEqual([]);
+    expect(readRunSnapshot(join(dir, "state.json"))!.status).toBe("PASS");
+  });
+}
+
 test("a run records where it executes, so a reader finds its artifacts", async () => {
   const root = mkdtempSync(join(tmpdir(), "run-location-"));
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-4" });
@@ -167,6 +201,37 @@ test("resume selectors apply to an aborted step, not only to pending ones", asyn
 
   const skipB = await loadOrCreateRun(path, "T-2", undefined, ["b"], dir, false, undefined, ctx);
   expect(skipB.steps[1]!.status).toBe("skipped");
+});
+
+test("resume selectors leave a step the journal finished as done, even when the snapshot still calls it running", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-selectors-journal-"));
+  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-journal" });
+  const path = pipelineFile(root);
+  const dir = resolveRunDir("p", "T-journal", undefined, true, ctx);
+  const run = await loadOrCreateRun(path, "T-journal", undefined, undefined, dir, false, undefined, ctx);
+  updateStep(run, run.steps[0]!, "done");
+  updateStep(run, run.steps[1]!, "running");
+  // A hard death between `updateStep`'s journal append and its snapshot write.
+  appendRunEvent(run, "step.status.changed", { stepId: "b", status: "done" });
+  expect(readRunSnapshot(join(dir, "state.json"))!.steps[1]!.status).toBe("running");
+
+  for (const [stepFilter, skipFilter] of [
+    [undefined, ["b"]],
+    [["c"], undefined],
+  ] as const) {
+    const resumed = await loadOrCreateRun(
+      path,
+      "T-journal",
+      stepFilter?.slice(),
+      skipFilter?.slice(),
+      dir,
+      false,
+      undefined,
+      ctx,
+    );
+    expect(resumed.steps[1]!.status).toBe("done");
+    expect(resumed.steps[1]!.excluded).toBeUndefined();
+  }
 });
 
 test("resume: an attempt priced in the journal but missing from the snapshot still counts", async () => {

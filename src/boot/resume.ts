@@ -22,7 +22,7 @@ import { log } from "../runtime/logging.js";
 import { restoreRunTotals } from "../state/cost-accounting.js";
 import { isChildSettled } from "../state/child-transitions.js";
 import { appendRunEvent, readRunEvents } from "../state/run-journal.js";
-import { allStepsSettled } from "../state/run-predicates.js";
+import { allStepsSettled, owesWork } from "../state/run-predicates.js";
 import { type ProjectedRunState, projectRunState, settleCrashedAttempts } from "../state/run-projection.js";
 import { saveRun } from "../state/run-repository.js";
 import { matchesStepSelector } from "../state/run-timeline.js";
@@ -90,6 +90,7 @@ function hydrate(
   persisted: PersistedRun,
   options: LoadOrCreateRunOptions,
   projected: ProjectedRunState,
+  selectionTookWork: boolean,
 ): Run {
   const definitionIds = new Set(pipeline.steps.map((step) => step.id));
   const removedIds = persisted.steps.map((step) => step.id).filter((id) => !definitionIds.has(id));
@@ -114,9 +115,15 @@ function hydrate(
   // ABORTED with no step left in flight is a SIGINT in the same window. Loading
   // either as terminal strands it — the parent of a child run then fails on
   // every resume, and a top-level run replays from scratch in a new directory.
+  // A selection that took out the work a STOPPED or FAIL run still owed settles
+  // it now: the verdict on disk judged that work, so it cannot stand for the run
+  // the selection leaves. Loaded as terminal, `--skip` of the step it ended on
+  // would change nothing and leave a run no later invocation resumes.
   const awaitingVerdict =
     allSettled &&
-    (persisted.status === "RUNNING" || (persisted.status === "ABORTED" && persisted.outcome?.resumable !== false));
+    (selectionTookWork ||
+      persisted.status === "RUNNING" ||
+      (persisted.status === "ABORTED" && persisted.outcome?.resumable !== false));
   const terminal = persisted.status !== undefined && allSettled && !awaitingVerdict;
   return {
     name: persisted.name,
@@ -205,28 +212,30 @@ function applyUnmeteredAuthorization(run: Run, persisted: PersistedRun, options:
 }
 
 /** Apply resume selectors in one pass; both selectors operate only on steps that
- * still have executable work, preserving terminal history on a resumed run. */
+ * still have executable work, preserving terminal history on a resumed run.
+ * Returns whether they took any of that work out.
+ *
+ * The steps must already be reconciled with the journal: a step the snapshot
+ * still calls `running` may be one the journal knows finished, and a selector
+ * applied to the snapshot would turn that finished work into an exclusion. */
 function applyStepFilters(
-  steps: PersistedStepState[],
+  steps: readonly PersistedStepState[],
   stepFilter: string[] | undefined,
   skipFilter: string[] | undefined,
-): void {
-  // `aborted` belongs here with `running`: an interrupted step is replayed on
-  // resume, so it still has executable work and a selector must be able to take
-  // it out of the selection. Leaving it out let `--step c` run the interrupted
-  // `b` anyway.
-  const filterable = (state: PersistedStepState) =>
-    state.status === "pending" || state.status === "failed" || state.status === "running" || state.status === "aborted";
+): boolean {
+  let tookWork = false;
   for (const state of steps) {
-    if (!filterable(state)) continue;
+    if (!owesWork(state.status)) continue;
     const outsideSelection =
       stepFilter !== undefined && !stepFilter.some((selector) => matchesStepSelector(state.id, selector));
     const explicitlySkipped = skipFilter?.some((selector) => matchesStepSelector(state.id, selector)) ?? false;
     if (outsideSelection || explicitlySkipped) {
       state.status = "skipped";
       state.excluded = true;
+      tookWork = true;
     }
   }
+  return tookWork;
 }
 
 /** Composed steps in the replay range that cannot run again in place: a child
@@ -245,7 +254,7 @@ function unreplayableSteps(steps: readonly PersistedStepState[], replayIds: Read
  * spend are kept: the budget ledger seeds from them, and the replay is more work
  * on the same run, not a new one. `replay` is what keeps the requeue durable
  * over the `done` events the journal holds for the earlier pass. */
-function requeueForReplay(steps: PersistedStepState[], replayIds: ReadonlySet<string>): void {
+function requeueForReplay(steps: readonly PersistedStepState[], replayIds: ReadonlySet<string>): void {
   for (const state of steps) {
     if (!replayIds.has(state.id)) continue;
     state.status = "pending";
@@ -389,10 +398,13 @@ export async function loadOrCreateRun(
     pipeline = await loadPipelineDefinition(pipelinePath, resumeContext);
     // Filters apply to every still-executable step, including failed and running
     // state restored from a previous attempt, and the definition steps the
-    // snapshot does not know yet.
+    // snapshot does not know yet. They and the requeue read the journal-reconciled
+    // states, which are the ones hydration consumes.
     seedNewDefinitionSteps(pipeline, saved);
-    applyStepFilters(saved.steps, stepFilter, skipFilter);
-    const unreplayable = unreplayableSteps(saved.steps, replayIds);
+    const projected = projectRunState(saved, readRunEvents({ run_dir: dir, runId: saved.runId, eventStore }));
+    const states = [...projected.steps.values()].flatMap((step) => (step.state ? [step.state] : []));
+    const selectionTookWork = applyStepFilters(states, stepFilter, skipFilter);
+    const unreplayable = unreplayableSteps(states, replayIds);
     if (unreplayable.length > 0) {
       if (resolution?.acquiredRunLock || options.strictSnapshot?.releaseRunLock) releaseRunDir(dir);
       throw new Error(
@@ -400,9 +412,8 @@ export async function loadOrCreateRun(
           `replayed in place. Use --fresh to start a new run.`,
       );
     }
-    requeueForReplay(saved.steps, replayIds);
-    const projected = projectRunState(saved, readRunEvents({ run_dir: dir, runId: saved.runId, eventStore }));
-    const run = hydrate(pipeline, pipelinePath, saved, options, projected);
+    requeueForReplay(states, replayIds);
+    const run = hydrate(pipeline, pipelinePath, saved, options, projected, selectionTookWork);
     run.run_dir = dir;
     run.stateStore = stateStore;
     run.eventStore = eventStore;

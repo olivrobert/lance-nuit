@@ -26,6 +26,8 @@ import type {
   ProjectsResponse,
   RunResponse,
   StatsRead,
+  RunJourney,
+  StepDetail,
   TerminalInfo,
   TerminalsResponse,
 } from "./types.js";
@@ -123,6 +125,22 @@ export function fetchFile(
   return getJson<FileView>(itemUrl(item.project.name, item.ticket, `/file${query}`));
 }
 
+/** One step of the item's run, opened from the timeline. Without `attempt` the
+ *  server picks the last one. */
+export function fetchStepDetail(
+  item: Pick<Item, "project" | "ticket">,
+  stepId: string,
+  attempt?: number,
+): Promise<StepDetail> {
+  const query = `?id=${encodeURIComponent(stepId)}${attempt !== undefined ? `&attempt=${attempt}` : ""}`;
+  return getJson<StepDetail>(itemUrl(item.project.name, item.ticket, `/step${query}`));
+}
+
+/** Every attempt and pause of the item's run. */
+export function fetchRunJourney(item: Pick<Item, "project" | "ticket">): Promise<RunJourney> {
+  return getJson<RunJourney>(itemUrl(item.project.name, item.ticket, "/journey"));
+}
+
 /** Address of one image of a work item as raw bytes, for an `<img src>`: a
  *  gallery cannot afford one base64 JSON round-trip per screenshot. */
 export function rawFileUrl(item: Pick<Item, "project" | "ticket">, path: string): string {
@@ -168,9 +186,20 @@ export function postRun(payload: RunPayload): Promise<ApiResult<RunResponse>> {
   return postJson<RunResponse>("/api/runs", payload);
 }
 
-/** Reopen the coder session of an item's run in a terminal of its own. */
-export function postCoderSession(project: string, ticket: string): Promise<ApiResult<RunResponse>> {
-  return postJson<RunResponse>("/api/sessions", { project, ticket });
+/** One attempt of a step, whose agent session is reopened. */
+export interface StepAttemptTarget {
+  step: string;
+  attempt: number;
+}
+
+/** Reopen an agent session of an item's run in a terminal of its own: the
+ *  coder's, or the one `target` left. */
+export function postAgentSession(
+  project: string,
+  ticket: string,
+  target?: StepAttemptTarget,
+): Promise<ApiResult<RunResponse>> {
+  return postJson<RunResponse>("/api/sessions", { project, ticket, ...target });
 }
 
 function terminalUrl(id: string, suffix = ""): string {

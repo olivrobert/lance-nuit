@@ -1,11 +1,26 @@
 import type { PersistedRun, PersistedStepState, StepStatus } from "../model/persisted.js";
 
 /**
+ * A step in this status has nothing left to execute. Every rule about what a
+ * step still owes reads this one: a status added to `StepStatus` is classified
+ * here once, not at each site that enumerates statuses.
+ */
+export function isSettledStatus(status: StepStatus): boolean {
+  return status === "done" || status === "skipped";
+}
+
+/** The step still has executable work: it never ran, is running, or its last
+ *  pass failed or was interrupted. */
+export function owesWork(status: StepStatus): boolean {
+  return !isSettledStatus(status);
+}
+
+/**
  * Every step reached a terminal success state (`done` or `skipped`). An empty
  * list is never settled: a run without steps has produced nothing to trust.
  */
 export function allStepsSettled(steps: ReadonlyArray<{ status: StepStatus }>): boolean {
-  return steps.length > 0 && steps.every((step) => step.status === "done" || step.status === "skipped");
+  return steps.length > 0 && steps.every((step) => isSettledStatus(step.status));
 }
 
 /** Resume rejection reason, so callers can EXPLAIN it instead of recomputing it
@@ -35,7 +50,7 @@ export function settledButUnfinalized(run: PersistedRun | null): boolean {
 
 /** Steps still to execute, which determines resumability. */
 export function pendingSteps(run: PersistedRun | null): PersistedStepState[] {
-  return run?.steps?.filter((step) => step.status !== "done" && step.status !== "skipped") ?? [];
+  return run?.steps?.filter((step) => owesWork(step.status)) ?? [];
 }
 
 /**
@@ -53,7 +68,7 @@ export function hasUnfinishedWork(run: PersistedRun | null): boolean {
   return (run.steps ?? []).some((step) => {
     const state = step.orchestration;
     if (!state) return false;
-    if (state.children.some((child) => child.status !== "done" && child.status !== "skipped")) return true;
+    if (state.children.some((child) => owesWork(child.status))) return true;
     // A `forEachPipeline` creates one child per item as it walks the list: items
     // it never reached have no child reference at all.
     const launched = state.children.filter((child) => child.kind === "main").length;
@@ -82,11 +97,7 @@ export function resumeDecision(run: PersistedRun | null): ResumeDecision {
   // missing — so keep the run as the latest one and let the next invocation
   // finalize it instead of creating a new run and replaying every step.
   if (settledButUnfinalized(run)) return { resume: true };
-  const actionable = run.steps.some(
-    (step) =>
-      step.status === "pending" || step.status === "running" || step.status === "failed" || step.status === "aborted",
-  );
-  return actionable ? { resume: true } : { resume: false, rejection: "settled" };
+  return run.steps.some((step) => owesWork(step.status)) ? { resume: true } : { resume: false, rejection: "settled" };
 }
 
 export function isPersistedRunResumable(run: PersistedRun | null): boolean {

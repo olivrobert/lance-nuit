@@ -12,6 +12,7 @@
 
 import type { JSX } from "react";
 import type { Item, ItemDetail, SheetTab } from "../../api/types.js";
+import { hasRunTab } from "../../lib/sheet.js";
 import { countFiles } from "../../lib/work-item-tree.js";
 import { useSheetNavigation } from "./sheet-context.js";
 import styles from "./Sheet.module.css";
@@ -30,9 +31,8 @@ export function SheetTabs({ item, detail, current }: SheetTabsProps): JSX.Elemen
   const fileCount = tree ? tree.children.reduce((total, node) => total + countFiles(node), 0) : undefined;
   // [tab, label, available, count shown after the label]
   const tabs: [SheetTab, string, boolean, string?][] = [
-    ["diagnostic", "Diagnostic", item.group === "failure" || Boolean(item.launch)],
     ["report", "Report", Boolean(detail.report)],
-    ["run", "Run", Boolean(detail.recap || detail.steps), stepCount ? `${stepCount} steps` : undefined],
+    ["run", "Run", hasRunTab(item, detail), stepCount ? `${stepCount} steps` : undefined],
     ["document", "Document", Boolean(tree?.gatePath || tree?.defaultPath)],
     ["files", "Files", Boolean(tree), fileCount ? String(fileCount) : undefined],
   ];
