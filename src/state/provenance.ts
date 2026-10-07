@@ -226,6 +226,20 @@ export async function stepFreshness(
   };
 }
 
+/** Whether the pure inputs read now are the ones `recorded`. The key sets must
+ *  match too: a definition that gained or lost an input since the record was
+ *  written does not answer to it. An input absent then and now is unchanged. */
+export async function inputsUnchanged(
+  ctx: PipelineContext,
+  step: Pick<StepDefinition, "sources" | "outputs">,
+  recorded: Record<string, InputFingerprint>,
+): Promise<boolean> {
+  const current = await fingerprintInputs(ctx, pureInputsOf(step));
+  const keys = Object.keys(current);
+  if (keys.length !== Object.keys(recorded).length) return false;
+  return keys.every((key) => key in recorded && recorded[key] === current[key]);
+}
+
 /** Bind existing outputs that carry no record at all to the inputs present now.
  *  Without adoption, the first run after this feature landed would regenerate the
  *  deliverables of every ticket already waiting for a human decision. */
