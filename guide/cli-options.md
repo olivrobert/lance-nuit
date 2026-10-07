@@ -8,9 +8,9 @@ flags.
 | Option | Alias | Description |
 |---|---|---|
 | `--pipeline <name\|path>` | `-p` | **Name** (`deploy`) resolved through the kit chain, or a path used as-is (default: `default`) |
-| `--steps <ids>` | `-s` | Comma-separated IDs (the others are skipped). A prefix such as `checks` also selects `checks.*`. Applies only to steps that still owe work: on resume, a `done` step declaring `input` is still re-checked and re-runs if its inputs changed ([input freshness](dsl.md#input-freshness)), and one declaring `rerunOnResume` is replayed |
+| `--steps <ids>` | `-s` | Comma-separated IDs (the others are skipped). A prefix such as `checks` also selects `checks.*`. Applies only to steps that still owe work: on resume, a `done` step declaring `input` is still re-checked and re-runs if its inputs changed ([input freshness](dsl.md#input-freshness)), and one declaring `rerunOnResume` is replayed. Under `--scan`, applied to every ticket |
 | `--skip <ids>` | `-k` | IDs to skip (mutually exclusive with `--steps`). Same scope as `--steps` |
-| `--start-at <id>` | `-a` | Replay from this step: it and every later step run again, even when already `done`; previous steps are skipped (exclusive with `--steps`/`--skip`). A `done` step before it that declares `input` or `rerunOnResume` is still reconsidered on resume ([input freshness](dsl.md#input-freshness)) |
+| `--start-at <id>` | `-a` | Replay from this step: it and every later step run again, even when already `done`; previous steps are skipped (exclusive with `--steps`/`--skip`). A `done` step before it that declares `input` or `rerunOnResume` is still reconsidered on resume ([input freshness](dsl.md#input-freshness)). Rejected under `--scan` |
 | `--budget <usd>` | | Approve a cost ceiling in USD for this run. Resumes a run stopped by its budget without repaying completed steps. It changes the amount only: it never authorizes spend the runner could not price. Giving a ceiling to a run that had none when it spent an unpriceable amount stops that run as `cost-unaccounted` — the new amount is enforceable against nothing, so pair it with `--allow-unmetered` to cap the priced spend and authorize the rest |
 | `--allow-unmetered` | | Authorize spend nobody can price, and resume a run stopped by `cost-unaccounted`. It lifts that stop only — the spend the runner *did* price still obeys the ceiling. Recorded on the selected run (later resumes need no flag) and propagated to the children it composes. Rejected on an inspection command and under `--scan` |
 | `--replay-interrupted` | | Authorize replaying a step the runner died in (crash, OOM, `SIGKILL`); without it, or a `replayInterrupted` declaration on the step, the resumed run stops before running that step again. Valid for this invocation only, never persisted, and passed to the children it composes. Rejected on an inspection command and under `--scan`. See [Interrupted steps](dsl.md#interrupted-steps) |
@@ -92,4 +92,6 @@ propagated only when the child cannot derive it from its environment.
 | `--fresh`, `--allow-dirty`, `--base-branch` | yes | parent decisions, invisible to the child |
 | `--worktree` | no | the child inherits the cwd (`chdir`) and `RUNNER_IN_WORKTREE`; it is rejected with `--scan` |
 | `--watch` | no | scans do not propagate it to children |
-| `--pipeline`, step selectors | no | set explicitly by the spawn caller |
+| `--steps`, `--skip` | yes | the operator's selection applies to every scanned ticket |
+| `--start-at` | no | rejected with `--scan`: a replay is a decision about one run |
+| `--pipeline` | no | set explicitly by the spawn caller |

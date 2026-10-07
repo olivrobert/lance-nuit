@@ -175,6 +175,11 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
       "Option --replay-interrupted authorizes one run: rerun that ticket explicitly instead of --scan.",
     );
   }
+  // Replaying done steps is a decision about one inspected run; --skip already
+  // excludes the earlier steps on every ticket a --scan sweeps.
+  if (args.startAt !== undefined && args.scan) {
+    throw new CliError("Option --start-at replays one run: rerun that ticket explicitly instead of --scan.");
+  }
   if (args.runId && args.fresh) {
     throw new CliError(
       "--run and --fresh are mutually exclusive: one resumes a specific run, the other starts from scratch.",
