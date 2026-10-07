@@ -648,7 +648,10 @@ lancenuit run PROJ-28 --worktree
   permits a dirty tree or `--allow-dirty` is used.
 - **Atomic persistence**: state is written to a temporary file and then renamed.
 - **Resume**: the last compatible run is resumed; attempts and output remain in
-  the work-item directory.
+  the work-item directory. A step the runner died in is not replayed without an
+  authorization — the step's `replayInterrupted` declaration or
+  `--replay-interrupted` — and a replay is marked in the final report; see
+  [Interrupted steps](dsl.md#interrupted-steps).
 - **Explicit verdict**: an agent step must produce a verdict; a bash step is
   evaluated by its exit code.
 

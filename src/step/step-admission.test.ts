@@ -173,3 +173,50 @@ for (const state of UNFINISHED_PASSES) {
     expect(events.some((event) => event.type === "step.skipped")).toBe(false);
   });
 }
+
+// ── Interrupted attempt ──────────────────────────────────────────────────────
+
+/** A step the runner died in, as crash settlement leaves it. */
+function interruptedStep(id: string, state: Parameters<typeof makeRunStep>[1] = {}): RunStep {
+  return makeRunStep(
+    { id, name: id.toUpperCase(), command: "push", runner: "bash" },
+    {
+      status: "running",
+      attempts: [
+        {
+          attempt: 1,
+          kind: "step",
+          status: "failed",
+          started_at: "2026-08-01T10:00:00.000Z",
+          log_path: `steps/${id}/attempt-001/output.log`,
+          interrupted: true,
+        },
+      ],
+      ...state,
+    },
+  );
+}
+
+test("interrupted: the --start-at target of this invocation is ready without authorization, a step later in the requeue is not", async () => {
+  const runDir = mkdtempSync(join(tmpdir(), "admission-interrupted-"));
+  const target = interruptedStep("check", { replay: true });
+  // Requeued by the same --start-at, so it carries `replay` too, but the operator
+  // never named it.
+  const later = interruptedStep("later", { replay: true });
+  const run = { name: "p", pipeline: "p", pipeline_path: "p.ts", run_dir: runDir, steps: [target, later] } as Run;
+  const admit = (step: RunStep) =>
+    admitStep({
+      run,
+      step,
+      baseCtx: buildPipelineContext({ cwd: runDir }),
+      budget: { cumulative: 0 },
+      output: NULL_RUN_OUTPUT,
+      startAt: "check",
+    });
+
+  expect((await admit(target)).kind).toBe("ready");
+  const refused = await admit(later);
+  expect(refused.kind).toBe("stopped");
+  expect(refused.kind === "stopped" && refused.reason).toMatch(/LATER.*--replay-interrupted.*replayInterrupted: true/s);
+  expect(run.outcome).toMatchObject({ phase: "later", resumable: true, stop: { kind: "needs-decision" } });
+});

@@ -19,7 +19,7 @@ import { pendingRejection } from "../state/decisions.js";
 import { recordCostStop } from "../state/cost-stop-events.js";
 import { adoptOutputs, inputsUnchanged, stepFreshness } from "../state/provenance.js";
 import { appendRunEvent } from "../state/run-journal.js";
-import { owesWork } from "../state/run-predicates.js";
+import { lastPassInterrupted, owesWork } from "../state/run-predicates.js";
 import { stopRun, updateStep } from "../state/run-transitions.js";
 import { absorbNonBlocking } from "./non-blocking.js";
 
@@ -117,6 +117,13 @@ export interface AdmitStepInput {
   baseCtx: PipelineContext;
   budget: RunBudget;
   output: RunOutput;
+  /** `--replay-interrupted`: this invocation authorizes replaying a step the
+   *  runner died in. */
+  replayInterrupted?: boolean;
+  /** The step this invocation names in `--start-at`. Never `step.replay`, which
+   *  is persisted until the step settles and would authorize a replay nobody
+   *  asked for on a later resume. */
+  startAt?: string;
 }
 
 /** Persist a guard rejection with the same blocking/non-blocking semantics. */
@@ -153,6 +160,19 @@ function admissionsToEvaluate(step: RunStep): readonly StepInputCondition[] {
  *  partial, so freshness cannot vouch for them. */
 function passLeftUnfinished(step: RunStep): boolean {
   return step.status !== "pending" && owesWork(step.status);
+}
+
+/** Who allowed replaying a step whose last attempt the runner died in, or
+ *  `undefined` when nobody did. */
+function interruptedReplayAuthorization(input: AdmitStepInput): string | undefined {
+  const { step } = input;
+  if (step.def.replay_interrupted) return "declared replayInterrupted";
+  // Replayed on every resume by its author's choice: an interrupted pass is no
+  // less safe than a completed one.
+  if (step.def.rerun_on_resume) return "declared rerunOnResume";
+  if (input.startAt === step.id) return "named by --start-at";
+  if (input.replayInterrupted) return "--replay-interrupted";
+  return undefined;
 }
 
 async function anyPendingRejection(ctx: PipelineContext, subjects: readonly string[]): Promise<boolean> {
@@ -276,6 +296,23 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
       await adoptOutputs(baseCtx, step.id, report);
       return applyInputDecision(run, step, input.output, "skip", SKIP_UP_TO_DATE, report.summary);
     }
+  }
+
+  // Checked last among the guards: a step that `when` or freshness now skips
+  // replays nothing, so there is nothing to authorize.
+  if (lastPassInterrupted(step)) {
+    const authorization = interruptedReplayAuthorization(input);
+    if (authorization === undefined) {
+      const detail =
+        `the runner died during the last attempt of ${step.def.name}, which may already have had side effects; ` +
+        `rerun with --replay-interrupted to replay it, or declare replayInterrupted: true on step "${step.id}" if replaying is safe`;
+      return applyInputDecision(run, step, input.output, "stop", detail, undefined, { kind: "needs-decision", detail });
+    }
+    input.output.emit({
+      type: "runner.message",
+      level: "info",
+      message: `↻ ${step.def.name} — replaying after an interrupted attempt (${authorization})`,
+    });
   }
 
   const command = (await resolveTemplateAsync(step.def.command, baseCtx))!;

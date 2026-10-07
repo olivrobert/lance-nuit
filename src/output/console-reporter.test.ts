@@ -241,3 +241,32 @@ test("a failed run keeps its bare resume command", () => {
   expect(text).not.toContain("fresh session");
   expect(text).not.toContain("by hand");
 });
+
+test("a step replayed after an interrupted attempt is marked in the report", () => {
+  const attempt = (number: number, status: "failed" | "done", interrupted?: true) => ({
+    attempt: number,
+    kind: "step" as const,
+    status,
+    started_at: "2026-08-01T10:00:00.000Z",
+    log_path: `steps/check/attempt-00${number}/output.log`,
+    ...(interrupted ? { interrupted } : {}),
+  });
+  const run = sampleRun();
+  run.steps[0] = makeRunStep(
+    { id: "check", name: "Check", command: "true", runner: "bash" },
+    { status: "done", control: { duration_ms: 20_000 }, attempts: [attempt(1, "failed", true), attempt(2, "done")] },
+  );
+  // Interrupted but not replayed yet: nothing to announce.
+  run.steps[3] = makeRunStep(
+    { id: "tests", name: "Tests", command: "true", runner: "bash" },
+    { status: "running", attempts: [attempt(1, "failed", true)] },
+  );
+
+  const report = buildRunReport(run, outcome);
+  expect(report.steps[0]?.replayedAfterInterruption).toBe(true);
+  expect(report.steps[3]?.replayedAfterInterruption).toBeUndefined();
+
+  const text = renderConsoleReport(report, { cwd: "/project" });
+  expect(text).toContain("✓ Check  20s  ↻ replayed after interruption");
+  expect(text).not.toMatch(/Tests.*replayed after interruption/);
+});
