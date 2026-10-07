@@ -5,8 +5,9 @@
 //
 // The server builds `argv` itself. A request names a verb and an item; it never
 // carries an argument that reaches the command line as typed. The subject must
-// be the one the run is stopped on, the pipeline is the run's, the worktree mode
-// is the run's, the budget is a bounded number the server formats, and a
+// be the one the run is stopped on, the pipeline is the file the run was
+// launched with (close and reopen address the run by its declared name), the
+// worktree mode is the run's, the budget is a bounded number the server formats, and a
 // rejection reason is bounded text passed as one argument, never through a shell.
 //
 // The same rules decide what the sheet offers: `verbsFor` lists the verbs an
@@ -102,13 +103,13 @@ function undecidedGate(item: Item): boolean {
  */
 function argvOf(item: Item, verb: Verb, budget: string, reason = ""): string[] {
   const worktree = item.worktree ? ["--worktree"] : [];
-  const run = ["run", item.ticket, "--pipeline", item.pipeline];
+  const run = ["run", item.ticket, "--pipeline", item.pipelineRef];
   const gate = pendingGate(item) ?? "";
   switch (verb) {
     case "approve-and-rerun":
       return [...run, "--approve", gate, ...worktree];
     case "approve":
-      return ["approve", item.ticket, gate, "--pipeline", item.pipeline, ...worktree];
+      return ["approve", item.ticket, gate, "--pipeline", item.pipelineRef, ...worktree];
     case "reject-and-rerun":
       return [...run, "--reject", gate, "--reason", reason, ...worktree];
     case "rerun":

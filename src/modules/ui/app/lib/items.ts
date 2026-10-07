@@ -77,7 +77,7 @@ export function isDelivered(item: Item): boolean {
  */
 export function unmeteredResumeCommand(item: Item): string {
   const worktree = item.worktree ? " --worktree" : "";
-  return `lancenuit run ${item.ticket} --pipeline ${item.pipeline} --allow-unmetered${worktree}`;
+  return `lancenuit run ${item.ticket} --pipeline ${item.pipelineRef} --allow-unmetered${worktree}`;
 }
 
 /**
