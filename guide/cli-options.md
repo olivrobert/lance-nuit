@@ -22,7 +22,7 @@ flags.
 | `--worktree-clean` | | Internal form used by `lancenuit worktree clean <ticket>`: run the optional `worktree-teardown.sh` hook, then remove the ticket worktree. See [usage.md](usage.md#worktrees) |
 | `--scan` | | Without a ticket: discover through `forEachWorkItem({ scan })` and loop over tickets. Rejected without a scannable loop |
 | `--limit <n>` | `-n` | Bound the items a command handles: tickets processed by `--scan` (overriding the `forEachWorkItem` limit), or runs listed by `--stats`. Error outside those two |
-| `--base-branch <branch>` | `-b` | Available through `ctx.baseBranch` |
+| `--base-branch <branch>` | `-b` | Available through `ctx.baseBranch`. Under `--scan`, also the branch checked out between tickets (otherwise the configured `baseBranch`) |
 | `--lint-config` | | Subcommand: compare `.lance-nuit/config.json` with all pipelines, then exit |
 | `--lint-pipeline` | | Subcommand: load the pipeline selected by `-p`, validate references, print its steps, then exit (`lancenuit lint -p <name>`) |
 | `--typecheck` | | Subcommand: typecheck project pipelines against installed DSL declarations |
