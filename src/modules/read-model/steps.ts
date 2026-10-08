@@ -2,17 +2,23 @@
 //
 // Where a run stands, step by step.
 //
-// `state.json` is the resume source of truth, so it is also the honest answer to
-// "how far did it get": the step list, in pipeline order, with the status the
-// runner last persisted. The journal answers a different question — "is anything
-// happening right now" — and only for a run still in flight, where the snapshot
-// is by definition behind. So the last journal line is read for a RUNNING run and
-// for no other: on a finished run it would say what the snapshot already says,
-// one file later.
+// The step list answers "how far did it get" the way a resume would: the
+// snapshot's steps, in pipeline order, reconciled with the journal by the
+// runner's own projection (`projectRunState`). The snapshot is written after
+// each event, so a crash between the two leaves a terminal status in the journal
+// alone; only a step the snapshot left pending or running can move, so the whole
+// journal is read only when one is.
+//
+// The journal also answers "is anything happening right now", and only for a run
+// a live runner holds, where the snapshot is by definition behind. So its last
+// line is read for a RUNNING run and for no other: on a finished run it would say
+// what the snapshot already says, and on a run whose runner died it would present
+// a dead line as current activity.
 
 import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import type { RawJournalEvent, RunJournalKnownEvent } from "../../model/journal.js";
-import type { PersistedStepState } from "../../model/persisted.js";
+import type { PersistedRun, PersistedStepState } from "../../model/persisted.js";
+import { projectRunState } from "../../state/run-projection.js";
 import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
@@ -65,12 +71,15 @@ function failCauseOf(cause: StepFailCause | undefined): ItemFailCause | undefine
   return cause === "blocked" ? "blocked" : undefined;
 }
 
-function stepView(step: PersistedStepState): RunStepView {
+/** A step still `running` in a run whose runner died runs nowhere: it is shown
+ *  `aborted`, as the runner writes the step it was in when it is interrupted. */
+function stepView(step: PersistedStepState, interrupted: boolean): RunStepView {
   const failKind = failKindOf(step.fail_kind);
   const failCause = failCauseOf(step.fail_cause);
+  const status = stepStatusOf(step);
   return {
     id: step.id,
-    status: stepStatusOf(step),
+    status: interrupted && status === "running" ? "aborted" : status,
     ...(step.started_at ? { startedAt: step.started_at } : {}),
     ...(step.finished_at ? { finishedAt: step.finished_at } : {}),
     ...(typeof step.retries === "number" && step.retries > 0 ? { retries: step.retries } : {}),
@@ -107,6 +116,23 @@ function lastEvent(runDir: string): RunEventView | undefined {
   return entry ? eventView(entry.event) : undefined;
 }
 
+/** The snapshot's steps as the runner projects them with its journal, in
+ *  snapshot order. Steps the journal alone knows are left out: the list shows
+ *  the pipeline the snapshot describes. */
+function projectedSteps(runDir: string, state: PersistedRun): PersistedStepState[] {
+  if (!state.steps.some((step) => step.status === "pending" || step.status === "running")) return state.steps;
+  let events: ReturnType<FileRunEventStore["readAt"]>;
+  try {
+    events = new FileRunEventStore().readAt(runDir);
+  } catch {
+    // An unreadable journal costs the reconciliation, not the step list: the
+    // snapshot is still what the runner last persisted.
+    return state.steps;
+  }
+  const projected = projectRunState(state, events);
+  return state.steps.map((step) => projected.steps.get(step.id)?.state ?? step);
+}
+
 /**
  * Steps of the run `project/ticket` is currently about.
  *
@@ -128,7 +154,7 @@ export function readSteps(
     runId: resolved.run.state.runId ?? "",
     runDir: resolved.run.runDir,
     status: resolved.status,
-    steps: resolved.run.state.steps.map(stepView),
+    steps: projectedSteps(resolved.run.runDir, resolved.run.state).map((step) => stepView(step, resolved.interrupted)),
     ...(event ? { lastEvent: event } : {}),
     ...(coder ? { coderStep: coder.id } : {}),
   };

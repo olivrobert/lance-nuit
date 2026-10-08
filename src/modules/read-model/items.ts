@@ -21,14 +21,16 @@ import type { PersistedRun } from "../../model/persisted.js";
 import { isClosableStatus, isClosureCurrent, readClosureAt } from "../../state/closure.js";
 import { runProvesUnpricedSpend } from "../../state/cost-accounting.js";
 import { approvalFreshness, isValidSubjectToken, readDecisionAt, rejectionPending } from "../../state/decisions.js";
-import { hasUnfinishedWork } from "../../state/run-predicates.js";
+import { projectStepAttempts } from "../../state/attempt-projection.js";
+import { hasUnfinishedWork, lastPassInterrupted, owesWork } from "../../state/run-predicates.js";
 import type { HistoryEntry } from "../../state/stats/history-reader.js";
 import { readHistory } from "../../state/stats/history-reader.js";
+import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
 import { FileWorkItemArtifactStore } from "../../state/stores/file-work-item-artifact-store.js";
 import { latestLaunchByItem } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl } from "./projects.js";
-import { latestRuns, statusOf, ticketDirectories, workItemDirOf } from "./runs.js";
+import { latestRuns, selectedRunStatus, ticketDirectories, workItemDirOf } from "./runs.js";
 import type {
   Item,
   ItemApproval,
@@ -155,6 +157,52 @@ function failureOf(state: PersistedRun): ItemFailure {
     ...(failKind ? { failKind } : {}),
     ...(failCause ? { failCause } : {}),
   };
+}
+
+/** Why an interrupted run has no verdict. A fixed sentence: the snapshot of a
+ *  run nobody finished carries no outcome to quote. */
+const INTERRUPTED_REASON = "the runner process died without recording a verdict (crash, kill, or reboot)";
+
+/** The failure of a run whose runner died: the step it was in, when the snapshot
+ *  recorded one, and why there is no verdict. */
+function interruptedFailureOf(state: PersistedRun): ItemFailure {
+  return {
+    phase: state.steps.find((step) => step.status === "running")?.id ?? "",
+    reason: INTERRUPTED_REASON,
+  };
+}
+
+/**
+ * The step whose last attempt the runner died in, which only a run authorized
+ * with `--replay-interrupted` replays.
+ *
+ * Two situations, both read from the journal because `state.json` keeps no
+ * attempt: a crashed run not resumed yet, whose attempt is still open; and a run
+ * a plain resume settled then stopped on that attempt (`step-admission.ts`), a
+ * stop with no subject. Any other run cannot be in either, so its journal is not
+ * read at all.
+ */
+function interruptedStepOf(
+  runDir: string,
+  state: PersistedRun,
+  interrupted: boolean,
+  stop: ItemStop | undefined,
+): string | undefined {
+  if (!interrupted && !(stop && !stop.subject)) return undefined;
+  let attemptsByStep: ReturnType<typeof projectStepAttempts>;
+  try {
+    attemptsByStep = projectStepAttempts(new FileRunEventStore().readAt(runDir));
+  } catch {
+    // An unreadable journal only loses the replay offer: the item keeps the
+    // verbs it would have had without it.
+    return undefined;
+  }
+  const step = state.steps.find((candidate) => {
+    const attempts = attemptsByStep.get(candidate.id);
+    if (lastPassInterrupted({ status: candidate.status, attempts })) return true;
+    return interrupted && owesWork(candidate.status) && attempts?.at(-1)?.status === "running";
+  });
+  return step?.id;
 }
 
 function costOf(state: PersistedRun): ItemCost {
@@ -320,9 +368,10 @@ async function buildItem(
   if (!selected) return undefined;
 
   const { state } = selected;
-  const status = statusOf(state);
+  const { status, interrupted } = selectedRunStatus(selected);
   const runId = state.runId ?? "";
   const stop = status === "STOPPED" ? stopOf(state) : undefined;
+  const interruptedStep = interruptedStepOf(selected.runDir, state, interrupted, stop);
   const approval = stop?.subject ? await approvalOf(project, ticket, stop.subject) : undefined;
   const url = ticketUrl(project, ticket);
   const branch = runId ? branchOf(project, runId, cache) : undefined;
@@ -352,7 +401,11 @@ async function buildItem(
     status,
     group,
     ...(stop ? { stop } : {}),
-    ...(status === "FAIL" || status === "ABORTED" ? { failure: failureOf(state) } : {}),
+    ...(interrupted
+      ? { failure: interruptedFailureOf(state) }
+      : status === "FAIL" || status === "ABORTED"
+        ? { failure: failureOf(state) }
+        : {}),
     ...(approval ? { approval } : {}),
     ...(budgetExceededOf(state) ? { budgetExceeded: true } : {}),
     ...(costUnaccountedOf(state) ? { costUnaccounted: true } : {}),
@@ -363,6 +416,8 @@ async function buildItem(
     effectiveWorkItemDir,
     ...(launch ? { launch } : {}),
     ...(closed ? { closed } : {}),
+    ...(interrupted ? { interrupted: true } : {}),
+    ...(interruptedStep ? { interruptedStep } : {}),
   };
 }
 

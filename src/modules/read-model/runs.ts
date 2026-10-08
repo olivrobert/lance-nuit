@@ -12,6 +12,7 @@ import { readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { PersistedRun } from "../../model/persisted.js";
 import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
+import { runLockHolder } from "../../state/stores/run-storage.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, workItemsRoot } from "./projects.js";
 import type { ItemStatus } from "./types.js";
 
@@ -74,8 +75,9 @@ export function latestRuns(project: ProjectEntry, ticket: string, store: FileRun
   return runs.sort((a, b) => updatedMs(b.state) - updatedMs(a.state));
 }
 
-/** `UNKNOWN` and a missing status both describe a run nobody finished; the box
- *  shows it as running rather than inventing a verdict for it. */
+/** Status as the snapshot alone says it. `UNKNOWN` and a missing status both
+ *  describe a run nobody finished, read as running rather than given an invented
+ *  verdict; whether anything still runs it is `selectedRunStatus`'s question. */
 export function statusOf(state: PersistedRun): ItemStatus {
   switch (state.status) {
     case "PASS":
@@ -87,6 +89,22 @@ export function statusOf(state: PersistedRun): ItemStatus {
     default:
       return "RUNNING";
   }
+}
+
+/**
+ * Status of the run a ticket is about, as the runner would judge it.
+ *
+ * A snapshot saying RUNNING is only live while a process holds its run
+ * directory: a runner killed without a chance to clean up leaves RUNNING behind
+ * forever. `runLockHolder` is the runner's own answer to "who holds this run",
+ * so the dashboard and a later `lancenuit run` agree on what can be resumed. The
+ * dead run is served as ABORTED, the status the runner persists for an
+ * interruption it lived to record.
+ */
+export function selectedRunStatus(run: SelectedRun): { status: ItemStatus; interrupted: boolean } {
+  const status = statusOf(run.state);
+  if (status === "RUNNING" && runLockHolder(run.runDir) === null) return { status: "ABORTED", interrupted: true };
+  return { status, interrupted: false };
 }
 
 /**
@@ -118,6 +136,8 @@ export interface ResolvedRun {
   ticket: string;
   run: SelectedRun;
   status: ItemStatus;
+  /** The snapshot says RUNNING but its runner is gone; `status` is then ABORTED. */
+  interrupted: boolean;
   /** Effective working directory of the run, after any worktree `chdir`: where
    *  its code and git state live, not its work item. */
   cwd: string;
@@ -143,7 +163,7 @@ export function resolveRun(
     project,
     ticket,
     run,
-    status: statusOf(run.state),
+    ...selectedRunStatus(run),
     cwd: effectiveCwd(project, run.state),
     workItemDir: workItemDirOf(project, ticket),
   };

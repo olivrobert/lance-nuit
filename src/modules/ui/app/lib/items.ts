@@ -50,6 +50,7 @@ export const VERB_LABELS: Record<string, string> = {
   approve: "approve only",
   "reject-and-rerun": "reject and rework",
   rerun: "rerun",
+  "replay-interrupted": "replay interrupted step",
   fresh: "start fresh",
   budget: "raise budget",
   close: "mark as closed",

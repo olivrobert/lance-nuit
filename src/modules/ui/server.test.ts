@@ -3,12 +3,14 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path";
 import {
   cleanupTempDirs,
+  DEAD_PID,
   makeProject,
   makeTempDir,
   workItemDir,
   writeArtifact,
   writeProjectsFile,
   writeRun,
+  writeRunLock,
 } from "../read-model/test-harness.js";
 import { createDefaultWorkItemGatewayRegistry } from "../work-item/registry.ts";
 import { USER_COOKIE } from "./cookies.js";
@@ -223,6 +225,26 @@ test("api: one item carries its tree, its steps, and its recap", async () => {
   expect(body.recap?.steps.map((step) => step.id)).toEqual(["plan"]);
 });
 
+test("api: a run whose runner died is served not busy, with rerun offered", async () => {
+  const { project, url } = await fixture();
+  const runDir = writeRun(project, "DEMO-3", "feature", {
+    runId: "r-crashed",
+    status: "RUNNING",
+    updatedAt: "2026-09-05T09:00:00.000Z",
+    steps: [{ id: "coder", status: "running", retries: 0 }],
+  });
+  writeRunLock(runDir, DEAD_PID);
+
+  const response = await fetch(url("/api/items/demo-app/DEMO-3"));
+
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    item: { status: string; group: string; busy: boolean; verbs: Array<{ verb: string }> };
+  };
+  expect(body.item).toMatchObject({ status: "ABORTED", group: "failure", busy: false });
+  expect(body.item.verbs.map((offer) => offer.verb)).toContain("rerun");
+});
+
 test("api: a step of the run opens on request; an unknown one is 404, a malformed query 400", async () => {
   const { url } = await fixture();
 
@@ -427,7 +449,7 @@ async function actionFixture(options: { fakeExit?: string } = {}): Promise<Fixtu
       stop: { subject: "plan", kind: "needs-decision", detail: "waiting for the plan" },
     },
   });
-  writeRun(project, "DEMO-2", "feature", { runId: "r-running", status: "RUNNING" });
+  writeRunLock(writeRun(project, "DEMO-2", "feature", { runId: "r-running", status: "RUNNING" }), process.ppid);
 
   const launcher = fakeLauncher();
   const env = { ...process.env, PIPELINE_HOME: home, FAKE_EXIT: options.fakeExit ?? "0" };

@@ -202,7 +202,11 @@ server side enters the bundle.
 The server side reads work items only through `src/modules/read-model/`
 (`index.ts` is its public surface, and the only module allowed to import
 `src/state/`; a Semgrep rule enforces the direction). It projects snapshots
-into the DTO the front end renders. Two of its readers take
+into the DTO the front end renders. The selected run's status goes through
+the runner's `runLockHolder`: a `RUNNING` snapshot no live process holds is
+served as an interrupted `ABORTED` run, so the dashboard and a later resume
+agree on what is live. Its step list is the snapshot reconciled with the
+journal by `projectRunState`, the projection a resume applies. Two of its readers take
 content a pipeline wrote rather than runner state: `Item.title`, the first
 `# ` heading of `artifacts/ticket.md` (a leading ticket key dropped), read
 from a bounded prefix of the file and absent when there is none, and `readReport`, which validates
