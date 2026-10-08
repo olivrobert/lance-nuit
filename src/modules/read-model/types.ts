@@ -7,9 +7,10 @@
 
 import type { Launch } from "../dashboard-home/index.js";
 
-/** Durable run status, restricted to the values an item can carry. `UNKNOWN` is
- *  read as `RUNNING`: a snapshot that never received a verdict is still, from a
- *  reader's point of view, a run nobody finished. */
+/** Durable run status, restricted to the values an item can carry. `RUNNING` —
+ *  and `UNKNOWN`, a snapshot that never received a verdict — is `RUNNING` only
+ *  while a live process holds the run; once its runner is gone, the run is served
+ *  as `ABORTED` (see `Item.interrupted`). */
 export type ItemStatus = "STOPPED" | "FAIL" | "ABORTED" | "RUNNING" | "PASS";
 
 /** Section of the morning box an item belongs to. Technical failures rank with
@@ -140,6 +141,13 @@ export interface Item {
   /** Present while a hand closure still describes the run: the item is then in
    *  the `done` group whatever its status. */
   closed?: ItemClosure;
+  /** The snapshot says RUNNING but no live process holds the run: its runner
+   *  died without a verdict (crash, kill, reboot). Served as `ABORTED`; it cannot
+   *  be closed by hand, because `lancenuit close` refuses a RUNNING snapshot. */
+  interrupted?: true;
+  /** Step whose last attempt the runner died in. Only a run authorized with
+   *  `--replay-interrupted` replays it: a plain rerun stops on it again. */
+  interruptedStep?: string;
 }
 
 /** How the dashboard renders a file, derived from its extension alone. `other`

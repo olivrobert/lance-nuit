@@ -111,6 +111,17 @@ export function writeRunEvents(runDir: string, events: Record<string, unknown>[]
   writeFileSync(join(runDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
 }
 
+/** A pid no process can hold: a just-exited child would do too, until the
+ *  kernel recycles its pid for an unrelated process. */
+export const DEAD_PID = 2147483646;
+
+/** `runner.lock` as the runner claims it, pid only so liveness is a pid probe.
+ *  A live holder must be `process.ppid`: the runner reads its own pid as "ours"
+ *  and never as a foreign holder. */
+export function writeRunLock(runDir: string, pid: number): void {
+  writeJson(join(runDir, "runner.lock"), { pid });
+}
+
 /** An approval decision locked to `body`; pass the body the artifact had when it
  *  was approved to build a stale one. */
 export function writeDecision(

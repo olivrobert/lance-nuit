@@ -212,6 +212,57 @@ test("offers: FAIL and ABORTED both rerun from the failure", () => {
   }
 });
 
+test("offers: an interrupted run reruns and starts fresh, but cannot be closed", () => {
+  const crashed = quiet({ status: "ABORTED", group: "failure", interrupted: true });
+  const offers = verbsFor(crashed);
+  expect(names(offers)).toEqual(["rerun", "fresh"]);
+  expect(offers[0]?.label).toBe("Rerun from failure");
+  expect(isBusy(crashed)).toBe(false);
+  expect(buildArgv(crashed, "close")).toMatchObject({ ok: false, status: 409 });
+  expect(argvOf(buildArgv(crashed, "rerun"))).toEqual(["run", "DEMO-1", "--pipeline", "feature"]);
+});
+
+test("offers: a step cut by a dead runner offers a replay, never a rerun that stops again", () => {
+  const crashed = item({
+    status: "ABORTED",
+    group: "failure",
+    interrupted: true,
+    interruptedStep: "coder",
+    stop: undefined,
+  });
+  const offers = verbsFor(crashed);
+  expect(names(offers)).toEqual(["replay-interrupted", "fresh"]);
+  expect(offers[0]?.primary).toBe(true);
+  expect(argvOf(buildArgv(crashed, "replay-interrupted"))).toEqual([
+    "run",
+    "DEMO-1",
+    "--pipeline",
+    "feature",
+    "--replay-interrupted",
+    "--worktree",
+  ]);
+  expect(buildArgv(crashed, "rerun")).toMatchObject({ ok: false, status: 409 });
+
+  // A plain resume already stopped on the cut attempt: same question, asked again.
+  const stopped = quiet({
+    stop: { kind: "needs-decision", detail: "the runner died inside coder" },
+    interruptedStep: "coder",
+  });
+  expect(names(verbsFor(stopped))).toEqual(["replay-interrupted", "close", "fresh"]);
+  expect(argvOf(buildArgv(stopped, "replay-interrupted"))).toEqual([
+    "run",
+    "DEMO-1",
+    "--pipeline",
+    "feature",
+    "--replay-interrupted",
+  ]);
+  expect(buildArgv(stopped, "rerun")).toMatchObject({ ok: false, status: 409 });
+
+  expect(buildArgv(quiet(), "replay-interrupted")).toMatchObject({ ok: false, status: 409 });
+  const closed = { at: "2026-09-06T08:00:00.000Z", by: "O" };
+  expect(buildArgv({ ...stopped, closed }, "replay-interrupted")).toMatchObject({ ok: false, status: 409 });
+});
+
 test("offers: a closed run offers only reopen and start fresh", () => {
   const offers = verbsFor(
     quiet({ status: "FAIL", group: "done", closed: { at: "2026-09-06T08:00:00.000Z", by: "O" } }),
@@ -245,6 +296,9 @@ test("offers: every offer is admitted, and its command is the argv the server bu
     quiet(),
     quiet({ status: "FAIL", group: "failure", budgetExceeded: true, worktree: true }),
     quiet({ status: "ABORTED", group: "failure" }),
+    quiet({ status: "ABORTED", group: "failure", interrupted: true }),
+    item({ status: "ABORTED", group: "failure", interrupted: true, interruptedStep: "coder", stop: undefined }),
+    quiet({ stop: { kind: "needs-decision", detail: "cut" }, interruptedStep: "coder" }),
     quiet({ status: "FAIL", group: "done", closed: { at: "2026-09-06T08:00:00.000Z", by: "O" } }),
     quiet({ status: "PASS", group: "done" }),
   ];

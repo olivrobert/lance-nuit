@@ -9,6 +9,7 @@ import {
   writeProjectsFile,
   writeRun,
   writeRunEvents,
+  writeRunLock,
   writeWorkItemFile,
 } from "./test-harness.ts";
 
@@ -236,6 +237,7 @@ test("step session: an attempt's resumable session, where its run ran; none for 
     status: "RUNNING",
     steps: [{ id: "triage", status: "done", retries: 1 }],
   });
+  writeRunLock(runDir, process.ppid);
   const finished = (attempt: number, extra: Record<string, unknown>) => ({
     ts: "2026-09-05T07:00:00.000Z",
     type: "step.attempt.finished",

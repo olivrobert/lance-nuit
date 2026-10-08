@@ -5,6 +5,7 @@ import { writeClosureAt } from "../../state/closure.ts";
 import { listItems, readItem, titleOfTicketMarkdown } from "./items.ts";
 import {
   cleanupTempDirs,
+  DEAD_PID,
   linkWorktree,
   makeProject,
   makeTempDir,
@@ -15,6 +16,8 @@ import {
   writeHistory,
   writeProjectsFile,
   writeRun,
+  writeRunEvents,
+  writeRunLock,
 } from "./test-harness.ts";
 
 const originalHome = process.env.PIPELINE_HOME;
@@ -53,11 +56,12 @@ test("items: each status lands in its group, decisions first and done last", asy
     status: "ABORTED",
     updatedAt: "2026-09-05T09:00:00.000Z",
   });
-  writeRun(project, "DEMO-4", "feature", {
+  const running = writeRun(project, "DEMO-4", "feature", {
     runId: "r-running",
     status: "RUNNING",
     updatedAt: "2026-09-05T06:00:00.000Z",
   });
+  writeRunLock(running, process.ppid);
   writeRun(project, "DEMO-5", "feature", { runId: "r-pass", status: "PASS", updatedAt: "2026-09-05T05:00:00.000Z" });
 
   const items = await listItems();
@@ -73,12 +77,13 @@ test("items: each status lands in its group, decisions first and done last", asy
 
 test("items: identity, cost, and the effective directory of a run in the main clone", async () => {
   const project = listedProject();
-  writeRun(project, "DEMO-7", "feature", {
+  const runDir = writeRun(project, "DEMO-7", "feature", {
     runId: "r-1",
     status: "RUNNING",
     updatedAt: "2026-09-05T08:00:00.000Z",
     total_control: { duration_ms: 12_000, total_cost_usd: 1.25, cost_estimated: true },
   });
+  writeRunLock(runDir, process.ppid);
 
   const [item] = await listItems();
 
@@ -93,6 +98,111 @@ test("items: identity, cost, and the effective directory of a run in the main cl
   expect(item!.project).toEqual({ name: "demo-app", cwd: project, provider: "jira" });
   expect(item!.branch).toBeUndefined();
   expect(item!.launch).toBeUndefined();
+});
+
+test("items: a RUNNING run whose runner died is an interrupted failure, one whose runner lives is running", async () => {
+  const project = listedProject();
+  const steps = [
+    { id: "plan", status: "done" as const, retries: 0 },
+    { id: "coder", status: "running" as const, retries: 0 },
+  ];
+  const dead = writeRun(project, "DEMO-1", "feature", {
+    runId: "r-dead",
+    status: "RUNNING",
+    updatedAt: "2026-09-05T08:00:00.000Z",
+    steps,
+  });
+  writeRunLock(dead, DEAD_PID);
+  const live = writeRun(project, "DEMO-2", "feature", {
+    runId: "r-live",
+    status: "RUNNING",
+    updatedAt: "2026-09-05T07:00:00.000Z",
+    steps,
+  });
+  writeRunLock(live, process.ppid);
+  // No lock at all: nothing claims the run, so nothing runs it either.
+  writeRun(project, "DEMO-3", "feature", { runId: "r-none", status: "RUNNING", updatedAt: "2026-09-05T06:00:00.000Z" });
+
+  const crashed = await readItem("demo-app", "DEMO-1");
+  const running = await readItem("demo-app", "DEMO-2");
+  const unlocked = await readItem("demo-app", "DEMO-3");
+
+  expect(crashed).toMatchObject({ status: "ABORTED", group: "failure", interrupted: true });
+  expect(crashed!.failure?.phase).toBe("coder");
+  expect(crashed!.failure?.reason).not.toBe("");
+  expect(running).toMatchObject({ status: "RUNNING", group: "running" });
+  expect(running!.interrupted).toBeUndefined();
+  expect(running!.failure).toBeUndefined();
+  expect(unlocked).toMatchObject({ status: "ABORTED", group: "failure", interrupted: true });
+  expect(unlocked!.failure?.phase).toBe("");
+});
+
+test("items: a run that died inside an attempt names the step to replay", async () => {
+  const project = listedProject();
+  const ts = "2026-09-05T08:00:00.000Z";
+  const started = { ts, type: "step.attempt.started", stepId: "coder", attempt: 1, kind: "step" };
+  const steps = [{ id: "coder", status: "running" as const, retries: 0 }];
+
+  // (a) crashed with an attempt still open in the journal.
+  const open = writeRun(project, "DEMO-1", "feature", { runId: "r-1", status: "RUNNING", updatedAt: ts, steps });
+  writeRunLock(open, DEAD_PID);
+  writeRunEvents(open, [started]);
+
+  // (b) crashed between attempts: nothing to replay.
+  const between = writeRun(project, "DEMO-2", "feature", { runId: "r-2", status: "RUNNING", updatedAt: ts, steps });
+  writeRunLock(between, DEAD_PID);
+  writeRunEvents(between, [
+    started,
+    { ts, type: "step.attempt.finished", stepId: "coder", attempt: 1, kind: "step", status: "done" },
+  ]);
+
+  // (c) a plain resume settled the crashed attempt, then stopped on it.
+  const stoppedDir = writeRun(project, "DEMO-3", "feature", {
+    runId: "r-3",
+    status: "STOPPED",
+    updatedAt: ts,
+    steps: [{ id: "coder", status: "pending", retries: 0 }],
+    outcome: {
+      phase: "coder",
+      reason: "interrupted",
+      logPath: null,
+      resumable: true,
+      stop: { kind: "needs-decision", detail: "the runner died inside coder" },
+    },
+  });
+  writeRunEvents(stoppedDir, [
+    started,
+    {
+      ts,
+      type: "step.attempt.finished",
+      stepId: "coder",
+      attempt: 1,
+      kind: "step",
+      status: "failed",
+      interrupted: true,
+    },
+  ]);
+
+  // (d) stopped at a gate: the journal is not consulted.
+  const gateDir = writeRun(project, "DEMO-4", "feature", {
+    runId: "r-4",
+    status: "STOPPED",
+    updatedAt: ts,
+    steps: [{ id: "coder", status: "pending", retries: 0 }],
+    outcome: {
+      phase: "plan",
+      reason: "waiting",
+      logPath: null,
+      resumable: true,
+      stop: { subject: "plan", kind: "needs-decision", detail: "plan needs approval" },
+    },
+  });
+  writeRunEvents(gateDir, [started]);
+
+  expect((await readItem("demo-app", "DEMO-1"))!.interruptedStep).toBe("coder");
+  expect((await readItem("demo-app", "DEMO-2"))!.interruptedStep).toBeUndefined();
+  expect((await readItem("demo-app", "DEMO-3"))!.interruptedStep).toBe("coder");
+  expect((await readItem("demo-app", "DEMO-4"))!.interruptedStep).toBeUndefined();
 });
 
 test("items: a run with no reported cost is not read as free", async () => {
@@ -603,6 +713,7 @@ test("items: a closure on a run nobody waits on is ignored", async () => {
   const project = listedProject();
   const updatedAt = "2026-09-05T08:00:00.000Z";
   const runDir = writeRun(project, "DEMO-9", "feature", { runId: "r-run", status: "RUNNING", updatedAt });
+  writeRunLock(runDir, process.ppid);
   writeClosureAt(runDir, { schemaVersion: 1, closedAt: updatedAt, closedBy: "Olivier", runUpdatedAt: updatedAt });
 
   const [item] = await listItems();

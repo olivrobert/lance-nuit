@@ -1,6 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
 import { readRecap } from "./recap.ts";
-import { cleanupTempDirs, makeProject, makeTempDir, writeProjectsFile, writeRun } from "./test-harness.ts";
+import {
+  cleanupTempDirs,
+  makeProject,
+  makeTempDir,
+  writeProjectsFile,
+  writeRun,
+  writeRunLock,
+} from "./test-harness.ts";
 
 const originalHome = process.env.PIPELINE_HOME;
 
@@ -86,12 +93,13 @@ test("recap: run-wide figures come from the ledger, not from a sum of the steps"
 
 test("recap: a run with no accounting yet reports no figure rather than zeros", () => {
   const project = listedProject();
-  writeRun(project, "DEMO-1", "feature", {
+  const runDir = writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
     status: "RUNNING",
     total_usage: {},
     steps: [{ id: "coder", status: "running", retries: 0 }],
   });
+  writeRunLock(runDir, process.ppid);
 
   expect(readRecap("demo-app", "DEMO-1")).toEqual({
     pipeline: "feature",
