@@ -15,6 +15,7 @@ function item(overrides: Partial<Item> = {}): Item {
     project: { name: "demo-app", cwd: "/srv/demo-app", provider: "jira" },
     ticket: "DEMO-1",
     pipeline: "feature",
+    pipelineRef: "feature",
     runId: "r-1",
     status: "STOPPED",
     group: "decision",

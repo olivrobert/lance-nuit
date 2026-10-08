@@ -282,6 +282,12 @@ plain resume stops on such a step (see
 [Interrupted steps](dsl.md#interrupted-steps)); a run a plain resume already
 stopped on that step offers it instead of **Rerun** too.
 
+Every verb that relaunches a run (approve, reject, rerun, replay, budget, start
+fresh) passes `--pipeline` the absolute path of the file the run was launched
+with, so it reloads that definition even when the file's name differs from the
+declared one or a homonymous pipeline exists at another kit level. **Mark as
+closed** and **Reopen** address the run by its declared pipeline name.
+
 The tabs are **Report**, **Run**, and **Files**, plus **Document** when the
 run has a document to show. A tab with nothing to show is not listed. A
 finished run opens on **Report** when its current run wrote a valid

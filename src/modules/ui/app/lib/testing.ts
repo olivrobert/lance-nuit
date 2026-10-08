@@ -9,6 +9,7 @@ export function makeItem(overrides: Partial<Item> = {}): Item {
     project: { name: "web", cwd: "/srv/web", provider: "local" },
     ticket: "ABC-1",
     pipeline: "feature",
+    pipelineRef: "feature",
     runId: "run-1",
     status: "STOPPED",
     group: "decision",

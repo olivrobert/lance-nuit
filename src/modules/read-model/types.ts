@@ -110,7 +110,13 @@ export interface Item {
    *  work-item source step, or one writing `ticket.md` elsewhere): the list then
    *  shows the ticket key instead. Never fetched from the provider. */
   title?: string;
+  /** Declared name of the pipeline: the run directory under `runs/`, what the
+   *  dashboard displays, and what `close` / `reopen` address the run by. */
   pipeline: string;
+  /** What `--pipeline` must receive to reload the run's own definition: the
+   *  absolute file the run was launched with, or the declared name when the
+   *  snapshot recorded no file. */
+  pipelineRef: string;
   runId: string;
   status: ItemStatus;
   group: ItemGroup;

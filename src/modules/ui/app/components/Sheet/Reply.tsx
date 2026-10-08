@@ -14,7 +14,7 @@ import { copy, setReply, useUi } from "../../store/ui-store.js";
 
 export function Reply({ item }: { item: Item }): JSX.Element {
   const draft = useUi((state) => state.replies[item.key] ?? "");
-  const command = `cd ${item.project.cwd} && lancenuit run ${item.ticket} --pipeline ${item.pipeline}${item.worktree ? " --worktree" : ""}`;
+  const command = `cd ${item.project.cwd} && lancenuit run ${item.ticket} --pipeline ${item.pipelineRef}${item.worktree ? " --worktree" : ""}`;
 
   return (
     <div>

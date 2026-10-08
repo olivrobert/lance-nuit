@@ -37,8 +37,16 @@ describe("closed runs and verb labels", () => {
   });
 
   test("the unmetered resume is shown as a command, worktree flag included", () => {
-    const item = makeItem({ status: "FAIL", group: "failure", costUnaccounted: true, worktree: true });
-    expect(unmeteredResumeCommand(item)).toBe("lancenuit run ABC-1 --pipeline feature --allow-unmetered --worktree");
+    const item = makeItem({
+      status: "FAIL",
+      group: "failure",
+      costUnaccounted: true,
+      worktree: true,
+      pipelineRef: "/srv/web/flows/other.ts",
+    });
+    expect(unmeteredResumeCommand(item)).toBe(
+      "lancenuit run ABC-1 --pipeline /srv/web/flows/other.ts --allow-unmetered --worktree",
+    );
   });
 
   test("a verb the browser does not know falls through to its own name", () => {

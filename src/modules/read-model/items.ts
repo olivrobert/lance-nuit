@@ -14,7 +14,7 @@
 // per project, and a persistent one would show a stale morning box.
 
 import { closeSync, openSync, readSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import { createArtifactRef } from "../../model/artifact-ports.js";
 import type { PersistedRun } from "../../model/persisted.js";
@@ -30,7 +30,7 @@ import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
 import { FileWorkItemArtifactStore } from "../../state/stores/file-work-item-artifact-store.js";
 import { latestLaunchByItem } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl } from "./projects.js";
-import { latestRuns, selectedRunStatus, ticketDirectories, workItemDirOf } from "./runs.js";
+import { effectiveCwd, latestRuns, selectedRunStatus, ticketDirectories, workItemDirOf } from "./runs.js";
 import type {
   Item,
   ItemApproval,
@@ -294,6 +294,19 @@ function branchOf(project: ProjectEntry, runId: string, cache: RequestCache): st
   return typeof branch === "string" && branch.length > 0 ? branch : undefined;
 }
 
+/**
+ * The pipeline a relaunch must load: the file the run was launched with.
+ *
+ * Resolved to an absolute path because the snapshot records it relative to the
+ * runner's cwd — the worktree for a `--worktree` run — while the dashboard
+ * spawns its relaunch in the main clone. Never the name when a file was
+ * recorded: the kit would resolve it to another file, or a homonym.
+ */
+function pipelineRefOf(project: ProjectEntry, state: PersistedRun, name: string): string {
+  const recorded = state.pipeline_path;
+  return typeof recorded === "string" && recorded.length > 0 ? resolve(effectiveCwd(project, state), recorded) : name;
+}
+
 /** Bytes of `ticket.md` read for the title. The heading sits at the top; the
  *  rest of the file can hold a long comment thread nobody needs for a row. */
 const TICKET_TITLE_READ_BYTES = 8 * 1024;
@@ -397,6 +410,7 @@ async function buildItem(
     ticket,
     ...(title ? { title } : {}),
     pipeline: selected.pipeline,
+    pipelineRef: pipelineRefOf(project, state, selected.pipeline),
     runId,
     status,
     group,

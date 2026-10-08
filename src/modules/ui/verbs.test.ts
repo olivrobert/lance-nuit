@@ -10,6 +10,7 @@ function item(overrides: Partial<Item> = {}): Item {
     project: { name: "demo-app", cwd: "/srv/demo-app", provider: "jira" },
     ticket: "DEMO-1",
     pipeline: "feature",
+    pipelineRef: "feature",
     runId: "r-1",
     status: "STOPPED",
     group: "decision",
@@ -56,6 +57,45 @@ test("argv: approve only goes through the approve verb, worktree included", () =
     "feature",
     "--worktree",
   ]);
+});
+
+test("argv: every relaunching verb loads the run's own pipeline file, close and reopen address it by name", () => {
+  const file = "/srv/demo-app/flows/other-name.ts";
+  const gate = { subject: "plan", kind: "needs-decision", detail: "gate", reworkable: true } as const;
+  const failed = { status: "FAIL", group: "failure", stop: undefined } as const;
+  const cases: [Partial<Item>, Parameters<typeof buildArgv>[1], Parameters<typeof buildArgv>[2]][] = [
+    [{ stop: gate }, "approve-and-rerun", { subject: "plan" }],
+    [{ stop: gate }, "approve", { subject: "plan" }],
+    [{ stop: gate }, "reject-and-rerun", { subject: "plan", reason: "split step 2" }],
+    [failed, "rerun", {}],
+    [{ ...failed, interrupted: true, interruptedStep: "coder" }, "replay-interrupted", {}],
+    [{ ...failed, budgetExceeded: true }, "budget", { budget: 5 }],
+    [failed, "fresh", {}],
+  ];
+  for (const worktree of [true, false]) {
+    for (const [overrides, verb, input] of cases) {
+      const argv = argvOf(buildArgv(item({ ...overrides, pipelineRef: file, worktree }), verb, input));
+      expect(argv.slice(argv.indexOf("--pipeline"), argv.indexOf("--pipeline") + 2)).toEqual(["--pipeline", file]);
+      expect(argv.includes("--worktree")).toBe(worktree);
+    }
+  }
+
+  expect(argvOf(buildArgv(item({ ...failed, pipelineRef: file }), "close"))).toEqual([
+    "close",
+    "DEMO-1",
+    "--pipeline",
+    "feature",
+  ]);
+  const closed = item({
+    ...failed,
+    group: "done",
+    pipelineRef: file,
+    closed: { at: "2026-09-06T08:00:00.000Z", by: "Olivier" },
+  });
+  expect(argvOf(buildArgv(closed, "reopen"))).toEqual(["reopen", "DEMO-1", "--pipeline", "feature"]);
+  expect(verbsFor(item({ ...failed, pipelineRef: file, worktree: false }))[0]?.command).toBe(
+    `lancenuit run DEMO-1 --pipeline ${file}`,
+  );
 });
 
 test("argv: the subject must be the pending gate, and a gate is required", () => {
