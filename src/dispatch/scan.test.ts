@@ -7,6 +7,7 @@
 // queues/states and inspect which return. An argument spy would pass despite bad filtering.
 
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,6 +69,7 @@ interface EnvOptions {
   limit?: number;
   cwd?: string;
   fresh?: boolean;
+  baseBranch?: string;
 }
 
 interface ScanEnv {
@@ -85,7 +87,7 @@ function scanEnv(opts: EnvOptions = {}): ScanEnv {
     fresh: opts.fresh ?? true,
     watch: false,
     limit: opts.limit,
-    ctx: buildPipelineContext({ cwd: opts.cwd ?? projectRoot(), workItem: gateway }),
+    ctx: buildPipelineContext({ cwd: opts.cwd ?? projectRoot(), workItem: gateway, baseBranch: opts.baseBranch }),
     def: opts.def ?? bugfixDef,
     scanStore: store,
   };
@@ -372,6 +374,75 @@ test("step selectors given with --scan reach every child", async () => {
     );
     expect(env.passthrough).toEqual(argv[1] === "-k" ? ["--skip", "second"] : ["--steps", "a,b"]);
   }
+});
+
+/** Project that is also a git repo on `main` with a `release` branch: the real
+ *  between-ticket checkout needs one, whereas `projectRoot()` must stay a bare
+ *  dir for the test that records the checkout failure. */
+function gitProject(config: Record<string, unknown>): { dir: string; git: (...args: string[]) => string } {
+  const dir = projectRoot(config);
+  const git = (...args: string[]) => spawnSync("git", args, { cwd: dir, encoding: "utf8" }).stdout.trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "t@t.t");
+  git("config", "user.name", "t");
+  writeFileSync(join(dir, "a.txt"), "x\n");
+  git("add", "a.txt");
+  git("commit", "-qm", "init");
+  git("branch", "release");
+  return { dir, git };
+}
+
+/** Run a two-ticket scan whose children leave HEAD on a work branch, as a real
+ *  ticket does; return the branch each child started from. */
+async function scanAcrossBranches(
+  env: DispatchEnv,
+  git: (...args: string[]) => string,
+): Promise<{ result?: number; startedOn: string[]; spawned: string[][] }> {
+  const startedOn: string[] = [];
+  const spawned: string[][] = [];
+  const { result } = await captureLogs(() =>
+    runDispatch(
+      scanStrategy,
+      env,
+      deps({
+        spawn: (args) => {
+          spawned.push(args);
+          startedOn.push(git("branch", "--show-current"));
+          git("checkout", "-q", "-b", `work-${args[0]}`);
+          return 0;
+        },
+      }),
+    ),
+  );
+  return { result, startedOn, spawned };
+}
+
+test("between tickets, the checkout returns to an explicit --base-branch, not the configured one", async () => {
+  const { dir, git } = gitProject({ baseBranch: "main" });
+  git("checkout", "-q", "release");
+  const { env, store } = scanEnv({ seed: bugTodoItems(2), cwd: dir, baseBranch: "release" });
+  env.passthrough = parseRunnerArgs(["--scan", "--base-branch", "release"]).passthrough;
+
+  const { result, startedOn, spawned } = await scanAcrossBranches(env, git);
+
+  expect(result).toBe(0);
+  expect(startedOn).toEqual(["release", "release"]);
+  expect(git("branch", "--show-current")).toBe("release");
+  expect(store.last?.abort).toBeNull();
+  for (const args of spawned) expect(args.filter((a) => a === "--base-branch")).toHaveLength(1);
+});
+
+test("without --base-branch, the checkout between tickets returns to the configured branch", async () => {
+  const { dir, git } = gitProject({ baseBranch: "release" });
+  git("checkout", "-q", "release");
+  const { env } = scanEnv({ seed: bugTodoItems(2), cwd: dir });
+
+  const { result, startedOn, spawned } = await scanAcrossBranches(env, git);
+
+  expect(result).toBe(0);
+  expect(startedOn).toEqual(["release", "release"]);
+  expect(git("branch", "--show-current")).toBe("release");
+  for (const args of spawned) expect(args.slice(-2)).toEqual(["--base-branch", "release"]);
 });
 
 test("record: written before discovery, with discovered null", async () => {
