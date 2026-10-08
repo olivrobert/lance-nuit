@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeClosureAt } from "../../state/closure.ts";
 import { listItems, readItem, titleOfTicketMarkdown } from "./items.ts";
@@ -98,6 +98,37 @@ test("items: identity, cost, and the effective directory of a run in the main cl
   expect(item!.project).toEqual({ name: "demo-app", cwd: project, provider: "jira" });
   expect(item!.branch).toBeUndefined();
   expect(item!.launch).toBeUndefined();
+});
+
+test("items: the relaunch reference is the run's own pipeline file, resolved against its cwd", async () => {
+  const project = listedProject();
+  // A homonym in the project kit: resolving the declared name would load it.
+  mkdirSync(join(project, ".lance-nuit", "pipelines"), { recursive: true });
+  writeFileSync(join(project, ".lance-nuit", "pipelines", "check.ts"), "// homonym\n");
+  writeRun(project, "DEMO-1", "check", {
+    runId: "r-1",
+    status: "FAIL",
+    cwd: project,
+    pipeline_path: "flows/other-name.ts",
+  });
+  const worktree = linkWorktree(project, "DEMO-2");
+  writeRun(project, "DEMO-2", "check", {
+    runId: "r-2",
+    status: "FAIL",
+    worktree: true,
+    cwd: worktree,
+    pipeline_path: ".lance-nuit/pipelines/check.ts",
+  });
+  writeRun(project, "DEMO-3", "check", { runId: "r-3", status: "FAIL" });
+
+  const main = await readItem("demo-app", "DEMO-1");
+  const linked = await readItem("demo-app", "DEMO-2");
+  const unrecorded = await readItem("demo-app", "DEMO-3");
+
+  expect(main!.pipeline).toBe("check");
+  expect(main!.pipelineRef).toBe(join(project, "flows/other-name.ts"));
+  expect(linked!.pipelineRef).toBe(join(worktree, ".lance-nuit/pipelines/check.ts"));
+  expect(unrecorded!.pipelineRef).toBe("check");
 });
 
 test("items: a RUNNING run whose runner died is an interrupted failure, one whose runner lives is running", async () => {
