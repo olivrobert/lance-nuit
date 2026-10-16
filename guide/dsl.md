@@ -420,7 +420,9 @@ The rules:
   because freshness does not track the repository tree an operator fixed. So
   does a step whose last pass failed or was interrupted: what that pass wrote
   is never adopted. A pass the runner died in needs an authorization before it
-  is replayed; see [Interrupted steps](#interrupted-steps).
+  is replayed; see [Interrupted steps](#interrupted-steps). A run stopped by
+  `--until` resumes the same way: the bound is never persisted, so the next
+  invocation re-checks the settled steps as above and runs what follows it.
 - **Absorbed failure.** A `blocking: false` step whose failure was absorbed is
   `done` without its outputs, so freshness alone would re-run it on every
   resume. Once the failure is absorbed — after its fix, `replayAfterFix: false`

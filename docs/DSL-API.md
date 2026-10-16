@@ -600,8 +600,9 @@ Persisted in `state.json` under `outcome.stop`; not importable from `@lance-nuit
 ```ts
 /** Expected recovery for a clean stop, in the reader's vocabulary. The first three
  *  mirror the review kinds a `humanReview` gate declares; `blocked` is the step
- *  fail cause of the same name — an obstacle outside the code. */
-export type RunStopKind = "needs-info" | "needs-decision" | "needs-human" | "blocked";
+ *  fail cause of the same name — an obstacle outside the code. `until` is the
+ *  bound an operator gave with `--until`: nothing is wrong, rerunning continues. */
+export type RunStopKind = "needs-info" | "needs-decision" | "needs-human" | "blocked" | "until";
 
 /** Structured cause of a clean stop, so a reader does not have to parse the
  *  console sentence stored in `stopped_reason`. */

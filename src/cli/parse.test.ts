@@ -109,3 +109,16 @@ test("--start-at is refused under --scan", () => {
   expect(() => parseRunnerArgs(["--scan", "-a", "x"])).toThrow(/--start-at/);
   expect(parseRunnerArgs(["FOO-1", "--start-at", "x"]).passthrough).toEqual([]);
 });
+
+test("--until is forwarded to dispatch children, exclusive with --steps, and refused on an inspection command", () => {
+  // The bound of a sweep (a night of triage only) applies to every ticket.
+  expect(parseRunnerArgs(["--scan", "--until", "triage"]).passthrough).toEqual(["--until", "triage"]);
+  expect(parseRunnerArgs(["FOO-1", "--until", "plan", "--skip", "a"]).until).toBe("plan");
+  expect(parseRunnerArgs(["FOO-1", "--until", "plan", "--start-at", "a"]).until).toBe("plan");
+  expect(() => parseRunnerArgs(["FOO-1", "--until", "plan", "--steps", "a"])).toThrow(
+    "Options --until and --steps are mutually exclusive.",
+  );
+  expect(() => parseRunnerArgs(["FOO-1", "--inspect", "--until", "plan"])).toThrow(
+    "Option --until applies to a run, not to an inspection command.",
+  );
+});

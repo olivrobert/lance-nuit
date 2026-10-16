@@ -15,8 +15,9 @@
  *
  * Declared in the model layer rather than in `dispatch/` because the scan record
  * persists them: the shapes that reach disk belong here. `dispatch/` re-exports
- * it as `DispatchOutcomeKind`. */
-export type DispatchOutcomeKind = "fixed" | "escalated" | "failed" | "skipped";
+ * it as `DispatchOutcomeKind`. `until` is a child that stopped at the `--until`
+ * bound the scan forwarded: its run is resumable and nothing needs a human. */
+export type DispatchOutcomeKind = "fixed" | "escalated" | "until" | "failed" | "skipped";
 
 /** State of one ticket inside a scan.
  *

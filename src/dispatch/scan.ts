@@ -194,6 +194,8 @@ export const scanStrategy: DispatchStrategy = {
     log(`Scanned tickets: ${tickets.length}`);
     log(line("Fixed    ", of("fixed")));
     log(line("Escalated", of("escalated")));
+    // Only a scan given --until has such tickets; elsewhere the line is noise.
+    if (of("until").length > 0) log(line("Until    ", of("until")));
     log(line("Failed   ", of("failed")));
   },
 };

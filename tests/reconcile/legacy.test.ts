@@ -9,11 +9,13 @@ import {
   heal,
   killDuring,
   latestRunId,
+  mark,
   run,
   scratchRoute,
   snapshot,
   touchTicket,
   trace,
+  traceSince,
 } from "./harness.ts";
 
 setDefaultTimeout(60_000);
@@ -40,13 +42,14 @@ test("S1: a run after a PASS starts a new run that replays only CHEAP steps and 
   const cwd = scratchRoute();
   const firstRun = passedRun(cwd);
   expect(trace(cwd)).toEqual(FULL);
+  const before = mark(cwd);
 
   const second = run(cwd);
 
   expect(second.status).toBe(0);
   expect(latestRunId(cwd)).not.toBe(firstRun);
   expect(snapshot(cwd).status).toBe("PASS");
-  expect(trace(cwd).slice(FULL.length)).toEqual(CHEAP_AND_BRANCH);
+  expect(traceSince(cwd, before)).toEqual(CHEAP_AND_BRANCH);
 });
 
 // Pinned defect: `comment` has a side effect and no receipt, so nothing tells a
@@ -82,6 +85,7 @@ test("S3: a failure healed and resumed continues the same run from the failed st
   const failedRun = latestRunId(cwd);
   expect(trace(cwd)).toEqual(["context", "branch", "triage", "plan", "prepare", "implement"]);
   heal(cwd, "implement");
+  const before = mark(cwd);
 
   const resumed = run(cwd);
 
@@ -90,7 +94,15 @@ test("S3: a failure healed and resumed continues the same run from the failed st
   expect(snapshot(cwd).status).toBe("PASS");
   // The matrix row only names triage and plan as not replayed; context and
   // prepare declare rerunOnResume, so the resume replays them before implement.
-  expect(trace(cwd).slice(6)).toEqual(["context", "prepare", "implement", "quality", "commit", "publish", "report"]);
+  expect(traceSince(cwd, before)).toEqual([
+    "context",
+    "prepare",
+    "implement",
+    "quality",
+    "commit",
+    "publish",
+    "report",
+  ]);
 });
 
 // Pinned defect: `--skip` is persisted as an exclusion, and the run passes
@@ -116,6 +128,7 @@ test("S5: a runner killed during publish stops the resume until the replay is au
   const killedRun = latestRunId(cwd);
   expect(trace(cwd)).toEqual(FULL.slice(0, -1));
   expect(snapshot(cwd).status).toBe("RUNNING");
+  const beforeStop = mark(cwd);
 
   const stopped = run(cwd);
 
@@ -130,34 +143,37 @@ test("S5: a runner killed during publish stops the resume until the replay is au
   // Pinned defect: the rerunOnResume steps before publish, prepare's database
   // reset included, replay before the interruption guard stops the resume, so a
   // resume that does nothing still pays for them. publish itself does not run.
-  expect(trace(cwd).slice(FULL.length - 1)).toEqual(["context", "prepare", "quality"]);
+  expect(traceSince(cwd, beforeStop)).toEqual(["context", "prepare", "quality"]);
   // A clean stop is not a failure: the process exits 0, only the snapshot says STOPPED.
   expect(stopped.status).toBe(0);
+  const beforeReplay = mark(cwd);
 
   const replayed = run(cwd, "--replay-interrupted");
 
   expect(replayed.status).toBe(0);
   expect(latestRunId(cwd)).toBe(killedRun);
   expect(snapshot(cwd).status).toBe("PASS");
-  expect(trace(cwd).slice(FULL.length + 2)).toEqual(["context", "prepare", "quality", "publish", "report"]);
+  expect(traceSince(cwd, beforeReplay)).toEqual(["context", "prepare", "quality", "publish", "report"]);
 });
 
 test("S6: a ticket edited after a PASS replays every step downstream of it in a new run", () => {
   const cwd = scratchRoute();
   const firstRun = passedRun(cwd);
   touchTicket(cwd);
+  const before = mark(cwd);
 
   const second = run(cwd);
 
   expect(second.status).toBe(0);
   expect(latestRunId(cwd)).not.toBe(firstRun);
   expect(snapshot(cwd).status).toBe("PASS");
-  expect(trace(cwd).slice(FULL.length)).toEqual(FULL);
+  expect(traceSince(cwd, before)).toEqual(FULL);
 });
 
 test("S7: --run on a PASS run with --start-at replays the target and every later step in that run", () => {
   const cwd = scratchRoute();
   const firstRun = passedRun(cwd);
+  const before = mark(cwd);
 
   const replay = run(cwd, "--run", firstRun, "--start-at", "implement");
 
@@ -166,7 +182,7 @@ test("S7: --run on a PASS run with --start-at replays the target and every later
   expect(snapshot(cwd).status).toBe("PASS");
   // Before the target, only the rerunOnResume steps replay: triage and plan are
   // reconsidered but fresh, branch is done and not reconsidered.
-  expect(trace(cwd).slice(FULL.length)).toEqual([
+  expect(traceSince(cwd, before)).toEqual([
     "context",
     "prepare",
     "implement",

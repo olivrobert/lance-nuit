@@ -12,6 +12,17 @@
 
 import { DEFAULT_UI_PORT, UI_HOST } from "../lib/ui-defaults.js";
 
+/**
+ * Exit code of a run `--until` stopped with steps left after its bound.
+ *
+ * Non-zero so that `--scan`, cron and shell scripts do not read an unfinished run
+ * as complete; distinct from 1, which every failure, budget stop and usage error
+ * already returns, so a caller can tell "stopped where asked" from "broke". 2 is
+ * avoided because shells and argument parsers use it for usage errors, 126/127
+ * for a command that cannot run, and 128+n for a signal (130, 143).
+ */
+export const UNTIL_STOP_EXIT_CODE = 3;
+
 export interface RunnerArgs {
   pipelinePath?: string;
   ticket?: string;
@@ -21,6 +32,9 @@ export interface RunnerArgs {
    *  skipped. Resolved into an effective skip in loadOrCreateRun (it needs the
    *  pipeline definition to know the order). */
   startAt?: string;
+  /** Step id after which this invocation stops. Valid for this invocation only
+   *  and never persisted: a later resume runs to its own bound, or to the end. */
+  until?: string;
   baseBranch?: string;
   watch: boolean;
   /** With --watch, automatically close the pane when the run becomes terminal. */
@@ -147,6 +161,7 @@ export type CommandScope = "create";
  *  - `--worktree`: the child inherits cwd (chdir) + `RUNNER_IN_WORKTREE` → NOT forwarded.
  *  - `--watch`: forwarded only by the multi-work-item strategy (tmux pane per child), not here.
  *  - `--steps` / `--skip`: the operator's selection applies to every ticket → forwarded.
+ *  - `--until`: the bound of a sweep (a night of triage only) applies to every ticket → forwarded.
  *  - `--start-at`: refused under `--scan` (cli/parse.ts); `--pipeline`: set by the spawn caller.
  */
 export const FLAGS: FlagSpec[] = [
@@ -196,6 +211,13 @@ export const FLAGS: FlagSpec[] = [
     key: "startAt",
     kind: "string",
     desc: "Replay from this step: it and every later step run again; preceding steps are skipped.",
+  },
+  {
+    long: "--until",
+    key: "until",
+    kind: "string",
+    passthrough: true,
+    desc: `Stop once this step is done or skipped; the run stays resumable. Exits ${UNTIL_STOP_EXIT_CODE} when steps are left. Never persisted.`,
   },
   {
     long: "--base-branch",

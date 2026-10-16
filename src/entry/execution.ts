@@ -17,7 +17,7 @@ import { ConsoleRunOutput, LiveFeedOutput } from "../output/run-output.js";
 import { CompositeRunOutput, type RunOutput } from "../runtime/run-output.js";
 import { StatusLineOutput } from "../output/status-line.js";
 import { agentBackendRegistryOf, buildPipelineContext, workItemRegistryOf } from "../pipeline/context.js";
-import type { RunnerArgs } from "../model/cli-options.js";
+import { type RunnerArgs, UNTIL_STOP_EXIT_CODE } from "../model/cli-options.js";
 import type { AbortScope } from "../runtime/abort.js";
 import { subscribe } from "../runtime/events.js";
 import { log } from "../runtime/logging.js";
@@ -225,5 +225,8 @@ export function reportRun(
   if (abort.isAbortRequested() || run.aborted) return abort.requestedSignal() === "SIGTERM" ? 143 : 130;
   // An accounting stop is a non-zero exit like a budget stop: unattended callers
   // (--scan, cron, a parent dispatch) must not read unfinished work as success.
-  return outcome.failed || outcome.budgetExceeded || outcome.costUnaccounted ? 1 : 0;
+  if (outcome.failed || outcome.budgetExceeded || outcome.costUnaccounted) return 1;
+  // Unfinished too, but where the operator asked: a code of its own, so a caller
+  // tells it from a failure. A failure or a cost stop outranks it above.
+  return outcome.untilStop ? UNTIL_STOP_EXIT_CODE : 0;
 }

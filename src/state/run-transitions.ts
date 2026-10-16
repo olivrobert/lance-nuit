@@ -285,6 +285,10 @@ export interface RunOutcome {
    *  bound; this says the ledger is the REASON, which is what the headline and the
    *  recovery command answer to. */
   costUnaccountedStop: boolean;
+  /** The run stopped at the `--until` bound of this invocation with steps left
+   *  after it; `stopped` is set too. Kept apart so the exit code can tell a stop
+   *  the operator asked for from one that needs them. */
+  untilStop: boolean;
   cumulativeCost: number;
 }
 

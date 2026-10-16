@@ -203,7 +203,7 @@ function headline(kind: RunReportKind, failedStep?: string): string {
   }
 }
 
-function nextAction(kind: RunReportKind): string | undefined {
+function nextAction(kind: RunReportKind, run: RunView): string | undefined {
   switch (kind) {
     case "verdict":
       return "Address the verdict, then rerun the pipeline.";
@@ -217,6 +217,8 @@ function nextAction(kind: RunReportKind): string | undefined {
       // sentence says what it does NOT lift.
       return "Authorize the unknown spend to resume where it stopped; the known spend still obeys the ceiling.";
     case "stopped":
+      // A bound the operator set is no condition to address.
+      if (run.outcome?.stop?.kind === "until") return "Rerun without --until, or with a later step, to continue.";
       return "Address the reported stop condition before resuming.";
     case "aborted":
       return "Rerun the pipeline when ready.";
@@ -320,7 +322,7 @@ export function buildRunReport(
     pipeline: run.name || run.pipeline,
     ticket: run.ticket,
     headline: headline(kind, failed?.def.name),
-    action: nextAction(kind),
+    action: nextAction(kind, run),
     ...(recoveryCommand(kind, run) ? { recovery: recoveryCommand(kind, run) } : {}),
     issue: run.outcome?.reason ?? run.stopped_reason,
     failedStep: failed?.def.name,

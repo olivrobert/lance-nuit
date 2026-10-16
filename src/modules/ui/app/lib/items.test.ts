@@ -27,6 +27,13 @@ describe("reasonOf and headlineOf", () => {
     expect(headlineOf(makeItem({ group: "failure", status: "ABORTED" }))).toBe("Execution interrupted");
     expect(headlineOf(makeItem({ group: "decision", stop: { detail: "x", subject: "plan" } }))).toBe("Review plan");
   });
+
+  test("a stop requested by --until says so and asks for a rerun, not for input", () => {
+    const detail = "stop requested by --until after plan: rerun to continue";
+    const item = makeItem({ group: "decision", stop: { kind: "until", detail } });
+    expect(headlineOf(item)).toBe("Stopped as requested");
+    expect(reasonOf(item)).toBe(detail);
+  });
 });
 
 describe("closed runs and verb labels", () => {

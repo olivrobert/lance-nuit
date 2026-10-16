@@ -12,18 +12,21 @@
 
 import { DISPATCH_CHILD_ENV, selfSpawnRunner } from "../exec/self-spawn.js";
 import type { PersistedRun } from "../model/persisted.js";
+import { UNTIL_STOP_EXIT_CODE } from "../model/cli-options.js";
 import { log } from "../runtime/logging.js";
 import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
 import { isPersistedRunComplete } from "../state/run-predicates.js";
 import { DispatchAbort } from "./abort.js";
 import type { DispatchClassification, DispatchEnv, DispatchOutcome, DispatchStrategy } from "./dispatch-strategy.js";
 
-/** Classify a loop run: non-zero exit is failed; a JSON run with stopped_reason is
- * escalated; otherwise it is fixed. */
+/** Classify a loop run: a child stopped at its `--until` bound is `until`; any
+ * other non-zero exit is failed; a JSON run with stopped_reason is escalated;
+ * otherwise it is fixed. */
 export function classifyPersistedRunOutcome(
   exitCode: number,
   run: PersistedRun | null,
-): "fixed" | "escalated" | "failed" {
+): "fixed" | "escalated" | "until" | "failed" {
+  if (exitCode === UNTIL_STOP_EXIT_CODE) return "until";
   if (exitCode !== 0) return "failed";
   if (run?.stopped_reason) return "escalated";
   return "fixed";
@@ -106,7 +109,8 @@ export async function runDispatch(
       const outcome = outcomeOf(ticket, deps.classify(ticket, code, env));
       outcomes.push(outcome);
       await strategy.onTicketFinished?.(outcome, env);
-      if (code !== 0) {
+      // A child stopped where `--until` asked did what the sweep wanted.
+      if (code !== 0 && code !== UNTIL_STOP_EXIT_CODE) {
         strategy.onTicketFailed?.(ticket, code, env);
         if (strategy.onFailure === "stop") return code;
       }

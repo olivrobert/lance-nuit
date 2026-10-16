@@ -21,8 +21,8 @@ import { fingerprintInputs, pureInputsOf } from "../state/provenance.js";
 
 import { latestAttemptLog } from "../state/run-timeline.js";
 import { saveRun } from "../state/run-repository.js";
-import { hasUnfinishedWork } from "../state/run-predicates.js";
-import { type RunOutcome, recordAbsorbedInputs, updateStep } from "../state/run-transitions.js";
+import { hasUnfinishedWork, isSettledStatus } from "../state/run-predicates.js";
+import { type RunOutcome, recordAbsorbedInputs, stopRun, updateStep } from "../state/run-transitions.js";
 import { runFixLoop } from "./fix-loop.js";
 import { executePipelineOrchestration } from "./pipeline-orchestration.js";
 import { admitStep, checkInputs, type StepAdmission } from "./step-admission.js";
@@ -128,6 +128,30 @@ export interface ExecuteRunStepsOptions {
   /** `--start-at` of this invocation. It names a top-level step, so children do
    *  not inherit it. */
   startAt?: string;
+  /** `--until` of this invocation: the step after which the loop stops. A
+   *  top-level step like `startAt`, never inherited, never persisted. */
+  until?: string;
+}
+
+/** The step `--until` names. Boot already refused an unknown id with the list of
+ *  steps; reaching here without one is a caller bug, not an operator typo. */
+function untilStepOf(run: Run, until: string | undefined): RunStep | undefined {
+  if (until === undefined) return undefined;
+  const step = run.steps.find((candidate) => candidate.id === until);
+  if (!step) throw new Error(`--until: step "${until}" is not a step of pipeline "${run.name}"`);
+  return step;
+}
+
+/**
+ * Stop the run at its `--until` bound. The steps after it stay `pending` for
+ * the same reason as at a budget stop (`step-admission.ts`): they are work this
+ * invocation did not fund, not work anyone decided to skip, and only `pending`
+ * keeps the run resumable.
+ */
+function stopAtBound(run: Run, bound: RunStep, output: RunOutput): void {
+  const detail = `stop requested by --until after ${bound.def.name}: rerun to continue`;
+  stopRun(run, bound, detail, { kind: "until", detail });
+  output.emit({ type: "runner.message", level: "info", message: `⏹ ${bound.def.name} — ${detail}` });
 }
 
 export async function executeRunSteps(
@@ -184,11 +208,20 @@ export async function executeRunSteps(
     let budgetExceeded = false;
     let costUnaccounted = false;
     let costUnaccountedStop = false;
+    let boundReached = false;
+    const bound = untilStepOf(run, opts.until);
     const baseCtx = context ?? buildContext(ticket, baseBranch);
     const isAborted = () => abort.isRunAborted(run);
 
     for (const step of run.steps) {
       if (isAborted()) break;
+      // The `--until` bound is reached once its step settled (`done` or
+      // `skipped`): every exit below that leaves it unsettled breaks the loop
+      // first, so the next step is where this invocation ends.
+      if (bound && run.steps.indexOf(step) > run.steps.indexOf(bound) && isSettledStatus(bound.status)) {
+        boundReached = true;
+        break;
+      }
       // Reconsider a settled step on resume when it asked for it, when it
       // declares `input` (its outputs may have been produced from bytes that have
       // since changed), or when it reworks an artifact a human may have rejected.
@@ -344,10 +377,14 @@ export async function executeRunSteps(
     // The same holds for a guard stop restored from the snapshot: once a resume
     // skipped the step the guard killed, the latch has nothing left to withhold.
     const unfinished = hasUnfinishedWork(run);
+    // A bound with nothing owed after it changes nothing: the run completes.
+    const untilStop = boundReached && bound !== undefined && unfinished;
+    if (untilStop) stopAtBound(run, bound, loopDeps.output);
     const finalDecision = unfinished ? costDecision(run.max_cost_usd, budget) : "continue";
     return {
       failed,
-      stopped,
+      stopped: stopped || untilStop,
+      untilStop,
       budgetExceeded: budgetExceeded || (budget.exceeded === true && unfinished),
       costUnaccounted: costUnaccounted || finalDecision === "unaccounted",
       // The retry and fix gates record their refusal on the shared ledger; the
