@@ -179,6 +179,11 @@ export interface Pipeline {
   max_cost_per_work_item_usd?: number;
   /** Disable the clean Git tree guard at startup (commit and quality are dirty by nature). */
   allow_dirty?: boolean;
+  /** Reconcile mode: on every invocation, a settled step is re-admitted and its
+   *  declared outputs, not its status, decide whether it runs. Every step must
+   *  then declare an output or `rerun_on_resume`; orchestration nodes keep the
+   *  authority of their status. */
+  reconcile?: boolean;
   /** Tracker source declared by a step. When absent, `--scan` is rejected: there is
    * no implicit source or default `bugTodo` queue. */
   work_item_source?: PipelineWorkItemSource;
@@ -195,6 +200,52 @@ export interface Pipeline {
    * absent here: nothing would replay and the gate would stop forever. */
   reworks?: ReadonlyMap<string, PipelineRework>;
   steps: PipelineStep[];
+}
+
+/**
+ * Reconcile mode's classification of a step (decisions D2 and D3), owned here so
+ * the build, the validation, the admission and the loop share one answer.
+ *
+ * An orchestration node is out of scope whatever it declares: it keeps the
+ * authority of its status, so neither its outputs nor its `rerun_on_resume`
+ * make reconcile mode re-admit it.
+ */
+type ClassifiedStep = Pick<PipelineStep, "runner" | "outputs" | "rerun_on_resume">;
+
+/** In reconcile mode, the presence of the step's outputs proves its work done. */
+export function deliversOutputs(step: ClassifiedStep): boolean {
+  return step.runner !== "pipeline" && (step.outputs?.length ?? 0) > 0;
+}
+
+/** A step reconcile mode re-admits: it declares outputs to check, or a replay
+ *  it vouches for. */
+export function reconcilable(step: ClassifiedStep): boolean {
+  return deliversOutputs(step) || (step.runner !== "pipeline" && step.rerun_on_resume === true);
+}
+
+/**
+ * Steps reconcile mode has nothing to decide on. In that mode a settled step runs
+ * again unless its outputs prove its work done, so a step without output would
+ * repeat its side effects on every invocation: it must declare what it delivers,
+ * or declare itself safe to replay. Composed pipelines keep the authority of
+ * their status, and the work-item source step belongs to the runner, so neither
+ * is the author's to classify.
+ */
+export function stepsWithoutDeliverable(pipeline: Pick<Pipeline, "steps" | "work_item_source">): PipelineStep[] {
+  return pipeline.steps.filter(
+    (step) => step.runner !== "pipeline" && step.id !== pipeline.work_item_source?.step_id && !reconcilable(step),
+  );
+}
+
+/** Why reconcile mode refuses `steps`, and the two ways out. */
+export function withoutDeliverableMessage(steps: readonly PipelineStep[]): string {
+  const names = steps.map((step) => `"${step.id}"`).join(", ");
+  const subject = steps.length === 1 ? `step ${names} declares` : `steps ${names} declare`;
+  return (
+    `reconcile mode requires every step to declare what it delivers; ${subject} neither output nor rerunOnResume. ` +
+    `Declare the artifact a step produces, or a receipt of its side effect, as output; ` +
+    `or set rerunOnResume: true if replaying it on every invocation is idempotent.`
+  );
 }
 
 /** Resolve templated values that accept an `async` function. A sync function

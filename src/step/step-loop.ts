@@ -9,6 +9,7 @@ import { backendSpecForStep } from "../contracts/backends.js";
 import { extractErrors } from "../exec/report-extraction.js";
 import { executeStep, type StepResult } from "../exec/runners.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../model/context.js";
+import { reconcilable } from "../model/definition.js";
 import type { Run, RunStep } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { buildPipelineContext } from "../pipeline/context.js";
@@ -25,7 +26,7 @@ import { hasUnfinishedWork, isSettledStatus } from "../state/run-predicates.js";
 import { type RunOutcome, recordAbsorbedInputs, stopRun, updateStep } from "../state/run-transitions.js";
 import { runFixLoop } from "./fix-loop.js";
 import { executePipelineOrchestration } from "./pipeline-orchestration.js";
-import { admitStep, checkInputs, type StepAdmission } from "./step-admission.js";
+import { admitStep, answersToOutputs, checkInputs, type StepAdmission } from "./step-admission.js";
 import { runAttempt, startFreshSession } from "./step-attempt.js";
 import { resolveOutcome } from "./step-outcome.js";
 
@@ -131,6 +132,9 @@ export interface ExecuteRunStepsOptions {
   /** `--until` of this invocation: the step after which the loop stops. A
    *  top-level step like `startAt`, never inherited, never persisted. */
   until?: string;
+  /** The pipeline declares `.reconcile()`. Read from the definition loaded by
+   *  this invocation, never from the snapshot: the mode belongs to the pipeline. */
+  reconcile?: boolean;
 }
 
 /** The step `--until` names. Boot already refused an unknown id with the list of
@@ -225,13 +229,22 @@ export async function executeRunSteps(
       // Reconsider a settled step on resume when it asked for it, when it
       // declares `input` (its outputs may have been produced from bytes that have
       // since changed), or when it reworks an artifact a human may have rejected.
-      // A re-admitted step with nothing to redo costs zero.
+      // A re-admitted step with nothing to redo costs zero. Reconcile mode
+      // re-admits every step that declares what it delivers, except
+      // orchestration nodes (`runPipeline`, `forEachPipeline`), which keep the
+      // authority of their status whatever they declare. A step declaring
+      // neither output nor rerunOnResume can only be the runner's work-item
+      // source step (the build refuses any other), and keeps its status too.
+      const reconciled = opts.reconcile === true && reconcilable(step.def);
       const reconsider =
         resuming &&
-        (step.def.rerun_on_resume || (step.def.sources?.length ?? 0) > 0 || (step.def.rework_for?.length ?? 0) > 0);
+        (reconciled ||
+          step.def.rerun_on_resume ||
+          (step.def.sources?.length ?? 0) > 0 ||
+          (step.def.rework_for?.length ?? 0) > 0);
       // An operator exclusion (`--step`, `--skip`, `--start-at`) is a decision, not
       // a freshness verdict: it survives the resume that re-admits the rest.
-      if (step.status === "skipped" && !(reconsider && step.def.sources && !step.excluded)) continue;
+      if (step.status === "skipped" && !(reconsider && (reconciled || step.def.sources) && !step.excluded)) continue;
       // Skip a done step on resume unless it is reconsidered. This idempotently
       // restores Git state: create-branch moves HEAD to feature/fix, while skipping
       // would leave it on base/develop and attach commits to the wrong branch.
@@ -245,6 +258,7 @@ export async function executeRunSteps(
         output: loopDeps.output,
         replayInterrupted: opts.replayInterrupted,
         startAt: opts.startAt,
+        reconcile: opts.reconcile,
       });
       if (isAborted()) break;
       if (admission.kind === "skip") continue;
@@ -342,8 +356,10 @@ export async function executeRunSteps(
       // `updateStep(running)` cleared `errors` for this pass, so a `done` step
       // carrying one absorbed its failure. Fingerprinted here, after any fix that
       // rewrote the inputs and before a later step can: a resume then re-checks
-      // the step only when something else changed them.
-      if ((step.def.sources?.length ?? 0) > 0 && step.status === "done" && step.errors !== undefined) {
+      // the step only when something else changed them. In reconcile mode a step
+      // without input answers to its missing outputs too, so it needs the same
+      // record (an empty one) not to replay its failure on every invocation.
+      if (answersToOutputs(step.def, opts.reconcile) && step.status === "done" && step.errors !== undefined) {
         recordAbsorbedInputs(run, step, await fingerprintInputs(baseCtx, pureInputsOf(step.def)));
       }
       if (action === "failed") {

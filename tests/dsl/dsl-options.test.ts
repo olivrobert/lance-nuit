@@ -7,6 +7,7 @@ import {
   bashStep,
   type LlmStepOptions,
   llmStep,
+  pipeline,
   runPipeline,
   textArtifact,
 } from "../../src/dsl.ts";
@@ -419,4 +420,74 @@ test("capture: the runner-side rule refuses captures on a non-agent step", () =>
     stepOverrides: {},
   });
   expect(findings.map((finding) => finding.message)).toContain('step "bash": capture applies only to runner "agent"');
+});
+
+/* ------------------------------------------------------------------------- *
+ * Reconcile mode: every step declares what it delivers (decision D2).
+ * ------------------------------------------------------------------------- */
+
+const announce = () => actionStep({ id: "announce", name: "Announce", describe: "post", run: () => {} });
+const notify = () => bashStep({ id: "notify", name: "Notify", command });
+const produce = () => bashStep({ id: "produce", name: "Produce", command, output: [result] });
+const replayable = () => bashStep({ id: "context", name: "Context", command, rerunOnResume: true });
+
+test("reconcile: a step with neither output nor rerunOnResume is refused at build, with both ways out", () => {
+  const build = () => pipeline("p").reconcile().add(produce(), announce(), replayable(), notify()).build();
+
+  expect(build).toThrow(
+    'Pipeline "p": reconcile mode requires every step to declare what it delivers; ' +
+      'steps "announce", "notify" declare neither output nor rerunOnResume. ' +
+      "Declare the artifact a step produces, or a receipt of its side effect, as output; " +
+      "or set rerunOnResume: true if replaying it on every invocation is idempotent.",
+  );
+});
+
+test("reconcile: the same steps build in legacy mode", () => {
+  const built = pipeline("p").add(produce(), announce(), replayable(), notify()).build();
+
+  expect(built.reconcile).toBeUndefined();
+  expect(built.steps.map((step) => step.id)).toEqual(["produce", "announce", "context", "notify"]);
+});
+
+test("reconcile: the mode is recorded on the built pipeline, whichever builder call comes first", () => {
+  expect(pipeline("p").reconcile().add(produce()).build().reconcile).toBe(true);
+  expect(pipeline("p").add(produce()).reconcile().build().reconcile).toBe(true);
+});
+
+test("reconcile: composition nodes and the work-item source step are not the author's to classify", () => {
+  const built = pipeline("p")
+    .reconcile()
+    .forEachWorkItem({
+      queue: "bugTodo",
+      do: [produce(), runPipeline({ id: "child", name: "Child", pipeline: "other" })],
+    })
+    .build();
+
+  expect(built.steps.map((step) => step.id)).toEqual(["ticket", "produce", "child"]);
+});
+
+function structureFindings(pipelineDefinition: Record<string, unknown>): string[] {
+  return new PipelineStructureValidator()
+    .validate({
+      source: "test.ts",
+      pipeline: { name: "raw", ...pipelineDefinition } as never,
+      profileOverrides: {},
+      stepOverrides: {},
+    })
+    .map((finding) => finding.message);
+}
+
+test("reconcile: a raw definition is held to the same rule at validation", () => {
+  const steps = [
+    { id: "notify", name: "Notify", command: "true", runner: "bash" },
+    { id: "produce", name: "Produce", command: "true", runner: "bash", outputs: [result] },
+  ];
+
+  expect(structureFindings({ reconcile: true, steps })).toEqual([
+    'reconcile mode requires every step to declare what it delivers; step "notify" declares neither output ' +
+      "nor rerunOnResume. Declare the artifact a step produces, or a receipt of its side effect, as output; " +
+      "or set rerunOnResume: true if replaying it on every invocation is idempotent.",
+  ]);
+  expect(structureFindings({ steps })).toEqual([]);
+  expect(structureFindings({ reconcile: "yes", steps })).toEqual(["reconcile must be a boolean"]);
 });

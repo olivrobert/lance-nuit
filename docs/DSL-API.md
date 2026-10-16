@@ -62,6 +62,11 @@ export interface Pipeline {
     max_cost_per_work_item_usd?: number;
     /** Disable the clean Git tree guard at startup (commit and quality are dirty by nature). */
     allow_dirty?: boolean;
+    /** Reconcile mode: on every invocation, a settled step is re-admitted and its
+     *  declared outputs, not its status, decide whether it runs. Every step must
+     *  then declare an output or `rerun_on_resume`; orchestration nodes keep the
+     *  authority of their status. */
+    reconcile?: boolean;
     /** Tracker source declared by a step. When absent, `--scan` is rejected: there is
      * no implicit source or default `bugTodo` queue. */
     work_item_source?: PipelineWorkItemSource;

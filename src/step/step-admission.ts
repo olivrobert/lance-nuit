@@ -10,9 +10,9 @@ import { runBashAsync } from "../exec/runners.js";
 import { errorMessage } from "../lib/errors.js";
 import { truncate } from "../lib/truncate.js";
 import type { PipelineContext } from "../model/context.js";
-import { resolveTemplateAsync } from "../model/definition.js";
+import { deliversOutputs, resolveTemplateAsync } from "../model/definition.js";
 import type { RunStopState } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { Run, RunStep, StepDefinition } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { costDecision, type RunBudget } from "../state/budget.js";
 import { pendingRejection } from "../state/decisions.js";
@@ -25,6 +25,10 @@ import { absorbNonBlocking } from "./non-blocking.js";
 
 /** Reason logged when declared inputs still match every produced output. */
 const SKIP_UP_TO_DATE = "outputs up to date with declared inputs";
+
+/** Reason logged, in reconcile mode, when a step without declared input finds
+ *  every output it declares: nothing it reads can have made them stale. */
+const SKIP_OUTPUTS_PRESENT = "outputs present";
 
 /** Reason logged when an absorbed failure's inputs still match those it settled at. */
 const SKIP_ABSORBED_UNCHANGED = "failure absorbed, inputs unchanged since";
@@ -125,6 +129,17 @@ export interface AdmitStepInput {
    *  is persisted until the step settles and would authorize a replay nobody
    *  asked for on a later resume. */
   startAt?: string;
+  /** The pipeline declares `.reconcile()`: declared outputs, not only declared
+   *  inputs, decide whether the step still owes work. */
+  reconcile?: boolean;
+}
+
+/** Whether the step's outputs decide if it still owes work: always when it
+ *  declares input, and in reconcile mode as soon as it delivers an output —
+ *  their presence then proves the work done, since nothing it reads can stale
+ *  them. An orchestration node never does: its children decide (D3). */
+export function answersToOutputs(def: StepDefinition, reconcile: boolean | undefined): boolean {
+  return (def.sources?.length ?? 0) > 0 || (reconcile === true && deliversOutputs(def));
 }
 
 /** Persist a guard rejection with the same blocking/non-blocking semantics. */
@@ -249,6 +264,7 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
   }
 
   const declaresInput = (step.def.sources?.length ?? 0) > 0;
+  const decidedByOutputs = answersToOutputs(step.def, input.reconcile);
   const admissions = admissionsToEvaluate(step);
   if (admissions.length > 0) {
     const decision = await checkInputs(step, baseCtx, admissions);
@@ -278,7 +294,7 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
   // A `--start-at` replay skips the freshness check too: it does not track the
   // repository tree, which is what an operator fixes before replaying. So does a
   // pass left unfinished: adopting what it wrote would settle a partial output.
-  if (declaresInput && !rejected && step.replay !== true && !passLeftUnfinished(step)) {
+  if (decidedByOutputs && !rejected && step.replay !== true && !passLeftUnfinished(step)) {
     // An absorbed failure wrote no outputs, so freshness would read them missing
     // and re-run the check on every resume. Its own fix may also have rewritten
     // its inputs; the record was taken after that fix, so only a change from
@@ -290,7 +306,11 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
     ) {
       return applyInputDecision(run, step, input.output, "skip", SKIP_ABSORBED_UNCHANGED);
     }
+    // Without input, freshness reduces to presence: no fingerprint can differ.
     const report = await stepFreshness(baseCtx, step.def);
+    if (!report.mustRun && !declaresInput) {
+      return applyInputDecision(run, step, input.output, "skip", SKIP_OUTPUTS_PRESENT);
+    }
     if (!report.mustRun) {
       // Adopt before skipping: an output produced before this record existed keeps
       // its content and gains the fingerprints it is being trusted against.

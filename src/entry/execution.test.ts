@@ -21,7 +21,7 @@ function makeRun(steps: RunStep[]): Run {
 }
 
 /** Capture what the header wrote to stderr. */
-function announce(run: Run): string {
+function announce(run: Run, reconcile = false): string {
   const previous = process.stderr.write.bind(process.stderr);
   let captured = "";
   process.stderr.write = ((chunk: string | Uint8Array) => {
@@ -29,7 +29,7 @@ function announce(run: Run): string {
     return true;
   }) as typeof process.stderr.write;
   try {
-    announceRun(run, {} as RunnerArgs);
+    announceRun(run, {} as RunnerArgs, reconcile);
   } finally {
     process.stderr.write = previous;
   }
@@ -83,4 +83,13 @@ test("each family lands on its own line", () => {
   expect(out).toContain("Re-run on resume: replayed\n");
   expect(out).toContain("Skipped: dropped\n");
   expect(out).not.toContain("later");
+});
+
+test("in reconcile mode, a completed step declaring an output is announced as re-checked, not as done", () => {
+  const steps = () => [step("branch", { outputs: [specArtifact] }), step("child", { runner: "pipeline" })];
+  const out = announce(makeRun(steps()), true);
+  expect(out).toContain("Re-checked on resume: branch\n");
+  // An orchestration node keeps the authority of its status.
+  expect(out).toContain("Resumed — already done: child\n");
+  expect(announce(makeRun(steps()))).toContain("Resumed — already done: branch, child\n");
 });
