@@ -127,7 +127,9 @@ test("S5: a runner killed during publish stops the resume until the replay is au
   expect(state.outcome?.phase).toBe("publish");
   // The snapshot keeps the dead attempt's status: the stop does not settle it.
   expect(statuses(cwd).publish).toBe("running");
-  // CHEAP steps before publish replay; publish itself does not run.
+  // Pinned defect: the rerunOnResume steps before publish, prepare's database
+  // reset included, replay before the interruption guard stops the resume, so a
+  // resume that does nothing still pays for them. publish itself does not run.
   expect(trace(cwd).slice(FULL.length - 1)).toEqual(["context", "prepare", "quality"]);
   // A clean stop is not a failure: the process exits 0, only the snapshot says STOPPED.
   expect(stopped.status).toBe(0);
