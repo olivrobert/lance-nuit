@@ -1,6 +1,6 @@
 import { VERDICT_FIELD_NAMES } from "../contracts/verdict.js";
 import { isLogicalSegment } from "../model/artifact-ports.js";
-import type { PipelineStep } from "../model/definition.js";
+import { type PipelineStep, stepsWithoutDeliverable, withoutDeliverableMessage } from "../model/definition.js";
 import type { PipelineValidationContext, PipelineValidationFinding, PipelineValidationRule } from "./types.js";
 
 const VALID_RUNNERS = new Set(["agent", "bash", "noop", "fn", "pipeline"]);
@@ -46,6 +46,14 @@ export class PipelineStructureValidator implements PipelineValidationRule {
       if (value != null && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) {
         fail(`${field} must be a strictly positive number`);
       }
+    }
+
+    if (context.pipeline.reconcile != null && typeof context.pipeline.reconcile !== "boolean") {
+      fail("reconcile must be a boolean");
+    }
+    if (context.pipeline.reconcile === true) {
+      const unclassified = stepsWithoutDeliverable({ ...context.pipeline, steps: stepsOf(context) });
+      if (unclassified.length > 0) fail(withoutDeliverableMessage(unclassified));
     }
 
     const seenIds = new Set<string>();

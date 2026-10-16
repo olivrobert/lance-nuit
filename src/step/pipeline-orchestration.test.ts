@@ -1848,3 +1848,57 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   // Nothing in the scope once both loops have returned.
   expect(abort.activeRuns()).toEqual([]);
 });
+
+test("pipeline-orchestration: a child declaring .reconcile() is resumed in reconcile mode", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pipeline-compose-reconcile-"));
+  try {
+    writePipeline(
+      root,
+      "child",
+      `
+import { appendFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+
+export default ({ pipeline, actionStep, textArtifact }) => {
+  const delivered = textArtifact("delivered.txt");
+  return pipeline("child")
+    .reconcile()
+    .add(
+      actionStep({ id: "produce", name: "produce", describe: "produce", output: [delivered],
+        run: async (ctx) => { appendFileSync(join(ctx.cwd, "trace.log"), "produce\\n"); await delivered.write(ctx, "done\\n"); } }),
+      actionStep({ id: "check", name: "check", describe: "check", rerunOnResume: true,
+        run: (ctx) => { if (existsSync(join(ctx.cwd, "fail-check"))) throw new Error("check: forced failure"); } }),
+    )
+    .build();
+};
+`,
+    );
+    const parentPath = writePipeline(
+      root,
+      "parent",
+      `
+export default ({ pipeline, runPipeline }) => pipeline("parent")
+  .add(runPipeline({ id: "child", name: "Child", pipeline: "./child.ts" })).build();
+`,
+    );
+    const runDir = join(root, "parent-run");
+    writeFileSync(join(root, "fail-check"), "");
+    const failed = await executeParent(parentPath, root, "P", runDir, true);
+    expect(failed.run.status).toBe("FAIL");
+    rmSync(join(root, "fail-check"));
+
+    const resumed = await executeParent(parentPath, root, "P", runDir, false);
+
+    expect(resumed.run.status).toBe("PASS");
+    expect(readFileSync(join(root, "trace.log"), "utf8")).toBe("produce\n");
+    const childRun = resumed.run.steps[0]!.orchestration!.children[0]!;
+    const childCtx = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
+    const childEvents = readRunEvents(join(pipelineRunsDir("child", "P", childCtx), childRun.runId!));
+    // Only reconcile mode re-admits a done step without input: legacy would trust its status silently.
+    expect(childEvents.filter((event) => event.type === "step.skipped")).toEqual([
+      expect.objectContaining({ stepId: "produce", reason: "outputs present" }),
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

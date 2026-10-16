@@ -11,6 +11,7 @@ import { startLiveFeed } from "./feed.js";
 import { enforceCleanTree } from "../boot/gitguard.js";
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineContext } from "../model/context.js";
+import { reconcilable } from "../model/definition.js";
 import type { Run, RunStep } from "../model/run.js";
 import { consoleReport } from "../output/console-reporter.js";
 import { ConsoleRunOutput, LiveFeedOutput } from "../output/run-output.js";
@@ -185,8 +186,9 @@ export function wireRunOutputs(run: Run, args: RunnerArgs): WiredOutputs {
   };
 }
 
-/** Header printed before the first step: what runs, and what a resume skipped. */
-export function announceRun(run: Run, args: RunnerArgs): void {
+/** Header printed before the first step: what runs, and what a resume skipped.
+ *  `reconcile` is the pipeline's mode, which widens what the loop re-admits. */
+export function announceRun(run: Run, args: RunnerArgs, reconcile = false): void {
   log(`\nPipeline: ${run.name}`);
   if (args.ticket) log(`Ticket: ${args.ticket}`);
   if (run.max_cost_usd) log(`Budget: $${run.max_cost_usd}`);
@@ -198,7 +200,8 @@ export function announceRun(run: Run, args: RunnerArgs): void {
   // replays unconditionally, while a step declaring `input` or reworking a gated
   // artifact is only re-examined and costs nothing when its sources have not moved
   // and no rejection is pending.
-  const reexamined = (s: RunStep) => (s.def.sources?.length ?? 0) > 0 || (s.def.rework_for?.length ?? 0) > 0;
+  const reexamined = (s: RunStep) =>
+    (s.def.sources?.length ?? 0) > 0 || (s.def.rework_for?.length ?? 0) > 0 || (reconcile && reconcilable(s.def));
   const rerun = done.filter((s) => s.def.rerun_on_resume);
   const rechecked = done.filter((s) => !s.def.rerun_on_resume && reexamined(s));
   const settled = done.filter((s) => !s.def.rerun_on_resume && !reexamined(s));

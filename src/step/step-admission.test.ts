@@ -247,3 +247,165 @@ test("interrupted: the --start-at target of this invocation is ready without aut
   expect(refused.kind === "stopped" && refused.reason).toMatch(/LATER.*--replay-interrupted.*replayInterrupted: true/s);
   expect(run.outcome).toMatchObject({ phase: "later", resumable: true, stop: { kind: "needs-decision" } });
 });
+
+// ── Reconcile mode: outputs without input ────────────────────────────────────
+
+/** A step producing `plan.md` from nothing it declares, like a branch creation. */
+function deliverableStep(state: Parameters<typeof makeRunStep>[1], def: Partial<PipelineStep> = {}): RunStep {
+  return reworkStep({ rework_for: undefined, ...def }, state);
+}
+
+async function admitReconciled(step: RunStep, ctx: PipelineContext, extra: { startAt?: string } = {}) {
+  const run = { name: "p", pipeline: "p", pipeline_path: "p.ts", run_dir: ctx.cwd, steps: [step] } as Run;
+  const admission = await admitStep({
+    run,
+    step,
+    baseCtx: ctx,
+    budget: { cumulative: 0 },
+    output: NULL_RUN_OUTPUT,
+    reconcile: true,
+    ...extra,
+  });
+  return { admission, events: readRunEvents(run.run_dir) };
+}
+
+test("reconcile: a done step whose outputs are all present is skipped, stays done, and adopts nothing", async () => {
+  const { values, ctx } = reworkContext({ "plan.md": "v1" });
+  const step = deliverableStep({ status: "done", control: { duration_ms: 1, total_cost_usd: 0.4 } });
+
+  const { admission, events } = await admitReconciled(step, ctx);
+
+  expect(admission.kind).toBe("skip");
+  expect(step.status).toBe("done");
+  // The spend of the pass that produced the outputs is kept: the ledger seeds from it.
+  expect(step.control?.total_cost_usd).toBe(0.4);
+  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({
+    stepId: "plan",
+    reason: "outputs present",
+  });
+  // No input, nothing to bind an output to: no provenance record is written.
+  expect([...values.keys()]).toEqual(["plan.md"]);
+});
+
+test("reconcile: a pending step of a new run whose outputs are present is skipped, not run", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const step = deliverableStep({ status: "pending" });
+
+  const { admission } = await admitReconciled(step, ctx);
+
+  expect(admission.kind).toBe("skip");
+  expect(step.status).toBe("skipped");
+});
+
+test("reconcile: a step missing one of its outputs runs", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const step = deliverableStep(
+    { status: "done", control: { duration_ms: 1 } },
+    {
+      outputs: [planArtifact, textArtifact("plan-audit.json")],
+    },
+  );
+
+  expect((await admitReconciled(step, ctx)).admission.kind).toBe("ready");
+});
+
+test("legacy: a step whose outputs are present but which declares no input runs", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const step = deliverableStep({ status: "pending" });
+
+  expect((await admitRework(step, ctx)).admission.kind).toBe("ready");
+});
+
+test("reconcile: a step requeued by --start-at runs although its outputs are present", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const step = deliverableStep({ status: "pending", replay: true, control: { duration_ms: 1 } });
+
+  expect((await admitReconciled(step, ctx)).admission.kind).toBe("ready");
+});
+
+test("reconcile: when decides before the outputs", async () => {
+  const { ctx } = reworkContext({});
+  const step = deliverableStep(
+    { status: "done", control: { duration_ms: 1 } },
+    {
+      inputs: [skipIf(() => true, "not this time")],
+    },
+  );
+
+  const { admission, events } = await admitReconciled(step, ctx);
+  expect(admission.kind).toBe("skip");
+  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({ reason: "not this time" });
+});
+
+test("reconcile: a step declaring no output but rerunOnResume runs", async () => {
+  const { ctx } = reworkContext({});
+  const step = deliverableStep(
+    { status: "done", control: { duration_ms: 1 } },
+    {
+      outputs: undefined,
+      rerun_on_resume: true,
+    },
+  );
+
+  expect((await admitReconciled(step, ctx)).admission.kind).toBe("ready");
+});
+
+test("reconcile: an absorbed failure without input is not re-run while its record holds", async () => {
+  const { ctx } = reworkContext({});
+  const step = deliverableStep({
+    status: "done",
+    control: { duration_ms: 1 },
+    errors: "audit failed",
+    absorbed_inputs: {},
+  });
+
+  const { admission, events } = await admitReconciled(step, ctx);
+
+  expect(admission.kind).toBe("skip");
+  expect(step.status).toBe("done");
+  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({
+    reason: "failure absorbed, inputs unchanged since",
+  });
+});
+
+for (const state of UNFINISHED_PASSES) {
+  test(`reconcile: a step left ${state.status} without input does not adopt the outputs its pass left`, async () => {
+    const { ctx } = reworkContext({ "plan.md": "partial" });
+    const step = deliverableStep({ ...state });
+
+    const { admission, events } = await admitReconciled(step, ctx);
+    expect(admission.kind).toBe("ready");
+    expect(events.some((event) => event.type === "step.skipped")).toBe(false);
+  });
+}
+
+test("reconcile: a step the runner died in is not settled by the outputs it left, the guard asks first", async () => {
+  const { ctx } = reworkContext({ "plan.md": "partial" });
+  const died = interruptedStep("plan");
+  const step = makeRunStep({ ...died.def, outputs: [planArtifact] }, { ...died });
+
+  const { admission, events } = await admitReconciled(step, ctx);
+
+  expect(admission.kind).toBe("stopped");
+  expect(events.some((event) => event.type === "step.skipped")).toBe(false);
+});
+
+test("reconcile: an orchestration node declaring a present output still runs, its children decide", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const node = makeRunStep(
+    {
+      id: "children",
+      name: "Children",
+      command: "",
+      runner: "pipeline",
+      orchestration: { kind: "runPipeline", pipeline: "child" },
+      outputs: [planArtifact],
+    },
+    { status: "pending" },
+  );
+
+  const { admission, events } = await admitReconciled(node, ctx);
+
+  expect(admission.kind).toBe("ready");
+  expect(events.some((event) => event.type === "step.skipped")).toBe(false);
+});

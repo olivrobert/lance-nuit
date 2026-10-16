@@ -25,6 +25,8 @@ export const TICKET = "T-1";
 export const PIPELINE = "route";
 
 export interface RouteOptions {
+  /** Declares `.reconcile()` on the pipeline, between `pipeline("route")` and its steps. */
+  reconcile?: boolean;
   /** Adds `comment`, a side effect with neither receipt nor `rerunOnResume`. */
   unclassified?: boolean;
   /**
@@ -86,6 +88,7 @@ export function routeSource(options: RouteOptions = {}): string {
       step("publish", { input: [commit], output: [mr] }, [mr]),${comment}
       step("report", { rerunOnResume: true }),
     `;
+  const mode = options.reconcile ? ".reconcile()" : "";
   const body = options.scan ? `.forEachWorkItem({ queue: "bugTodo", scan: {}, do: [${steps}] })` : `.add(${steps})`;
   return `import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -114,7 +117,7 @@ export default ({ pipeline, actionStep, textArtifact }: any) => {
       },
     });
 
-  return pipeline("route")
+  return pipeline("route")${mode}
     ${body}
     .build();
 };
@@ -337,6 +340,13 @@ export async function killDuring(cwd: string, id: string, ...args: string[]): Pr
     rmSync(hang, { force: true });
   }
   return { status: child.exitCode, stdout, stderr };
+}
+
+/** Deletes artifact `name` of `T-1` by hand, as an operator discarding a deliverable would. */
+export function removeArtifact(cwd: string, name: string): void {
+  const path = join(workItemDir(cwd), "artifacts", name);
+  if (!existsSync(path)) throw new Error(`removeArtifact: ${name} does not exist`);
+  rmSync(path);
 }
 
 /** Changes the bytes of `ticket.md`, the pure input of `triage` and `plan`. */
