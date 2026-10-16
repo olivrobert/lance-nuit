@@ -87,6 +87,27 @@ export function checkRunArgs(args: RunnerArgs): string | undefined {
 }
 
 /**
+ * Check `--until` against the loaded pipeline, before anything is recorded or
+ * spawned: under `--scan`, a typo would otherwise stop every child at boot.
+ * The unknown-step message has the shape of the `--start-at` one.
+ */
+export function checkUntil(args: RunnerArgs, pipelineDef: Pipeline): string | undefined {
+  if (args.until === undefined) return undefined;
+  const ids = pipelineDef.steps.map((step) => step.id);
+  const bound = ids.indexOf(args.until);
+  if (bound < 0) {
+    return `--until: step "${args.until}" not found in pipeline "${pipelineDef.name}" (steps: ${ids.join(", ")}).`;
+  }
+  // Every step before the --start-at target is skipped, so a bound among them is
+  // already reached: the run would stop without running anything.
+  const start = args.startAt === undefined ? -1 : ids.indexOf(args.startAt);
+  if (start > bound) {
+    return `--until: step "${args.until}" comes before --start-at step "${args.startAt}" in pipeline "${pipelineDef.name}": nothing would run.`;
+  }
+  return undefined;
+}
+
+/**
  * Refuse a run whose working directory has drifted inside an existing kit.
  *
  * A shell keeps its directory between commands, so a `cd` made for an unrelated
@@ -239,6 +260,12 @@ export async function startup(argv: string[]): Promise<StartupOutcome> {
   // in the parent's context.
   const pipelineDef = await loadPipelineDefinition(pipelinePath, context);
   const stateStore = new FileRunStateStore({ context, pipeline: pipelineDef.name, ticket: args.ticket });
+
+  const untilError = checkUntil(args, pipelineDef);
+  if (untilError) {
+    log(untilError);
+    return { kind: "exit", code: 1 };
+  }
 
   const approval = await applyApproval(args, pipelineDef, context);
   if (approval.kind === "error") {

@@ -128,7 +128,8 @@ A snapshot also records where and why the run stands where it does:
 - `outcome.stop` describes a clean stop without making a reader parse
   `stopped_reason`: `detail` is the reason without the console decoration,
   `kind` is the expected recovery (`needs-info`, `needs-decision`, `needs-human`,
-  or `blocked` for a step whose `fail_cause` says so), `subject` is the
+  `blocked` for a step whose `fail_cause` says so, or `until` for the bound an
+  operator set with `--until`, which a plain rerun lifts), `subject` is the
   approval subject that lifts the stop when the gate declares one, and
   `artifact` (`artifacts/<name>`) is the artifact a `humanReview` gate is
   about — the file the dashboard opens under the decision, since only the
@@ -425,7 +426,7 @@ The file holds the pipeline, the provider, the project, the queue, the effective
 | --- | --- |
 | `pending` | discovered and selected, never started |
 | `running` | handed to a child that has not come back |
-| `done` | settled, with its `outcome` (`fixed`, `escalated`, `failed`, `skipped`) and the child's `runId` when it wrote a snapshot |
+| `done` | settled, with its `outcome` (`fixed`, `escalated`, `until` for a child stopped at the `--until` bound the scan forwarded, `failed`, `skipped`) and the child's `runId` when it wrote a snapshot |
 | `deferred` | discovered but cut by the limit; re-run the scan, or raise `--limit` |
 
 The record is rewritten in full at every transition — before discovery, when

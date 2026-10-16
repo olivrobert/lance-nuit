@@ -17,8 +17,9 @@ export type ItemStatus = "STOPPED" | "FAIL" | "ABORTED" | "RUNNING" | "PASS";
  *  gates: both wait for the same person. */
 export type ItemGroup = "decision" | "failure" | "running" | "done";
 
-/** Expected recovery for a clean stop, as the runner recorded it. */
-export type ItemStopKind = "needs-info" | "needs-decision" | "needs-human" | "blocked";
+/** Expected recovery for a clean stop, as the runner recorded it. `until` is a
+ *  stop the operator asked for with `--until`: a rerun continues the run. */
+export type ItemStopKind = "needs-info" | "needs-decision" | "needs-human" | "blocked" | "until";
 
 /** Failure kind in the dashboard's words: a judgment call the agent made, or an
  *  incident it hit. The runner persists `verdict` / `technical`. */

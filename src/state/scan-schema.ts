@@ -12,7 +12,13 @@ import * as z from "zod";
 import type { AssertAssignable, Plain } from "../lib/type-assertions.js";
 import type { DispatchOutcomeKind, ScanAbort, ScanRecord, ScanTicketState } from "../model/scan-record.js";
 
-const OUTCOME_KINDS = ["fixed", "escalated", "failed", "skipped"] as const satisfies readonly DispatchOutcomeKind[];
+const OUTCOME_KINDS = [
+  "fixed",
+  "escalated",
+  "until",
+  "failed",
+  "skipped",
+] as const satisfies readonly DispatchOutcomeKind[];
 const ABORT_PHASES = ["discovery", "between-tickets"] as const satisfies readonly ScanAbort["phase"][];
 
 const ScanAbortSchema = z.looseObject({

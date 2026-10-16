@@ -270,3 +270,19 @@ test("a step replayed after an interrupted attempt is marked in the report", () 
   expect(text).toContain("✓ Check  20s  ↻ replayed after interruption");
   expect(text).not.toMatch(/Tests.*replayed after interruption/);
 });
+
+test("a stop requested by --until asks for a rerun, not for a condition to address", () => {
+  const run = sampleRun();
+  run.steps[2]!.status = "done";
+  run.status = "STOPPED";
+  const detail = "stop requested by --until after Reuse Audit: rerun to continue";
+  run.outcome = { phase: "audit", reason: detail, logPath: null, resumable: true, stop: { kind: "until", detail } };
+  const stopped = { ...outcome, failed: false, stopped: true };
+
+  const report = buildRunReport(run, stopped);
+
+  expect(report.kind).toBe("stopped");
+  expect(report.action).toBe("Rerun without --until, or with a later step, to continue.");
+  delete run.outcome.stop;
+  expect(buildRunReport(run, stopped).action).toBe("Address the reported stop condition before resuming.");
+});

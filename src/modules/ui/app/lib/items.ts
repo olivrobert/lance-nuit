@@ -40,6 +40,8 @@ export function headlineOf(item: Item): string {
   if (item.group === "running") return "Execution in progress";
   if (item.closed) return "Closed by hand";
   if (item.group === "done") return "Run completed";
+  // Nothing to decide: the operator bounded the run and only has to rerun it.
+  if (item.stop?.kind === "until") return "Stopped as requested";
   return item.stop?.subject ? `Review ${item.stop.subject}` : "Your input is needed";
 }
 

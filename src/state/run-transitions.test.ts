@@ -24,6 +24,7 @@ const outcome: RunOutcome = {
   budgetExceeded: false,
   costUnaccounted: false,
   costUnaccountedStop: false,
+  untilStop: false,
   cumulativeCost: 0.3,
 };
 
@@ -233,6 +234,7 @@ function unaccountedReport(overrides: Partial<RunOutcome> = {}): string {
     // The admission gate withheld step "b": the accounting stop is the REASON the
     // run ended, which is what earns the headline and the recovery command.
     costUnaccountedStop: true,
+    untilStop: false,
     cumulativeCost: 0,
     ...overrides,
   };

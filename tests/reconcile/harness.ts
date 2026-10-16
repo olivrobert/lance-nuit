@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 const runnerEntry = resolve(import.meta.dir, "../../src/runner.ts");
+const fakeWorkItems = resolve(import.meta.dir, "../../src/modules/work-item/fake.ts");
 const RUN_TIMEOUT_MS = 25_000;
 const KILL_WAIT_TIMEOUT_MS = 15_000;
 
@@ -26,6 +27,14 @@ export const PIPELINE = "route";
 export interface RouteOptions {
   /** Adds `comment`, a side effect with neither receipt nor `rerunOnResume`. */
   unclassified?: boolean;
+  /**
+   * Tickets a `--scan` discovers. The steps then sit inside
+   * `forEachWorkItem({ queue: "bugTodo", scan })`, whose source step writes each
+   * ticket's `ticket.md`, and the tracker is the in-memory gateway of the
+   * `--scan` unit tests (`modules/work-item/fake.ts`), registered through an
+   * extension module.
+   */
+  scan?: readonly string[];
 }
 
 export interface RunResult {
@@ -65,6 +74,19 @@ function git(cwd: string, ...args: string[]): void {
 /** Source of `.lance-nuit/pipelines/route.ts`. */
 export function routeSource(options: RouteOptions = {}): string {
   const comment = options.unclassified ? `\n      step("comment", {}),` : "";
+  const steps = `
+      step("context", { rerunOnResume: true }),
+      step("branch", { output: [branch] }, [branch]),
+      step("triage", { input: [ticket], output: [triage] }, [triage]),
+      step("plan", { input: [ticket, triage], output: [plan] }, [plan]),
+      step("prepare", { rerunOnResume: true }),
+      step("implement", { input: [plan], output: [impl] }, [impl]),
+      step("quality", { rerunOnResume: true }),
+      step("commit", { input: [impl], output: [commit] }, [commit]),
+      step("publish", { input: [commit], output: [mr] }, [mr]),${comment}
+      step("report", { rerunOnResume: true }),
+    `;
+  const body = options.scan ? `.forEachWorkItem({ queue: "bugTodo", scan: {}, do: [${steps}] })` : `.add(${steps})`;
   return `import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -93,25 +115,26 @@ export default ({ pipeline, actionStep, textArtifact }: any) => {
     });
 
   return pipeline("route")
-    .add(
-      step("context", { rerunOnResume: true }),
-      step("branch", { output: [branch] }, [branch]),
-      step("triage", { input: [ticket], output: [triage] }, [triage]),
-      step("plan", { input: [ticket, triage], output: [plan] }, [plan]),
-      step("prepare", { rerunOnResume: true }),
-      step("implement", { input: [plan], output: [impl] }, [impl]),
-      step("quality", { rerunOnResume: true }),
-      step("commit", { input: [impl], output: [commit] }, [commit]),
-      step("publish", { input: [commit], output: [mr] }, [mr]),${comment}
-      step("report", { rerunOnResume: true }),
-    )
+    ${body}
     .build();
 };
 `;
 }
 
-function workItemDir(cwd: string): string {
-  return join(cwd, ".lance-nuit", "work-items", TICKET);
+/** Extension module registering the `fake` work-item provider, seeded with the
+ *  tickets a `--scan` discovers. */
+function scanExtensionSource(tickets: readonly string[]): string {
+  const items = tickets.map((ref) => ({ ref, queues: ["bugTodo"], state: "todo" }));
+  return `import { createFakeWorkItemGateway } from ${JSON.stringify(fakeWorkItems)};
+
+export default {
+  workItems: [{ id: "fake", create: () => createFakeWorkItemGateway({ items: ${JSON.stringify(items)} }) }],
+};
+`;
+}
+
+function workItemDir(cwd: string, ticket: string = TICKET): string {
+  return join(cwd, ".lance-nuit", "work-items", ticket);
 }
 
 function ticketPath(cwd: string): string {
@@ -136,6 +159,18 @@ export function scratchRoute(options: RouteOptions = {}): string {
   mkdirSync(dirname(ticketPath(cwd)), { recursive: true });
   writeFileSync(ticketPath(cwd), "# T-1\n\nRoute the request.\n");
   git(cwd, "init", "-q");
+  if (options.scan) {
+    // Between tickets, a scan checks out the configured base branch, `main` by default.
+    git(cwd, "symbolic-ref", "HEAD", "refs/heads/main");
+    writeFileSync(join(cwd, ".lance-nuit", "extensions.mjs"), scanExtensionSource(options.scan));
+    writeFileSync(
+      join(cwd, ".lance-nuit", "config.json"),
+      JSON.stringify({
+        workItem: { provider: "fake", project: "T" },
+        extensions: { module: "./.lance-nuit/extensions.mjs" },
+      }),
+    );
+  }
   git(cwd, "config", "user.name", "lance-nuit acceptance");
   git(cwd, "config", "user.email", "acceptance@example.invalid");
   git(cwd, "add", ".");
@@ -155,7 +190,12 @@ function runnerArgs(args: readonly string[]): string[] {
 
 /** One runner invocation on `T-1` with the `route` pipeline. */
 export function run(cwd: string, ...args: string[]): RunResult {
-  const result = spawnSync(process.execPath, runnerArgs(args), {
+  return runRaw(cwd, TICKET, "--pipeline", PIPELINE, ...args);
+}
+
+/** One runner invocation with exactly `args`: neither a ticket nor a pipeline is added. */
+export function runRaw(cwd: string, ...args: string[]): RunResult {
+  const result = spawnSync(process.execPath, [runnerEntry, ...args], {
     cwd,
     encoding: "utf8",
     timeout: RUN_TIMEOUT_MS,
@@ -171,9 +211,62 @@ export function trace(cwd: string): string[] {
   return readFileSync(path, "utf8").split("\n").filter(Boolean);
 }
 
+function latestLink(cwd: string, ticket: string): string {
+  return join(workItemDir(cwd, ticket), "runs", PIPELINE, "latest");
+}
+
 /** Id of the run `latest` points at. */
-export function latestRunId(cwd: string): string {
-  return readlinkSync(join(workItemDir(cwd), "runs", PIPELINE, "latest"));
+export function latestRunId(cwd: string, ticket: string = TICKET): string {
+  return readlinkSync(latestLink(cwd, ticket));
+}
+
+function latestRunDir(cwd: string, ticket: string): string {
+  return join(workItemDir(cwd, ticket), "runs", PIPELINE, latestRunId(cwd, ticket));
+}
+
+function journalLines(cwd: string, ticket: string): string[] {
+  const path = join(latestRunDir(cwd, ticket), "events.jsonl");
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8").split("\n").filter(Boolean);
+}
+
+/** How far the trace and the journal of the `latest` run went, so a scenario
+ *  reads what the invocations after it added. */
+export interface Mark {
+  traceLength: number;
+  runId?: string;
+  journalLength: number;
+}
+
+export function mark(cwd: string, ticket: string = TICKET): Mark {
+  const traceLength = trace(cwd).length;
+  if (!existsSync(latestLink(cwd, ticket))) return { traceLength, journalLength: 0 };
+  return { traceLength, runId: latestRunId(cwd, ticket), journalLength: journalLines(cwd, ticket).length };
+}
+
+/** Ids of the steps whose action ran since `since`, in order. */
+export function traceSince(cwd: string, since: Mark): string[] {
+  return trace(cwd).slice(since.traceLength);
+}
+
+export interface SkipEvent {
+  stepId: string;
+  reason: string;
+  freshness?: string;
+}
+
+/**
+ * Why admission skipped steps since `since`: the `step.skipped` events of the
+ * `latest` run's journal. When `latest` is a new run since the mark, its whole
+ * journal counts.
+ */
+export function skipsSince(cwd: string, since: Mark, ticket: string = TICKET): SkipEvent[] {
+  const sameRun = since.runId !== undefined && since.runId === latestRunId(cwd, ticket);
+  return journalLines(cwd, ticket)
+    .slice(sameRun ? since.journalLength : 0)
+    .map((line) => JSON.parse(line) as SkipEvent & { type?: string })
+    .filter((event) => event.type === "step.skipped")
+    .map(({ stepId, reason, freshness }) => ({ stepId, reason, ...(freshness ? { freshness } : {}) }));
 }
 
 export interface StepSnapshot {
@@ -191,8 +284,8 @@ export interface RunSnapshot {
 }
 
 /** `state.json` of the `latest` run. */
-export function snapshot(cwd: string): RunSnapshot {
-  const path = join(workItemDir(cwd), "runs", PIPELINE, latestRunId(cwd), "state.json");
+export function snapshot(cwd: string, ticket: string = TICKET): RunSnapshot {
+  const path = join(latestRunDir(cwd, ticket), "state.json");
   return JSON.parse(readFileSync(path, "utf8")) as RunSnapshot;
 }
 

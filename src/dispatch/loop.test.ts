@@ -2,6 +2,7 @@
 // differences in dispatch behavior instead of flattening them accidentally.
 
 import { expect, test } from "bun:test";
+import { UNTIL_STOP_EXIT_CODE } from "../model/cli-options.ts";
 import type { Pipeline } from "../model/definition.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { classifyPersistedRunOutcome, type DispatchDeps, runDispatch } from "./loop.ts";
@@ -284,6 +285,29 @@ test("classifyPersistedRunOutcome: present stopped_reason → escalated", () => 
 test("classifyPersistedRunOutcome: exit 0 without stopped_reason → fixed", () => {
   expect(classifyPersistedRunOutcome(0, { steps: [] } as never)).toBe("fixed");
   expect(classifyPersistedRunOutcome(0, null)).toBe("fixed");
+});
+
+test("classifyPersistedRunOutcome: the --until exit code → until, although the run is stopped", () => {
+  const run = { schemaVersion: 1, runId: "scan-1", steps: [], stopped_reason: "stop requested by --until after plan" };
+  expect(classifyPersistedRunOutcome(UNTIL_STOP_EXIT_CODE, run as never)).toBe("until");
+});
+
+test("a child stopped at its --until bound is not a failure, even for a strategy that stops on one", async () => {
+  const failed: string[] = [];
+  const spawned: string[] = [];
+  const code = await runDispatch(
+    strategy({ onFailure: "stop", onTicketFailed: (ticket) => failed.push(ticket) }),
+    env(),
+    deps({
+      spawn: (args) => {
+        spawned.push(args[0]!);
+        return UNTIL_STOP_EXIT_CODE;
+      },
+    }),
+  );
+  expect(code).toBe(0);
+  expect(spawned).toEqual(["A", "B"]);
+  expect(failed).toEqual([]);
 });
 
 /* ------------------------------------------------------------------------- *

@@ -11,6 +11,7 @@ flags.
 | `--steps <ids>` | `-s` | Comma-separated IDs (the others are skipped). A prefix such as `checks` also selects `checks.*`. Applies only to steps that still owe work: on resume, a `done` step declaring `input` is still re-checked and re-runs if its inputs changed ([input freshness](dsl.md#input-freshness)), and one declaring `rerunOnResume` is replayed. Under `--scan`, applied to every ticket |
 | `--skip <ids>` | `-k` | IDs to skip (mutually exclusive with `--steps`). Same scope as `--steps` |
 | `--start-at <id>` | `-a` | Replay from this step: it and every later step run again, even when already `done`; previous steps are skipped (exclusive with `--steps`/`--skip`). A `done` step before it that declares `input` or `rerunOnResume` is still reconsidered on resume ([input freshness](dsl.md#input-freshness)). Rejected under `--scan` |
+| `--until <id>` | | Stop the run once this step is settled (`done` or `skipped`): later steps stay `pending`, the run stops `STOPPED` with the stop kind `until`, stays resumable, and exits `3` (see [Exit codes](#exit-codes)). With nothing left after the step, the run passes normally. Valid for this invocation only and never persisted: a plain rerun continues past it. Exclusive with `--steps`; works with `--skip` and `--start-at` (a bound before the `--start-at` target is refused). An unknown id is refused before any step, with the list of ids. Rejected on an inspection command. Under `--scan`, applied to every ticket |
 | `--budget <usd>` | | Approve a cost ceiling in USD for this run. Resumes a run stopped by its budget without repaying completed steps. It changes the amount only: it never authorizes spend the runner could not price. Giving a ceiling to a run that had none when it spent an unpriceable amount stops that run as `cost-unaccounted` — the new amount is enforceable against nothing, so pair it with `--allow-unmetered` to cap the priced spend and authorize the rest |
 | `--allow-unmetered` | | Authorize spend nobody can price, and resume a run stopped by `cost-unaccounted`. It lifts that stop only — the spend the runner *did* price still obeys the ceiling. Recorded on the selected run (later resumes need no flag) and propagated to the children it composes. Rejected on an inspection command and under `--scan` |
 | `--replay-interrupted` | | Authorize replaying a step the runner died in (crash, OOM, `SIGKILL`); without it, or a `replayInterrupted` declaration on the step, the resumed run stops before running that step again. Valid for this invocation only, never persisted, and passed to the children it composes. Rejected on an inspection command and under `--scan`. See [Interrupted steps](dsl.md#interrupted-steps) |
@@ -93,5 +94,23 @@ propagated only when the child cannot derive it from its environment.
 | `--worktree` | no | the dispatch child inherits the cwd (`chdir`) and `RUNNER_IN_WORKTREE`; it is rejected with `--scan` |
 | `--watch` | no | scans do not propagate it to children |
 | `--steps`, `--skip` | yes | the operator's selection applies to every scanned ticket |
+| `--until` | yes | the bound of a sweep (a night of triage only) applies to every scanned ticket; a child stopped at it is counted on the scan's `Until` line, not as a failure |
 | `--start-at` | no | rejected with `--scan`: a replay is a decision about one run |
 | `--pipeline` | no | set explicitly by the spawn caller |
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | The run passed, or stopped cleanly at a gate (`STOPPED` with `needs-*` or `blocked`): only the snapshot says it stopped |
+| `1` | A failure, a budget or `cost-unaccounted` stop, or a usage or boot error |
+| `3` | The run stopped at its `--until` bound with steps left after it. Resumable: rerun without `--until`, or with a later step |
+| `130`, `143` | Interrupted by `SIGINT` or `SIGTERM` |
+
+`3` is distinct from `1` so that `--scan`, cron, and shell scripts can tell a
+stop the operator asked for from a run that broke, and non-zero so that none of
+them reads an unfinished run as complete. `2` is avoided because shells and
+argument parsers use it for usage errors. A failure or a cost stop reached in
+the same invocation outranks it and exits `1`. A `--scan` parent's code does not
+carry its children's: it reads them to classify each ticket, which its report and
+[scan record](persistence.md#scan-records) show.

@@ -59,7 +59,13 @@ const RUN_STATS_STATUSES = [
   "ABORTED",
   "UNKNOWN",
 ] as const satisfies readonly RunStatsEntry["status"][];
-const STOP_KINDS = ["needs-info", "needs-decision", "needs-human", "blocked"] as const satisfies readonly RunStopKind[];
+const STOP_KINDS = [
+  "needs-info",
+  "needs-decision",
+  "needs-human",
+  "blocked",
+  "until",
+] as const satisfies readonly RunStopKind[];
 const FAIL_KINDS = ["verdict", "technical"] as const satisfies readonly StepFailKind[];
 const OUTCOME_STOP_KINDS = ["budget-exceeded", "cost-unaccounted"] as const satisfies readonly RunOutcomeStopKind[];
 

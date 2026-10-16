@@ -273,6 +273,28 @@ test("items: a stop carries its subject and kind, an older run only its raw reas
   expect(older!.approval).toBeUndefined();
 });
 
+test("items: a stop requested by --until keeps its kind and asks for a rerun, with no approval to wait on", async () => {
+  const project = listedProject();
+  const detail = "stop requested by --until after plan: rerun to continue";
+  writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "STOPPED",
+    updatedAt: "2026-09-05T08:00:00.000Z",
+    steps: [
+      { id: "plan", status: "done", retries: 0 },
+      { id: "implement", status: "pending", retries: 0 },
+    ],
+    outcome: { phase: "plan", reason: detail, logPath: null, resumable: true, stop: { kind: "until", detail } },
+  });
+
+  const [item] = await listItems();
+
+  expect(item!.group).toBe("decision");
+  expect(item!.stop).toEqual({ kind: "until", detail });
+  expect(item!.approval).toBeUndefined();
+  expect(item!.interruptedStep).toBeUndefined();
+});
+
 test("items: a failure exposes its phase, reason, fail kind and fail cause", async () => {
   const project = listedProject();
   writeRun(project, "DEMO-1", "feature", {

@@ -96,6 +96,14 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
   if (selectors > 1) {
     throw new CliError("Options --steps, --skip, and --start-at are mutually exclusive.");
   }
+  // --steps already names exactly what runs; a bound on top of it would either
+  // repeat that selection or contradict it.
+  if (args.until !== undefined && args.stepFilter !== undefined) {
+    throw new CliError("Options --until and --steps are mutually exclusive.");
+  }
+  if (args.until !== undefined && (args.inspect || args.logs || args.clean || args.approveOnly || args.rejectOnly)) {
+    throw new CliError("Option --until applies to a run, not to an inspection command.");
+  }
   // Without --scan there is only one ticket, so a limit would be silently ignored.
   // --stats is the other bounded listing: it caps the runs printed.
   if (args.limit != null && !args.scan && !args.stats) {

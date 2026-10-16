@@ -627,6 +627,7 @@ lancenuit run PROJ-28 --fresh
 lancenuit run PROJ-28 --pipeline .lance-nuit/pipelines/release.ts --steps lint,tests
 lancenuit run PROJ-28 --pipeline .lance-nuit/pipelines/release.ts --skip tests
 lancenuit run PROJ-28 --start-at tests
+lancenuit run PROJ-28 --until plan
 lancenuit run PROJ-28 --allow-dirty
 lancenuit run PROJ-28 --worktree
 ```
@@ -653,14 +654,22 @@ lancenuit run PROJ-28 --worktree
   - A composed step (`runPipeline`, `forEachPipeline`) whose children already
     settled cannot be replayed in place: the run refuses and points to
     `--fresh`.
+- `--until X` stops the run once `X` is done or skipped. Unlike the selectors,
+  it is a bound of this invocation only and is never persisted: the steps after
+  `X` stay `pending`, the run stops as `STOPPED` with the stop kind `until` and
+  exits `3`, and a plain rerun resumes it where it stopped. When nothing is owed
+  after `X`, the run simply passes. It is exclusive with `--steps`, and works
+  with `--skip` and `--start-at`.
 - On a **resumed** run the selectors are durable, not a one-off view: every step
   they leave out is written to the snapshot as `skipped`. Once no step remains,
   the run finalizes as `PASS` and counts as complete — `--scan` will not pick the
   work item up again. Use `--fresh` to replay the whole pipeline instead.
 - `--scan` discovers work items, and `--limit` caps the number discovered.
   `--steps` and `--skip` apply to each scanned ticket, so a ticket whose
-  remaining work they all exclude is complete for later scans. `--start-at` is
-  refused under `--scan`: replay one ticket explicitly instead.
+  remaining work they all exclude is complete for later scans. `--until` applies
+  to each scanned ticket too: each child stops after the bound, the scan reports
+  it on an `Until` line rather than as a failure, and a later scan resumes it.
+  `--start-at` is refused under `--scan`: replay one ticket explicitly instead.
 - `--allow-dirty` disables the clean-tree guard for the current run.
 - `--worktree` isolates the run in a dedicated Git worktree.
 

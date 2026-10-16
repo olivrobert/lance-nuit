@@ -9,7 +9,7 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { pipelineRunsDir } from "../state/stores/run-storage.js";
 import { textArtifact } from "../dsl/artifact.js";
 import { readDecision } from "../state/decisions.js";
-import { applyApproval, applyRejection } from "./startup.js";
+import { applyApproval, applyRejection, checkUntil } from "./startup.js";
 
 const budgetArtifact = artifact("budget.json", (value) => value as { amountUsd: number });
 const def = pipeline("budgeted")
@@ -161,4 +161,23 @@ test("--reject on a run another runner is already resuming starts no second run"
 
   expect(await applyRejection(rejectArgs(), planned(true), context)).toEqual({ kind: "done" });
   expect(readDecision(context, "plan")?.decision).toBe("rejected");
+});
+
+test("checkUntil: an unknown step lists the ids, and a bound before --start-at is refused", () => {
+  const steps = pipeline("bounded")
+    .add(bashStep({ id: "a", name: "A", command: "true" }))
+    .add(bashStep({ id: "b", name: "B", command: "true" }))
+    .add(bashStep({ id: "c", name: "C", command: "true" }))
+    .build();
+  const args = (overrides: Partial<RunnerArgs>) => ({ ...overrides }) as RunnerArgs;
+
+  expect(checkUntil(args({}), steps)).toBeUndefined();
+  expect(checkUntil(args({ until: "b" }), steps)).toBeUndefined();
+  expect(checkUntil(args({ until: "b", startAt: "b" }), steps)).toBeUndefined();
+  expect(checkUntil(args({ until: "x" }), steps)).toBe(
+    '--until: step "x" not found in pipeline "bounded" (steps: a, b, c).',
+  );
+  expect(checkUntil(args({ until: "a", startAt: "b" }), steps)).toBe(
+    '--until: step "a" comes before --start-at step "b" in pipeline "bounded": nothing would run.',
+  );
 });
