@@ -419,14 +419,14 @@ The rules:
   `outputs up to date with declared inputs`.
 - **Unfinished attempts.** Before every attempt, the runner marks each output
   the step declares as being written by that attempt, in the output's
-  provenance record ([persistence](persistence.md)); only the success of that
-  attempt clears the mark, and a step without `input` then keeps a record with
-  no fingerprint that names it as the producer. An output found with the mark
-  is `unfinished`: the attempt that wrote it failed, was killed, or had its
-  failure absorbed by `blocking: false`, so its bytes may be partial. An
-  unfinished output is never adopted and never counts as present: every step
-  declaring it as output runs. The mark lives in the work item, not in the run,
-  so it holds across a new run, `--fresh`, `--start-at`, and
+  provenance record ([persistence](persistence.md#output-provenance)); only
+  the success of that attempt clears the mark, and a step without `input` then
+  keeps a record with no fingerprint that names it as the producer. An output
+  found with the mark is `unfinished`: the attempt that wrote it failed, was
+  killed, or had its failure absorbed by `blocking: false`, so its bytes may be
+  partial. An unfinished output is never adopted and never counts as present:
+  every step declaring it as output runs. The mark lives in the work item, not
+  in the run, so it holds across a new run, `--fresh`, `--start-at`, and
   `--steps`/`--skip`. It ranks with `missing` in the summary. This applies with
   or without [reconcile mode](#reconcile-mode), and to a step without `input`
   as well. Whenever admission reads the freshness of such a step, the journal
@@ -466,7 +466,8 @@ The rules:
 - **Order.** `when` first, freshness second. When `when` refuses while an output
   is stale, the reason reads `... (inputs changed, outputs kept)`.
 - **Resume.** A `done` step declaring `input` is re-admitted, and so is a
-  `skipped` one — unless it was taken out by `--step`, `--skip`, or `--start-at`.
+  `skipped` one — unless it was taken out by `--steps`, `--skip`, or
+  `--start-at`, an exclusion [reconcile mode](#reconcile-mode) never keeps.
   A re-admitted step whose outputs are all fresh costs nothing. A step requeued
   by `--start-at` is the exception: it runs even when its outputs are fresh,
   because freshness does not track the repository tree an operator fixed. So
@@ -583,7 +584,10 @@ and `implement` — an agent step — is stale and paid again on every rerun.
 recorded, decide what remains to do. Without it, a `done` step that declares
 neither `input` nor `rerunOnResume` is never looked at again in its run, and a
 new run replays every such step. The mode is opt-in per pipeline; a pipeline
-without it keeps the behavior described in the sections above.
+without it keeps the behavior described in the sections above. The run record
+still holds what only the run knows — spend, attempts, sessions, how each pass
+ended; see
+[the run record and the deliverables](persistence.md#the-run-record-and-the-deliverables).
 
 ```ts
 pipeline("ticket")
@@ -628,8 +632,7 @@ The rules:
   adopted: the step runs again (or asks first, if the runner died in it). A
   skipped step keeps the spend of its earlier passes in the run's totals and
   budget. A `blocking: false` step declaring `output` without `input` whose
-  failure was absorbed
-  gets an empty record of its inputs, and is skipped with
+  failure was absorbed gets an empty record of its inputs, and is skipped with
   `failure absorbed, inputs unchanged since` instead of failing again on every
   invocation.
 - **Out of scope.** `runPipeline` and `forEachPipeline` nodes keep the authority
@@ -649,8 +652,9 @@ The rules:
   adopted in any case: its outputs stay [unfinished](#input-freshness) until an
   attempt succeeds, whatever the status says. Nothing is persisted as an
   exclusion, and the next invocation admits those steps again, except the nodes
-  and the work-item source step above, which keep the `skipped` status they got
-  (see [CLI options](cli-options.md)).
+  and the work-item source step above, which keep the status the selection left
+  them: `done`, or `skipped` for one that was pending (see
+  [CLI options](cli-options.md)).
 - **Switching back to the default mode.** A step a reconcile invocation set
   aside is a plain `skipped` step in that run: the default mode re-admits it
   only if it declares `input`, as any skipped step, while the next reconcile

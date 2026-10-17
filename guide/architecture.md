@@ -314,7 +314,7 @@ journal.
 budget exceeded? ---- yes ----> run stops, remaining steps stay pending
        | no
        v
-admission (`when`) ---- skip ----> persisted skipped step
+admission (`when`, freshness) ---- skip ----> skipped (a done step stays done)
        | pass
        v
 environment guard (`require`) ---- fail -> hard failure, no agent spawn
@@ -348,6 +348,27 @@ step loop reads the resulting `failCause` field and never prose. See
 
 Every attempt has a durable identity and log. The event journal is the source for
 timeline and statistics projections; the state snapshot is the fast resume surface.
+
+### Who decides that a step runs
+
+Whether a step runs on this invocation is decided in two places, in this order,
+and each rule they read has one owner:
+
+| Decision | Owner |
+| --- | --- |
+| **Re-admission**: whether a settled step goes through admission again, and, in reconcile mode, whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). Boot (`boot/resume.ts`) applies the selectors to the snapshot in the default mode only; in both modes it requeues the `--start-at` target and the steps after it |
+| **Admission**: budget, `when`, a pending rejection, the freshness or presence of the outputs, the interruption guard, then the environment guard | `step/step-admission.ts` (`admitStep`; `answersToOutputs` says whether the outputs decide, `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished) |
+| **Standing of an output**: `missing`, `unfinished`, `unknown`, `stale`, `fresh` or adoptable, and the doubt `unguaranteed` carries | `state/provenance.ts`, the only writer of `artifacts/.provenance/`. `standingOf` is the one reading rule for a record: admission (`stepFreshness`), the public `freshness()` and the dashboard all read it there. The attempt (`step/step-attempt.ts`) only chooses when to write: the in-flight mark before each attempt (`markInFlight`), the record after a success |
+| **Reconcile classification**: which steps the mode re-admits (those declaring `output` or `rerunOnResume`), the build error for a step declaring neither, and the orchestration nodes that keep the authority of their status | `model/definition.ts` (`deliversOutputs`, `reconcilable`, `stepsWithoutDeliverable`), shared by the build (`.reconcile()`), the loader's validation (`validation/structure.ts`), admission and the loop |
+
+Two run facts beside the decision are runtime-only and never persisted
+(`model/run.ts`): `Run.reconcile`, set by boot from the definition it loads the
+steps from and read by the step loop, so boot and the loop cannot disagree on
+the mode; and `Run.executingStepId`, written by `updateStep` alone and read by
+`abortRun`, so that a signal interrupts the step this process is running and
+never one a dead runner left `running`. What the run record still decides in
+reconcile mode, and what the deliverables decide instead, is tabled in
+[persistence](persistence.md#the-run-record-and-the-deliverables).
 
 ## 6. Capability lookup
 

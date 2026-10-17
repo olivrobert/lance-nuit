@@ -20,12 +20,15 @@ The three families (`artifacts/`, `reports/`, `runs/`) are described in the
 architecture guide. `artifacts/.provenance/` is owned by the runner: it holds one
 `{ artifact, producedBy, producedAt, inputs: { "artifacts/<name>": "<sha256>" } }`
 record per declared output (without fingerprint for a step without `input`),
-which is what makes a rerun replay only what its sources changed. A record with
-an `inFlight` mark names the attempt still writing that output, or the one that
+which is what makes a rerun replay only what its sources changed, and, in
+[reconcile mode](dsl.md#reconcile-mode), which of the deliverables on disk an
+unfinished attempt left and must not count as done. A record with an
+`inFlight` mark names the attempt still writing that output, or the one that
 failed while writing it: an output that attempt may have left partial is never
-adopted. A record marked `unguaranteed` says revisions rewrote bytes no finished
-attempt vouched for: the steps producing that output run again. See [`persistence.md`](persistence.md) for the
-record shape and [`dsl.md`](dsl.md) for the freshness rules.
+adopted. A record marked `unguaranteed` says revisions rewrote bytes no
+finished attempt vouched for: the steps producing that output run again. See
+[`persistence.md`](persistence.md#output-provenance) for the record shape and
+[`dsl.md`](dsl.md#input-freshness) for the freshness rules.
 
 Tickets in **arbitrary work-item subdirectories** are supported by passing the
 full path: `lancenuit run exports/PROJ-1478 --pipeline delivery` targets

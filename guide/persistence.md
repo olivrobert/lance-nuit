@@ -8,7 +8,7 @@ item normally looks like this:
 ├── artifacts/                 # durable business outputs (JSON, Markdown, inputs/…)
 │   ├── ticket.md              # tracker snapshot used as pipeline input
 │   ├── inputs/                # optional human-provided files
-│   └── .provenance/           # runner-owned input fingerprints, one per output
+│   └── .provenance/           # runner-owned record of each declared output
 ├── reports/                   # disposable machine/human reports
 │   └── <LOT-ID>/              # isolated reports for a batch sub-run
 ├── decisions/                 # hash-locked approval and rejection records
@@ -25,11 +25,81 @@ item normally looks like this:
 `ctx.paths.artifactsDir`, `ctx.paths.reportsDir`, and
 `ctx.paths.decisionsDir` are the canonical paths. Steps and skills should use
 these context paths rather than rebuilding paths from a ticket name.
-`artifacts/.provenance/<name>.json` is written by the runner for every output of a
-step that declares `input`, and, until its attempt succeeds, for every output a
-step produces from scratch (below). The prefix is reserved: an artifact descriptor
-cannot claim a name inside it. A record binds one artifact to the bytes it came
-from:
+A batch (`lot`) receives `reports/<LOT-ID>/`; other phases use the work-item's
+flat `reports/` directory. Artifact descriptors read and write through
+`ctx.artifacts`, which validates names and keeps the logical interface
+independent of the filesystem.
+
+`decisions/<subject>.json` holds the current human answer for one subject; an
+approval replaces a rejection and the reverse. A rejection adds the reason the
+rework step reads and the round it opened:
+
+```json
+{
+  "schemaVersion": 1,
+  "decision": "rejected",
+  "subject": "plan",
+  "artifact": "artifacts/plan.md",
+  "artifactSha256": "<sha256>",
+  "decidedAt": "2026-09-03T12:00:00.000Z",
+  "decidedBy": "human",
+  "reason": "split step 2",
+  "round": 1
+}
+```
+
+The file is shared by a parent run and its children and survives `--fresh`, so
+the round bound holds across runs. See
+[human-control.md](human-control.md#reject-and-rework).
+
+A project pipeline can split a parent plan into lots without creating a dispatch
+run for each lot. The generic resolver also supports explicit nested work-item
+paths and the `PROJ-28-01 → PROJ-28/US-01` mapping when that directory layout is
+present. Such a child has the same `artifacts/`, `reports/`, `decisions/`, and
+`runs/` families.
+
+## The run record and the deliverables
+
+The run record, `state.json` and `events.jsonl` in the run directory, is the
+run's journal and ledger: what each step did and how its last pass ended
+(done, failed, aborted, interrupted), its attempts and retries, the agent
+sessions it opened, and what it cost against the budget. The deliverables live
+beside it, in the work item: the artifacts in `artifacts/` and their records in
+`artifacts/.provenance/`. They outlive the run, so a new run, `--fresh`
+included, finds them as the last one left them.
+
+The two answer different questions, and the mode decides which one says what
+remains to do:
+
+| Question | Default mode | [Reconcile mode](dsl.md#reconcile-mode) |
+| --- | --- | --- |
+| Does a settled step run again? | its status in `state.json`: a `done` step is not looked at again in its run, unless it declares `input` or `rerunOnResume`, or is a gate's rework step | its declared outputs: it runs when one is missing, `unknown`, stale or [unfinished](dsl.md#input-freshness); a `rerunOnResume` step without output always runs |
+| Did the last pass of the step in this run finish? | the run record | the run record: the [interruption guard](dsl.md#interrupted-steps) and the rerun a failed pass is owed read it in both modes |
+| What was spent, and may the run spend more? | the run record | the run record |
+| Does a `runPipeline` or `forEachPipeline` node, or the work-item source step, run again? | its status | its status |
+
+`when` and a pending [rejection](human-control.md#reject-and-rework) come
+before these answers in both modes.
+
+In reconcile mode `state.json` no longer decides what remains to do for a step
+that declares outputs, orchestration nodes aside: they keep the authority of
+their status. It still holds everything only the run can know: spend,
+attempts, sessions and the way a pass ended. Where an output's provenance
+record carries an in-flight mark, the mark answers whether the output can be
+adopted, in both modes and whatever the status of the step that wrote it.
+Where none exists (an attempt of an older runner, a record deleted by hand),
+only the run's record of an unfinished pass keeps the output from being
+adopted, within that run.
+
+## Output provenance
+
+`artifacts/.provenance/<name>.json` is the runner's record of one declared
+output: which step produced it, and from which bytes. Every attempt of a step
+declaring `output`, orchestration nodes aside, writes one per output, with the
+fingerprints of its pure inputs when the step declares `input` and none
+otherwise; `state/provenance.ts` is the only writer. The prefix is reserved:
+an artifact descriptor cannot claim a name inside it. A record binds one
+artifact to the bytes it came from:
 
 ```json
 {
@@ -76,8 +146,7 @@ interruption, the death of the runner and a failure absorbed by
   (`"inputs": {}`). It still names the step as the producer, which a later
   revision of the output keeps; without it, a revising step would find the
   output with no record, adopt it, and pass for its producer. `freshness()`
-  reports such an output `fresh`, and in reconcile mode it counts as present,
-  as before.
+  reports such an output `fresh`, and reconcile mode counts it as present.
 
 An output revised in place, declared as both `input` and `output` of the step,
 is marked too, but keeps its bytes. Its mark adds `inFlight.revision`: the
@@ -150,6 +219,8 @@ Only a record that is no longer valid JSON reads as no record at all. Deleting
 the record by hand is how an operator keeps an output they repaired themselves;
 see [input freshness](dsl.md#input-freshness) for the procedure.
 
+### Mixing runner releases
+
 A runner that predates the mark reads it as an ordinary record:
 
 - for a step declaring `input`, the mark lists none of its inputs, so it is
@@ -162,49 +233,16 @@ A runner that predates the mark reads it as an ordinary record:
 - it ignores `unguaranteed`: the record lists only the revising steps' inputs,
   so the producer is `stale` and runs, unless the revisions read every input of
   the producer, or the producer declares no `input` and the pipeline reconciles.
-  Merging into a record, it keeps the fields it does not know, so a later
-  newer runner still reads them;
+  Merging into a record, it keeps the fields it does not know, so a newer
+  runner still reads them afterwards;
 - a step without `input` leaves the record it finds as it is, mark included, as
   it did before the mark.
 
-Mixing releases on one work item has two effects. An attempt made by the older
+Mixing the two on one work item has two effects. An attempt made by the older
 runner leaves no mark, so the newer runner may adopt what it left partial, as
-either release did before. And the older runner never removes the mark of a step
+the older one would. And the older runner never removes the mark of a step
 without `input`, so the newer runner then sees `unfinished` and runs the steps
 declaring that output once more.
-
-A batch (`lot`) receives `reports/<LOT-ID>/`; other phases use the work-item's
-flat `reports/` directory. Artifact descriptors read and write through
-`ctx.artifacts`, which validates names and keeps the logical interface
-independent of the filesystem.
-
-`decisions/<subject>.json` holds the current human answer for one subject; an
-approval replaces a rejection and the reverse. A rejection adds the reason the
-rework step reads and the round it opened:
-
-```json
-{
-  "schemaVersion": 1,
-  "decision": "rejected",
-  "subject": "plan",
-  "artifact": "artifacts/plan.md",
-  "artifactSha256": "<sha256>",
-  "decidedAt": "2026-09-03T12:00:00.000Z",
-  "decidedBy": "human",
-  "reason": "split step 2",
-  "round": 1
-}
-```
-
-The file is shared by a parent run and its children and survives `--fresh`, so
-the round bound holds across runs. See
-[human-control.md](human-control.md#reject-and-rework).
-
-A project pipeline can split a parent plan into lots without creating a dispatch
-run for each lot. The generic resolver also supports explicit nested work-item
-paths and the `PROJ-28-01 → PROJ-28/US-01` mapping when that directory layout is
-present. Such a child has the same `artifacts/`, `reports/`, `decisions/`, and
-`runs/` families.
 
 ## Run snapshots and resume
 
@@ -228,7 +266,7 @@ retained for correct attribution. Which of the two files is believed when they
 disagree is settled per concept in [Which record is authoritative](#which-record-is-authoritative).
 
 Resume is a boot step (`boot/resume.ts`): it loads the definition, projects the
-persisted state, applies the `--step`/`--skip`/`--start-at` selectors to the
+persisted state, applies the `--steps`/`--skip`/`--start-at` selectors to the
 projected steps, and assembles the in-memory run from the definition and those
 steps. The selectors come after the projection so they judge what the journal
 knows: a step the snapshot still calls `running` but the journal finished stays
@@ -238,14 +276,15 @@ when the snapshot had passed; attempts, retries and spend are kept.
 
 In [reconcile mode](dsl.md#reconcile-mode) the selectors last one invocation, so
 the snapshot never holds an exclusion: boot applies none of them (it still
-requeues for `--start-at`) and drops an `excluded` mark an earlier legacy
+requeues for `--start-at`) and drops an `excluded` mark a default-mode
 invocation left. The step loop applies them instead (`step/step-loop.ts`): a
 step they leave out is journaled as `step.skipped` with the reason
-`operator selection`, a `done` step stays `done` and a pending one becomes
-`skipped`, which lets the run settle and pass. The run outcome carries the ids,
-which the final report counts. The next invocation, a resume or a new run after
-the `PASS`, re-admits those steps like any other, except orchestration nodes and
-the work-item source step, which keep the authority of their status.
+`operator selection`, and the run outcome carries the ids, which the final
+report counts. A `done` step stays `done` and a pending one becomes `skipped`,
+so the run can settle and pass; the next invocation re-admits them like any
+other step, except orchestration nodes and the work-item source step, which
+keep the status the selection left them: `done`, or `skipped` for one that was
+pending.
 
 A step whose last pass failed, was aborted or was interrupted keeps its status
 when it is left out: the interruption guard and the rerun a failed pass is owed
@@ -254,17 +293,22 @@ are run facts the next admission reads from it. The run then stops with
 `--until` bound or another stop ended it first (a run holding an aborted step
 stays `ABORTED`). The outcome names the step that ended the invocation, never a
 failed one the selection set aside. Whether an output that pass wrote can be
-adopted does not depend on any of this: its in-flight mark in `.provenance/`
-answers on every invocation.
+adopted is answered on every invocation by its in-flight mark in
+`.provenance/`; the kept status covers what no mark protects (see
+[the run record and the deliverables](#the-run-record-and-the-deliverables)).
 
 A step a dead runner left `running`, an orchestration node killed mid-child
 included, stays so while later steps run. The snapshot cannot tell it from the
 step being executed, so `updateStep` records the step this process put in
 `running` (`Run.executingStepId`, runtime-only), and a SIGINT or SIGTERM aborts
-that one only. In either mode, a signal that lands while no step executes (during
-an admission, or before the first step) marks no step `aborted`; earlier releases
-marked the first `running` step, a dead pass whose interruption then read as an
-abort.
+that one only. In either mode, a signal that lands while no step executes
+(during an admission, or before the first step) marks no step `aborted`.
+
+`Run.reconcile` is runtime-only too: boot sets it from the definition it loads
+the steps from, and the step loop reads it there. The mode belongs to the
+pipeline, so a run created without `.reconcile()` is reconciled from the first
+invocation that loads a definition declaring it (for the way back, see
+[switching back to the default mode](dsl.md#reconcile-mode)).
 
 `state/` only reads, projects and reconciles
 (`state/run-projection.ts`): it reconciles each persisted step with the attempts
@@ -458,7 +502,7 @@ projection of spend already accounted for when the attempt closed.
 | Composed child spend (`accountedCostUsd`, `accountedDurationMs`, `accountedUsage`) | parent snapshot | the parent node's `control` and `usage`, the parent ledger | What the parent already charged for this child (`chargeChildReconciliation`). A resumed child re-reports its whole history and is charged by difference; a reference reloaded from a snapshot written before the last reconciliation is charged the missing difference again, never twice. |
 | Location (`worktree`, `cwd`) | snapshot | — | Rewritten by every resume with the invocation's own location. |
 | Absorbed inputs (`absorbed_inputs`) | snapshot | — | Written by `recordAbsorbedInputs` after a `blocking: false` step that declares `input` absorbed its failure in an attempt, cleared by `updateStep(running)`. The journal does not carry it. Missing — an older snapshot, or an interruption between the absorption and the record — leaves the decision to freshness, which re-runs the step. |
-| Selection (`excluded`, `replay`, skipped steps) | snapshot, then the current selectors | — | `--step` / `--skip` / `--start-at` apply on top of the persisted state to every step that still owes work, including steps the definition gained since the snapshot. In reconcile mode no `excluded` mark is written or kept: the step loop applies the selectors to this invocation only. `--start-at X` also requeues `X` and every later step, whatever their status, as `pending` with `replay`, and lifts their `excluded` mark; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
+| Selection (`excluded`, `replay`, skipped steps) | snapshot, then the current selectors | — | `--steps` / `--skip` / `--start-at` apply on top of the persisted state to every step that still owes work, including steps the definition gained since the snapshot. In reconcile mode no `excluded` mark is written or kept: the step loop applies the selectors to this invocation only. `--start-at X` also requeues `X` and every later step, whatever their status, as `pending` with `replay`, and lifts their `excluded` mark; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
 
 ### Interruption windows
 
@@ -562,7 +606,7 @@ kept and read on what it still says.
 | `run.budget.exceeded` | the ceiling stopped the run (see [budgets and timeouts](budgets-timeouts.md)) |
 | `run.cost.unaccounted` | a gate withheld work over spend nobody could price |
 | `run.unmetered.authorized` | a human authorized unpriceable spend with `--allow-unmetered` |
-| `step.skipped` | an input decision skipped a step |
+| `step.skipped` | admission skipped a step, or, in reconcile mode, this invocation's selection left it out (reason `operator selection`); carries `reason`, and the freshness summary when the freshness of declared inputs decided or when `when` refused a step declaring `input` |
 | `step.source.unavailable` | a source the step declares as input could not be read: its freshness is unknown and the step runs (see [external sources](dsl.md#external-sources)) |
 | `step.outputs.unfinished` | outputs the step declares carry the mark of an attempt that never succeeded: they are never adopted and the step runs; carries `outputs` (see [input freshness](dsl.md#input-freshness)) |
 | `step.status.changed` | a step changes status |

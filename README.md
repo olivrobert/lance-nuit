@@ -16,7 +16,9 @@ and what needs your attention.
 work, go to sleep, review in the morning.
 
 - **Resume after interruption.** Re-run the same command to continue from the
-  interrupted step, keeping completed steps and recorded spend.
+  interrupted step, keeping completed steps and recorded spend. In
+  [reconcile mode](guide/dsl.md#reconcile-mode), the deliverables on disk, not
+  the run's status, decide what remains to do.
 - **Give failures a recovery plan.** Retry, ask an agent to repair the cause,
   escalate to a stronger model, or hand the work to a human.
 - **Control agent spending.** Set a budget for the run, including repairs and
