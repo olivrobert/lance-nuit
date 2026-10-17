@@ -45,9 +45,9 @@ An input absent when the record was written is stored as `null`, so its
 reappearance invalidates the record instead of being silently adopted.
 
 Before every attempt of a step declaring `output`, with or without `input`, the
-runner writes a record for each output the step produces from scratch, carrying
-an `inFlight` mark: the attempt that is about to write the artifact. The mark
-lists no input.
+runner writes a record for each output, carrying an `inFlight` mark: the attempt
+that is about to write the artifact. For an output the step produces from
+scratch, the mark lists no input.
 
 ```json
 {
@@ -66,38 +66,106 @@ lists no input.
 ```
 
 The mark outlives the run: whatever the attempt leaves is `unfinished` until an
-attempt producing the output from scratch succeeds, and an unfinished output is
+attempt declaring the output succeeds, and an unfinished output is
 never adopted (see [input freshness](dsl.md#input-freshness)). A failure, an
 interruption, the death of the runner and a failure absorbed by
 `blocking: false` all leave it in place. On success:
 
 - a step declaring `input` replaces the mark with its normal record;
-- a step without `input` removes the record. It records no fingerprint, so its
-  outputs carry no record once they are complete, exactly as before the mark
-  existed: `freshness()` keeps reporting them `unknown`, and adoption keeps
-  ignoring them, since only a step declaring `input` adopts anything.
+- a step without `input` replaces it with a record that lists no input
+  (`"inputs": {}`). It still names the step as the producer, which a later
+  revision of the output keeps; without it, a revising step would find the
+  output with no record, adopt it, and pass for its producer. `freshness()`
+  reports such an output `fresh`, and in reconcile mode it counts as present,
+  as before.
 
 An output revised in place, declared as both `input` and `output` of the step,
-is not marked: its record is left as it is during the attempt, and the revision
-merges its fingerprints into it on success, as before the mark existed. A
-successful revision therefore keeps the mark of a failed attempt that produced
-the output. Partial bytes left by a failed revision are a known gap: the record
-of their producer still vouches for them (see
-[input freshness](dsl.md#input-freshness)).
+is marked too, but keeps its bytes. Its mark adds `inFlight.revision`: the
+SHA-256 of the bytes the attempt found, and in `previous` the producer, date and
+inputs of the record that vouched for them. Outside the mark, `producedBy` and
+`inputs` are those of that record, minus the revising step's own pure inputs.
 
-The field is optional and additive, so the schema version stays `1`. Presence
+```json
+{
+  "schemaVersion": 1,
+  "artifact": "artifacts/plan.md",
+  "producedBy": "plan",
+  "producedAt": "2026-09-03T11:40:00.000Z",
+  "inputs": { "artifacts/ticket.md": "<sha256>" },
+  "inFlight": {
+    "runId": "20260903T115900.000Z-ticket-a1b2c3",
+    "stepId": "review",
+    "attempt": 1,
+    "startedAt": "2026-09-03T12:00:00.000Z",
+    "revision": {
+      "outputSha256": "<sha256 of plan.md when review started>",
+      "previous": {
+        "producedBy": "plan",
+        "producedAt": "2026-09-03T11:40:00.000Z",
+        "inputs": { "artifacts/ticket.md": "<sha256>" }
+      }
+    }
+  }
+}
+```
+
+While the artifact still holds those bytes, the revision changed nothing and
+`previous` stands for the record; once they differ, the output is `unfinished`.
+On success, the revision merges its fingerprints into `previous` and the mark
+goes.
+
+When the bytes a revision finds are themselves `unfinished`, its mark carries no
+`revision` but `"unguaranteed": { "revisedBy": [] }`. A successful revision keeps
+the field in its record and adds itself to `revisedBy`; `producedBy` then names
+the step that last wrote the bytes:
+
+```json
+{
+  "schemaVersion": 1,
+  "artifact": "artifacts/plan.md",
+  "producedBy": "review",
+  "producedAt": "2026-09-03T12:05:00.000Z",
+  "inputs": { "artifacts/notes.md": "<sha256>" },
+  "unguaranteed": { "revisedBy": ["review"] }
+}
+```
+
+`unguaranteed` reads `unfinished` to every step declaring the artifact except
+those in `revisedBy`, which judge the record by its `inputs`. A revision of bytes
+already in doubt keeps the doubt and the inputs earlier revisers recorded, and
+adds itself; one that writes nothing leaves the doubt as it found it. Only a
+successful attempt producing the artifact from scratch lifts it, by writing the
+record anew. The rule never reads `producedBy`, which is attribution only: an
+adoption names whichever step adopted, and a step can be renamed. A step that
+revises an artifact it produces itself is listed once its revision succeeds, and
+the doubt then stays on its record without making it run again.
+
+The fields are optional and additive, so the schema version stays `1`. Presence
 decides: a record that carries an `inFlight` field reads `unfinished`, whatever
-that field holds and even when the rest of the record no longer validates. Only
-a record that is no longer valid JSON reads as no record at all.
-Deleting the record by hand is how an operator keeps an output they repaired
-themselves; see [input freshness](dsl.md#input-freshness) for the procedure.
+that field holds and even when the rest of the record no longer validates —
+except a revision mark whose `revision` is intact and whose bytes have not
+moved. A record that carries `unguaranteed` but no longer validates, or whose
+`revisedBy` is not a list, exempts nobody: it reads `unfinished` to every step.
+Only a record that is no longer valid JSON reads as no record at all. Deleting
+the record by hand is how an operator keeps an output they repaired themselves;
+see [input freshness](dsl.md#input-freshness) for the procedure.
 
 A runner that predates the mark reads it as an ordinary record:
 
 - for a step declaring `input`, the mark lists none of its inputs, so it is
   `stale` and the step runs;
 - for a step without `input` in reconcile mode, it only checks that the output
-  exists, so it counts a marked output as present, as it did before the mark.
+  exists, so it counts a marked output as present, as it did before the mark;
+- for an output revised in place, the mark keeps the producer's inputs, so it
+  trusts the producer even when the revision wrote partial bytes, as before the
+  mark, and runs the revising step;
+- it ignores `unguaranteed`: the record lists only the revising steps' inputs,
+  so the producer is `stale` and runs, unless the revisions read every input of
+  the producer, or the producer declares no `input` and the pipeline reconciles.
+  Merging into a record, it keeps the fields it does not know, so a later
+  newer runner still reads them;
+- a step without `input` leaves the record it finds as it is, mark included, as
+  it did before the mark.
 
 Mixing releases on one work item has two effects. An attempt made by the older
 runner leaves no mark, so the newer runner may adopt what it left partial, as

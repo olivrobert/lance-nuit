@@ -418,12 +418,13 @@ The rules:
   `unknown`, or `stale`. Otherwise it is skipped with
   `outputs up to date with declared inputs`.
 - **Unfinished attempts.** Before every attempt, the runner marks each output
-  the step produces from scratch as being written by that attempt, in the
-  output's provenance record ([persistence](persistence.md)); only a successful
-  attempt of a step producing it from scratch clears the mark. An output found
-  with the mark is `unfinished`: the attempt that wrote it failed, was killed,
-  or had its failure absorbed by `blocking: false`, so its bytes may be partial.
-  An unfinished output is never adopted and never counts as present: every step
+  the step declares as being written by that attempt, in the output's
+  provenance record ([persistence](persistence.md)); only the success of that
+  attempt clears the mark, and a step without `input` then keeps a record with
+  no fingerprint that names it as the producer. An output found with the mark
+  is `unfinished`: the attempt that wrote it failed, was killed, or had its
+  failure absorbed by `blocking: false`, so its bytes may be partial. An
+  unfinished output is never adopted and never counts as present: every step
   declaring it as output runs. The mark lives in the work item, not in the run,
   so it holds across a new run, `--fresh`, `--start-at`, and
   `--steps`/`--skip`. It ranks with `missing` in the summary. This applies with
@@ -432,17 +433,23 @@ The rules:
   says why it runs with `step.outputs.unfinished` (`stepId`, `outputs`); a
   step that runs without that reading (a resume of its failed pass,
   `--start-at`, a step without `input` outside reconcile mode) gets no event.
-- **Limit: outputs revised in place.** An output the step also declares as
-  `input` is revised in place: it is neither erased nor marked before the
-  attempt, and the revision merges its fingerprints into the record on success,
-  as before the mark existed. A revision that wrote nothing therefore costs the
-  step that produced the output nothing, and a successful revision keeps a mark
-  the producer's failed attempt left, so the producer still runs again. The
-  reverse case is not covered yet: a revision that wrote then failed, or was
-  killed, leaves bytes the producer's record still vouches for. The producer is
-  not replayed, and the next pass of the revising step works on those bytes. A
-  later release closes this gap; until then, replay the producer with
-  `--start-at` after such a failure.
+- **Outputs revised in place.** The mark of a revision keeps the bytes it
+  found and the record that vouched for them. A revision that failed or was
+  killed without writing leaves the output as it was: the step that produced
+  it stays fresh and does not pay again, and an absorbed `blocking: false`
+  revision that never writes costs only itself on every run. A revision that
+  wrote, then failed or was killed, leaves the output `unfinished`: the step
+  that produced it runs again. A revision that succeeds over `unfinished`
+  bytes — after `--skip` of their producer, or on a retry after a partial
+  write — vouches only for itself: the record says so explicitly
+  (`unguaranteed`) and lists the revising steps it exempts. To every other
+  step declaring the output, it stays `unfinished` until a step producing it
+  from scratch succeeds. The producer therefore runs on the next run whatever
+  inputs the revision read, and whatever the producer is named by then; a
+  listed reviser is judged by its inputs as usual, since running it again
+  would vouch for nothing more. A step that revises an output it produces
+  itself (its `input` and `output` both list it) is listed once its own
+  revision succeeds, so it does not replay itself on every run.
 - **Adoption.** An output that exists without any record adopts the inputs
   present now and is skipped. Without this, the feature would regenerate the
   deliverables of every work item already waiting for a human decision.
@@ -452,9 +459,10 @@ The rules:
   start a new run (`--fresh`): the output is `adoptable` and adopts the current
   inputs. Resuming the failed run instead replays the step over your repair,
   because its last pass failed. A step without `input` never adopts anything:
-  once the record is gone, its output counts as present in reconcile mode, and
+  once its record is gone, its output counts as present in reconcile mode, and
   the step runs again on every new run in the default mode. To have the step
-  rewrite the output instead, replay it with `--start-at`.
+  rewrite the output instead, replay it with `--start-at`. A revising step
+  that finds an output without any record adopts it as its own.
 - **Order.** `when` first, freshness second. When `when` refuses while an output
   is stale, the reason reads `... (inputs changed, outputs kept)`.
 - **Resume.** A `done` step declaring `input` is re-admitted, and so is a
@@ -463,8 +471,7 @@ The rules:
   by `--start-at` is the exception: it runs even when its outputs are fresh,
   because freshness does not track the repository tree an operator fixed. So
   does a step whose last pass failed or was interrupted: what that pass wrote
-  is never adopted, in this run or, for an output produced from scratch, a
-  later one (see *Unfinished attempts*). A
+  is never adopted, in this run or a later one (see *Unfinished attempts*). A
   pass the runner died in needs an authorization before it is replayed; see
   [Interrupted steps](#interrupted-steps). A run stopped by
   `--until` resumes the same way: the bound is never persisted, so the next
@@ -495,9 +502,13 @@ before freshness is ever consulted.
 `freshness(ctx, artifact)` exposes the same records to a pipeline, returning
 `fresh`, `stale`, `missing`, or `unknown` for one artifact against its own record.
 An unfinished artifact is reported `stale`: the public helper has no
-`unfinished` value, and either way the artifact must be produced again.
-It is what an author branches on to run an amendment step rather than a full
-regeneration. A record bound to an external source reads `unknown` unless an
+`unfinished` value, and either way the artifact must be produced again. So is
+an artifact in doubt (`unguaranteed`), until a step producing it from scratch
+writes it: for an output a step only ever revises itself, that is final after a
+partial attempt. A `when` requiring `fresh` would then stay closed, and the
+dashboard no longer lists the output under its step. The helper is what an
+author branches on to run an amendment step rather than a full regeneration. A
+record bound to an external source reads `unknown` unless an
 artifact input already makes it `stale`: the record keeps the source's
 fingerprint, not its command.
 

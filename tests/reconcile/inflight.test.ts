@@ -1,7 +1,7 @@
 // In-flight attempts, rows W1 to W6 and W11 of the reconciliation matrix. Before
-// every spawn the runner marks each output the step produces from scratch as
-// written by an attempt that has not finished yet, in `.provenance/`; only a
-// successful attempt clears the mark.
+// every spawn the runner marks each output the step declares as written by an
+// attempt that has not finished yet, in `.provenance/`; only a successful attempt
+// clears the mark. Outputs revised in place: revised.test.ts.
 // A deliverable a failed or killed attempt left behind is therefore never adopted,
 // whatever the run facts say: a new run, `--fresh`, `--start-at` and selectors
 // all lose the status of the failed pass, the work item keeps the mark.
@@ -215,8 +215,8 @@ test("W5: a step without input ignores `outputs present` when a failed attempt l
   expect(eventsSince(cwd, before, UNFINISHED_EVENT)).toEqual([
     expect.objectContaining({ stepId: "branch", outputs: ["branch.json"] }),
   ]);
-  // A step without input keeps no record once it succeeded: the mark was its only one.
-  expect(provenanceRecords(cwd)["branch.json.json"]).toBeUndefined();
+  // A step without input that succeeds replaces its mark with a record without fingerprint.
+  expect(provenanceRecords(cwd)["branch.json.json"]).toMatchObject({ producedBy: "branch", inputs: {} });
 });
 
 for (const mode of [
@@ -229,6 +229,7 @@ for (const mode of [
     expect(trace(cwd)).toEqual(FULL);
     const records = provenanceRecords(cwd);
     expect(Object.keys(records)).toEqual([
+      "branch.json.json",
       "commit.sha.json",
       "impl.md.json",
       "mr-url.txt.json",
@@ -243,38 +244,6 @@ for (const mode of [
     // S1 in legacy, R2 in reconcile mode.
     expect(traceSince(cwd, before)).toEqual([...mode.relaunch]);
     expect(inFlightRecords(cwd)).toEqual([]);
-  });
-}
-
-// ── Known limit: an output revised in place (left to L2c) ────────────────────
-// `review` revises `plan.md` (`input: [notes, plan]`, `output: [plan]`). Such an
-// output is neither marked nor erased, as before the mark existed: a revision
-// that writes then fails leaves partial bytes the record of `plan` still vouches
-// for. Rows W7 to W10 and W12 of the matrix wait for a later lot.
-
-/** `route` with `review`, in run order. */
-const REVIEWED = ["context", "branch", "triage", "plan", "review", ...FULL.slice(4)];
-
-for (const mode of [
-  { name: "legacy", options: {} },
-  { name: "reconcile", options: reconcile },
-] as const) {
-  test(`limit (${mode.name}): a revision that wrote then failed is resumed over its partial bytes, its producer is not replayed`, () => {
-    const cwd = scratchRoute({ ...mode.options, review: true });
-    partialAt(cwd, "review");
-    expect(run(cwd).status).not.toBe(0);
-    expect(statusesOf(cwd).review).toBe("failed");
-    expect(trace(cwd)).toEqual(REVIEWED.slice(0, 5));
-    expect(readArtifact(cwd, "plan.md")).toBe("partial review\n");
-    expect(inFlightRecords(cwd)).toEqual([]);
-    heal(cwd, "review");
-    const before = mark(cwd);
-
-    expect(run(cwd).status).toBe(0);
-
-    expect(traceSince(cwd, before)).toEqual(["context", ...REVIEWED.slice(4)]);
-    expect(eventsSince(cwd, before, UNFINISHED_EVENT)).toEqual([]);
-    expect(readArtifact(cwd, "plan.md")).toStartWith("review ");
   });
 }
 

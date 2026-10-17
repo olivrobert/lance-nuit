@@ -50,9 +50,25 @@ export interface RouteOptions {
   /**
    * Adds `review` after `plan`: it revises `plan.md` in place
    * (`input: [notes, plan]`, `output: [plan]`), from `notes.md`, which the
-   * fixture writes.
+   * fixture writes. `"absorbed"`: `review` is `blocking: false`, so its failure
+   * is absorbed and the run goes on. `"retried"`: `review` declares
+   * `onFail: { retries: 1 }`, and `partialAt(cwd, "review")` applies to its
+   * first attempt only, so the retry revises the partial bytes and succeeds.
    */
-  review?: boolean;
+  review?: boolean | "absorbed" | "retried";
+  /** `review` also reads `ticket.md` and `triage.md`: its pure inputs cover
+   *  every input of `plan`, the step that produced what it revises. */
+  reviewReadsAll?: boolean;
+  /** Adds `rbranch` after `branch`: it revises `branch.json` in place from
+   *  `notes.md` (`input: [notes, branch]`), so the output it revises comes
+   *  from a step without input. `"retried"`: as `review: "retried"`, for `rbranch`. */
+  branchReview?: boolean | "retried";
+  /** Id of the step producing `plan.md`, `plan` by default: a pipeline that
+   *  renamed it. */
+  planId?: string;
+  /** `plan` declares `plan.md` as input too: the step that produces the output
+   *  is also the one revising it, as a step amending its own deliverable does. */
+  planRevisesItself?: boolean;
 }
 
 export interface RunResult {
@@ -104,7 +120,30 @@ function treeDeclaration(source: RouteOptions["source"]): string {
 /** Source of `.lance-nuit/pipelines/route.ts`. */
 export function routeSource(options: RouteOptions = {}): string {
   const comment = options.unclassified ? `\n      step("comment", {}),` : "";
-  const review = options.review ? `\n      step("review", { input: [notes, plan], output: [plan] }, [plan]),` : "";
+  const reviewExtra =
+    options.review === "absorbed"
+      ? ", blocking: false"
+      : options.review === "retried"
+        ? ", onFail: { retries: 1 }"
+        : "";
+  const reviewInput = options.reviewReadsAll ? "[ticket, triage, notes, plan]" : "[notes, plan]";
+  const review = options.review
+    ? `\n      step("review", { input: ${reviewInput}, output: [plan]${reviewExtra} }, [plan]),`
+    : "";
+  const branchRetry = options.branchReview === "retried" ? ", onFail: { retries: 1 }" : "";
+  const branchReview = options.branchReview
+    ? `\n      step("rbranch", { input: [notes, branch], output: [branch]${branchRetry} }, [branch]),`
+    : "";
+  const planInput = options.planRevisesItself ? "[ticket, triage, plan]" : "[ticket, triage]";
+  const retried = [
+    ...(options.review === "retried" ? ["review"] : []),
+    ...(options.branchReview === "retried" ? ["rbranch"] : []),
+  ];
+  const partialOnce =
+    retried.length > 0
+      ? `\n        if (partial && ${JSON.stringify(retried)}.includes(id)) rmSync(join(ctx.cwd, "partial-" + id));`
+      : "";
+  const notes = options.review || options.branchReview;
   const implementInput = options.source ? "[plan, tree]" : "[plan]";
   const implementOutput = options.source === "output" ? "[impl, tree]" : "[impl]";
   const implementEdits =
@@ -113,9 +152,9 @@ export function routeSource(options: RouteOptions = {}): string {
       : "";
   const steps = `
       step("context", { rerunOnResume: true }),
-      step("branch", { output: [branch] }, [branch]),
+      step("branch", { output: [branch] }, [branch]),${branchReview}
       step("triage", { input: [ticket], output: [triage] }, [triage]),
-      step("plan", { input: [ticket, triage], output: [plan] }, [plan]),${review}
+      step(${JSON.stringify(options.planId ?? "plan")}, { input: ${planInput}, output: [plan] }, [plan]),${review}
       step("prepare", { rerunOnResume: true }),
       step("implement", { input: ${implementInput}, output: ${implementOutput} }, [impl]),
       step("quality", { rerunOnResume: true }),
@@ -125,7 +164,7 @@ export function routeSource(options: RouteOptions = {}): string {
     `;
   const mode = options.reconcile ? ".reconcile()" : "";
   const body = options.scan ? `.forEachWorkItem({ queue: "bugTodo", scan: {}, do: [${steps}] })` : `.add(${steps})`;
-  return `import { appendFileSync, existsSync } from "node:fs";
+  return `import { appendFileSync, existsSync${retried.length > 0 ? ", rmSync" : ""} } from "node:fs";
 import { join } from "node:path";
 
 export default ({ pipeline, actionStep, textArtifact${options.source ? ", source" : ""} }: any) => {
@@ -135,7 +174,7 @@ export default ({ pipeline, actionStep, textArtifact${options.source ? ", source
   const plan = textArtifact("plan.md");
   const impl = textArtifact("impl.md");
   const commit = textArtifact("commit.sha");
-  const mr = textArtifact("mr-url.txt");${options.review ? `\n  const notes = textArtifact("notes.md");` : ""}${treeDeclaration(options.source)}
+  const mr = textArtifact("mr-url.txt");${notes ? `\n  const notes = textArtifact("notes.md");` : ""}${treeDeclaration(options.source)}
 
   const step = (id: string, extra: object, produce: any[] = []) =>
     actionStep({
@@ -148,7 +187,7 @@ export default ({ pipeline, actionStep, textArtifact${options.source ? ", source
         const hang = existsSync(join(ctx.cwd, "hang-" + id));
         // Written before the trace line: killDuring kills as soon as it reads the
         // trace, and the partial outputs must already be on disk by then.
-        if (partial) for (const out of produce) await out.write(ctx, "partial " + id + "\\n");
+        if (partial) for (const out of produce) await out.write(ctx, "partial " + id + "\\n");${partialOnce}
         appendFileSync(join(ctx.cwd, "trace.log"), id + "\\n");
         if (partial && !hang) throw new Error(id + ": failed after a partial write");
         if (existsSync(join(ctx.cwd, "fail-" + id))) throw new Error(id + ": forced failure");
@@ -202,7 +241,8 @@ export function scratchRoute(options: RouteOptions = {}): string {
   writeFileSync(join(cwd, ".lance-nuit", "pipelines", `${PIPELINE}.ts`), routeSource(options));
   mkdirSync(dirname(ticketPath(cwd)), { recursive: true });
   writeFileSync(ticketPath(cwd), "# T-1\n\nRoute the request.\n");
-  if (options.review) writeFileSync(join(dirname(ticketPath(cwd)), "notes.md"), "Review the plan.\n");
+  if (options.review || options.branchReview)
+    writeFileSync(join(dirname(ticketPath(cwd)), "notes.md"), "Review the plan.\n");
   git(cwd, "init", "-q");
   if (options.scan) {
     // Between tickets, a scan checks out the configured base branch, `main` by default.
@@ -221,6 +261,18 @@ export function scratchRoute(options: RouteOptions = {}): string {
   git(cwd, "add", ".");
   git(cwd, "commit", "-qm", "fixture");
   return cwd;
+}
+
+/** Rewrites and commits the `route` pipeline of `cwd` for `options`: the
+ *  definition an operator changed between two invocations. */
+export function redefineRoute(cwd: string, options: RouteOptions): void {
+  writeFileSync(join(cwd, ".lance-nuit", "pipelines", `${PIPELINE}.ts`), routeSource(options));
+  git(cwd, "commit", "-qam", "redefine route");
+}
+
+/** Rewrites `notes.md`, the pure input of the revising steps. */
+export function touchNotes(cwd: string): void {
+  appendFileSync(join(dirname(ticketPath(cwd)), "notes.md"), "Review it again.\n");
 }
 
 /** Removes every scratch repository created so far. */
