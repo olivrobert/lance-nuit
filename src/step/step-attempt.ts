@@ -16,6 +16,7 @@
 // for the accounting to be right.
 
 import { appendFileSync } from "node:fs";
+import { basename } from "node:path";
 import type {
   AgentBackend,
   AgentBackendRegistry,
@@ -37,12 +38,13 @@ import { type RunBudget, remainingBudget } from "../state/budget.js";
 import { chargeAttemptToLedger, isUnpricedSpend, type SettledSpend } from "../state/cost-accounting.js";
 import { recordCostStop } from "../state/cost-stop-events.js";
 import {
+  clearInFlight,
   fingerprintInputs,
   inputsReadAfterAttempt,
   inputsReadBeforeAttempt,
+  markInFlight,
   mergeProvenance,
   readInputs,
-  removeProvenance,
   revisedInPlace,
   writeProvenance,
 } from "../state/provenance.js";
@@ -375,13 +377,21 @@ export async function runAttempt(run: Run, step: RunStep, options: RunAttemptOpt
         ? await fingerprintInputs(options.context, inputsReadBeforeAttempt(ctx.step.def))
         : undefined;
 
+      // Marked before anything is erased or spawned: whatever this attempt leaves
+      // of an output it produces from scratch stays `unfinished` until it
+      // succeeds, whichever run reads it next.
+      await markInFlight(options.context, ctx.step.def, {
+        // A run's directory is named after its id; an old snapshot may lack the field.
+        runId: ctx.run.runId ?? basename(ctx.run.run_dir),
+        stepId: ctx.step.id,
+        attempt: ctx.attempt.attempt,
+        startedAt: ctx.attempt.started_at,
+      });
       // A declared output proves this attempt completed; its previous version was
       // removed before spawn, like report_paths. An output the step also declares
       // as input is revised in place, so it survives the erasure.
       for (const output of ctx.step.def.outputs ?? []) {
-        if (revised.has(output.name)) continue;
-        await output.remove(options.context);
-        if (declaresInput) await removeProvenance(options.context, output);
+        if (!revised.has(output.name)) await output.remove(options.context);
       }
 
       const result = await options.executeStep(
@@ -437,6 +447,8 @@ export async function runAttempt(run: Run, step: RunStep, options: RunAttemptOpt
           const record = revised.has(output.name) ? mergeProvenance : writeProvenance;
           await record(options.context, output, ctx.step.id, fingerprints);
         }
+      } else {
+        await clearInFlight(options.context, ctx.step.def);
       }
       return result;
     },

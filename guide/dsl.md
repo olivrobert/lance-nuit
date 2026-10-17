@@ -408,16 +408,53 @@ The rules:
   of the attempt and recorded on success, after the outputs are verified, in one
   provenance record per produced artifact. An external source is the exception:
   it is read once the attempt succeeded (see below).
-- **Freshness of an output** at admission time: absent is `missing`; a pure input
-  absent is `unknown` (a safe bias); no record at all is `adoptable`; a
-  fingerprint that differs, or a declared input the record does not list, is
-  `stale`; otherwise `fresh`. A record written by another step producing the same
-  artifact from other inputs is therefore `stale` for this step, which runs.
-- **Decision.** The step runs when an output is `missing`, `unknown`, or `stale`.
-  Otherwise it is skipped with `outputs up to date with declared inputs`.
+- **Freshness of an output** at admission time: absent is `missing`; left by an
+  attempt that never succeeded is `unfinished` (see below); a pure input absent
+  is `unknown` (a safe bias); no record at all is `adoptable`; a fingerprint that
+  differs, or a declared input the record does not list, is `stale`; otherwise
+  `fresh`. A record written by another step producing the same artifact from
+  other inputs is therefore `stale` for this step, which runs.
+- **Decision.** The step runs when an output is `missing`, `unfinished`,
+  `unknown`, or `stale`. Otherwise it is skipped with
+  `outputs up to date with declared inputs`.
+- **Unfinished attempts.** Before every attempt, the runner marks each output
+  the step produces from scratch as being written by that attempt, in the
+  output's provenance record ([persistence](persistence.md)); only a successful
+  attempt of a step producing it from scratch clears the mark. An output found
+  with the mark is `unfinished`: the attempt that wrote it failed, was killed,
+  or had its failure absorbed by `blocking: false`, so its bytes may be partial.
+  An unfinished output is never adopted and never counts as present: every step
+  declaring it as output runs. The mark lives in the work item, not in the run,
+  so it holds across a new run, `--fresh`, `--start-at`, and
+  `--steps`/`--skip`. It ranks with `missing` in the summary. This applies with
+  or without [reconcile mode](#reconcile-mode), and to a step without `input`
+  as well. Whenever admission reads the freshness of such a step, the journal
+  says why it runs with `step.outputs.unfinished` (`stepId`, `outputs`); a
+  step that runs without that reading (a resume of its failed pass,
+  `--start-at`, a step without `input` outside reconcile mode) gets no event.
+- **Limit: outputs revised in place.** An output the step also declares as
+  `input` is revised in place: it is neither erased nor marked before the
+  attempt, and the revision merges its fingerprints into the record on success,
+  as before the mark existed. A revision that wrote nothing therefore costs the
+  step that produced the output nothing, and a successful revision keeps a mark
+  the producer's failed attempt left, so the producer still runs again. The
+  reverse case is not covered yet: a revision that wrote then failed, or was
+  killed, leaves bytes the producer's record still vouches for. The producer is
+  not replayed, and the next pass of the revising step works on those bytes. A
+  later release closes this gap; until then, replay the producer with
+  `--start-at` after such a failure.
 - **Adoption.** An output that exists without any record adopts the inputs
   present now and is skipped. Without this, the feature would regenerate the
   deliverables of every work item already waiting for a human decision.
+- **Repairing an output by hand.** No command adopts an output you fixed
+  yourself after a failed attempt: the mark makes the step run again. To keep
+  your version, delete its record, `artifacts/.provenance/<name>.json`, then
+  start a new run (`--fresh`): the output is `adoptable` and adopts the current
+  inputs. Resuming the failed run instead replays the step over your repair,
+  because its last pass failed. A step without `input` never adopts anything:
+  once the record is gone, its output counts as present in reconcile mode, and
+  the step runs again on every new run in the default mode. To have the step
+  rewrite the output instead, replay it with `--start-at`.
 - **Order.** `when` first, freshness second. When `when` refuses while an output
   is stale, the reason reads `... (inputs changed, outputs kept)`.
 - **Resume.** A `done` step declaring `input` is re-admitted, and so is a
@@ -426,8 +463,10 @@ The rules:
   by `--start-at` is the exception: it runs even when its outputs are fresh,
   because freshness does not track the repository tree an operator fixed. So
   does a step whose last pass failed or was interrupted: what that pass wrote
-  is never adopted. A pass the runner died in needs an authorization before it
-  is replayed; see [Interrupted steps](#interrupted-steps). A run stopped by
+  is never adopted, in this run or, for an output produced from scratch, a
+  later one (see *Unfinished attempts*). A
+  pass the runner died in needs an authorization before it is replayed; see
+  [Interrupted steps](#interrupted-steps). A run stopped by
   `--until` resumes the same way: the bound is never persisted, so the next
   invocation re-checks the settled steps as above and runs what follows it.
 - **Absorbed failure.** A `blocking: false` step whose failure was absorbed is
@@ -455,6 +494,8 @@ before freshness is ever consulted.
 
 `freshness(ctx, artifact)` exposes the same records to a pipeline, returning
 `fresh`, `stale`, `missing`, or `unknown` for one artifact against its own record.
+An unfinished artifact is reported `stale`: the public helper has no
+`unfinished` value, and either way the artifact must be produced again.
 It is what an author branches on to run an amendment step rather than a full
 regeneration. A record bound to an external source reads `unknown` unless an
 artifact input already makes it `stale`: the record keeps the source's
@@ -563,7 +604,8 @@ The rules:
   [rework](human-control.md#reject-and-rework) step, then the declarations:
   - `input` and `output`: [input freshness](#input-freshness), unchanged;
   - `output` without `input`: the step is skipped with `outputs present` when
-    every output it declares exists, and runs when one is missing;
+    every output it declares exists, and runs when one is missing or
+    [unfinished](#input-freshness);
   - `rerunOnResume` without `output`: the step runs.
 
   The [interruption guard](#interrupted-steps) still comes last.

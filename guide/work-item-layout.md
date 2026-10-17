@@ -20,7 +20,9 @@ The three families (`artifacts/`, `reports/`, `runs/`) are described in the
 architecture guide. `artifacts/.provenance/` is owned by the runner: it holds one
 `{ artifact, producedBy, producedAt, inputs: { "artifacts/<name>": "<sha256>" } }`
 record per output of a step declaring `input`, which is what makes a rerun replay
-only what its sources changed. See [`persistence.md`](persistence.md) for the
+only what its sources changed. A record with an `inFlight` mark names the attempt
+still writing that output, or the one that failed while writing it: an output
+that attempt may have left partial is never adopted. See [`persistence.md`](persistence.md) for the
 record shape and [`dsl.md`](dsl.md) for the freshness rules.
 
 Tickets in **arbitrary work-item subdirectories** are supported by passing the

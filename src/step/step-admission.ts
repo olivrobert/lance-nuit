@@ -156,6 +156,19 @@ function reportUnavailableSources(input: AdmitStepInput, unavailable: readonly U
   }
 }
 
+/** Outputs left by an attempt that never succeeded make the step run whatever
+ *  the run remembers of that attempt: the journal says which, for a diagnosis. */
+function reportUnfinishedOutputs(input: AdmitStepInput, outputs: readonly string[]): void {
+  if (outputs.length === 0) return;
+  const { run, step } = input;
+  appendRunEvent(run, "step.outputs.unfinished", { stepId: step.id, outputs: [...outputs] });
+  input.output.emit({
+    type: "runner.message",
+    level: "info",
+    message: `↻ ${step.def.name} — running: ${outputs.join(", ")} left by an attempt that did not succeed`,
+  });
+}
+
 /** Persist a guard rejection with the same blocking/non-blocking semantics. */
 function rejectAdmission(
   input: AdmitStepInput,
@@ -321,8 +334,10 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
       return applyInputDecision(run, step, input.output, "skip", SKIP_ABSORBED_UNCHANGED);
     }
     // Without input, freshness reduces to presence: no fingerprint can differ.
+    // An output an unfinished attempt left is not present work: it makes the step run.
     const report = await stepFreshness(baseCtx, step.def);
     reportUnavailableSources(input, report.unavailable);
+    reportUnfinishedOutputs(input, report.unfinished);
     if (!report.mustRun && !declaresInput) {
       return applyInputDecision(run, step, input.output, "skip", SKIP_OUTPUTS_PRESENT);
     }

@@ -133,6 +133,12 @@ const EVENT_SCHEMAS = {
     source: z.string(),
     reason: z.string(),
   }),
+  "step.outputs.unfinished": z.looseObject({
+    ...base,
+    type: z.literal("step.outputs.unfinished"),
+    stepId,
+    outputs: z.array(z.string()),
+  }),
   "step.status.changed": z.looseObject({
     ...base,
     type: z.literal("step.status.changed"),

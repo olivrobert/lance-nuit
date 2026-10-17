@@ -188,6 +188,23 @@ test("step detail: produced files are the artifacts whose provenance names the s
   expect(readStepDetail("demo-app", "DEMO-1", "tests", undefined)?.produced).toEqual([]);
 });
 
+test("step detail: an artifact an unfinished attempt wrote is not listed as produced", () => {
+  const project = listedProject();
+  runWithAttempts(project);
+  const record = (artifact: string, extra: object = {}) =>
+    JSON.stringify({ schemaVersion: 1, artifact, producedBy: "audit", producedAt: "x", inputs: {}, ...extra });
+  const inFlight = { runId: "r-1", stepId: "audit", attempt: 2, startedAt: "2026-09-05T07:04:00.000Z" };
+  writeWorkItemFile(
+    project,
+    "DEMO-1",
+    "artifacts/.provenance/audit.json.json",
+    record("artifacts/audit.json", { inFlight }),
+  );
+  writeWorkItemFile(project, "DEMO-1", "artifacts/.provenance/plan.md.json", record("artifacts/plan.md"));
+
+  expect(readStepDetail("demo-app", "DEMO-1", "audit", undefined)?.produced).toEqual(["artifacts/plan.md"]);
+});
+
 test("step detail: an unknown step, attempt-less step or unknown run answers without guessing", () => {
   const project = listedProject();
   const runDir = writeRun(project, "DEMO-1", "feature", {

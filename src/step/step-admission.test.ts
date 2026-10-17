@@ -11,7 +11,7 @@ import type { Run, RunStep } from "../model/run.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { pendingRejection, recordRejection } from "../state/decisions.js";
-import { fingerprintInputs, writeProvenance } from "../state/provenance.js";
+import { fingerprintInputs, markInFlight, writeProvenance } from "../state/provenance.js";
 import { readRunEvents } from "../state/run-journal.js";
 import { makeRunStep } from "../state/run-step.js";
 import { admitStep, checkInputs } from "./step-admission.js";
@@ -409,6 +409,60 @@ test("reconcile: an orchestration node declaring a present output still runs, it
 
   expect(admission.kind).toBe("ready");
   expect(events.some((event) => event.type === "step.skipped")).toBe(false);
+});
+
+// ── Outputs left by an attempt that never succeeded ──────────────────────────
+
+const ticketArtifact = textArtifact("ticket.md");
+
+const IN_FLIGHT = { runId: "earlier-run", stepId: "plan", attempt: 1, startedAt: "2026-01-01T09:00:00.000Z" };
+
+test("unfinished: a pending step of a new run whose output an unfinished attempt left runs, and says why", async () => {
+  const { ctx } = reworkContext({ "ticket.md": "t", "plan.md": "partial" });
+  const step = reworkStep({ rework_for: undefined, sources: [ticketArtifact] }, { status: "pending" });
+  await markInFlight(ctx, step.def, IN_FLIGHT);
+
+  const { admission, events } = await admitRework(step, ctx);
+
+  // Nothing about the run says the earlier pass failed: only the mark does.
+  expect(admission.kind).toBe("ready");
+  expect(events.some((event) => event.type === "step.skipped")).toBe(false);
+  expect(events.filter((event) => event.type === "step.outputs.unfinished")).toEqual([
+    expect.objectContaining({ stepId: "plan", outputs: ["plan.md"] }),
+  ]);
+});
+
+test("unfinished: in reconcile mode, a marked output without input is not `outputs present`", async () => {
+  const { ctx } = reworkContext({ "plan.md": "partial" });
+  const step = deliverableStep({ status: "pending" });
+  await markInFlight(ctx, step.def, IN_FLIGHT);
+
+  const { admission, events } = await admitReconciled(step, ctx);
+
+  expect(admission.kind).toBe("ready");
+  expect(events.some((event) => event.type === "step.skipped")).toBe(false);
+});
+
+test("unfinished: an absorbed failure keeps its mark and is still skipped while its inputs hold", async () => {
+  const { ctx } = reworkContext({ "ticket.md": "t", "plan.md": "partial" });
+  const step = reworkStep(
+    { rework_for: undefined, sources: [ticketArtifact], blocking: false },
+    {
+      status: "done",
+      control: { duration_ms: 1 },
+      errors: "audit failed",
+      absorbed_inputs: await fingerprintInputs(ctx, [ticketArtifact]),
+    },
+  );
+  await markInFlight(ctx, step.def, IN_FLIGHT);
+
+  const { admission, events } = await admitRework(step, ctx);
+
+  expect(admission.kind).toBe("skip");
+  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({
+    reason: "failure absorbed, inputs unchanged since",
+  });
+  expect(events.some((event) => event.type === "step.outputs.unfinished")).toBe(false);
 });
 
 // ── External sources ─────────────────────────────────────────────────────────
