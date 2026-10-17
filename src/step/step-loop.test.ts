@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { artifact, textArtifact } from "../dsl/artifact.ts";
@@ -1838,7 +1838,11 @@ const branchArtifact = textArtifact("branch.json");
 const branchStep = (state: StepStateInput = {}, def: Partial<PipelineStep> = {}): RunStep =>
   bashStep("branch", "cmd", { outputs: [branchArtifact], ...def }, state);
 
-const reconcileOpts = (resuming: boolean) => ({ resuming, reconcile: true });
+/** Marks `run` as boot does for a pipeline declaring `.reconcile()`. */
+function reconciled(run: Run): Run {
+  run.reconcile = true;
+  return run;
+}
 
 test("reconcile: a done step whose deliverable is present is not paid twice, and its spend still counts", async () => {
   const { ctx } = artifactContext({ "branch.json": "{}" });
@@ -1847,7 +1851,7 @@ test("reconcile: a done step whose deliverable is present is not paid twice, and
   const run = makeRun([step, later]);
 
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(run, "PROJ-1", undefined, reconcileOpts(true), deps, ctx);
+  const outcome = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["later"]);
   expect(step.status).toBe("done");
@@ -1863,7 +1867,7 @@ test("reconcile: a new run does not pay a step whose deliverable is already pres
   const run = makeRun([step]);
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, reconcileOpts(false), deps, ctx);
+  await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: false }, deps, ctx);
 
   expect(calls.exec).toBe(0);
   expect(step.status).toBe("skipped");
@@ -1886,7 +1890,7 @@ test("reconcile: a done step whose deliverable was deleted runs again; legacy tr
       return deps.executeStep(s, command, budget, context);
     },
   };
-  await executeRunSteps(makeRun([step]), "PROJ-1", undefined, reconcileOpts(true), writing, ctx);
+  await executeRunSteps(reconciled(makeRun([step])), "PROJ-1", undefined, { resuming: true }, writing, ctx);
 
   expect(calls.ids).toEqual(["branch"]);
   expect(step.status).toBe("done");
@@ -1912,7 +1916,7 @@ test("reconcile: a step skipped by its own admission is re-admitted, an excluded
       return deps.executeStep(s, command, budget, context);
     },
   };
-  await executeRunSteps(run, "PROJ-1", undefined, reconcileOpts(true), writing, ctx);
+  await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, writing, ctx);
 
   expect(calls.ids).toEqual(["branch"]);
   expect(admitted.status).toBe("done");
@@ -1925,14 +1929,14 @@ test("reconcile: an absorbed failure without input does not run again on every r
   const gate = bashStep("gate", "test -f ok");
   const run = makeRun([check, gate]);
   const first = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
-  await executeRunSteps(run, "PROJ-1", undefined, reconcileOpts(false), first.deps, ctx);
+  await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: false }, first.deps, ctx);
   expect(check.status).toBe("done");
   expect(check.errors).toBe("audit failed");
   // No input to fingerprint: the record is empty, and still vouches for the absorption.
   expect(check.absorbed_inputs).toEqual({});
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, reconcileOpts(true), deps, ctx);
+  await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["gate"]);
   const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
@@ -1973,7 +1977,7 @@ test("reconcile: a materialized orchestration node keeps the authority of its st
   const run = makeRun([node]);
 
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(run, "PROJ-1", undefined, reconcileOpts(true), deps, ctx);
+  const outcome = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, deps, ctx);
 
   // Re-admitted, the node would relaunch its child pipeline, which does not exist here.
   expect(outcome.failed).toBe(false);
@@ -1999,9 +2003,354 @@ test("reconcile: a skipped orchestration node declaring rerunOnResume stays skip
   const run = makeRun([node]);
 
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(run, "PROJ-1", undefined, reconcileOpts(true), deps, ctx);
+  const outcome = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, deps, ctx);
 
   expect(outcome.failed).toBe(false);
   expect(calls.exec).toBe(0);
   expect(node.status).toBe("skipped");
+});
+
+// --- Reconcile mode: selectors last one invocation ---------------------------
+//
+// Boot persists no exclusion in reconcile mode; the loop applies this
+// invocation's `--steps`, `--skip` and `--start-at` and reports what they left out.
+
+const replayable = (id: string, state: StepStateInput = {}): RunStep =>
+  bashStep(id, "cmd", { rerun_on_resume: true }, state);
+
+function selectionSkips(run: Run): Array<{ stepId?: unknown; reason?: unknown }> {
+  return readRunEvents(run.run_dir)
+    .filter((event) => event.type === "step.skipped")
+    .map((event) => ({ stepId: event.stepId, reason: event.reason }));
+}
+
+test("reconcile: --skip sets a step aside whatever its status, journals why, and persists no exclusion", async () => {
+  const { ctx } = artifactContext();
+  const done = replayable("context", { status: "done", control: { duration_ms: 1 } });
+  const owed = replayable("quality");
+  const kept = replayable("report");
+  const run = makeRun([done, owed, kept]);
+  try {
+    const { deps, calls } = fakeDeps();
+    const outcome = await executeRunSteps(
+      reconciled(run),
+      "PROJ-1",
+      undefined,
+      { resuming: true, skipFilter: ["context", "quality"] },
+      deps,
+      ctx,
+    );
+
+    expect(calls.ids).toEqual(["report"]);
+    expect(outcome.setAside).toEqual(["context", "quality"]);
+    expect(outcome.stopped).toBe(false);
+    // A done step keeps the status its pass earned; a pending one settles as skipped.
+    expect(done.status).toBe("done");
+    expect(owed.status).toBe("skipped");
+    expect(run.steps.map((step) => step.excluded)).toEqual([undefined, undefined, undefined]);
+    expect(selectionSkips(run)).toEqual([
+      { stepId: "context", reason: "operator selection" },
+      { stepId: "quality", reason: "operator selection" },
+    ]);
+    const persisted = readRunSnapshot(join(run.run_dir, "state.json"))!;
+    expect(persisted.steps.some((step) => "excluded" in step)).toBe(false);
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+test("reconcile: --steps sets aside every step it does not name, prefixes included", async () => {
+  const { ctx } = artifactContext();
+  const run = makeRun([replayable("checks.lint"), replayable("checks.types"), replayable("report")]);
+  try {
+    const { deps, calls } = fakeDeps();
+    const outcome = await executeRunSteps(
+      reconciled(run),
+      "PROJ-1",
+      undefined,
+      { resuming: false, stepFilter: ["checks"] },
+      deps,
+      ctx,
+    );
+
+    expect(calls.ids).toEqual(["checks.lint", "checks.types"]);
+    expect(outcome.setAside).toEqual(["report"]);
+    expect(run.steps[2]!.status).toBe("skipped");
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+test("reconcile: --start-at sets aside the work still owed before its target, and re-admits a done step", async () => {
+  const { ctx } = artifactContext();
+  const done = replayable("context", { status: "done", control: { duration_ms: 1 } });
+  const owed = replayable("prepare");
+  const target = replayable("implement", { status: "pending", replay: true });
+  const run = makeRun([done, owed, target]);
+  try {
+    const { deps, calls } = fakeDeps();
+    const outcome = await executeRunSteps(
+      reconciled(run),
+      "PROJ-1",
+      undefined,
+      { resuming: true, startAt: "implement" },
+      deps,
+      ctx,
+    );
+
+    expect(calls.ids).toEqual(["context", "implement"]);
+    expect(outcome.setAside).toEqual(["prepare"]);
+    expect(owed.status).toBe("skipped");
+    expect(owed.excluded).toBeUndefined();
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+test("reconcile: a step left out whose last pass is unfinished keeps its status, and the run stops for a decision", async () => {
+  const { ctx } = artifactContext();
+  const failed = replayable("quality", { status: "failed", errors: "boom" });
+  const interrupted = replayable("publish", { status: "running" });
+  interrupted.attempts = [
+    {
+      attempt: 1,
+      kind: "step",
+      status: "aborted",
+      started_at: "2026-10-16T00:00:00Z",
+      log_path: "x",
+      interrupted: true,
+    },
+  ];
+  const kept = replayable("report");
+  const run = makeRun([failed, interrupted, kept]);
+  try {
+    const { deps, calls } = fakeDeps();
+    const outcome = await executeRunSteps(
+      reconciled(run),
+      "PROJ-1",
+      undefined,
+      { resuming: true, skipFilter: ["quality", "publish"] },
+      deps,
+      ctx,
+    );
+
+    expect(calls.ids).toEqual(["report"]);
+    expect(outcome.setAside).toEqual(["quality", "publish"]);
+    // The status is what the next admission reads: settled, it would let freshness
+    // adopt the failed pass's outputs and replay the interrupted one unasked.
+    expect(failed.status).toBe("failed");
+    expect(failed.errors).toBe("boom");
+    expect(interrupted.status).toBe("running");
+    expect(outcome.stopped).toBe(true);
+    expect(run.outcome?.stop?.kind).toBe("needs-decision");
+    expect(run.outcome?.phase).toBe("quality");
+    expect(selectionSkips(run)).toEqual([
+      { stepId: "quality", reason: "operator selection" },
+      { stepId: "publish", reason: "operator selection" },
+    ]);
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+test("reconcile: a step left out with an unfinished pass does not turn a failure later in the run into a stop", async () => {
+  const { ctx } = artifactContext();
+  const failed = replayable("quality", { status: "failed", errors: "boom" });
+  const run = makeRun([failed, replayable("report")]);
+  try {
+    const { deps } = fakeDeps([{ ok: false }]);
+    const outcome = await executeRunSteps(
+      reconciled(run),
+      "PROJ-1",
+      undefined,
+      { resuming: true, skipFilter: ["quality"] },
+      deps,
+      ctx,
+    );
+
+    expect(outcome.failed).toBe(true);
+    expect(outcome.stopped).toBe(false);
+    expect(failed.status).toBe("failed");
+    expect(run.outcome?.stop).toBeUndefined();
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+test("reconcile: a requeued step whose last attempt was interrupted keeps pending when left out, and the run stops", async () => {
+  const { ctx } = artifactContext();
+  const requeued = replayable("publish", { status: "pending", replay: true });
+  requeued.attempts = [
+    {
+      attempt: 1,
+      kind: "step",
+      status: "aborted",
+      started_at: "2026-10-16T00:00:00Z",
+      log_path: "x",
+      interrupted: true,
+    },
+  ];
+  const run = makeRun([requeued, replayable("report")]);
+  try {
+    const { deps, calls } = fakeDeps();
+    const outcome = await executeRunSteps(
+      reconciled(run),
+      "PROJ-1",
+      undefined,
+      { resuming: true, skipFilter: ["publish"] },
+      deps,
+      ctx,
+    );
+
+    expect(calls.ids).toEqual(["report"]);
+    // Settled as skipped, it would lose the interruption the next admission must see.
+    expect(requeued.status).toBe("pending");
+    expect(outcome.stopped).toBe(true);
+    expect(run.outcome?.stop?.kind).toBe("needs-decision");
+    expect(run.outcome?.stop?.detail).toContain("--replay-interrupted");
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+test("reconcile: an --until bound left out unfinished is reached, and its stop outranks the selection's", async () => {
+  const { ctx } = artifactContext();
+  const bound = replayable("plan", { status: "failed", errors: "boom" });
+  const run = makeRun([replayable("context"), bound, replayable("implement")]);
+  try {
+    const { deps, calls } = fakeDeps();
+    const outcome = await executeRunSteps(
+      reconciled(run),
+      "PROJ-1",
+      undefined,
+      { resuming: true, skipFilter: ["plan"], until: "plan" },
+      deps,
+      ctx,
+    );
+
+    expect(calls.ids).toEqual(["context"]);
+    expect(outcome.untilStop).toBe(true);
+    expect(run.outcome?.stop?.kind).toBe("until");
+    expect(bound.status).toBe("failed");
+    expect(run.steps[2]!.status).toBe("pending");
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+test("reconcile: a step set aside before the --until bound settles it, later steps stay pending", async () => {
+  const { ctx } = artifactContext();
+  const run = makeRun([replayable("context"), replayable("plan"), replayable("report")]);
+  try {
+    const { deps, calls } = fakeDeps();
+    const outcome = await executeRunSteps(
+      reconciled(run),
+      "PROJ-1",
+      undefined,
+      { resuming: false, skipFilter: ["plan"], until: "plan" },
+      deps,
+      ctx,
+    );
+
+    expect(calls.ids).toEqual(["context"]);
+    expect(outcome.untilStop).toBe(true);
+    expect(outcome.setAside).toEqual(["plan"]);
+    expect(run.steps.map((step) => step.status)).toEqual(["done", "skipped", "pending"]);
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+// A cost stop outranks the selection's: the run did not go to the end, so the
+// stop that withheld work is the one the operator must act on.
+for (const gate of [
+  { name: "budget", maxCost: 1, unaccounted: false },
+  { name: "unpriced spend", maxCost: 5, unaccounted: true },
+] as const) {
+  test(`reconcile: a ${gate.name} stop after a step left out unfinished keeps its own kind`, async () => {
+    const { ctx } = artifactContext();
+    // The failed pass spent the budget; its spend still counts though it is set aside.
+    const failed = replayable("quality", {
+      status: "failed",
+      errors: "boom",
+      control: { duration_ms: 1, total_cost_usd: 2, ...(gate.unaccounted ? { cost_unknown: true } : {}) },
+    });
+    const run = makeRun([failed, replayable("report")], gate.maxCost);
+    if (gate.unaccounted) run.cost_unaccounted = true;
+    try {
+      const { deps, calls } = fakeDeps();
+      const outcome = await executeRunSteps(
+        reconciled(run),
+        "PROJ-1",
+        undefined,
+        { resuming: true, skipFilter: ["quality"] },
+        deps,
+        ctx,
+      );
+
+      expect(calls.ids).toEqual([]);
+      expect(outcome.setAside).toEqual(["quality"]);
+      expect(outcome.budgetExceeded).toBe(!gate.unaccounted);
+      expect(outcome.costUnaccountedStop).toBe(gate.unaccounted);
+      expect(outcome.stopped).toBe(false);
+      expect(run.outcome?.stop?.kind).not.toBe("needs-decision");
+      expect(failed.status).toBe("failed");
+      expect(run.steps[1]!.status).toBe("pending");
+    } finally {
+      rmSync(run.run_dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("reconcile: an interruption after a step left out unfinished is not turned into a selection stop", async () => {
+  const { ctx } = artifactContext();
+  const failed = replayable("quality", { status: "failed", errors: "boom" });
+  const run = makeRun([failed, replayable("report"), replayable("publish")]);
+  const abort = createAbortScope();
+  try {
+    const { deps, calls } = fakeDeps();
+    const executeStep = deps.executeStep;
+    // The signal lands while report runs, before the handler persists the abort.
+    deps.executeStep = async (...args) => {
+      abort.requestAbort("SIGINT");
+      return executeStep(...args);
+    };
+    const outcome = await executeRunSteps(
+      reconciled(run),
+      "PROJ-1",
+      undefined,
+      { resuming: true, abort, skipFilter: ["quality"] },
+      deps,
+      ctx,
+    );
+
+    expect(calls.ids).toEqual(["report"]);
+    expect(outcome.stopped).toBe(false);
+    expect(run.stopped_reason).toBeUndefined();
+    expect(run.outcome?.stop).toBeUndefined();
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+test("legacy: the loop leaves the selectors to boot, which persisted them as exclusions", async () => {
+  const { ctx } = artifactContext();
+  const run = makeRun([replayable("context"), replayable("quality")]);
+  try {
+    const { deps, calls } = fakeDeps();
+    const outcome = await executeRunSteps(
+      run,
+      "PROJ-1",
+      undefined,
+      { resuming: false, skipFilter: ["quality"], stepFilter: ["context"] },
+      deps,
+      ctx,
+    );
+
+    expect(calls.ids).toEqual(["context", "quality"]);
+    expect(outcome.setAside).toEqual([]);
+    expect(selectionSkips(run)).toEqual([]);
+  } finally {
+    rmSync(run.run_dir, { recursive: true, force: true });
+  }
 });

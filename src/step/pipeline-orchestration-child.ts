@@ -226,7 +226,6 @@ export async function executeChild(
         resuming: hadSnapshot,
         abort,
         replayInterrupted: input.replayInterrupted,
-        reconcile: childDefinition.reconcile === true,
       },
       stepLoopDeps(input.output),
       childCtx,

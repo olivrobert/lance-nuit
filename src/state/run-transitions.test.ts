@@ -620,3 +620,77 @@ test("updateStep: a settled step drops its replay mark, an unsettled one keeps i
     expect(JSON.parse(snapshotOf(run)).steps[1].replay).toBeUndefined();
   }
 });
+
+/** A step a dead runner left `running`, its last attempt settled as interrupted on resume. */
+function deadPass(id: string): ReturnType<typeof makeRunStep> {
+  const step = makeRunStep({ id, name: id.toUpperCase(), command: "true", runner: "bash" }, { status: "running" });
+  step.attempts = [
+    {
+      attempt: 1,
+      kind: "step",
+      status: "aborted",
+      started_at: "2026-10-16T00:00:00Z",
+      log_path: "x",
+      interrupted: true,
+    },
+  ];
+  return step;
+}
+
+test("abortRun: a pass the runner died in, left running by a selection, is not the step a signal aborts", () => {
+  const run = twoStepRun("transitions-abort-dead-pass-");
+  const dead = deadPass("dead");
+  run.steps.splice(1, 0, dead);
+  const live = run.steps[2]!;
+  updateStep(run, live, "running");
+
+  abortRun(run, "SIGINT");
+
+  expect(live.status).toBe("aborted");
+  // Still `running` with its interrupted attempt: its replay must still be authorized.
+  expect(dead.status).toBe("running");
+  expect(run.outcome?.phase).toBe("b");
+  finalizeRun(run, { setAside: ["dead"] });
+  expect(run.outcome?.phase).toBe("b");
+});
+
+test("abortRun: with only a dead pass running, no step is marked aborted", () => {
+  const run = twoStepRun("transitions-abort-only-dead-");
+  const dead = deadPass("dead");
+  run.steps.push(dead);
+
+  abortRun(run, "SIGINT");
+
+  expect(run.status).toBe("ABORTED");
+  expect(dead.status).toBe("running");
+  expect(run.outcome?.phase).toBeNull();
+  finalizeRun(run);
+  expect(run.outcome).toMatchObject({ phase: null, logPath: null });
+});
+
+test("finalizeRun: a failed step the selection set aside is not named as the cause of a later failure or stop", () => {
+  const failing = twoStepRun("transitions-set-aside-fail-");
+  const setAside = makeRunStep({ id: "old", name: "Old", command: "true", runner: "bash" }, { status: "failed" });
+  setAside.errors = "old failure";
+  failing.steps.unshift(setAside);
+  updateStep(failing, failing.steps[2]!, "running");
+  updateStep(failing, failing.steps[2]!, "failed", "exit code 2");
+
+  finalizeRun(failing, { failed: true, setAside: ["old"] });
+
+  expect(failing.status).toBe("FAIL");
+  expect(failing.outcome).toMatchObject({ phase: "b", reason: "exit code 2" });
+
+  const stopped = twoStepRun("transitions-set-aside-stop-");
+  const old = makeRunStep({ id: "old", name: "Old", command: "true", runner: "bash" }, { status: "failed" });
+  stopped.steps.unshift(old);
+  stopRun(stopped, stopped.steps[1]!, "until reached", { kind: "until", detail: "until reached" });
+
+  finalizeRun(stopped, { stopped: true, untilStop: true, setAside: ["old"] });
+
+  expect(stopped.status).toBe("STOPPED");
+  expect(stopped.outcome).toMatchObject({ phase: "a", stop: { kind: "until" } });
+  // Without the selection, the failed step is the cause, as before.
+  finalizeRun(stopped, { stopped: true });
+  expect(stopped.outcome?.phase).toBe("old");
+});

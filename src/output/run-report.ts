@@ -19,6 +19,8 @@ export interface RunReportOutcome {
    *  `cost` headline and the `--allow-unmetered` recovery line. */
   costUnaccountedStop?: boolean;
   cumulativeCost: number;
+  /** Steps this invocation's selectors left out in reconcile mode. */
+  setAside?: readonly string[];
 }
 
 export type RunReportKind =
@@ -100,6 +102,10 @@ export interface RunReport {
   recovery?: string;
   resources: RunReportResource[];
   resumptions: RunReportResume[];
+  /** Names of the steps the operator's selection left out of this invocation
+   *  only (reconcile mode). Counted apart from `statusCounts`, which cannot tell
+   *  them from steps skipped as up to date. */
+  setAside: string[];
 }
 
 function sessionOf(step: RunStepView | undefined): AgentSession | undefined {
@@ -354,5 +360,6 @@ export function buildRunReport(
       : undefined,
     resources,
     resumptions: resumptions(run, failed, kind, registry),
+    setAside: (outcome.setAside ?? []).map((id) => run.steps.find((step) => step.id === id)?.def.name ?? id),
   };
 }

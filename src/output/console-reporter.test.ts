@@ -286,3 +286,14 @@ test("a stop requested by --until asks for a rerun, not for a condition to addre
   delete run.outcome.stop;
   expect(buildRunReport(run, stopped).action).toBe("Address the reported stop condition before resuming.");
 });
+
+test("the steps a reconcile selection set aside are counted and named apart from other skips", () => {
+  const run = sampleRun();
+  const setAside = renderConsoleReport(buildRunReport(run, { ...outcome, setAside: ["unused", "tests"] }), {
+    cwd: "/project",
+  });
+  expect(setAside).toContain("2 steps set aside by operator selection: Optional step, Tests");
+
+  const none = renderConsoleReport(buildRunReport(run, outcome), { cwd: "/project" });
+  expect(none).not.toContain("set aside");
+});

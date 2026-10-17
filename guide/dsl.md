@@ -598,8 +598,7 @@ The rules:
   declare `rerunOnResume: true` when replaying it is idempotent. In this mode
   `rerunOnResume` therefore means "safe to replay, nothing to deliver".
 - **Re-admission.** On a resume, every settled step goes through admission
-  again: a `done` one, and a `skipped` one unless `--steps`, `--skip` or
-  `--start-at` took it out.
+  again, `done` or `skipped`.
 - **Admission.** `when` decides first, then a pending rejection of a
   [rework](human-control.md#reject-and-rework) step, then the declarations:
   - `input` and `output`: [input freshness](#input-freshness), unchanged;
@@ -626,8 +625,25 @@ The rules:
   of their status: they are neither re-admitted nor required to declare an
   output, and an output they declare never skips them. The same goes for the
   step `forEachWorkItem` adds to read the ticket, which belongs to the runner.
-  `--steps` and `--skip` keep persisting their exclusions, as in the default
-  mode.
+- **Selectors.** `--steps`, `--skip` and `--start-at` hold for one
+  invocation. A step they leave out is not run and the journal records
+  `operator selection`: a `done` step stays `done`, a pending one becomes
+  `skipped`, and one whose last pass failed, was aborted or was interrupted
+  keeps that status, so the next invocation still meets the
+  [interruption guard](#interrupted-steps) and reruns the failed pass. The run
+  then stops with `needs-decision` instead of passing (a run holding an aborted
+  step stays `ABORTED`), unless an `--until` bound or another stop ended it
+  first. A step that `--start-at` requeued after a failed or aborted attempt is
+  `pending`, and settles like any other. What an unfinished pass wrote is never
+  adopted in any case: its outputs stay [unfinished](#input-freshness) until an
+  attempt succeeds, whatever the status says. Nothing is persisted as an
+  exclusion, and the next invocation admits those steps again, except the nodes
+  and the work-item source step above, which keep the `skipped` status they got
+  (see [CLI options](cli-options.md)).
+- **Switching back to the default mode.** A step a reconcile invocation set
+  aside is a plain `skipped` step in that run: the default mode re-admits it
+  only if it declares `input`, as any skipped step, while the next reconcile
+  invocation runs it.
 
 ### Failure handling and retry escalation
 

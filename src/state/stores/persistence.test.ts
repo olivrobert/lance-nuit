@@ -622,6 +622,7 @@ test("abortRun: an agent attempt killed without a live estimate is flagged cost_
   run.runId = "abort-unpriced";
   const step = run.steps[1]!;
   step.status = "running";
+  run.executingStepId = step.id;
   step.attempts = [
     {
       attempt: 1,
@@ -646,6 +647,7 @@ test("abortRun: a live estimate charges the attempt and clears the unknown flag"
   run.runId = "abort-estimated";
   const step = run.steps[1]!;
   step.status = "running";
+  run.executingStepId = step.id;
   step.control = { duration_ms: 10, total_cost_usd: 0.2 };
   step.attempts = [
     {
@@ -671,6 +673,7 @@ test("abortRun: a bash step spends nothing; its fix pass is an agent and does", 
   bash.runId = "abort-bash";
   const bashStep = bash.steps[0]!;
   bashStep.status = "running";
+  bash.executingStepId = bashStep.id;
   bashStep.attempts = [
     {
       attempt: 1,
@@ -688,6 +691,7 @@ test("abortRun: a bash step spends nothing; its fix pass is an agent and does", 
   fix.runId = "abort-bash-fix";
   const fixed = fix.steps[0]!;
   fixed.status = "running";
+  fix.executingStepId = fixed.id;
   fixed.attempts = [
     {
       attempt: 2,
@@ -747,6 +751,8 @@ function makeRun(dir: string): Run {
     pipeline: "feat",
     pipeline_path: "feat.ts",
     run_dir: dir,
+    // As `updateStep(running)` records it for the step this process executes.
+    executingStepId: "spec",
     steps: [
       makeRunStep({ id: "triage", name: "T", command: "x", runner: "bash" }, { status: "done" }),
       makeRunStep(

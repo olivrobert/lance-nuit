@@ -224,6 +224,12 @@ export function renderConsoleReport(report: RunReport, options: { cwd?: string }
     report.statusCounts.pending ? plural(report.statusCounts.pending, "step not run", "steps not run") : "",
   ].filter(Boolean);
   if (collapsed.length > 0) lines.push(dim(`  └─ ${collapsed.join(" · ")}`));
+  // Not dimmed with the rest: unlike a skip on freshness, nothing checked these
+  // steps in this invocation, and only a later one will reconcile them.
+  if (report.setAside.length > 0) {
+    const count = plural(report.setAside.length, "step", "steps");
+    lines.push(`  ${count} set aside by operator selection: ${report.setAside.join(", ")}`);
+  }
 
   if (report.issue) {
     lines.push("", bold(report.kind === "verdict" ? "Verdict" : "Diagnostic"));

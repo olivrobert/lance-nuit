@@ -122,7 +122,8 @@ test("W2: in legacy mode too, --fresh replays the step whose partial output a fa
 
 // The third FAIL of L3: the run facts that kept the partial output from being
 // adopted vanish once `--start-at` puts the step back to `pending` and a new run
-// starts (with L3, `--skip implement` did the same within the run).
+// starts. The form with `--skip implement` in place of `--fresh` is in
+// selectors.test.ts.
 test("W3: a step requeued by --start-at, then run anew, never adopts the partial output of its failed pass", () => {
   const cwd = scratchRoute(reconcile);
   failAt(cwd, "implement");

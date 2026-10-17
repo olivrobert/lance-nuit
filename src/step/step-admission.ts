@@ -36,6 +36,10 @@ const SKIP_ABSORBED_UNCHANGED = "failure absorbed, inputs unchanged since";
 /** Reason logged when a rework step already ran and nobody rejected its output since. */
 const SKIP_NO_REJECTION = "no pending rejection";
 
+/** Reason logged, in reconcile mode, when this invocation's `--steps`, `--skip` or
+ *  `--start-at` leaves the step out. */
+const SKIP_OPERATOR_SELECTION = "operator selection";
+
 export type StepAdmission =
   | { kind: "budget-exceeded" }
   /** Spending became unaccountable under a cost ceiling: an attempt spent tokens
@@ -114,6 +118,37 @@ function applyInputDecision(
   updateStep(run, step, "failed", `input failed: ${reason}`);
   output.emit({ type: "runner.message", level: "error", message: `${step.def.name} — input failed: ${reason}` });
   return { kind: "failed", reason };
+}
+
+/** How a step the operator's selection left out of this invocation stands. */
+export type OperatorSelectionSkip = "settled" | "unfinished";
+
+/**
+ * Leave a step out of this invocation on the operator's selection, without
+ * admitting it: no budget gate, no `when`, no freshness. Unlike a legacy
+ * exclusion nothing marks the step for later invocations, so the next one
+ * admits it like any other. A `done` step stays `done`, as on a freshness skip.
+ *
+ * A step whose last pass is unfinished keeps its status (`unfinished`), and the
+ * loop stops the run for a decision rather than pass over it. Those are run
+ * facts, and the next invocation's admission reads them: settled, an interrupted
+ * pass would replay without anyone authorizing it, and a failed one would lose
+ * the rerun its run owes it (`passLeftUnfinished`). Whether its outputs can be
+ * adopted is not decided here: the in-flight mark answers that on every
+ * invocation, whatever the status (`state/provenance.ts`).
+ */
+export function skipForOperatorSelection(run: Run, step: RunStep, output: RunOutput): OperatorSelectionSkip {
+  if (passLeftUnfinished(step) || lastPassInterrupted(step)) {
+    appendRunEvent(run, "step.skipped", { stepId: step.id, reason: SKIP_OPERATOR_SELECTION });
+    output.emit({
+      type: "runner.message",
+      level: "info",
+      message: `⊘ ${step.def.name} — not run: ${SKIP_OPERATOR_SELECTION}; its last pass is unfinished, so it stays ${step.status}`,
+    });
+    return "unfinished";
+  }
+  applyInputDecision(run, step, output, "skip", SKIP_OPERATOR_SELECTION);
+  return "settled";
 }
 
 export interface AdmitStepInput {
@@ -199,8 +234,10 @@ function admissionsToEvaluate(step: RunStep): readonly StepInputCondition[] {
   return conditions.filter((condition) => !condition.frozenOnStart);
 }
 
-/** The last pass started and did not complete: whatever outputs it left are
- *  partial, so freshness cannot vouch for them. */
+/** The last pass of this run started and did not complete: the run owes it a
+ *  rerun, whatever freshness would say of the outputs it left. A run fact, lost
+ *  once the step settles or is requeued; the in-flight mark is what keeps a
+ *  partial output from being adopted beyond that (`state/provenance.ts`). */
 function passLeftUnfinished(step: RunStep): boolean {
   return step.status !== "pending" && owesWork(step.status);
 }
@@ -320,7 +357,10 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
 
   // A `--start-at` replay skips the freshness check too: it does not track the
   // repository tree, which is what an operator fixes before replaying. So does a
-  // pass left unfinished: adopting what it wrote would settle a partial output.
+  // pass left unfinished in this run, which the in-flight mark cannot replace:
+  // it covers the outputs an attempt produces from scratch, not one revised in
+  // place, one an orchestration node's children write, or one an attempt of an
+  // older runner left, and freshness would adopt those.
   if (decidedByOutputs && !rejected && step.replay !== true && !passLeftUnfinished(step)) {
     // An absorbed failure wrote no outputs, so freshness would read them missing
     // and re-run the check on every resume. Its own fix may also have rewritten

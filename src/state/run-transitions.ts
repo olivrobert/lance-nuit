@@ -52,6 +52,11 @@ import { deriveRunStatus, isResumableStatus } from "./run-verdict.js";
 export function updateStep(run: Run, step: RunStep, status: RunStep["status"], errors?: string): void {
   if (run.aborted) return;
   step.status = status;
+  // `running` in the snapshot does not say which step this process executes: a
+  // pass the runner died in keeps it, while an operator selection lets later
+  // steps run. The transition that starts a pass is what knows.
+  if (status === "running") run.executingStepId = step.id;
+  else if (run.executingStepId === step.id) delete run.executingStepId;
   if (status === "running") {
     step.started_at = new Date().toISOString();
     // A resume/retry must not retain an earlier terminal timestamp.
@@ -174,7 +179,7 @@ export function abortRun(
 ): void {
   const reason = `${signal}: run interrupted manually`;
   const now = new Date().toISOString();
-  const activeStep = run.steps.find((step) => step.status === "running");
+  const activeStep = run.steps.find((step) => step.id === run.executingStepId && step.status === "running");
   const activeAttempt = activeStep
     ? [...(activeStep.attempts ?? [])].reverse().find((attempt) => attempt.status === "running")
     : undefined;
@@ -183,6 +188,7 @@ export function abortRun(
 
   if (activeStep) {
     activeStep.status = "aborted";
+    delete run.executingStepId;
     activeStep.finished_at = now;
     activeStep.errors = reason;
 
@@ -290,6 +296,9 @@ export interface RunOutcome {
    *  the operator asked for from one that needs them. */
   untilStop: boolean;
   cumulativeCost: number;
+  /** Steps this invocation's selectors left out in reconcile mode, in run order.
+   *  Reported, never persisted: the next invocation admits them again. */
+  setAside?: readonly string[];
 }
 
 /** The loop signals `finalizeRun` needs. Every field is optional so a run that
@@ -327,11 +336,10 @@ function stopKindOf(outcome: RunFinalizationSignals | undefined): RunOutcomeStop
 export function finalizeRun(run: Run, outcome?: RunFinalizationSignals): void {
   run.total_control = aggregateControl(run.steps);
   run.total_usage = aggregateUsage(run.steps);
-  const failed = run.steps.find((step) => step.status === "failed");
-  const active = run.steps.find((step) => step.status === "running");
-  const logPath = failed
-    ? relativeRunPath(run.run_dir, latestAttemptLog(run, failed))
-    : (run.outcome?.logPath ?? (active ? relativeRunPath(run.run_dir, latestAttemptLog(run, active)) : null));
+  // A failed step the selection set aside did not end this invocation: naming
+  // it would point the outcome at a step that never ran, away from the real stop.
+  const failed = run.steps.find((step) => step.status === "failed" && !outcome?.setAside?.includes(step.id));
+  const logPath = failed ? relativeRunPath(run.run_dir, latestAttemptLog(run, failed)) : (run.outcome?.logPath ?? null);
   // Case precedence lives in run-verdict.ts, shared with projection.
   const status = deriveRunStatus(run, {
     failed: outcome?.failed,
@@ -360,7 +368,7 @@ export function finalizeRun(run: Run, outcome?: RunFinalizationSignals): void {
   const stop = run.outcome?.stop;
   if (status === "ABORTED") {
     run.outcome = {
-      phase: failed?.id ?? active?.id ?? run.outcome?.phase ?? null,
+      phase: failed?.id ?? run.outcome?.phase ?? null,
       reason: run.outcome?.reason ?? "run stopped manually",
       logPath,
       resumable,
