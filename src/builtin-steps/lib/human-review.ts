@@ -292,7 +292,9 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
               inferredPipelineName(gate) ?? failPipelineName(),
               reworkable,
             ),
-        }),
+          // Replay is safe: the note's execution key dedupes it and the move is
+          // idempotent. Reconcile mode needs it declared, having no output to check.
+        }).rerunOnResume(),
       ]
     : [];
 
@@ -364,6 +366,9 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
     when: { if: verdict, else: "stop" as const },
     run: () => "human review complete or not required",
     describe: () => `validate human review for exit point "${opts.id}"`,
+    // The verdict is recomputed on every admission, so a replay re-checks the
+    // approval against the current artifact: a stale one stops the run again.
+    rerunOnResume: true,
   });
 
   // The `--approve <subject> → artifact` mapping comes from the gate that reads it:
