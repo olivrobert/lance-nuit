@@ -180,6 +180,27 @@ test("approval: and no one approved is added to the raw verdict", async () => {
   expect((await admit(stepOf(steps, "demo-gate"), approved.ctx)).action).toBe("pass");
 });
 
+test("reconcile: the escalation and the gate declare a safe replay, so the pipeline builds", () => {
+  const built = pipeline("test")
+    .reconcile()
+    .add(createInternalWorkItemSourceStep({ dir: () => "/tmp/work-items", queue: "featureTodo" }))
+    .add(
+      humanReview<Verdict>({
+        id: "demo",
+        artifact: verdictArtifact,
+        kind: "needs-decision",
+        blocked: (value) => value.blocked === true,
+        approval: { subject: "sujet" },
+        note: () => ({ headline: "🤖 Escalation — demo.", fields: [] }),
+        reason: () => "blocking verdict",
+      }),
+    )
+    .build();
+
+  expect(stepOf(built.steps, "escalate-demo").rerun_on_resume).toBe(true);
+  expect(stepOf(built.steps, "demo-gate").rerun_on_resume).toBe(true);
+});
+
 test("stale approval: artifact changed, exit point reopens", async () => {
   const steps = build({ approval: { subject: "sujet" } });
   const f = fixture({ blocked: true, approved: true });

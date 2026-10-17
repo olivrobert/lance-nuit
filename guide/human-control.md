@@ -131,6 +131,14 @@ soon as one of its declared inputs no longer matches the fingerprints its output
 were produced from. A step that declares nothing keeps the old behavior and stays
 settled. See [`dsl.md`](dsl.md#input-freshness).
 
+The gate and the escalation `humanReview` builds declare `rerunOnResume`, in
+both modes. A completed gate therefore checks its approval again on every
+resume: if the artifact changed after its approval, the run stops again.
+Replaying the escalation is safe because its note's execution key deduplicates
+it and the move is idempotent. That declaration is also what lets a
+[reconcile](dsl.md#reconcile-mode) pipeline contain them. The branch abandonment
+step declares neither, so a reconcile pipeline cannot use `abandonBranch` yet.
+
 ## Idempotence and tracker failures
 
 An escalation's stable `id` is the `{ ticket, stepId }` idempotence key. Keep it

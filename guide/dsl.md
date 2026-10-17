@@ -611,7 +611,9 @@ The rules:
   declare the artifact the step produces, or a receipt of its side effect (the
   merge-request URL a push wrote, the id of a posted comment), as `output`; or
   declare `rerunOnResume: true` when replaying it is idempotent. In this mode
-  `rerunOnResume` therefore means "safe to replay, nothing to deliver".
+  `rerunOnResume` therefore means "safe to replay, nothing to deliver". The
+  gate and the escalation of a [`humanReview`](human-control.md) declare it
+  themselves.
 - **Re-admission.** On a resume, every settled step goes through admission
   again, `done` or `skipped`.
 - **Admission.** `when` decides first, then a pending rejection of a

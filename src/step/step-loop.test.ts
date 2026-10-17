@@ -36,7 +36,7 @@ import { commandRegistries } from "../commands/registries.js";
 import { createAbortScope } from "../runtime/abort.js";
 import { humanReview } from "../builtin-steps/lib/human-review.js";
 import { bashStep as dslBashStep, pipeline } from "../dsl.js";
-import { pendingRejection, recordRejection } from "../state/decisions.js";
+import { pendingRejection, recordApproval, recordRejection } from "../state/decisions.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 
 function makeRun(steps: RunStep[], maxCost?: number): Run {
@@ -2052,6 +2052,46 @@ test("default mode: a done orchestration node declaring rerunOnResume is re-admi
   // pipeline file that does not exist here.
   await expect(executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, fakeDeps().deps, ctx)).rejects.toThrow();
   expect(node.status).toBe("running");
+});
+
+test("reconcile: a done humanReview gate checks its approval again on every invocation", async () => {
+  const { values, ctx } = reworkContext({ "plan.md": "v1" });
+  await recordApproval(ctx, "plan", reviewedPlan);
+  const built = pipeline("p")
+    .reconcile()
+    .add(
+      dslBashStep({ id: "write", name: "Write", command: "write" }).output(reviewedPlan),
+      humanReview<string>({
+        id: "plan",
+        artifact: reviewedPlan,
+        kind: "needs-decision",
+        blocked: () => true,
+        approval: { subject: "plan" },
+        reason: () => "plan to review",
+      }),
+    )
+    .build();
+  const run = makeRun(built.steps.map((def) => makeRunStep(def, { status: "done", control: { duration_ms: 1 } })));
+  const gate = run.steps.find((step) => step.id === "plan-gate")!;
+
+  const approved = await executeRunSteps(
+    reconciled(run),
+    "PROJ-1",
+    undefined,
+    { resuming: true },
+    fakeDeps().deps,
+    ctx,
+  );
+  expect(approved.stopped).toBe(false);
+  expect(gate.status).toBe("done");
+  const attempts = readRunEvents(run.run_dir).filter((event) => event.type === "step.attempt.started");
+  expect(attempts.map((event) => (event as { stepId?: string }).stepId)).toEqual(["plan-gate"]);
+
+  // The plan changed after its approval: the done gate must not wave it through.
+  values.set("plan.md", "v2");
+  const stale = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, fakeDeps().deps, ctx);
+  expect(stale.stopped).toBe(true);
+  expect(run.outcome?.phase).toBe("plan-gate");
 });
 
 // --- Reconcile mode: selectors last one invocation ---------------------------
