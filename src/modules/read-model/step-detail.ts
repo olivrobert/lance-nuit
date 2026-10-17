@@ -16,7 +16,7 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import { dirname, join } from "node:path";
 import type { PersistedAttempt } from "../../model/persisted.js";
 import { projectStepAttempts } from "../../state/attempt-projection.js";
-import { type ArtifactProvenance, isInFlight } from "../../state/provenance.js";
+import { isInFlight, standingOf } from "../../state/provenance.js";
 import { ATTEMPT_COMMAND_FILE } from "../../state/run-timeline.js";
 import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import { isPathWithin } from "../../state/stores/path-safety.js";
@@ -101,11 +101,12 @@ function excerpt(path: string, limit: number, from: "head" | "tail"): { text: st
   }
 }
 
-/** Artifacts whose provenance record names `stepId` as their producer. Once a
- *  step succeeds, only one declaring `input` keeps a record, so the list may be
- *  empty for a step that did write files. A record still marked in flight is left
- *  out: the attempt that wrote the artifact has not succeeded, and the bytes may
- *  be partial. */
+/** Artifacts whose provenance record names `stepId` as their producer. A step
+ *  that wrote files without declaring them as output keeps no record, so the list
+ *  may miss them. An artifact whose bytes the record does not vouch for is left
+ *  out — an attempt that wrote it has not succeeded, or a revision rewrote bytes
+ *  no finished attempt vouched for: they may be partial. The rule is the
+ *  runner's own (`standingOf`). */
 function producedBy(workItemDir: string, stepId: string): string[] {
   const dir = join(workItemDir, PROVENANCE_DIR);
   let names: string[];
@@ -117,20 +118,31 @@ function producedBy(workItemDir: string, stepId: string): string[] {
   }
   const produced: string[] = [];
   for (const name of names.sort()) {
-    const record = readProvenance(join(dir, name));
-    if (isInFlight(record)) continue;
-    const artifact = record?.producedBy === stepId ? record.artifact : undefined;
-    if (typeof artifact === "string" && isSafeRelativePath(artifact)) produced.push(artifact);
+    const artifactName = name.slice(0, -".json".length);
+    if (!isSafeRelativePath(artifactName)) continue;
+    const stored = readJson(join(dir, name));
+    const text = isInFlight(stored) ? readText(join(workItemDir, "artifacts", artifactName)) : undefined;
+    const standing = standingOf(stored, artifactName, text);
+    const record = standing.kind === "vouched" ? standing.record : undefined;
+    if (record?.producedBy === stepId && isSafeRelativePath(record.artifact)) produced.push(record.artifact);
   }
   return produced;
 }
 
-function readProvenance(path: string): Partial<ArtifactProvenance> | undefined {
+function readJson(path: string): unknown {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
-    return typeof parsed === "object" && parsed !== null ? (parsed as Partial<ArtifactProvenance>) : undefined;
+    return JSON.parse(readFileSync(path, "utf-8"));
   } catch {
     // A record being rewritten or edited by hand names no producer.
+    return undefined;
+  }
+}
+
+function readText(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf-8");
+  } catch {
+    // An artifact removed since its record was written: its mark vouches for nothing.
     return undefined;
   }
 }

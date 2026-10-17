@@ -38,8 +38,8 @@ import { type RunBudget, remainingBudget } from "../state/budget.js";
 import { chargeAttemptToLedger, isUnpricedSpend, type SettledSpend } from "../state/cost-accounting.js";
 import { recordCostStop } from "../state/cost-stop-events.js";
 import {
-  clearInFlight,
   fingerprintInputs,
+  type InputFingerprint,
   inputsReadAfterAttempt,
   inputsReadBeforeAttempt,
   markInFlight,
@@ -435,6 +435,7 @@ export async function runAttempt(run: Run, step: RunStep, options: RunAttemptOpt
       }
       // Only here is "command succeeded and outputs verified" true, so only here
       // may a fingerprint be recorded.
+      let fingerprints: Record<string, InputFingerprint> = {};
       if (given) {
         const after = await readInputs(options.context, inputsReadAfterAttempt(ctx.step.def));
         // The record then says `null`, which re-runs the step next time; the
@@ -442,13 +443,13 @@ export async function runAttempt(run: Run, step: RunStep, options: RunAttemptOpt
         for (const { source, reason } of after.unavailable) {
           appendRunEvent(ctx.run, "step.source.unavailable", { stepId: ctx.step.id, source, reason });
         }
-        const fingerprints = { ...given, ...after.fingerprints };
-        for (const output of ctx.step.def.outputs ?? []) {
-          const record = revised.has(output.name) ? mergeProvenance : writeProvenance;
-          await record(options.context, output, ctx.step.id, fingerprints);
-        }
-      } else {
-        await clearInFlight(options.context, ctx.step.def);
+        fingerprints = { ...given, ...after.fingerprints };
+      }
+      // A step without input records an empty fingerprint: the record still names
+      // it as the producer, which a later revision of the output keeps.
+      for (const output of ctx.step.def.outputs ?? []) {
+        const record = revised.has(output.name) ? mergeProvenance : writeProvenance;
+        await record(options.context, output, ctx.step.id, fingerprints);
       }
       return result;
     },

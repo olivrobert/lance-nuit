@@ -13,7 +13,7 @@ import { settleAttemptStats } from "../state/attempt-closure.ts";
 import type { RunBudget } from "../state/budget.ts";
 import { chargeAttemptToLedger } from "../state/cost-accounting.ts";
 import { sha256Text } from "../state/hash.ts";
-import { PROVENANCE_PREFIX, readProvenance, writeProvenance } from "../state/provenance.ts";
+import { outputFreshness, PROVENANCE_PREFIX, readProvenance, writeProvenance } from "../state/provenance.ts";
 import { readRunEvents } from "../state/run-journal.ts";
 import { attemptLogPath, nextAttemptLogPath } from "../state/run-timeline.ts";
 import { abortRun } from "../state/run-transitions.ts";
@@ -35,18 +35,21 @@ const FIX_SPEC = { id: "claude" } as const;
 
 const baseCtx = buildPipelineContext({ ...commandRegistries(), cwd: ".", runnerBin: "", runnerDir: "" });
 
+/** One-artifact store. Provenance records are dropped: they would overwrite the
+ *  single value, and the tests using it are about the artifact alone. */
 function artifactFixture(initial?: unknown) {
   let value = initial === undefined ? undefined : JSON.stringify(initial);
+  const isRecord = (ref: ArtifactRef) => ref.name.startsWith(PROVENANCE_PREFIX);
   const store: WorkItemArtifactStore = {
-    exists: async () => value !== undefined,
-    readText: async () => value,
-    readJson: async <T>(_ref: ArtifactRef, parse: (raw: unknown) => T) =>
-      value === undefined ? undefined : parse(JSON.parse(value)),
-    writeText: async (_ref, next) => {
-      value = next;
+    exists: async (ref) => !isRecord(ref) && value !== undefined,
+    readText: async (ref) => (isRecord(ref) ? undefined : value),
+    readJson: async <T>(ref: ArtifactRef, parse: (raw: unknown) => T) =>
+      isRecord(ref) || value === undefined ? undefined : parse(JSON.parse(value)),
+    writeText: async (ref, next) => {
+      if (!isRecord(ref)) value = next;
     },
-    remove: async () => {
-      value = undefined;
+    remove: async (ref) => {
+      if (!isRecord(ref)) value = undefined;
     },
   };
   return {
@@ -1134,7 +1137,7 @@ test("runAttempt: erasing an output replaces the record that vouched for it with
   expect(record).not.toHaveProperty("inFlight");
 });
 
-test("runAttempt: a step without declared inputs keeps the previous behavior", async () => {
+test("runAttempt: a step without declared inputs erases its output before spawn and records itself as producer", async () => {
   const { values, ctx } = multiArtifactFixture({ "spec.md": "stale" });
   const step = makeStep({ outputs: [specArtifact] });
   const run = makeRun(step, 10);
@@ -1152,7 +1155,9 @@ test("runAttempt: a step without declared inputs keeps the previous behavior", a
   });
 
   expect(seenBeforeSpawn).toBeUndefined();
-  expect(values.has(`${PROVENANCE_PREFIX}spec.md.json`)).toBe(false);
+  const record = await readProvenance(ctx, specArtifact);
+  expect(record).toMatchObject({ producedBy: step.id, inputs: {} });
+  expect(record).not.toHaveProperty("inFlight");
 });
 
 test("runAttempt: a failed attempt of a step without input leaves its output marked in flight", async () => {
@@ -1174,30 +1179,32 @@ test("runAttempt: a failed attempt of a step without input leaves its output mar
   expect((await readProvenance(ctx, specArtifact))?.inFlight).toMatchObject({ stepId: "verify", attempt: 1 });
 });
 
-// Known limit, left to a later lot (L2c): a revision in place is not marked, as
-// before the mark existed, so a revision that wrote then failed leaves partial
-// bytes under the record of the step that produced them.
-test("runAttempt: a failed revision in place leaves the record of the output untouched", async () => {
+test("runAttempt: a failed revision in place keeps the bytes it found, and leaves them unfinished once it wrote", async () => {
   const { values, ctx } = multiArtifactFixture({ "ticket.md": "answered", "spec.md": "previous draft" });
   const step = makeStep({ sources: [ticketArtifact, specArtifact], outputs: [specArtifact] });
   const produced = await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
+  const amend = (write: boolean) =>
+    runAttempt(makeRun(step, 10), step, {
+      command: "amend the spec",
+      context: ctx,
+      budget: { cumulative: 0 },
+      executeStep: async () => {
+        if (write) values.set("spec.md", "half amended");
+        return { output: "", ok: false, failReason: "crashed", stats: { duration_ms: 1 } };
+      },
+    });
 
-  let recordDuringSpawn: unknown;
-  const failed = await runAttempt(makeRun(step, 10), step, {
-    command: "amend the spec",
-    context: ctx,
-    budget: { cumulative: 0 },
-    executeStep: async () => {
-      recordDuringSpawn = await readProvenance(ctx, specArtifact);
-      values.set("spec.md", "half amended");
-      return { output: "", ok: false, failReason: "crashed", stats: { duration_ms: 1 } };
-    },
-  });
+  expect((await amend(false)).ok).toBe(false);
+  // Nothing written: the record of the step that produced the bytes still stands.
+  expect(values.get("spec.md")).toBe("previous draft");
+  expect(await outputFreshness(ctx, specArtifact, { "artifacts/ticket.md": sha256Text("one") }, "spec")).toBe("fresh");
 
-  expect(failed.ok).toBe(false);
-  expect(recordDuringSpawn).toEqual(produced);
-  expect(await readProvenance(ctx, specArtifact)).toEqual(produced);
+  expect((await amend(true)).ok).toBe(false);
   expect(values.get("spec.md")).toBe("half amended");
+  expect((await readProvenance(ctx, specArtifact))?.producedBy).toBe(produced.producedBy);
+  expect(await outputFreshness(ctx, specArtifact, { "artifacts/ticket.md": sha256Text("one") }, "spec")).toBe(
+    "unfinished",
+  );
 });
 
 /* ------------------------------------------------------------------------- *

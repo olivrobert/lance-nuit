@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { sha256Text } from "../../state/hash.ts";
 import { OUTPUT_EXCERPT_BYTES, readStepDetail, readStepSession } from "./step-detail.ts";
 import {
   cleanupTempDirs,
@@ -285,4 +286,35 @@ test("step session: an attempt's resumable session, where its run ran; none for 
   expect(readStepSession("demo-app", "DEMO-1", "other", 2)).toBeUndefined();
   const attempts = readStepDetail("demo-app", "DEMO-1", "triage", undefined)?.attempts;
   expect(attempts?.map((attempt) => attempt.hasSession ?? false)).toEqual([false, true, false]);
+});
+
+test("step detail: a revision that wrote nothing keeps the artifact under its producer; one over unfinished bytes does not", () => {
+  const project = listedProject();
+  runWithAttempts(project);
+  const record = (artifact: string, extra: object = {}) =>
+    JSON.stringify({ schemaVersion: 1, artifact, producedBy: "audit", producedAt: "x", inputs: {}, ...extra });
+  const attempt = { runId: "r-1", stepId: "review", attempt: 1, startedAt: "2026-09-05T07:04:00.000Z" };
+  const previous = { producedBy: "audit", producedAt: "x", inputs: {} };
+  writeWorkItemFile(project, "DEMO-1", "artifacts/audit.json", "{}");
+  writeWorkItemFile(
+    project,
+    "DEMO-1",
+    "artifacts/.provenance/audit.json.json",
+    record("artifacts/audit.json", {
+      inFlight: { ...attempt, revision: { outputSha256: sha256Text("{}"), previous } },
+    }),
+  );
+  writeWorkItemFile(project, "DEMO-1", "artifacts/plan.md", "revised over partial bytes");
+  writeWorkItemFile(
+    project,
+    "DEMO-1",
+    "artifacts/.provenance/plan.md.json",
+    record("artifacts/plan.md", { unguaranteed: { revisedBy: ["review"] } }),
+  );
+
+  expect(readStepDetail("demo-app", "DEMO-1", "audit", undefined)?.produced).toEqual(["artifacts/audit.json"]);
+
+  // The revision rewrote the bytes it found: until it succeeds they may be partial.
+  writeWorkItemFile(project, "DEMO-1", "artifacts/audit.json", '{"half":');
+  expect(readStepDetail("demo-app", "DEMO-1", "audit", undefined)?.produced).toEqual([]);
 });
