@@ -238,6 +238,13 @@ function applyStepFilters(
   return tookWork;
 }
 
+/** Reconcile mode persists no exclusion: the loop applies this invocation's
+ * selectors (`step/step-loop.ts`), so one an earlier legacy invocation left in
+ * the snapshot is dropped instead of binding every later invocation. */
+function dropPersistedExclusions(steps: readonly PersistedStepState[]): void {
+  for (const state of steps) delete state.excluded;
+}
+
 /** Composed steps in the replay range that cannot run again in place: a child
  * already settled returns at once on the next pass, so the node would turn
  * `done` without running anything. */
@@ -403,7 +410,9 @@ export async function loadOrCreateRun(
     seedNewDefinitionSteps(pipeline, saved);
     const projected = projectRunState(saved, readRunEvents({ run_dir: dir, runId: saved.runId, eventStore }));
     const states = [...projected.steps.values()].flatMap((step) => (step.state ? [step.state] : []));
-    const selectionTookWork = applyStepFilters(states, stepFilter, skipFilter);
+    const reconcile = pipeline.reconcile === true;
+    const selectionTookWork = !reconcile && applyStepFilters(states, stepFilter, skipFilter);
+    if (reconcile) dropPersistedExclusions(states);
     const unreplayable = unreplayableSteps(states, replayIds);
     if (unreplayable.length > 0) {
       if (resolution?.acquiredRunLock || options.strictSnapshot?.releaseRunLock) releaseRunDir(dir);
@@ -414,6 +423,7 @@ export async function loadOrCreateRun(
     }
     requeueForReplay(states, replayIds);
     const run = hydrate(pipeline, pipelinePath, saved, options, projected, selectionTookWork);
+    run.reconcile = reconcile;
     run.run_dir = dir;
     run.stateStore = stateStore;
     run.eventStore = eventStore;
@@ -436,6 +446,7 @@ export async function loadOrCreateRun(
   }
 
   const runId = basename(dir);
+  const reconcile = pipeline.reconcile === true;
   const run: Run = {
     schemaVersion: 1,
     runId,
@@ -465,13 +476,16 @@ export async function loadOrCreateRun(
     worktree: location.worktree,
     cwd: location.cwd,
     specPath: buildContext.config.specPath,
+    reconcile,
     stateStore,
     eventStore,
     logStore,
     steps: pipeline.steps.map((def) => {
+      // Reconcile mode leaves the selection to the loop: it lasts this invocation only.
       const excluded =
-        (stepFilter && !stepFilter.some((selector) => matchesStepSelector(def.id, selector))) ||
-        (skipFilter?.some((selector) => matchesStepSelector(def.id, selector)) ?? false);
+        !reconcile &&
+        ((stepFilter && !stepFilter.some((selector) => matchesStepSelector(def.id, selector))) ||
+          (skipFilter?.some((selector) => matchesStepSelector(def.id, selector)) ?? false));
       if (excluded) return makeRunStep(def, { status: "skipped", excluded: true });
       return makeRunStep(def, replayIds.has(def.id) ? { status: "pending", replay: true } : { status: "pending" });
     }),

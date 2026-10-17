@@ -61,7 +61,7 @@ async function main() {
   const { run, context, resuming } = prepared;
 
   const outputs = wireRunOutputs(run, started.ready.args);
-  announceRun(run, started.ready.args, started.ready.pipelineDef.reconcile === true);
+  announceRun(run, started.ready.args, run.reconcile === true);
 
   const outcome = await executeRunSteps(
     run,
@@ -73,7 +73,8 @@ async function main() {
       replayInterrupted: started.ready.args.replayInterrupted,
       startAt: started.ready.args.startAt,
       until: started.ready.args.until,
-      reconcile: started.ready.pipelineDef.reconcile === true,
+      stepFilter: started.ready.args.stepFilter,
+      skipFilter: started.ready.args.skipFilter,
     },
     stepLoopDeps(outputs.output),
     context,

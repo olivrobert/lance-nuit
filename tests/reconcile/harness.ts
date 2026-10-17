@@ -362,7 +362,19 @@ function occurrences(cwd: string, id: string): number {
  * middle of an attempt. The hang marker is removed afterwards so the next
  * invocation can replay the step.
  */
-export async function killDuring(cwd: string, id: string, ...args: string[]): Promise<RunResult> {
+export function killDuring(cwd: string, id: string, ...args: string[]): Promise<RunResult> {
+  return signalDuring("SIGKILL", cwd, id, args);
+}
+
+/**
+ * Same as `killDuring`, with SIGINT: the operator interrupting the run, which the
+ * runner records as `aborted` before it exits.
+ */
+export function interruptDuring(cwd: string, id: string, ...args: string[]): Promise<RunResult> {
+  return signalDuring("SIGINT", cwd, id, args);
+}
+
+async function signalDuring(signal: NodeJS.Signals, cwd: string, id: string, args: string[]): Promise<RunResult> {
   const hang = join(cwd, `hang-${id}`);
   // The trace accumulates across invocations: wait for a NEW occurrence of `id`.
   const runsBefore = occurrences(cwd, id);
@@ -382,13 +394,13 @@ export async function killDuring(cwd: string, id: string, ...args: string[]): Pr
     while (occurrences(cwd, id) === runsBefore) {
       if (child.exitCode !== null || child.signalCode !== null || Date.now() > deadline) {
         throw new Error(
-          `killDuring: step "${id}" did not start (trace.log: ${trace(cwd).join(",")})\n${stdout}\n${stderr}`,
+          `${signal} during: step "${id}" did not start (trace.log: ${trace(cwd).join(",")})\n${stdout}\n${stderr}`,
         );
       }
       await Bun.sleep(20);
     }
   } finally {
-    child.kill("SIGKILL");
+    child.kill(signal);
     await exited;
     rmSync(hang, { force: true });
   }
@@ -416,6 +428,19 @@ export function touchTicket(cwd: string): void {
 export function editTracked(cwd: string, { commit = true }: { commit?: boolean } = {}): void {
   appendFileSync(join(cwd, "tracked.txt"), "edited\n");
   if (commit) git(cwd, "commit", "-qam", "edit tracked file");
+}
+
+/**
+ * Replaces the pipelines of the scratch repository with `files` (name → source,
+ * under `.lance-nuit/pipelines/`) and commits them, so the clean tree guard
+ * still admits a new run.
+ */
+export function writePipelines(cwd: string, files: Record<string, string>): void {
+  for (const [name, source] of Object.entries(files)) {
+    writeFileSync(join(cwd, ".lance-nuit", "pipelines", name), source);
+  }
+  git(cwd, "add", "-f", "-A", ".lance-nuit/pipelines");
+  git(cwd, "commit", "-qm", "replace pipelines");
 }
 
 /** The provenance record of artifact `name` of `T-1`: the input fingerprints it was produced from. */

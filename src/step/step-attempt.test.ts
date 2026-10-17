@@ -73,6 +73,8 @@ function makeRun(step: RunStep, maxCost?: number): Run {
     pipeline_path: "p.ts",
     run_dir: dir,
     max_cost_usd: maxCost,
+    // As the step loop's `updateStep(running)` records it before the attempt.
+    executingStepId: step.status === "running" ? step.id : undefined,
     steps: [step],
   };
 }

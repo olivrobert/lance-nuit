@@ -1026,3 +1026,77 @@ test("a new run started with --start-at marks the target and later steps as repl
     ["pending", undefined, true],
   ]);
 });
+
+// Reconcile mode: the selectors last one invocation, so boot persists none of
+// them and drops an exclusion an earlier legacy invocation left behind.
+
+function reconcilePipelineFile(root: string, file: string, mode: "reconcile" | "legacy"): string {
+  const path = join(root, file);
+  const step = (id: string) =>
+    `  .add(actionStep({ id: "${id}", name: "${id}", run: () => {}, describe: "${id}", rerunOnResume: true }))`;
+  writeFileSync(
+    path,
+    `export default ({ pipeline, actionStep }) => pipeline("p")${mode === "reconcile" ? ".reconcile()" : ""}
+${["a", "b", "c"].map(step).join("\n")}
+  .build();`,
+  );
+  return path;
+}
+
+test("reconcile: a new run started with selectors persists no exclusion and leaves every step to the loop", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-reconcile-new-"));
+  try {
+    const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-rec" });
+    const path = reconcilePipelineFile(root, "p.ts", "reconcile");
+    for (const [stepFilter, skipFilter, startAt] of [
+      [["c"], undefined, undefined],
+      [undefined, ["b"], undefined],
+      [undefined, undefined, "c"],
+    ] as const) {
+      const dir = resolveRunDir("p", "T-rec", undefined, true, ctx);
+      const run = await loadOrCreateRun(
+        path,
+        "T-rec",
+        stepFilter?.slice(),
+        skipFilter?.slice(),
+        dir,
+        false,
+        startAt,
+        ctx,
+      );
+      expect(run.steps.map((step) => step.status)).toEqual(["pending", "pending", "pending"]);
+      expect(run.steps.map((step) => step.excluded)).toEqual([undefined, undefined, undefined]);
+      expect(run.reconcile).toBe(true);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reconcile: a resume applies no selector at boot and drops an exclusion a legacy invocation persisted", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-reconcile-inherited-"));
+  try {
+    const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-inh" });
+    const legacy = reconcilePipelineFile(root, "legacy.ts", "legacy");
+    const dir = resolveRunDir("p", "T-inh", undefined, true, ctx);
+    const run = await loadOrCreateRun(legacy, "T-inh", undefined, ["b"], dir, false, undefined, ctx);
+    expect(run.steps[1]).toMatchObject({ status: "skipped", excluded: true });
+    expect(run.reconcile).toBe(false);
+    saveRun(run);
+
+    const reconciled = reconcilePipelineFile(root, "reconciled.ts", "reconcile");
+    const resumed = await loadOrCreateRun(reconciled, "T-inh", undefined, ["c"], dir, false, undefined, ctx);
+
+    // b stays skipped, which the loop re-admits; c owes work the loop sets aside.
+    expect(resumed.steps.map((step) => step.status)).toEqual(["pending", "skipped", "pending"]);
+    expect(resumed.steps.map((step) => step.excluded)).toEqual([undefined, undefined, undefined]);
+    // The mode comes from the definition boot loaded, never from the snapshot.
+    expect(resumed.reconcile).toBe(true);
+    saveRun(resumed);
+    const persisted = readRunSnapshot(join(dir, "state.json"))!;
+    expect(persisted.steps.some((step) => "excluded" in step)).toBe(false);
+    expect("reconcile" in persisted).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

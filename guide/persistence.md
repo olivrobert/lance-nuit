@@ -166,7 +166,39 @@ steps. The selectors come after the projection so they judge what the journal
 knows: a step the snapshot still calls `running` but the journal finished stays
 `done` instead of becoming an exclusion. `--start-at X` requeues `X` and every
 later step, so the run is hydrated live with totals derived from the steps even
-when the snapshot had passed; attempts, retries and spend are kept. `state/` only reads, projects and reconciles
+when the snapshot had passed; attempts, retries and spend are kept.
+
+In [reconcile mode](dsl.md#reconcile-mode) the selectors last one invocation, so
+the snapshot never holds an exclusion: boot applies none of them (it still
+requeues for `--start-at`) and drops an `excluded` mark an earlier legacy
+invocation left. The step loop applies them instead (`step/step-loop.ts`): a
+step they leave out is journaled as `step.skipped` with the reason
+`operator selection`, a `done` step stays `done` and a pending one becomes
+`skipped`, which lets the run settle and pass. The run outcome carries the ids,
+which the final report counts. The next invocation, a resume or a new run after
+the `PASS`, re-admits those steps like any other, except orchestration nodes and
+the work-item source step, which keep the authority of their status.
+
+A step whose last pass failed, was aborted or was interrupted keeps its status
+when it is left out: the interruption guard and the rerun a failed pass is owed
+are run facts the next admission reads from it. The run then stops with
+`needs-decision` rather than pass into a new run that would lose them, unless an
+`--until` bound or another stop ended it first (a run holding an aborted step
+stays `ABORTED`). The outcome names the step that ended the invocation, never a
+failed one the selection set aside. Whether an output that pass wrote can be
+adopted does not depend on any of this: its in-flight mark in `.provenance/`
+answers on every invocation.
+
+A step a dead runner left `running`, an orchestration node killed mid-child
+included, stays so while later steps run. The snapshot cannot tell it from the
+step being executed, so `updateStep` records the step this process put in
+`running` (`Run.executingStepId`, runtime-only), and a SIGINT or SIGTERM aborts
+that one only. In either mode, a signal that lands while no step executes (during
+an admission, or before the first step) marks no step `aborted`; earlier releases
+marked the first `running` step, a dead pass whose interruption then read as an
+abort.
+
+`state/` only reads, projects and reconciles
 (`state/run-projection.ts`): it reconciles each persisted step with the attempts
 the journal holds and settles the attempts a crash left running, without ever
 knowing about a pipeline definition.
@@ -358,7 +390,7 @@ projection of spend already accounted for when the attempt closed.
 | Composed child spend (`accountedCostUsd`, `accountedDurationMs`, `accountedUsage`) | parent snapshot | the parent node's `control` and `usage`, the parent ledger | What the parent already charged for this child (`chargeChildReconciliation`). A resumed child re-reports its whole history and is charged by difference; a reference reloaded from a snapshot written before the last reconciliation is charged the missing difference again, never twice. |
 | Location (`worktree`, `cwd`) | snapshot | — | Rewritten by every resume with the invocation's own location. |
 | Absorbed inputs (`absorbed_inputs`) | snapshot | — | Written by `recordAbsorbedInputs` after a `blocking: false` step that declares `input` absorbed its failure in an attempt, cleared by `updateStep(running)`. The journal does not carry it. Missing — an older snapshot, or an interruption between the absorption and the record — leaves the decision to freshness, which re-runs the step. |
-| Selection (`excluded`, `replay`, skipped steps) | snapshot, then the current selectors | — | `--step` / `--skip` / `--start-at` apply on top of the persisted state to every step that still owes work, including steps the definition gained since the snapshot. `--start-at X` also requeues `X` and every later step, whatever their status, as `pending` with `replay`, and lifts their `excluded` mark; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
+| Selection (`excluded`, `replay`, skipped steps) | snapshot, then the current selectors | — | `--step` / `--skip` / `--start-at` apply on top of the persisted state to every step that still owes work, including steps the definition gained since the snapshot. In reconcile mode no `excluded` mark is written or kept: the step loop applies the selectors to this invocation only. `--start-at X` also requeues `X` and every later step, whatever their status, as `pending` with `replay`, and lifts their `excluded` mark; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
 
 ### Interruption windows
 

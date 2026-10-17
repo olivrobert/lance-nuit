@@ -20,13 +20,19 @@ import { controlForRun, runProvesUnpricedSpend } from "../state/cost-accounting.
 import { inheritChildBudgetStop } from "../state/cost-stop-events.js";
 import { fingerprintInputs, pureInputsOf } from "../state/provenance.js";
 
-import { latestAttemptLog } from "../state/run-timeline.js";
+import { latestAttemptLog, matchesStepSelector } from "../state/run-timeline.js";
 import { saveRun } from "../state/run-repository.js";
-import { hasUnfinishedWork, isSettledStatus } from "../state/run-predicates.js";
+import { hasUnfinishedWork, isSettledStatus, lastPassInterrupted, owesWork } from "../state/run-predicates.js";
 import { type RunOutcome, recordAbsorbedInputs, stopRun, updateStep } from "../state/run-transitions.js";
 import { runFixLoop } from "./fix-loop.js";
 import { executePipelineOrchestration } from "./pipeline-orchestration.js";
-import { admitStep, answersToOutputs, checkInputs, type StepAdmission } from "./step-admission.js";
+import {
+  admitStep,
+  answersToOutputs,
+  checkInputs,
+  type StepAdmission,
+  skipForOperatorSelection,
+} from "./step-admission.js";
 import { runAttempt, startFreshSession } from "./step-attempt.js";
 import { resolveOutcome } from "./step-outcome.js";
 
@@ -132,9 +138,28 @@ export interface ExecuteRunStepsOptions {
   /** `--until` of this invocation: the step after which the loop stops. A
    *  top-level step like `startAt`, never inherited, never persisted. */
   until?: string;
-  /** The pipeline declares `.reconcile()`. Read from the definition loaded by
-   *  this invocation, never from the snapshot: the mode belongs to the pipeline. */
-  reconcile?: boolean;
+  /** `--steps` of this invocation. In reconcile mode the loop applies it, and
+   *  `--skip`, instead of boot persisting them as exclusions. Top-level steps
+   *  only, like `startAt`. */
+  stepFilter?: readonly string[];
+  /** `--skip` of this invocation; see `stepFilter`. */
+  skipFilter?: readonly string[];
+}
+
+/**
+ * Whether this invocation's selectors leave `step` out, in reconcile mode. The
+ * selection lasts one invocation, so this is the one place that applies it; boot
+ * persists it only in legacy mode. `--steps` and `--skip` leave a step out
+ * whatever its status: statuses no longer decide what runs, the operator's
+ * selection does. `--start-at` keeps its scope: before the target, only work
+ * still owed is left out, and a `done` step is re-admitted as usual.
+ */
+function leftOutBySelection(run: Run, step: RunStep, opts: ExecuteRunStepsOptions): boolean {
+  if (opts.stepFilter && !opts.stepFilter.some((selector) => matchesStepSelector(step.id, selector))) return true;
+  if (opts.skipFilter?.some((selector) => matchesStepSelector(step.id, selector))) return true;
+  if (opts.startAt === undefined) return false;
+  const target = run.steps.findIndex((candidate) => candidate.id === opts.startAt);
+  return run.steps.indexOf(step) < target && owesWork(step.status);
 }
 
 /** The step `--until` names. Boot already refused an unknown id with the list of
@@ -158,6 +183,22 @@ function stopAtBound(run: Run, bound: RunStep, output: RunOutput): void {
   output.emit({ type: "runner.message", level: "info", message: `⏹ ${bound.def.name} — ${detail}` });
 }
 
+/**
+ * Stop a run whose selection left out a step an earlier pass did not finish.
+ * The step owes the decision the next invocation's admission will ask for
+ * (replay authorization, or a new pass), so the run stays resumable.
+ */
+function stopOnUnfinishedSelection(run: Run, step: RunStep, output: RunOutput): void {
+  const replay = lastPassInterrupted(step)
+    ? "; the runner died in its last attempt, so that rerun will ask for --replay-interrupted"
+    : "";
+  const detail =
+    `${step.def.name} was left out by operator selection while its last pass is unfinished: ` +
+    `rerun without the selection to resolve it${replay}`;
+  stopRun(run, step, detail, { kind: "needs-decision", detail });
+  output.emit({ type: "runner.message", level: "info", message: `⏹ ${step.def.name} — ${detail}` });
+}
+
 export async function executeRunSteps(
   run: Run,
   ticket: string | undefined,
@@ -170,6 +211,8 @@ export async function executeRunSteps(
   const unregisterActiveRun = abort.registerActiveRun(run);
   try {
     const { resuming } = opts;
+    // The mode as boot read it from the definition the steps come from.
+    const reconcile = run.reconcile === true;
     const loopDeps = {
       executeStep: deps.executeStep,
       extractErrors: deps.extractErrors,
@@ -213,6 +256,8 @@ export async function executeRunSteps(
     let costUnaccounted = false;
     let costUnaccountedStop = false;
     let boundReached = false;
+    const setAside: string[] = [];
+    let leftUnfinished: RunStep | undefined;
     const bound = untilStepOf(run, opts.until);
     const baseCtx = context ?? buildContext(ticket, baseBranch);
     const isAborted = () => abort.isRunAborted(run);
@@ -220,11 +265,21 @@ export async function executeRunSteps(
     for (const step of run.steps) {
       if (isAborted()) break;
       // The `--until` bound is reached once its step settled (`done` or
-      // `skipped`): every exit below that leaves it unsettled breaks the loop
+      // `skipped`), or once this invocation's selection left it out, even
+      // unfinished: every exit below that leaves it unsettled breaks the loop
       // first, so the next step is where this invocation ends.
-      if (bound && run.steps.indexOf(step) > run.steps.indexOf(bound) && isSettledStatus(bound.status)) {
+      if (
+        bound &&
+        run.steps.indexOf(step) > run.steps.indexOf(bound) &&
+        (isSettledStatus(bound.status) || setAside.includes(bound.id))
+      ) {
         boundReached = true;
         break;
+      }
+      if (reconcile && leftOutBySelection(run, step, opts)) {
+        if (skipForOperatorSelection(run, step, loopDeps.output) === "unfinished") leftUnfinished ??= step;
+        setAside.push(step.id);
+        continue;
       }
       // Reconsider a settled step on resume when it asked for it, when it
       // declares `input` (its outputs may have been produced from bytes that have
@@ -235,15 +290,16 @@ export async function executeRunSteps(
       // authority of their status whatever they declare. A step declaring
       // neither output nor rerunOnResume can only be the runner's work-item
       // source step (the build refuses any other), and keeps its status too.
-      const reconciled = opts.reconcile === true && reconcilable(step.def);
+      const reconciled = reconcile && reconcilable(step.def);
       const reconsider =
         resuming &&
         (reconciled ||
           step.def.rerun_on_resume ||
           (step.def.sources?.length ?? 0) > 0 ||
           (step.def.rework_for?.length ?? 0) > 0);
-      // An operator exclusion (`--step`, `--skip`, `--start-at`) is a decision, not
-      // a freshness verdict: it survives the resume that re-admits the rest.
+      // A legacy operator exclusion (`--steps`, `--skip`, `--start-at`) is a
+      // decision, not a freshness verdict: it survives the resume that re-admits
+      // the rest. Reconcile mode persists none (above).
       if (step.status === "skipped" && !(reconsider && (reconciled || step.def.sources) && !step.excluded)) continue;
       // Skip a done step on resume unless it is reconsidered. This idempotently
       // restores Git state: create-branch moves HEAD to feature/fix, while skipping
@@ -258,7 +314,7 @@ export async function executeRunSteps(
         output: loopDeps.output,
         replayInterrupted: opts.replayInterrupted,
         startAt: opts.startAt,
-        reconcile: opts.reconcile,
+        reconcile,
       });
       if (isAborted()) break;
       if (admission.kind === "skip") continue;
@@ -359,7 +415,7 @@ export async function executeRunSteps(
       // the step only when something else changed them. In reconcile mode a step
       // without input answers to its missing outputs too, so it needs the same
       // record (an empty one) not to replay its failure on every invocation.
-      if (answersToOutputs(step.def, opts.reconcile) && step.status === "done" && step.errors !== undefined) {
+      if (answersToOutputs(step.def, reconcile) && step.status === "done" && step.errors !== undefined) {
         recordAbsorbedInputs(run, step, await fingerprintInputs(baseCtx, pureInputsOf(step.def)));
       }
       if (action === "failed") {
@@ -396,10 +452,17 @@ export async function executeRunSteps(
     // A bound with nothing owed after it changes nothing: the run completes.
     const untilStop = boundReached && bound !== undefined && unfinished;
     if (untilStop) stopAtBound(run, bound, loopDeps.output);
+    // A loop that went to the end can still not pass: the selection left a step
+    // whose last pass is unfinished in that state, and a PASS would start a new
+    // run that loses the facts of that pass: an interruption to authorize, a
+    // rerun owed. Nothing else ended the run, so this is its stop.
+    const ranToEnd = !failed && !stopped && !budgetExceeded && !costUnaccounted && !untilStop && !isAborted();
+    const selectionStop = ranToEnd ? leftUnfinished : undefined;
+    if (selectionStop) stopOnUnfinishedSelection(run, selectionStop, loopDeps.output);
     const finalDecision = unfinished ? costDecision(run.max_cost_usd, budget) : "continue";
     return {
       failed,
-      stopped: stopped || untilStop,
+      stopped: stopped || untilStop || selectionStop !== undefined,
       untilStop,
       budgetExceeded: budgetExceeded || (budget.exceeded === true && unfinished),
       costUnaccounted: costUnaccounted || finalDecision === "unaccounted",
@@ -407,6 +470,7 @@ export async function executeRunSteps(
       // admission gate and the orchestration gates report theirs directly.
       costUnaccountedStop: costUnaccountedStop || (budget.unaccountedStop === true && finalDecision === "unaccounted"),
       cumulativeCost: budget.cumulative,
+      setAside,
     };
   } finally {
     unregisterActiveRun();
