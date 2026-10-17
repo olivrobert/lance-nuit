@@ -8,20 +8,48 @@
 // `.provenance/` prefix rather than next to `decisions/`: the store needs no new
 // port, and it works for every ticket, including layouts where no decisions
 // directory exists.
+//
+// An external source (`dsl.source`) is fingerprinted here too, from the stdout
+// of its command, so that every input of a step answers to the same comparison.
 
+import { exitCodeFailReason } from "../exec/bash-runner.js";
+import { runSupervisedCommand } from "../exec/process-runner.js";
+import { withoutRunnerInternalEnv } from "../exec/self-spawn.js";
+import { errorMessage } from "../lib/errors.js";
 import type { Artifact } from "../model/artifact.js";
 import { createArtifactRef } from "../model/artifact-ports.js";
 import type { PipelineContext } from "../model/context.js";
+import { resolveTemplateAsync } from "../model/definition.js";
 import type { StepDefinition } from "../model/run.js";
-import { sha256Text } from "./hash.js";
+import { isSource, type Source, type StepInput } from "../model/source.js";
+import { sha256Bytes, sha256Text } from "./hash.js";
 
 /** Reserved artifact-name prefix owned by the runner. */
 export const PROVENANCE_PREFIX = ".provenance/";
 
 /** Fingerprint of one declared input: its SHA-256, or `null` when the input was
- *  absent at the time the record was written. `null` is a fact, not a gap: an
- *  input that reappears must invalidate the record instead of being adopted. */
+ *  absent at the time the record was written — for a source, when its command
+ *  failed. `null` is a fact, not a gap: an input that reappears must invalidate
+ *  the record instead of being adopted. */
 export type InputFingerprint = string | null;
+
+/** Same bound as an admission command (`checkInputs`): a source is read before
+ *  any spawn, and one that hangs (git prompting for credentials) must not freeze
+ *  the run. */
+export const SOURCE_TIMEOUT_MS = 30_000;
+
+/** A declared source whose command failed: its fingerprint is `null`, which
+ *  means unknown, never absent. */
+export interface UnavailableSource {
+  source: string;
+  reason: string;
+}
+
+/** Fingerprints of a step's pure inputs, and the sources that could not be read. */
+export interface InputReading {
+  fingerprints: Record<string, InputFingerprint>;
+  unavailable: UnavailableSource[];
+}
 
 export interface ArtifactProvenance {
   schemaVersion: 1;
@@ -54,12 +82,26 @@ export interface StepFreshnessReport {
   adoptable: Artifact<unknown>[];
   /** Fingerprints of the pure inputs, read once for the whole step. */
   fingerprints: Record<string, InputFingerprint>;
+  /** Sources whose command failed during this reading. */
+  unavailable: UnavailableSource[];
 }
 
 /** Record key of an artifact, aligned with the `artifacts/<name>` form used by
  *  human decisions so both files can be read side by side. */
 function recordKey(name: string): string {
   return `artifacts/${name}`;
+}
+
+const SOURCE_KEY_PREFIX = "source:";
+
+/** Record key of a source. Its prefix differs from `artifacts/`, so a source
+ *  named like an artifact never shares its fingerprint. */
+export function sourceKey(name: string): string {
+  return `${SOURCE_KEY_PREFIX}${name}`;
+}
+
+function inputKey(input: StepInput): string {
+  return isSource(input) ? sourceKey(input.name) : recordKey(input.name);
 }
 
 function provenanceName(artifactName: string): string {
@@ -71,17 +113,65 @@ function ref(ctx: PipelineContext, name: string) {
   return createArtifactRef(ctx.ticket, name);
 }
 
-/** Read the raw bytes of each artifact and hash them. `null` means absent. */
+/**
+ * Run a source's command and return its raw stdout. It runs in the context's
+ * working directory, with the environment of a step (runner-internal `RUNNER_*`
+ * variables removed), and is killed after `timeoutMs`. Rejects with the reason
+ * when the command cannot be resolved, exits non-zero, or times out.
+ */
+async function sourceBytes(ctx: PipelineContext, source: Source, timeoutMs: number): Promise<Buffer> {
+  const command = await resolveTemplateAsync(source.command, ctx);
+  if (!command?.trim()) throw new Error(`source "${source.name}": command resolved to an empty string`);
+  const result = await runSupervisedCommand("bash", ["-c", command], {
+    cwd: ctx.cwd,
+    env: withoutRunnerInternalEnv(process.env),
+    timeoutMs,
+  });
+  if (result.timedOut) throw new Error(`source "${source.name}": command timed out after ${timeoutMs / 1000}s`);
+  if (result.status !== 0) {
+    throw new Error(`source "${source.name}": ${exitCodeFailReason(result.status, result.stderr)}`);
+  }
+  return result.stdoutBytes;
+}
+
+/** A source's stdout, decoded as UTF-8; rejects like the fingerprint reading does. */
+export async function readSource(
+  ctx: PipelineContext,
+  source: Source,
+  timeoutMs: number = SOURCE_TIMEOUT_MS,
+): Promise<string> {
+  return (await sourceBytes(ctx, source, timeoutMs)).toString("utf8");
+}
+
+/** Hash every pure input: an artifact's raw bytes (`null` when absent), a
+ *  source's raw stdout (`null` when its command failed, listed in
+ *  `unavailable`). The bytes, not the decoded text: a diff of a Latin-1 file
+ *  decodes two different edits to the same replacement characters. */
+export async function readInputs(ctx: PipelineContext, inputs: readonly StepInput[]): Promise<InputReading> {
+  const fingerprints: Record<string, InputFingerprint> = {};
+  const unavailable: UnavailableSource[] = [];
+  for (const input of inputs) {
+    if (isSource(input)) {
+      try {
+        fingerprints[inputKey(input)] = sha256Bytes(await sourceBytes(ctx, input, SOURCE_TIMEOUT_MS));
+      } catch (error) {
+        fingerprints[inputKey(input)] = null;
+        unavailable.push({ source: input.name, reason: errorMessage(error) });
+      }
+      continue;
+    }
+    const raw = await ctx.artifacts.readText(ref(ctx, input.name));
+    fingerprints[inputKey(input)] = raw === undefined ? null : sha256Text(raw);
+  }
+  return { fingerprints, unavailable };
+}
+
+/** Fingerprints of the pure inputs alone, as `readInputs` reads them. */
 export async function fingerprintInputs(
   ctx: PipelineContext,
-  artifacts: readonly Artifact<unknown>[],
+  inputs: readonly StepInput[],
 ): Promise<Record<string, InputFingerprint>> {
-  const fingerprints: Record<string, InputFingerprint> = {};
-  for (const input of artifacts) {
-    const raw = await ctx.artifacts.readText(ref(ctx, input.name));
-    fingerprints[recordKey(input.name)] = raw === undefined ? null : sha256Text(raw);
-  }
-  return fingerprints;
+  return (await readInputs(ctx, inputs)).fingerprints;
 }
 
 function parseProvenance(value: unknown, artifactName: string): ArtifactProvenance {
@@ -164,15 +254,33 @@ export async function removeProvenance(ctx: PipelineContext, artifact: Artifact<
   await ctx.artifacts.remove(ref(ctx, provenanceName(artifact.name)));
 }
 
-/** Inputs a step actually depends on: what it reads minus what it revises. */
-export function pureInputsOf(step: Pick<StepDefinition, "sources" | "outputs">): Artifact<unknown>[] {
+/** Inputs a step actually depends on: what it reads minus what it revises. A
+ *  source is never revised: it cannot be an output. */
+export function pureInputsOf(step: Pick<StepDefinition, "sources" | "outputs">): StepInput[] {
   const revised = new Set((step.outputs ?? []).map((output) => output.name));
-  return (step.sources ?? []).filter((source) => !revised.has(source.name));
+  return (step.sources ?? []).filter((input) => isSource(input) || !revised.has(input.name));
+}
+
+/** Pure inputs an attempt records as it was given them, read before it starts:
+ *  the artifacts. */
+export function inputsReadBeforeAttempt(step: Pick<StepDefinition, "sources" | "outputs">): StepInput[] {
+  return pureInputsOf(step).filter((input) => !isSource(input));
+}
+
+/** Pure inputs an attempt records once it succeeded: the sources. A step that
+ *  changes its own source — an implementation step editing the tree it reads —
+ *  would otherwise record the state before its change, and be stale on every
+ *  later admission because of it. The price is a change made by someone else
+ *  during the attempt, which the record then absorbs. */
+export function inputsReadAfterAttempt(step: Pick<StepDefinition, "sources" | "outputs">): StepInput[] {
+  return pureInputsOf(step).filter(isSource);
 }
 
 /** Outputs the step revises in place: declared as both input and output. */
 export function revisedInPlace(step: Pick<StepDefinition, "sources" | "outputs">): Set<string> {
-  const declaredInputs = new Set((step.sources ?? []).map((source) => source.name));
+  const declaredInputs = new Set(
+    (step.sources ?? []).filter((input) => !isSource(input)).map((artifact) => artifact.name),
+  );
   return new Set((step.outputs ?? []).filter((output) => declaredInputs.has(output.name)).map((o) => o.name));
 }
 
@@ -206,7 +314,7 @@ export async function stepFreshness(
   ctx: PipelineContext,
   step: Pick<StepDefinition, "sources" | "outputs">,
 ): Promise<StepFreshnessReport> {
-  const fingerprints = await fingerprintInputs(ctx, pureInputsOf(step));
+  const { fingerprints, unavailable } = await readInputs(ctx, pureInputsOf(step));
   const states: Record<string, OutputFreshness> = {};
   const adoptable: Artifact<unknown>[] = [];
   for (const output of step.outputs ?? []) {
@@ -223,18 +331,21 @@ export async function stepFreshness(
     stale: values.includes("stale"),
     adoptable,
     fingerprints,
+    unavailable,
   };
 }
 
 /** Whether the pure inputs read now are the ones `recorded`. The key sets must
  *  match too: a definition that gained or lost an input since the record was
- *  written does not answer to it. An input absent then and now is unchanged. */
+ *  written does not answer to it. An artifact absent then and now is unchanged;
+ *  a source unreadable now is not, since nobody knows what it holds. */
 export async function inputsUnchanged(
   ctx: PipelineContext,
   step: Pick<StepDefinition, "sources" | "outputs">,
   recorded: Record<string, InputFingerprint>,
 ): Promise<boolean> {
-  const current = await fingerprintInputs(ctx, pureInputsOf(step));
+  const { fingerprints: current, unavailable } = await readInputs(ctx, pureInputsOf(step));
+  if (unavailable.length > 0) return false;
   const keys = Object.keys(current);
   if (keys.length !== Object.keys(recorded).length) return false;
   return keys.every((key) => key in recorded && recorded[key] === current[key]);
@@ -250,13 +361,20 @@ export async function adoptOutputs(ctx: PipelineContext, stepId: string, report:
 }
 
 /** Public freshness of one artifact, read from its own record. A pipeline uses it
- *  to branch on "the source moved" without owning fingerprints itself. */
+ *  to branch on "the source moved" without owning fingerprints itself. A record
+ *  bound to an external source reads `unknown` unless an artifact input already
+ *  made it `stale`: the record keeps the source's fingerprint, not its command. */
 export async function freshness(ctx: PipelineContext, artifact: Artifact<unknown>): Promise<ArtifactFreshness> {
   const exists = await ctx.artifacts.exists(ref(ctx, artifact.name));
   if (!exists) return "missing";
   const record = await readProvenance(ctx, artifact);
   if (!record) return "unknown";
+  let boundToSource = false;
   for (const [key, recorded] of Object.entries(record.inputs)) {
+    if (key.startsWith(SOURCE_KEY_PREFIX)) {
+      boundToSource = true;
+      continue;
+    }
     const name = key.startsWith("artifacts/") ? key.slice("artifacts/".length) : key;
     const raw = await ctx.artifacts.readText(ref(ctx, name));
     const current = raw === undefined ? null : sha256Text(raw);
@@ -264,5 +382,5 @@ export async function freshness(ctx: PipelineContext, artifact: Artifact<unknown
     if (current === null) return "unknown";
     if (current !== recorded) return "stale";
   }
-  return "fresh";
+  return boundToSource ? "unknown" : "fresh";
 }

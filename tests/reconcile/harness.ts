@@ -37,6 +37,15 @@ export interface RouteOptions {
    * extension module.
    */
   scan?: readonly string[];
+  /**
+   * Adds `tree`, a `dsl.source` over the repository state, to the input of
+   * `implement` (L4). `"failable"`: its command exits non-zero while
+   * `fail-tree` exists (`failAt(cwd, "tree")`). `"output"`: `implement`
+   * also declares it as output, which the build refuses. `"written"`:
+   * `implement` also edits `tracked.txt`, as an implementation changes the
+   * tree it reads; the tree is then dirty after its first pass.
+   */
+  source?: boolean | "failable" | "output" | "written";
 }
 
 export interface RunResult {
@@ -73,16 +82,34 @@ function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore", env: isolatedEnv(cwd) });
 }
 
+const TREE_COMMAND = "git rev-parse HEAD; git diff HEAD --binary";
+
+/** Declaration of `tree`, the external source of `route` (empty without one). */
+function treeDeclaration(source: RouteOptions["source"]): string {
+  if (!source) return "";
+  const command =
+    source === "failable"
+      ? `test ! -e fail-tree || { echo "tree: forced failure" >&2; exit 1; }; ${TREE_COMMAND}`
+      : TREE_COMMAND;
+  return `\n  const tree = source("tree", { command: ${JSON.stringify(command)} });`;
+}
+
 /** Source of `.lance-nuit/pipelines/route.ts`. */
 export function routeSource(options: RouteOptions = {}): string {
   const comment = options.unclassified ? `\n      step("comment", {}),` : "";
+  const implementInput = options.source ? "[plan, tree]" : "[plan]";
+  const implementOutput = options.source === "output" ? "[impl, tree]" : "[impl]";
+  const implementEdits =
+    options.source === "written"
+      ? `\n        if (id === "implement") appendFileSync(join(ctx.cwd, "tracked.txt"), "implemented " + Date.now() + "\\n");`
+      : "";
   const steps = `
       step("context", { rerunOnResume: true }),
       step("branch", { output: [branch] }, [branch]),
       step("triage", { input: [ticket], output: [triage] }, [triage]),
       step("plan", { input: [ticket, triage], output: [plan] }, [plan]),
       step("prepare", { rerunOnResume: true }),
-      step("implement", { input: [plan], output: [impl] }, [impl]),
+      step("implement", { input: ${implementInput}, output: ${implementOutput} }, [impl]),
       step("quality", { rerunOnResume: true }),
       step("commit", { input: [impl], output: [commit] }, [commit]),
       step("publish", { input: [commit], output: [mr] }, [mr]),${comment}
@@ -93,14 +120,14 @@ export function routeSource(options: RouteOptions = {}): string {
   return `import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-export default ({ pipeline, actionStep, textArtifact }: any) => {
+export default ({ pipeline, actionStep, textArtifact${options.source ? ", source" : ""} }: any) => {
   const ticket = textArtifact("ticket.md");
   const branch = textArtifact("branch.json");
   const triage = textArtifact("triage.md");
   const plan = textArtifact("plan.md");
   const impl = textArtifact("impl.md");
   const commit = textArtifact("commit.sha");
-  const mr = textArtifact("mr-url.txt");
+  const mr = textArtifact("mr-url.txt");${treeDeclaration(options.source)}
 
   const step = (id: string, extra: object, produce: any[] = []) =>
     actionStep({
@@ -112,7 +139,7 @@ export default ({ pipeline, actionStep, textArtifact }: any) => {
         appendFileSync(join(ctx.cwd, "trace.log"), id + "\\n");
         if (existsSync(join(ctx.cwd, "fail-" + id))) throw new Error(id + ": forced failure");
         // A pending promise alone does not keep the event loop alive.
-        if (existsSync(join(ctx.cwd, "hang-" + id))) await new Promise(() => setInterval(() => {}, 1_000));
+        if (existsSync(join(ctx.cwd, "hang-" + id))) await new Promise(() => setInterval(() => {}, 1_000));${implementEdits}
         for (const out of produce) await out.write(ctx, id + " " + Date.now() + "\\n");
       },
     });
@@ -357,8 +384,30 @@ export function touchTicket(cwd: string): void {
 /**
  * Changes a tracked file and commits it: the repository state moves while the
  * tree stays clean, so the runner's clean tree guard still admits a new run.
+ * `{ commit: false }` leaves the change in the working tree: a new run then
+ * needs `--allow-dirty`.
  */
-export function editTracked(cwd: string): void {
+export function editTracked(cwd: string, { commit = true }: { commit?: boolean } = {}): void {
   appendFileSync(join(cwd, "tracked.txt"), "edited\n");
-  git(cwd, "commit", "-qam", "edit tracked file");
+  if (commit) git(cwd, "commit", "-qam", "edit tracked file");
+}
+
+/** The provenance record of artifact `name` of `T-1`: the input fingerprints it was produced from. */
+export function provenanceInputs(cwd: string, name: string): Record<string, string | null> {
+  const path = join(workItemDir(cwd), "artifacts", ".provenance", `${name}.json`);
+  return (JSON.parse(readFileSync(path, "utf8")) as { inputs: Record<string, string | null> }).inputs;
+}
+
+/** Events of type `type` in the journal of the `latest` run since `since` (whole journal for a new run). */
+export function eventsSince(
+  cwd: string,
+  since: Mark,
+  type: string,
+  ticket: string = TICKET,
+): Record<string, unknown>[] {
+  const sameRun = since.runId !== undefined && since.runId === latestRunId(cwd, ticket);
+  return journalLines(cwd, ticket)
+    .slice(sameRun ? since.journalLength : 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((event) => event.type === type);
 }

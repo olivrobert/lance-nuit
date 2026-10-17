@@ -11,6 +11,7 @@ import type {
   Templated,
 } from "../model/context.js";
 import type { WorkItemScanDefinition } from "../model/definition.js";
+import type { StepInput } from "../model/source.js";
 import type { Artifact } from "./artifact.js";
 import type { StepBuilder } from "./dsl-steps.js";
 import type { InputPredicate, When } from "./input.js";
@@ -71,12 +72,13 @@ export interface StepOptionsBase {
   name: string;
   when?: When | readonly When[];
   require?: AsyncTemplated<PipelineContext>;
-  /** Artifacts this step reads. Opt-in: declaring it makes the runner skip the
-   *  step while every `output` is up to date with the fingerprints of these
-   *  inputs, and re-admit it on resume when one of them changed. An artifact
-   *  listed in both `input` and `output` is revised in place: it is never erased
-   *  before the attempt and never fingerprinted. */
-  input?: readonly Artifact<unknown>[];
+  /** Artifacts and external sources (`source()`) this step reads. Opt-in:
+   *  declaring it makes the runner skip the step while every `output` is up to
+   *  date with the fingerprints of these inputs, and re-admit it on resume when
+   *  one of them changed. An artifact listed in both `input` and `output` is
+   *  revised in place: it is never erased before the attempt and never
+   *  fingerprinted. A source can never be an `output`. */
+  input?: readonly StepInput[];
   output?: readonly Artifact<unknown>[];
   report?: string | readonly string[];
   errorExtractor?: string;

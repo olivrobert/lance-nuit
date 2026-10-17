@@ -1,6 +1,7 @@
 import { VERDICT_FIELD_NAMES } from "../contracts/verdict.js";
 import { isLogicalSegment } from "../model/artifact-ports.js";
 import { type PipelineStep, stepsWithoutDeliverable, withoutDeliverableMessage } from "../model/definition.js";
+import { sourceDeclarationError } from "../model/source.js";
 import type { PipelineValidationContext, PipelineValidationFinding, PipelineValidationRule } from "./types.js";
 
 const VALID_RUNNERS = new Set(["agent", "bash", "noop", "fn", "pipeline"]);
@@ -90,6 +91,8 @@ export class PipelineStructureValidator implements PipelineValidationRule {
       if (step.sources?.length && !step.outputs?.length) {
         fail(`step "${id}": input requires output`);
       }
+      const sourceError = sourceDeclarationError(step);
+      if (sourceError) fail(`step "${id}": ${sourceError}`);
       if (step.captures?.length && step.runner !== "agent") {
         fail(`step "${id}": capture applies only to runner "agent"`);
       }

@@ -283,6 +283,8 @@ context types. The structural primitives are:
   for a sequential child loop;
 - `artifact(name, parser)` / `textArtifact(name, parser?)` for artifact descriptors,
   and `.approval(subject, artifact)` for approvable subjects;
+- `source(name, { command })` for state outside the work item a step declares
+  as `input` — see [External sources](#external-sources);
 - `llmStep({ capture: { field: artifact | { artifact, schema } } })` to have the
   runner persist a field of the agent's verdict as an artifact — see
   [Captured outputs](#captured-outputs).
@@ -378,9 +380,10 @@ is not covered by this rule.
 
 ### Input freshness
 
-`input` declares the artifacts a step reads, symmetrically to `output`. It is the
-answer to "the human answered on the ticket, rerun": the runner replays the steps
-whose sources moved, and only those.
+`input` declares the artifacts a step reads, symmetrically to `output`, and the
+[external sources](#external-sources) it depends on. It is the answer to "the
+human answered on the ticket, rerun": the runner replays the steps whose sources
+moved, and only those.
 
 ```ts
 bashStep({
@@ -403,7 +406,8 @@ The rules:
   fingerprint, and it is still required afterwards.
 - **Fingerprint.** SHA-256 of the raw bytes of every pure input, read at the start
   of the attempt and recorded on success, after the outputs are verified, in one
-  provenance record per produced artifact.
+  provenance record per produced artifact. An external source is the exception:
+  it is read once the attempt succeeded (see below).
 - **Freshness of an output** at admission time: absent is `missing`; a pure input
   absent is `unknown` (a safe bias); no record at all is `adoptable`; a
   fingerprint that differs, or a declared input the record does not list, is
@@ -452,12 +456,74 @@ before freshness is ever consulted.
 `freshness(ctx, artifact)` exposes the same records to a pipeline, returning
 `fresh`, `stale`, `missing`, or `unknown` for one artifact against its own record.
 It is what an author branches on to run an amendment step rather than a full
-regeneration.
+regeneration. A record bound to an external source reads `unknown` unless an
+artifact input already makes it `stale`: the record keeps the source's
+fingerprint, not its command.
 
 Known limits: writes that no `output` declares are not tracked; a `PASS` run is
 never resumed, so a new run starts with everything `pending` (freshness still
 applies); a `PASS` child pipeline is not re-entered; and a `when` with `stop`
 re-evaluated on resume can stop on a step that already completed.
+
+#### External sources
+
+`source(name, { command })` declares state that lives outside the work item — the
+repository tree, a lock file, a remote revision — so that a step's freshness
+covers it. Its content is the stdout of a bash command:
+
+```ts
+const tree = source("tree", { command: 'git diff "$(git merge-base HEAD origin/main)" --binary' });
+bashStep({ id: "implement", name: "Implement", command: "implement", input: [plan, tree], output: [impl] });
+```
+
+Choose a command that the pipeline's own work does not move. The diff of the
+working tree against the base branch changes with the content of the code, not
+with the commits that record it. `git rev-parse HEAD; git diff HEAD --binary`
+looks equivalent but is a trap: when a later step (`commit`) commits what
+`implement` wrote, `HEAD` moves, the stdout changes although the code did not,
+and `implement` — an agent step — is stale and paid again on every rerun.
+
+- **Fingerprint.** SHA-256 of the command's raw stdout bytes, before any
+  decoding, so a diff of a non-UTF-8 file still fingerprints each edit apart;
+  stderr is not part of it.
+  It is recorded under `source:<name>` in the provenance record, beside the
+  `artifacts/<name>` keys, so a source never shares a fingerprint with an artifact
+  of the same name. The rules above apply unchanged: a stdout that moved makes
+  the outputs `stale`, and the step runs again with everything downstream of what
+  it rewrites.
+- **Execution.** The command runs in the pipeline's working directory (the
+  repository root, or the worktree under `--worktree`), with the environment of a
+  step: the runner's internal `RUNNER_*` variables are removed. It is bounded to
+  30 s, like a `when` command. `command` may also be a function of the
+  pipeline context. The runner reads a source at admission and again once the
+  attempt succeeded, so the command must be safe to repeat.
+- **Read after the attempt.** The fingerprint recorded is the one the source
+  gives after a successful attempt, not before it: a step that changes what it
+  reads — an implementation editing the tree — is not stale because of its own
+  change, only because of a later one. A change someone else makes during the
+  attempt is absorbed into the record. This does not cover a change made by a
+  *later* step: see the command choice above.
+- **Deterministic command.** A stdout that is empty or constant never makes the
+  step stale; one that varies on every call (a timestamp, an unordered listing)
+  makes it run every time. The stdout is held in memory whole, with no size
+  bound.
+- **Adding a source** to a step that already produced its outputs replays it
+  once: their record does not list the new input, so they are `stale`.
+- **Failure.** A command that exits non-zero, times out, or resolves to an empty
+  string leaves the freshness `unknown`, so the step runs, as for an absent
+  input. The reason is journaled as `step.source.unavailable` (`stepId`,
+  `source`, `reason`) and printed once. The same event is journaled when the
+  reading after a successful attempt fails. An output produced while its source
+  was unreadable is recorded against `null`: it is `stale` once the source
+  reads again.
+- **Read, never written.** A source in `output`, or two sources of the same name
+  in one step's `input`, is a build error. `source.read(ctx)` returns the
+  stdout, for an action step that needs the same bytes.
+- **Untracked files.** `git diff HEAD` does not show them. A pipeline that must
+  see new files marks them itself (`git add -N`), in a step or in the source's
+  command; the runner never stages anything.
+- **Both modes.** A source works with or without [reconcile mode](#reconcile-mode):
+  a step declaring `input` answers to its freshness in both.
 
 ### Reconcile mode
 

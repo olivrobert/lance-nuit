@@ -9,6 +9,7 @@ import {
   llmStep,
   pipeline,
   runPipeline,
+  source as externalSource,
   textArtifact,
 } from "../../src/dsl.ts";
 import { assertStrictSchema } from "../../src/dsl/dsl-steps.ts";
@@ -260,6 +261,32 @@ test("input: declared sources reach the canonical definition", () => {
 
   expect(step.sources?.map((entry) => entry.name)).toEqual(["source.json"]);
   expect(step.outputs?.map((entry) => entry.name)).toEqual(["result.json"]);
+});
+
+test("input: an external source reaches the canonical definition beside the artifacts", () => {
+  const tree = externalSource("tree", { command: "git rev-parse HEAD" });
+  const step = bashStep({ id: "derive", name: "Derive", command, input: [source, tree], output: [result] }).build();
+
+  expect(step.sources).toEqual([source, tree]);
+});
+
+test("input: a source declared as output is refused, being read and never written", () => {
+  const tree = externalSource("tree", { command: "git rev-parse HEAD" });
+  const options = { id: "derive", name: "Derive", command, input: [tree], output: [result, tree] };
+
+  // A JavaScript pipeline is untyped: the builder is what stops it.
+  expect(() => bashStep(options as unknown as BashStepOptions).build()).toThrow(
+    'Step "derive": source "tree" cannot be an output: a source is read, never written',
+  );
+});
+
+test("input: two sources of the same name would share one fingerprint and are refused", () => {
+  const first = externalSource("tree", { command: "git rev-parse HEAD" });
+  const second = externalSource("tree", { command: "git diff HEAD" });
+
+  expect(() =>
+    bashStep({ id: "derive", name: "Derive", command, input: [first, second], output: [result] }).build(),
+  ).toThrow('Step "derive": source "tree" is declared twice in input');
 });
 
 test("input: a step without output has nothing to compare its inputs against", () => {

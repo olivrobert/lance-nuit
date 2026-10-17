@@ -32,6 +32,8 @@ export interface SupervisedProcess {
 export interface SupervisedCommandResult {
   status: number;
   stdout: string;
+  /** `stdout` before UTF-8 decoding. */
+  stdoutBytes: Buffer;
   stderr: string;
   timedOut: boolean;
   killed: boolean;
@@ -151,6 +153,7 @@ export function runSupervisedCommand(
       resolve({
         status,
         stdout: output.stdout(),
+        stdoutBytes: output.stdoutBytes(),
         stderr: output.stderr() || spawnError,
         timedOut,
         killed: killedByPolicy,

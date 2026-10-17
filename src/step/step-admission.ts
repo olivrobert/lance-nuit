@@ -17,7 +17,7 @@ import type { RunOutput } from "../runtime/run-output.js";
 import { costDecision, type RunBudget } from "../state/budget.js";
 import { pendingRejection } from "../state/decisions.js";
 import { recordCostStop } from "../state/cost-stop-events.js";
-import { adoptOutputs, inputsUnchanged, stepFreshness } from "../state/provenance.js";
+import { adoptOutputs, inputsUnchanged, stepFreshness, type UnavailableSource } from "../state/provenance.js";
 import { appendRunEvent } from "../state/run-journal.js";
 import { lastPassInterrupted, owesWork } from "../state/run-predicates.js";
 import { stopRun, updateStep } from "../state/run-transitions.js";
@@ -140,6 +140,20 @@ export interface AdmitStepInput {
  *  them. An orchestration node never does: its children decide (D3). */
 export function answersToOutputs(def: StepDefinition, reconcile: boolean | undefined): boolean {
   return (def.sources?.length ?? 0) > 0 || (reconcile === true && deliversOutputs(def));
+}
+
+/** A source that could not be read makes the step run without anyone seeing
+ *  why: the journal keeps the reason, the console says it once. */
+function reportUnavailableSources(input: AdmitStepInput, unavailable: readonly UnavailableSource[]): void {
+  const { run, step } = input;
+  for (const { source, reason } of unavailable) {
+    appendRunEvent(run, "step.source.unavailable", { stepId: step.id, source, reason });
+    input.output.emit({
+      type: "runner.message",
+      level: "warn",
+      message: `${step.def.name} — source "${source}" unavailable, freshness unknown, running: ${reason}`,
+    });
+  }
 }
 
 /** Persist a guard rejection with the same blocking/non-blocking semantics. */
@@ -308,6 +322,7 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
     }
     // Without input, freshness reduces to presence: no fingerprint can differ.
     const report = await stepFreshness(baseCtx, step.def);
+    reportUnavailableSources(input, report.unavailable);
     if (!report.mustRun && !declaresInput) {
       return applyInputDecision(run, step, input.output, "skip", SKIP_OUTPUTS_PRESENT);
     }

@@ -64,6 +64,9 @@ export type RunJournalKnownEvent =
     })
   | (JournalBase & { type: "run.unmetered.authorized"; budgetScopeId: string | null; maxCostUsd: number | null })
   | (JournalBase & { type: "step.skipped"; stepId: string; reason: string; freshness?: string })
+  /** A source the step declares as input could not be read: its freshness is
+   *  unknown, so the step runs. */
+  | (JournalBase & { type: "step.source.unavailable"; stepId: string; source: string; reason: string })
   | (JournalBase & {
       type: "step.status.changed";
       stepId: string;

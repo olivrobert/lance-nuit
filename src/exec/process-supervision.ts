@@ -14,22 +14,28 @@ const POLL_INTERVAL_MS = 25;
 
 export interface CapturedProcessOutput {
   stdout(): string;
+  /** stdout as the child wrote it: decoding replaces invalid UTF-8 sequences,
+   *  so two different outputs can decode to the same text. */
+  stdoutBytes(): Buffer;
   stderr(): string;
 }
 
 /** Collect a child's text pipes without duplicating stream wiring in callers. */
 export function captureProcessOutput(child: ChildProcess): CapturedProcessOutput {
-  let stdout = "";
+  const stdout: Buffer[] = [];
   let stderr = "";
-  child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
-  child.stdout?.on("data", (chunk: string) => {
-    stdout += chunk;
+  child.stdout?.on("data", (chunk: Buffer) => {
+    stdout.push(chunk);
   });
   child.stderr?.on("data", (chunk: string) => {
     stderr += chunk;
   });
-  return { stdout: () => stdout, stderr: () => stderr };
+  return {
+    stdout: () => Buffer.concat(stdout).toString("utf8"),
+    stdoutBytes: () => Buffer.concat(stdout),
+    stderr: () => stderr,
+  };
 }
 
 export interface ProcessTrackingOptions {

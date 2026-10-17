@@ -25,6 +25,8 @@ export interface Dsl {
     promptFile: PromptFileFactory;
     artifact: typeof artifact;
     textArtifact: typeof textArtifact;
+    /** External state a step reads (`input`), fingerprinted from a command's stdout. */
+    source: typeof source;
     skip: typeof skip;
     fail: typeof fail;
     stop: typeof stop;
@@ -158,12 +160,13 @@ export interface StepOptionsBase {
     name: string;
     when?: When | readonly When[];
     require?: AsyncTemplated<PipelineContext>;
-    /** Artifacts this step reads. Opt-in: declaring it makes the runner skip the
-     *  step while every `output` is up to date with the fingerprints of these
-     *  inputs, and re-admit it on resume when one of them changed. An artifact
-     *  listed in both `input` and `output` is revised in place: it is never erased
-     *  before the attempt and never fingerprinted. */
-    input?: readonly Artifact<unknown>[];
+    /** Artifacts and external sources (`source()`) this step reads. Opt-in:
+     *  declaring it makes the runner skip the step while every `output` is up to
+     *  date with the fingerprints of these inputs, and re-admit it on resume when
+     *  one of them changed. An artifact listed in both `input` and `output` is
+     *  revised in place: it is never erased before the attempt and never
+     *  fingerprinted. A source can never be an `output`. */
+    input?: readonly StepInput[];
     output?: readonly Artifact<unknown>[];
     report?: string | readonly string[];
     errorExtractor?: string;
@@ -671,6 +674,44 @@ export declare function artifact<T>(name: string, parse: ArtifactParser<T>): Art
  *  The parser receives the bytes as-is and can only reject or return them; text
  *  artifacts have no structured shape to normalize and no inverse serializer. */
 export declare function textArtifact(name: string, parse?: (raw: string) => string): Artifact<string>;
+
+export interface SourceOptions {
+    /** Bash command whose stdout is the source's content, run in the working
+     *  directory with a 30 s bound. A function receives the pipeline context. It
+     *  must be deterministic: a stdout that is empty or constant never makes the
+     *  step stale, one that varies on every call makes it run every time. Its
+     *  stdout is held in memory whole, with no size bound. */
+    command: AsyncTemplated<PipelineContext>;
+}
+
+/**
+ * State outside the work-item that a step reads, declared through `input` so
+ * its freshness covers it: the step is re-admitted when the raw stdout of
+ * `command` changes. The fingerprint recorded is read again once the attempt
+ * succeeded, so a step that changes its own source is not stale because of it.
+ * A source is read, never written: declaring it as `output` is a build error.
+ * A command that fails leaves the freshness unknown, so the step runs. Adding a
+ * source to a step that already produced its outputs replays it once: their
+ * record does not list the new input.
+ */
+export declare function source(name: string, options: SourceOptions): Source;
+```
+
+## External sources
+
+```ts
+export interface Source {
+    /** Tells a source apart from an artifact in a step's `input`. */
+    readonly kind: "source";
+    readonly name: string;
+    /** Bash command whose stdout is the source's content. */
+    readonly command: AsyncTemplated<PipelineContext>;
+    /** Run the command and return its stdout; rejects when it fails. */
+    read(ctx: PipelineContext): Promise<string>;
+}
+
+/** What a step may declare through `input`: artifacts it reads, and sources. */
+export type StepInput = Artifact<unknown> | Source;
 ```
 
 ## Prompt files
@@ -1156,6 +1197,8 @@ export declare function pendingRejection(ctx: PipelineContext, subject: Decision
 export type ArtifactFreshness = Exclude<OutputFreshness, "adoptable">;
 
 /** Public freshness of one artifact, read from its own record. A pipeline uses it
- *  to branch on "the source moved" without owning fingerprints itself. */
+ *  to branch on "the source moved" without owning fingerprints itself. A record
+ *  bound to an external source reads `unknown` unless an artifact input already
+ *  made it `stale`: the record keeps the source's fingerprint, not its command. */
 export declare function freshness(ctx: PipelineContext, artifact: Artifact<unknown>): Promise<ArtifactFreshness>;
 ```

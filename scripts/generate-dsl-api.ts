@@ -155,7 +155,12 @@ const SECTIONS: Section[] = [
   {
     title: "Artifacts",
     file: "dsl/artifact.d.ts",
-    names: ["ArtifactParser", "Artifact", "artifact", "textArtifact"],
+    names: ["ArtifactParser", "Artifact", "artifact", "textArtifact", "SourceOptions", "source"],
+  },
+  {
+    title: "External sources",
+    file: "model/source.d.ts",
+    names: ["Source", "StepInput"],
   },
   {
     title: "Prompt files",

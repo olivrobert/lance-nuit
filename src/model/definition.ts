@@ -7,6 +7,7 @@ import type { Artifact } from "./artifact.js";
 import type { AsyncTemplated, FixContext, PipelineContext, PipelineLot, StepAction } from "./context.js";
 import type { InputPredicate, StepInputCondition } from "./input.js";
 import type { StepProfileName } from "./profiles.js";
+import type { StepInput } from "./source.js";
 
 export interface StepFailure {
   /** Repair prompt. Absent: the command is simply replayed. */
@@ -113,10 +114,11 @@ export interface PipelineStep {
    *  before `outputs` are verified. Each captured artifact is also in `outputs`.
    *  Agent steps only. */
   captures?: StepCapture[];
-  /** Artifacts this step reads, declared through `input`. `inputs` above is
-   *  already taken by admission conditions, hence the distinct name. Present
-   *  only on steps that opted into input-freshness skipping. */
-  sources?: Artifact<unknown>[];
+  /** Artifacts and external sources this step reads, declared through `input`.
+   *  `inputs` above is already taken by admission conditions, hence the
+   *  distinct name. Present only on steps that opted into input-freshness
+   *  skipping. */
+  sources?: StepInput[];
   error_extractor?: string;
   /** Machine reports written by the command (project-defined format).
    *  When set, error_extractor reads these files instead of stdout: the command

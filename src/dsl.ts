@@ -5,7 +5,7 @@ import type {
   workItemDeliveryStep as workItemDeliveryStepFactory,
   workItemEscalateStep as workItemEscalateStepFactory,
 } from "./builtin-steps/lib/work-item-steps.js";
-import type { artifact, textArtifact } from "./dsl/artifact.js";
+import type { artifact, source, textArtifact } from "./dsl/artifact.js";
 import type { forEachPipeline, runPipeline } from "./dsl/dsl-orchestration.js";
 import type { pipeline } from "./dsl/dsl-pipeline.js";
 import type { actionStep, bashStep, LlmStepFactory, WithBackendFactory } from "./dsl/dsl-steps.js";
@@ -39,7 +39,8 @@ export type {
 } from "./builtin-steps/lib/human-review.js";
 export { humanReview } from "./builtin-steps/lib/human-review.js";
 export type { EffortLevel, JsonSchema } from "./contracts/backends.js";
-export { artifact, textArtifact } from "./dsl/artifact.js";
+export type { SourceOptions } from "./dsl/artifact.js";
+export { artifact, source, textArtifact } from "./dsl/artifact.js";
 // The orchestration and work-item functions are imported above from their
 // focused modules; export them through this stable authoring entrypoint.
 export { forEachPipeline, runPipeline } from "./dsl/dsl-orchestration.js";
@@ -146,6 +147,8 @@ export interface Dsl {
   promptFile: PromptFileFactory;
   artifact: typeof artifact;
   textArtifact: typeof textArtifact;
+  /** External state a step reads (`input`), fingerprinted from a command's stdout. */
+  source: typeof source;
   skip: typeof skip;
   fail: typeof fail;
   stop: typeof stop;
@@ -173,4 +176,4 @@ export interface Dsl {
 
 export type PipelineFactory = (dsl: Dsl) => Pipeline;
 export type { WorkQueue } from "./contracts/work-items.js";
-export type { Artifact } from "./dsl/artifact.js";
+export type { Artifact, Source } from "./dsl/artifact.js";
