@@ -126,6 +126,13 @@ const EVENT_SCHEMAS = {
     reason: z.string(),
     freshness: optionalString,
   }),
+  "step.source.unavailable": z.looseObject({
+    ...base,
+    type: z.literal("step.source.unavailable"),
+    stepId,
+    source: z.string(),
+    reason: z.string(),
+  }),
   "step.status.changed": z.looseObject({
     ...base,
     type: z.literal("step.status.changed"),

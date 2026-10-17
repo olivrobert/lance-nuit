@@ -1,6 +1,7 @@
 {"ts":"2026-01-01T09:00:00.000Z","type":"run.started","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","pipeline":"parent-pipeline","ticket":"WI-1"}
 {"ts":"2026-01-01T09:00:00.100Z","type":"run.unmetered.authorized","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","budgetScopeId":"20260101T090000.000Z-parent-pipeline-a1b2c3","maxCostUsd":15}
 {"ts":"2026-01-01T09:00:01.000Z","type":"step.skipped","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"plan","reason":"input decision: skip","freshness":"artifact newer than input"}
+{"ts":"2026-01-01T09:00:01.500Z","type":"step.source.unavailable","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"implement","source":"tree","reason":"source \"tree\": exit code 128\nfatal: not a git repository"}
 {"ts":"2026-01-01T09:00:02.000Z","type":"step.status.changed","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"tests","status":"running"}
 {"ts":"2026-01-01T09:00:03.000Z","type":"step.attempt.started","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"tests","attempt":1,"kind":"step","sessionId":null,"logPath":"steps/tests/attempt-001/output.log"}
 {"ts":"2026-01-01T09:00:04.000Z","type":"step.cost.unaccounted","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","stepId":"tests","model":"unpriced-model-1"}

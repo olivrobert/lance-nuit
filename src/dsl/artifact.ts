@@ -1,9 +1,11 @@
 import type { Artifact, ArtifactParser } from "../model/artifact.js";
 import { createArtifactRef } from "../model/artifact-ports.js";
-import type { PipelineContext } from "../model/context.js";
-import { PROVENANCE_PREFIX } from "../state/provenance.js";
+import type { AsyncTemplated, PipelineContext } from "../model/context.js";
+import type { Source } from "../model/source.js";
+import { PROVENANCE_PREFIX, readSource } from "../state/provenance.js";
 
 export type { Artifact, ArtifactParser } from "../model/artifact.js";
+export type { Source } from "../model/source.js";
 
 /** `.provenance/` is owned by the runner: it stores the input fingerprints of
  *  every artifact. A descriptor pointing there would let a pipeline overwrite the
@@ -82,4 +84,38 @@ export function textArtifact(name: string, parse: (raw: string) => string = (raw
     remove: (ctx: PipelineContext) => ctx.artifacts.remove(ref(ctx, name)),
     validate: parse,
   });
+}
+
+export interface SourceOptions {
+  /** Bash command whose stdout is the source's content, run in the working
+   *  directory with a 30 s bound. A function receives the pipeline context. It
+   *  must be deterministic: a stdout that is empty or constant never makes the
+   *  step stale, one that varies on every call makes it run every time. Its
+   *  stdout is held in memory whole, with no size bound. */
+  command: AsyncTemplated<PipelineContext>;
+}
+
+/**
+ * State outside the work-item that a step reads, declared through `input` so
+ * its freshness covers it: the step is re-admitted when the raw stdout of
+ * `command` changes. The fingerprint recorded is read again once the attempt
+ * succeeded, so a step that changes its own source is not stale because of it.
+ * A source is read, never written: declaring it as `output` is a build error.
+ * A command that fails leaves the freshness unknown, so the step runs. Adding a
+ * source to a step that already produced its outputs replays it once: their
+ * record does not list the new input.
+ */
+export function source(name: string, options: SourceOptions): Source {
+  if (!name.trim()) throw new Error("source(): name must be a non-empty string");
+  const command = options?.command;
+  if (typeof command !== "function" && (typeof command !== "string" || !command.trim())) {
+    throw new Error(`source("${name}"): command must be a non-empty string or a function`);
+  }
+  const descriptor: Source = Object.freeze({
+    kind: "source" as const,
+    name,
+    command,
+    read: (ctx: PipelineContext) => readSource(ctx, descriptor),
+  });
+  return descriptor;
 }

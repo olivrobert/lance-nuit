@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { artifact, textArtifact } from "../dsl/artifact.ts";
+import { artifact, source, textArtifact } from "../dsl/artifact.ts";
 import type { AgentSession } from "../contracts/backends.ts";
 import type { executeStep, runWithAgent } from "../exec/runners.ts";
 import type { ArtifactRef, WorkItemArtifactStore } from "../model/artifact-ports.ts";
@@ -1003,6 +1003,76 @@ test("runAttempt: fingerprints are recorded only once the outputs are verified",
   const record = await readProvenance(ctx, specArtifact);
   expect(record?.producedBy).toBe("verify");
   expect(record?.inputs).toEqual({ "artifacts/ticket.md": sha256Text("one") });
+});
+
+test("runAttempt: artifacts are recorded as given, sources as the successful attempt left them", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "attempt-source-"));
+  try {
+    const tree = join(dir, "tree.txt");
+    writeFileSync(tree, "before");
+    const { values, ctx } = multiArtifactFixture({ "ticket.md": "one" });
+    const step = makeStep({
+      sources: [ticketArtifact, source("tree", { command: `cat ${JSON.stringify(tree)}` })],
+      outputs: [specArtifact],
+    });
+
+    const ok = await runAttempt(makeRun(step, 10), step, {
+      command: "implement",
+      context: ctx,
+      budget: { cumulative: 0 },
+      executeStep: async () => {
+        // An implementation edits the tree it reads; nothing should edit the ticket, but if it did...
+        writeFileSync(tree, "after");
+        values.set("ticket.md", "two");
+        values.set("spec.md", "written");
+        return { output: "", ok: true, stats: { duration_ms: 1 } };
+      },
+    });
+
+    expect(ok.ok).toBe(true);
+    expect((await readProvenance(ctx, specArtifact))?.inputs).toEqual({
+      "artifacts/ticket.md": sha256Text("one"),
+      "source:tree": sha256Text("after"),
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runAttempt: a source unreadable after the attempt is recorded as null and journaled", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "attempt-source-"));
+  try {
+    const tree = join(dir, "tree.txt");
+    writeFileSync(tree, "before");
+    const { values, ctx } = multiArtifactFixture({ "ticket.md": "one" });
+    const step = makeStep({
+      sources: [ticketArtifact, source("tree", { command: `cat ${JSON.stringify(tree)}` })],
+      outputs: [specArtifact],
+    });
+    const run = makeRun(step, 10);
+
+    const ok = await runAttempt(run, step, {
+      command: "implement",
+      context: ctx,
+      budget: { cumulative: 0 },
+      executeStep: async () => {
+        rmSync(tree);
+        values.set("spec.md", "written");
+        return { output: "", ok: true, stats: { duration_ms: 1 } };
+      },
+    });
+
+    expect(ok.ok).toBe(true);
+    expect((await readProvenance(ctx, specArtifact))?.inputs).toEqual({
+      "artifacts/ticket.md": sha256Text("one"),
+      "source:tree": null,
+    });
+    const unavailable = readRunEvents(run.run_dir).filter((event) => event.type === "step.source.unavailable");
+    expect(unavailable).toHaveLength(1);
+    expect(unavailable[0]).toMatchObject({ stepId: "verify", source: "tree" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("runAttempt: an output declared as input is revised in place, not erased", async () => {

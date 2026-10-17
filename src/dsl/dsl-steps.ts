@@ -7,6 +7,7 @@ import { VERDICT_FIELD_NAMES } from "../contracts/verdict.js";
 import { isLogicalSegment } from "../model/artifact-ports.js";
 import type { AsyncTemplated, PipelineContext, StepAction, Templated } from "../model/context.js";
 import type { PipelineStep, StepCapture, StepFailure } from "../model/definition.js";
+import { sourceDeclarationError, type StepInput } from "../model/source.js";
 import type { Artifact } from "./artifact.js";
 import type {
   ActionStepOptions,
@@ -198,7 +199,7 @@ export abstract class StepBuilder {
     return this;
   }
 
-  input(...artifacts: Artifact<unknown>[]): this {
+  input(...artifacts: StepInput[]): this {
     this.step.sources = [...(this.step.sources ?? []), ...artifacts];
     return this;
   }
@@ -328,6 +329,8 @@ function validatePipelineStep(step: PipelineStep): void {
   if (step.sources?.length && !step.outputs?.length) {
     throw new Error(`Step "${step.id}": input requires output`);
   }
+  const sourceError = sourceDeclarationError(step);
+  if (sourceError) throw new Error(`Step "${step.id}": ${sourceError}`);
   // A capture reads the agent's structured output; only an agent step has one.
   if (step.captures?.length && step.runner !== "agent") {
     throw new Error(`Step "${step.id}": capture applies only to an agent step (llmStep)`);

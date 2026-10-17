@@ -38,8 +38,10 @@ import { chargeAttemptToLedger, isUnpricedSpend, type SettledSpend } from "../st
 import { recordCostStop } from "../state/cost-stop-events.js";
 import {
   fingerprintInputs,
+  inputsReadAfterAttempt,
+  inputsReadBeforeAttempt,
   mergeProvenance,
-  pureInputsOf,
+  readInputs,
   removeProvenance,
   revisedInPlace,
   writeProvenance,
@@ -367,10 +369,10 @@ export async function runAttempt(run: Run, step: RunStep, options: RunAttemptOpt
     invoke: async (ctx) => {
       const declaresInput = (ctx.step.def.sources?.length ?? 0) > 0;
       const revised = declaresInput ? revisedInPlace(ctx.step.def) : new Set<string>();
-      // Read the inputs BEFORE the attempt: the fingerprints must describe what
-      // the step was given, not what a later step may have rewritten.
-      const fingerprints = declaresInput
-        ? await fingerprintInputs(options.context, pureInputsOf(ctx.step.def))
+      // Read the artifacts BEFORE the attempt: the fingerprints must describe
+      // what the step was given, not what a later step may have rewritten.
+      const given = declaresInput
+        ? await fingerprintInputs(options.context, inputsReadBeforeAttempt(ctx.step.def))
         : undefined;
 
       // A declared output proves this attempt completed; its previous version was
@@ -423,7 +425,14 @@ export async function runAttempt(run: Run, step: RunStep, options: RunAttemptOpt
       }
       // Only here is "command succeeded and outputs verified" true, so only here
       // may a fingerprint be recorded.
-      if (fingerprints) {
+      if (given) {
+        const after = await readInputs(options.context, inputsReadAfterAttempt(ctx.step.def));
+        // The record then says `null`, which re-runs the step next time; the
+        // journal is where a diagnosis learns why.
+        for (const { source, reason } of after.unavailable) {
+          appendRunEvent(ctx.run, "step.source.unavailable", { stepId: ctx.step.id, source, reason });
+        }
+        const fingerprints = { ...given, ...after.fingerprints };
         for (const output of ctx.step.def.outputs ?? []) {
           const record = revised.has(output.name) ? mergeProvenance : writeProvenance;
           await record(options.context, output, ctx.step.id, fingerprints);

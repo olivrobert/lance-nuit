@@ -12,3 +12,8 @@ import { createHash } from "node:crypto";
 export function sha256Text(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
+
+/** SHA-256 hex digest of raw bytes, for content that need not be UTF-8. */
+export function sha256Bytes(value: Uint8Array): string {
+  return createHash("sha256").update(value).digest("hex");
+}

@@ -41,6 +41,8 @@ export type {
 export type {
   Artifact,
   ArtifactParser,
+  Source,
+  SourceOptions,
 } from "../dsl/artifact.js";
 export type {
   ActionStepOptions,
@@ -101,6 +103,7 @@ export {
   skipIf,
   skipUnless,
   skipUnlessCommand,
+  source,
   stop,
   stopIf,
   stopUnless,

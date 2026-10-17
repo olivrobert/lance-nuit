@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { textArtifact } from "../dsl/artifact.js";
+import { source, textArtifact } from "../dsl/artifact.js";
 import { skipIf, skipUnlessCommand } from "../dsl/input.js";
 import type { ArtifactRef, WorkItemArtifactStore } from "../model/artifact-ports.js";
 import type { PipelineContext } from "../model/context.js";
@@ -11,6 +11,7 @@ import type { Run, RunStep } from "../model/run.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { pendingRejection, recordRejection } from "../state/decisions.js";
+import { fingerprintInputs, writeProvenance } from "../state/provenance.js";
 import { readRunEvents } from "../state/run-journal.js";
 import { makeRunStep } from "../state/run-step.js";
 import { admitStep, checkInputs } from "./step-admission.js";
@@ -408,4 +409,37 @@ test("reconcile: an orchestration node declaring a present output still runs, it
 
   expect(admission.kind).toBe("ready");
   expect(events.some((event) => event.type === "step.skipped")).toBe(false);
+});
+
+// ── External sources ─────────────────────────────────────────────────────────
+
+test("source: a done step whose source cannot be read runs, and the journal says which source and why", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const tree = source("tree", { command: "echo 'fatal: not a git repository' >&2; exit 128" });
+  const step = reworkStep({ rework_for: undefined, sources: [tree] });
+
+  const { admission, events } = await admitRework(step, ctx);
+
+  expect(admission.kind).toBe("ready");
+  expect(events.some((event) => event.type === "step.skipped")).toBe(false);
+  const unavailable = events.filter((event) => event.type === "step.source.unavailable");
+  expect(unavailable).toHaveLength(1);
+  expect(unavailable[0]).toMatchObject({ stepId: "plan", source: "tree" });
+  expect(String((unavailable[0] as { reason?: unknown }).reason)).toContain("fatal: not a git repository");
+});
+
+test("source: a done step whose source reads the bytes it was produced from is skipped as up to date", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const tree = source("tree", { command: "echo stable" });
+  const step = reworkStep({ rework_for: undefined, sources: [tree] });
+  await writeProvenance(ctx, planArtifact, "plan", await fingerprintInputs(ctx, [tree]));
+
+  const { admission, events } = await admitRework(step, ctx);
+
+  expect(admission.kind).toBe("skip");
+  expect(events.some((event) => event.type === "step.source.unavailable")).toBe(false);
+  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({
+    stepId: "plan",
+    reason: "outputs up to date with declared inputs",
+  });
 });

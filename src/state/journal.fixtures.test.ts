@@ -29,6 +29,7 @@ const FIXTURE_TYPES = [
   "run.cost.unaccounted",
   "run.unmetered.authorized",
   "step.skipped",
+  "step.source.unavailable",
   "step.status.changed",
   "step.attempt.started",
   "step.attempt.finished",

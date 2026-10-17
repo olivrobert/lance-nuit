@@ -400,6 +400,7 @@ kept and read on what it still says.
 | `run.cost.unaccounted` | a gate withheld work over spend nobody could price |
 | `run.unmetered.authorized` | a human authorized unpriceable spend with `--allow-unmetered` |
 | `step.skipped` | an input decision skipped a step |
+| `step.source.unavailable` | a source the step declares as input could not be read: its freshness is unknown and the step runs (see [external sources](dsl.md#external-sources)) |
 | `step.status.changed` | a step changes status |
 | `step.attempt.started` | an attempt opens |
 | `step.attempt.finished` | an attempt closes (payload table above) |

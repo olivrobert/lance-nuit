@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { type Artifact, artifact, textArtifact } from "../dsl/artifact.js";
+import { type Artifact, artifact, source, textArtifact } from "../dsl/artifact.js";
 import type { Pipeline, StepCapture, StepFailure } from "../model/definition.js";
 import { PipelineStructureValidator } from "./structure.js";
 
@@ -35,6 +35,28 @@ test("a fix policy bounded to zero attempts would never repair", () => {
   expect(findings({ fix_prompt: "fix", max_retries: 0 })).toEqual([
     'step "verify": on_failure.max_retries must be >= 1 when fix_prompt is set',
   ]);
+});
+
+test("a raw definition writing a source, or declaring one twice, is refused like the builder does", () => {
+  const tree = source("tree", { command: "git rev-parse HEAD" });
+  const result = textArtifact("result.md");
+  const validate = (sources: unknown[], outputs: unknown[]) =>
+    new PipelineStructureValidator()
+      .validate({
+        source: "gate.ts",
+        pipeline: {
+          name: "gate",
+          steps: [{ id: "derive", name: "Derive", command: "true", runner: "bash", sources, outputs }],
+        } as unknown as Pipeline,
+        profileOverrides: {},
+      })
+      .map((finding) => finding.message);
+
+  expect(validate([tree], [result])).toEqual([]);
+  expect(validate([tree], [result, tree])).toEqual([
+    'step "derive": source "tree" cannot be an output: a source is read, never written',
+  ]);
+  expect(validate([tree, tree], [result])).toEqual(['step "derive": source "tree" is declared twice in input']);
 });
 
 /** `captures` reach the runner from a raw definition too, without the builder's
