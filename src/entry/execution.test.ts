@@ -93,3 +93,11 @@ test("in reconcile mode, a completed step declaring an output is announced as re
   expect(out).toContain("Resumed — already done: child\n");
   expect(announce(makeRun(steps()))).toContain("Resumed — already done: branch, child\n");
 });
+
+test("in reconcile mode, a completed orchestration node declaring rerunOnResume is announced as done, not as re-run", () => {
+  const node = () => [step("child", { runner: "pipeline", rerun_on_resume: true })];
+  const out = announce(makeRun(node()), true);
+  expect(out).toContain("Resumed — already done: child\n");
+  expect(out).not.toContain("Re-run on resume");
+  expect(announce(makeRun(node()))).toContain("Re-run on resume: child\n");
+});

@@ -11,7 +11,7 @@ import { startLiveFeed } from "./feed.js";
 import { enforceCleanTree } from "../boot/gitguard.js";
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineContext } from "../model/context.js";
-import { reconcilable } from "../model/definition.js";
+import { reconcilable, rerunsOnResume } from "../model/definition.js";
 import type { Run, RunStep } from "../model/run.js";
 import { consoleReport } from "../output/console-reporter.js";
 import { ConsoleRunOutput, LiveFeedOutput } from "../output/run-output.js";
@@ -202,9 +202,10 @@ export function announceRun(run: Run, args: RunnerArgs, reconcile = false): void
   // and no rejection is pending.
   const reexamined = (s: RunStep) =>
     (s.def.sources?.length ?? 0) > 0 || (s.def.rework_for?.length ?? 0) > 0 || (reconcile && reconcilable(s.def));
-  const rerun = done.filter((s) => s.def.rerun_on_resume);
-  const rechecked = done.filter((s) => !s.def.rerun_on_resume && reexamined(s));
-  const settled = done.filter((s) => !s.def.rerun_on_resume && !reexamined(s));
+  const reruns = (s: RunStep) => rerunsOnResume(s.def, reconcile);
+  const rerun = done.filter(reruns);
+  const rechecked = done.filter((s) => !reruns(s) && reexamined(s));
+  const settled = done.filter((s) => !reruns(s) && !reexamined(s));
   if (settled.length > 0) log(`Resumed — already done: ${settled.map((s) => s.def.name).join(", ")}`);
   if (rechecked.length > 0) log(`Re-checked on resume: ${rechecked.map((s) => s.def.name).join(", ")}`);
   if (rerun.length > 0) log(`Re-run on resume: ${rerun.map((s) => s.def.name).join(", ")}`);

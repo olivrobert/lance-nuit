@@ -9,7 +9,7 @@ import { backendSpecForStep } from "../contracts/backends.js";
 import { extractErrors } from "../exec/report-extraction.js";
 import { executeStep, type StepResult } from "../exec/runners.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../model/context.js";
-import { reconcilable } from "../model/definition.js";
+import { reconcilable, rerunsOnResume } from "../model/definition.js";
 import type { Run, RunStep } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { buildPipelineContext } from "../pipeline/context.js";
@@ -294,7 +294,7 @@ export async function executeRunSteps(
       const reconsider =
         resuming &&
         (reconciled ||
-          step.def.rerun_on_resume ||
+          rerunsOnResume(step.def, reconcile) ||
           (step.def.sources?.length ?? 0) > 0 ||
           (step.def.rework_for?.length ?? 0) > 0);
       // A legacy operator exclusion (`--steps`, `--skip`, `--start-at`) is a
