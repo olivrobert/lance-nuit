@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capabilitySuffix } from "../../env/capability-frontmatter.ts";
-import { capabilityPreflightCommand } from "./skill-preflight.ts";
+import { pipeline } from "../../dsl.ts";
+import { capabilityPreflightCommand, requireCapabilitiesStep } from "./skill-preflight.ts";
 
 function fixture(): { root: string; runnerDir: string; cwd: string } {
   const root = mkdtempSync(join(tmpdir(), "skills-preflight-"));
@@ -86,4 +87,13 @@ test("preflight ignores node_modules and vendor", () => {
   writeSkill(join(cwd, ".claude", "node_modules", "paquet"), "skill-leurre");
 
   expect(run(runnerDir, cwd, ["skill-leurre"]).status).toBe(1);
+});
+
+test("reconcile: the preflight declares a safe replay, so the pipeline builds", () => {
+  const built = pipeline("p")
+    .reconcile()
+    .add(requireCapabilitiesStep({ id: "preflight", skills: ["plugin-test:skill"] }))
+    .build();
+
+  expect(built.steps[0]?.rerun_on_resume).toBe(true);
 });
