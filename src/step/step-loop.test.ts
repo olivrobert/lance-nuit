@@ -2010,6 +2010,50 @@ test("reconcile: a skipped orchestration node declaring rerunOnResume stays skip
   expect(node.status).toBe("skipped");
 });
 
+/** A completed `runPipeline` node declaring `rerunOnResume`, whose child pipeline does not exist here. */
+function doneNodeRerunOnResume(): RunStep {
+  return makeRunStep(
+    {
+      id: "children",
+      name: "Children",
+      command: "",
+      runner: "pipeline",
+      orchestration: { kind: "runPipeline", pipeline: "child" },
+      rerun_on_resume: true,
+    },
+    {
+      status: "done",
+      orchestration: {
+        kind: "runPipeline",
+        children: [{ key: "main", kind: "main", pipeline: "child", status: "done", accountedCostUsd: 0 }],
+      },
+    },
+  );
+}
+
+test("reconcile: a done orchestration node declaring rerunOnResume keeps its status", async () => {
+  const { ctx } = artifactContext();
+  const node = doneNodeRerunOnResume();
+  const run = makeRun([node]);
+
+  const outcome = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, fakeDeps().deps, ctx);
+
+  expect(outcome.failed).toBe(false);
+  expect(node.status).toBe("done");
+  expect(readRunEvents(run.run_dir).map((event) => event.type)).toEqual([]);
+});
+
+test("default mode: a done orchestration node declaring rerunOnResume is re-admitted", async () => {
+  const { ctx } = artifactContext();
+  const node = doneNodeRerunOnResume();
+  const run = makeRun([node]);
+
+  // Re-admitted, the node starts its orchestration, which then fails to resolve a
+  // pipeline file that does not exist here.
+  await expect(executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, fakeDeps().deps, ctx)).rejects.toThrow();
+  expect(node.status).toBe("running");
+});
+
 // --- Reconcile mode: selectors last one invocation ---------------------------
 //
 // Boot persists no exclusion in reconcile mode; the loop applies this

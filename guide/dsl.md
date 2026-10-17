@@ -637,8 +637,12 @@ The rules:
   invocation.
 - **Out of scope.** `runPipeline` and `forEachPipeline` nodes keep the authority
   of their status: they are neither re-admitted nor required to declare an
-  output, and an output they declare never skips them. The same goes for the
-  step `forEachWorkItem` adds to read the ticket, which belongs to the runner.
+  output, and an output they declare never skips them. `rerunOnResume` has no
+  effect on them in this mode, while the default mode re-admits a `done` node
+  that declares it (a `skipped` one stays `skipped`). In both modes, a node
+  that is a [rework](human-control.md#reject-and-rework) step still runs again
+  while a rejection of its subject is pending. The step `forEachWorkItem` adds to read the ticket, which
+  belongs to the runner, keeps the authority of its status too.
 - **Selectors.** `--steps`, `--skip` and `--start-at` hold for one
   invocation. A step they leave out is not run and the journal records
   `operator selection`: a `done` step stays `done`, a pending one becomes

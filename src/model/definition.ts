@@ -219,10 +219,17 @@ export function deliversOutputs(step: ClassifiedStep): boolean {
   return step.runner !== "pipeline" && (step.outputs?.length ?? 0) > 0;
 }
 
+/** Whether the author's `rerun_on_resume` replays this settled step on resume.
+ *  The default mode honors it on every step, orchestration nodes included, as it
+ *  always has; reconcile mode leaves a node to its status. */
+export function rerunsOnResume(step: ClassifiedStep, reconcile: boolean): boolean {
+  return step.rerun_on_resume === true && !(reconcile && step.runner === "pipeline");
+}
+
 /** A step reconcile mode re-admits: it declares outputs to check, or a replay
  *  it vouches for. */
 export function reconcilable(step: ClassifiedStep): boolean {
-  return deliversOutputs(step) || (step.runner !== "pipeline" && step.rerun_on_resume === true);
+  return deliversOutputs(step) || rerunsOnResume(step, true);
 }
 
 /**

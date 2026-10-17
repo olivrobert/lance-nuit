@@ -698,6 +698,59 @@ test("an interruption during a later step aborts that step, not the orchestratio
   expect(statusesOf(aborted)).toMatchObject({ sub: "running", report: "aborted" });
 });
 
+/** `NODE_PIPELINES` whose node `sub` declares `rerunOnResume`, in reconcile mode or the default one. */
+function rerunNodePipelines(mode: "reconcile" | "default"): Record<string, string> {
+  return {
+    ...NODE_PIPELINES,
+    "route.ts": `${IMPORTS}
+export default ({ pipeline, actionStep, runPipeline }: any) => {
+  ${TRACED_STEP}
+  const sub = runPipeline({ id: "sub", name: "sub", pipeline: "./child.ts" }).rerunOnResume();
+  return pipeline("route")${mode === "reconcile" ? ".reconcile()" : ""}.add(step("context"), sub, step("report")).build();
+};
+`,
+  };
+}
+
+/** Kills `route` during `report`, after `sub` settled, then resumes it: the statuses `sub` went through on that resume, and its header. */
+async function resumeAfterSettledNode(cwd: string): Promise<{ sub: unknown[]; header: string }> {
+  await killDuring(cwd, "report");
+  expect(statusesOf(snapshot(cwd))).toMatchObject({ sub: "done", report: "running" });
+  const before = mark(cwd);
+
+  const resumed = run(cwd);
+
+  expect(resumed.status).toBe(0);
+  expect(snapshot(cwd).status).toBe("PASS");
+  const sub = eventsSince(cwd, before, "step.status.changed")
+    .filter((event) => event.stepId === "sub")
+    .map((event) => event.status);
+  return { sub, header: resumed.stdout + resumed.stderr };
+}
+
+// D3: rerunOnResume does not take an orchestration node's status from it in
+// reconcile mode. The default mode keeps re-admitting it, as it always has.
+test("reconcile: a settled orchestration node declaring rerunOnResume is not re-admitted on resume", async () => {
+  const cwd = scratchRoute(reconcile);
+  writePipelines(cwd, rerunNodePipelines("reconcile"));
+
+  const { sub, header } = await resumeAfterSettledNode(cwd);
+
+  expect(sub).toEqual([]);
+  expect(header).toContain("Resumed — already done: sub\n");
+  expect(header).not.toMatch(/Re-run on resume: .*sub/);
+});
+
+test("default mode: a settled orchestration node declaring rerunOnResume is re-admitted on resume", async () => {
+  const cwd = scratchRoute();
+  writePipelines(cwd, rerunNodePipelines("default"));
+
+  const { sub, header } = await resumeAfterSettledNode(cwd);
+
+  expect(sub).toEqual(["running", "done"]);
+  expect(header).toContain("Re-run on resume: context, sub\n");
+});
+
 /** Legacy `route`: `gate` admits itself through a `when` that traces
  *  `gate-when` and hangs while `hang-gate-when` exists, before `work`, the one
  *  step whose interrupted pass needs an authorization to replay. */

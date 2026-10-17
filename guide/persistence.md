@@ -76,7 +76,7 @@ remains to do:
 | Does a settled step run again? | its status in `state.json`: a `done` step is not looked at again in its run, unless it declares `input` or `rerunOnResume`, or is a gate's rework step | its declared outputs: it runs when one is missing, `unknown`, stale or [unfinished](dsl.md#input-freshness); a `rerunOnResume` step without output always runs |
 | Did the last pass of the step in this run finish? | the run record | the run record: the [interruption guard](dsl.md#interrupted-steps) and the rerun a failed pass is owed read it in both modes |
 | What was spent, and may the run spend more? | the run record | the run record |
-| Does a `runPipeline` or `forEachPipeline` node, or the work-item source step, run again? | its status | its status |
+| Does a `runPipeline` or `forEachPipeline` node, or the work-item source step, run again? | its status, unless the node is `done` and declares `rerunOnResume` | its status, even when the node declares `rerunOnResume` |
 
 `when` and a pending [rejection](human-control.md#reject-and-rework) come
 before these answers in both modes.
