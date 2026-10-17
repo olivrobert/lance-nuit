@@ -8,6 +8,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -46,6 +47,12 @@ export interface RouteOptions {
    * tree it reads; the tree is then dirty after its first pass.
    */
   source?: boolean | "failable" | "output" | "written";
+  /**
+   * Adds `review` after `plan`: it revises `plan.md` in place
+   * (`input: [notes, plan]`, `output: [plan]`), from `notes.md`, which the
+   * fixture writes.
+   */
+  review?: boolean;
 }
 
 export interface RunResult {
@@ -97,6 +104,7 @@ function treeDeclaration(source: RouteOptions["source"]): string {
 /** Source of `.lance-nuit/pipelines/route.ts`. */
 export function routeSource(options: RouteOptions = {}): string {
   const comment = options.unclassified ? `\n      step("comment", {}),` : "";
+  const review = options.review ? `\n      step("review", { input: [notes, plan], output: [plan] }, [plan]),` : "";
   const implementInput = options.source ? "[plan, tree]" : "[plan]";
   const implementOutput = options.source === "output" ? "[impl, tree]" : "[impl]";
   const implementEdits =
@@ -107,7 +115,7 @@ export function routeSource(options: RouteOptions = {}): string {
       step("context", { rerunOnResume: true }),
       step("branch", { output: [branch] }, [branch]),
       step("triage", { input: [ticket], output: [triage] }, [triage]),
-      step("plan", { input: [ticket, triage], output: [plan] }, [plan]),
+      step("plan", { input: [ticket, triage], output: [plan] }, [plan]),${review}
       step("prepare", { rerunOnResume: true }),
       step("implement", { input: ${implementInput}, output: ${implementOutput} }, [impl]),
       step("quality", { rerunOnResume: true }),
@@ -127,7 +135,7 @@ export default ({ pipeline, actionStep, textArtifact${options.source ? ", source
   const plan = textArtifact("plan.md");
   const impl = textArtifact("impl.md");
   const commit = textArtifact("commit.sha");
-  const mr = textArtifact("mr-url.txt");${treeDeclaration(options.source)}
+  const mr = textArtifact("mr-url.txt");${options.review ? `\n  const notes = textArtifact("notes.md");` : ""}${treeDeclaration(options.source)}
 
   const step = (id: string, extra: object, produce: any[] = []) =>
     actionStep({
@@ -136,10 +144,16 @@ export default ({ pipeline, actionStep, textArtifact${options.source ? ", source
       describe: id,
       ...extra,
       run: async (ctx: any) => {
+        const partial = existsSync(join(ctx.cwd, "partial-" + id));
+        const hang = existsSync(join(ctx.cwd, "hang-" + id));
+        // Written before the trace line: killDuring kills as soon as it reads the
+        // trace, and the partial outputs must already be on disk by then.
+        if (partial) for (const out of produce) await out.write(ctx, "partial " + id + "\\n");
         appendFileSync(join(ctx.cwd, "trace.log"), id + "\\n");
+        if (partial && !hang) throw new Error(id + ": failed after a partial write");
         if (existsSync(join(ctx.cwd, "fail-" + id))) throw new Error(id + ": forced failure");
         // A pending promise alone does not keep the event loop alive.
-        if (existsSync(join(ctx.cwd, "hang-" + id))) await new Promise(() => setInterval(() => {}, 1_000));${implementEdits}
+        if (hang) await new Promise(() => setInterval(() => {}, 1_000));${implementEdits}
         for (const out of produce) await out.write(ctx, id + " " + Date.now() + "\\n");
       },
     });
@@ -182,12 +196,13 @@ export function scratchRoute(options: RouteOptions = {}): string {
   mkdirSync(join(cwd, ".lance-nuit", "pipelines"), { recursive: true });
   writeFileSync(
     join(cwd, ".gitignore"),
-    "trace.log\nfail-*\nhang-*\n.lance-nuit/run/\n.lance-nuit/work-items/\n.lance-nuit/pipeline-history/\n",
+    "trace.log\nfail-*\nhang-*\npartial-*\n.lance-nuit/run/\n.lance-nuit/work-items/\n.lance-nuit/pipeline-history/\n",
   );
   writeFileSync(join(cwd, "tracked.txt"), "v1\n");
   writeFileSync(join(cwd, ".lance-nuit", "pipelines", `${PIPELINE}.ts`), routeSource(options));
   mkdirSync(dirname(ticketPath(cwd)), { recursive: true });
   writeFileSync(ticketPath(cwd), "# T-1\n\nRoute the request.\n");
+  if (options.review) writeFileSync(join(dirname(ticketPath(cwd)), "notes.md"), "Review the plan.\n");
   git(cwd, "init", "-q");
   if (options.scan) {
     // Between tickets, a scan checks out the configured base branch, `main` by default.
@@ -323,8 +338,19 @@ export function failAt(cwd: string, id: string): void {
   writeFileSync(join(cwd, `fail-${id}`), "");
 }
 
+/**
+ * Makes step `id` write every output it declares with the content `partial <id>`,
+ * then fail: an attempt that leaves a partial deliverable behind. Combined with
+ * `killDuring`, the step writes, then hangs until it is killed.
+ */
+export function partialAt(cwd: string, id: string): void {
+  writeFileSync(join(cwd, `partial-${id}`), "");
+}
+
+/** Undoes `failAt` and `partialAt` on step `id`. */
 export function heal(cwd: string, id: string): void {
   rmSync(join(cwd, `fail-${id}`), { force: true });
+  rmSync(join(cwd, `partial-${id}`), { force: true });
 }
 
 function occurrences(cwd: string, id: string): number {
@@ -396,6 +422,33 @@ export function editTracked(cwd: string, { commit = true }: { commit?: boolean }
 export function provenanceInputs(cwd: string, name: string): Record<string, string | null> {
   const path = join(workItemDir(cwd), "artifacts", ".provenance", `${name}.json`);
   return (JSON.parse(readFileSync(path, "utf8")) as { inputs: Record<string, string | null> }).inputs;
+}
+
+/** Content of artifact `name` of `T-1`. */
+export function readArtifact(cwd: string, name: string): string {
+  return readFileSync(join(workItemDir(cwd), "artifacts", name), "utf8");
+}
+
+/** Writes artifact `name` of `T-1` by hand, as a step that died mid-write would have left it. */
+export function writeArtifact(cwd: string, name: string, content: string): void {
+  writeFileSync(join(workItemDir(cwd), "artifacts", name), content);
+}
+
+/** Deletes the provenance record of artifact `name` of `T-1`, as an operator keeping a hand repair does. */
+export function removeProvenanceRecord(cwd: string, name: string): void {
+  rmSync(join(workItemDir(cwd), "artifacts", ".provenance", `${name}.json`));
+}
+
+/** Every provenance record of `T-1`, keyed by file name under `.provenance/`. */
+export function provenanceRecords(cwd: string): Record<string, Record<string, unknown>> {
+  const dir = join(workItemDir(cwd), "artifacts", ".provenance");
+  if (!existsSync(dir)) return {};
+  return Object.fromEntries(
+    readdirSync(dir)
+      .filter((name) => name.endsWith(".json"))
+      .sort()
+      .map((name) => [name, JSON.parse(readFileSync(join(dir, name), "utf8")) as Record<string, unknown>]),
+  );
 }
 
 /** Events of type `type` in the journal of the `latest` run since `since` (whole journal for a new run). */

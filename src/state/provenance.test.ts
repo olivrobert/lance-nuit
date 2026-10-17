@@ -8,10 +8,15 @@ import type { PipelineContext } from "../model/context.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { sha256Text } from "./hash.ts";
 import {
+  type ArtifactProvenance,
   adoptOutputs,
+  clearInFlight,
   fingerprintInputs,
   freshness,
+  type InFlightAttempt,
+  type InputFingerprint,
   inputsUnchanged,
+  markInFlight,
   mergeProvenance,
   outputFreshness,
   PROVENANCE_PREFIX,
@@ -20,7 +25,6 @@ import {
   readSource,
   SOURCE_TIMEOUT_MS,
   readProvenance,
-  removeProvenance,
   revisedInPlace,
   stepFreshness,
   writeProvenance,
@@ -103,17 +107,260 @@ test("mergeProvenance: a revising step adds its inputs and keeps the first produ
   expect(Object.keys(record?.inputs ?? {}).sort()).toEqual(["artifacts/spec.md", "artifacts/ticket.md"]);
 });
 
-test("removeProvenance: the record disappears with the artifact", async () => {
+const ATTEMPT: InFlightAttempt = {
+  runId: "20260101T090000.000Z-route-a1b2c3",
+  stepId: "spec",
+  attempt: 2,
+  startedAt: "2026-01-01T09:00:00.000Z",
+};
+
+test("markInFlight: every declared output gets a mark and no inputs, even one produced fresh before", async () => {
   const { ctx, store } = fixture();
   store.values.set("ticket.md", "one");
+  store.values.set("spec.md", "complete");
   await writeProvenance(ctx, spec, "spec", await fingerprintInputs(ctx, [ticket]));
 
-  await removeProvenance(ctx, spec);
+  await markInFlight(ctx, { sources: [ticket], outputs: [spec, plan] }, ATTEMPT);
 
-  expect(await readProvenance(ctx, spec)).toBeUndefined();
+  for (const output of [spec, plan]) {
+    const record = await readProvenance(ctx, output);
+    expect(record?.inFlight).toEqual(ATTEMPT);
+    expect(record?.inputs).toEqual({});
+  }
 });
 
-test("outputFreshness: reports the five admission states", async () => {
+test("markInFlight: a step without input marks its outputs too", async () => {
+  const { ctx } = fixture();
+
+  await markInFlight(ctx, { outputs: [spec] }, ATTEMPT);
+
+  expect((await readProvenance(ctx, spec))?.inFlight).toEqual(ATTEMPT);
+});
+
+test("outputFreshness: a marked output is unfinished, whatever its inputs say", async () => {
+  const { ctx, store } = fixture();
+  store.values.set("ticket.md", "one");
+  await markInFlight(ctx, { sources: [ticket], outputs: [spec] }, ATTEMPT);
+
+  // Absent stays absent: there is nothing to keep either way.
+  expect(await outputFreshness(ctx, spec, await fingerprintInputs(ctx, [ticket]))).toBe("missing");
+
+  store.values.set("spec.md", "partial");
+  expect(await outputFreshness(ctx, spec, await fingerprintInputs(ctx, [ticket]))).toBe("unfinished");
+  // Neither an unreadable input nor the absence of any input turns it into something else.
+  expect(await outputFreshness(ctx, spec, await fingerprintInputs(ctx, [plan]))).toBe("unfinished");
+  expect(await outputFreshness(ctx, spec, {})).toBe("unfinished");
+});
+
+test("outputFreshness: a mark damaged by hand still reads unfinished", async () => {
+  const { ctx, store } = fixture();
+  store.values.set("spec.md", "partial");
+  store.values.set(
+    `${PROVENANCE_PREFIX}spec.md.json`,
+    JSON.stringify({
+      schemaVersion: 1,
+      artifact: "artifacts/spec.md",
+      producedBy: "spec",
+      producedAt: "x",
+      inputs: {},
+      inFlight: null,
+    }),
+  );
+
+  expect(await outputFreshness(ctx, spec, {})).toBe("unfinished");
+});
+
+test("outputFreshness: a mark on a record that no longer validates still reads unfinished", async () => {
+  const { ctx, store } = fixture();
+  store.values.set("ticket.md", "one");
+  store.values.set("spec.md", "partial");
+  await markInFlight(ctx, { sources: [ticket], outputs: [spec] }, ATTEMPT);
+  const key = `${PROVENANCE_PREFIX}spec.md.json`;
+  const { producedBy: _dropped, ...withoutProducer } = JSON.parse(store.values.get(key) ?? "{}");
+  store.values.set(key, JSON.stringify(withoutProducer));
+
+  expect(await readProvenance(ctx, spec)).toBeUndefined();
+  expect(await outputFreshness(ctx, spec, await fingerprintInputs(ctx, [ticket]))).toBe("unfinished");
+  expect((await stepFreshness(ctx, { sources: [ticket], outputs: [spec] })).adoptable).toEqual([]);
+  expect(await freshness(ctx, spec)).toBe("stale");
+  // A step without input that succeeds settles it like any other mark.
+  await clearInFlight(ctx, { outputs: [spec] });
+  expect(store.values.has(key)).toBe(false);
+
+  // JSON that no longer parses is no record at all: nothing can be read from it.
+  store.values.set(key, '{ "inFlight": ');
+  expect(await outputFreshness(ctx, spec, await fingerprintInputs(ctx, [ticket]))).toBe("adoptable");
+});
+
+test("stepFreshness: an unfinished output must run, is never adoptable, and ranks with missing", async () => {
+  const { ctx, store } = fixture();
+  store.values.set("ticket.md", "one");
+  store.values.set("spec.md", "written before any record existed");
+  store.values.set("plan.md", "partial");
+  await markInFlight(ctx, { sources: [ticket], outputs: [plan] }, ATTEMPT);
+  const step = { sources: [ticket], outputs: [spec, plan] };
+
+  const report = await stepFreshness(ctx, step);
+
+  expect(report.states).toEqual({ "spec.md": "adoptable", "plan.md": "unfinished" });
+  expect(report.summary).toBe("unfinished");
+  expect(report.mustRun).toBe(true);
+  expect(report.unfinished).toEqual(["plan.md"]);
+  expect(report.adoptable.map((output) => output.name)).toEqual(["spec.md"]);
+  // Adopting what the report offers never settles the marked output.
+  await adoptOutputs(ctx, "plan", report);
+  expect((await readProvenance(ctx, plan))?.inFlight).toEqual(ATTEMPT);
+
+  // Without input, an unfinished output is not "present".
+  expect((await stepFreshness(ctx, { outputs: [plan] })).mustRun).toBe(true);
+
+  // A missing output still names the summary: missing outranks unfinished.
+  store.values.delete("spec.md");
+  expect((await stepFreshness(ctx, step)).summary).toBe("missing");
+});
+
+test("stepFreshness: unfinished names the summary over unknown, stale and adoptable", async () => {
+  const { ctx, store } = fixture();
+  const notes = textArtifact("notes.md");
+  store.values.set("ticket.md", "one");
+  for (const name of ["spec.md", "plan.md", "notes.md"]) store.values.set(name, "written");
+  await writeProvenance(ctx, spec, "other", {});
+  await markInFlight(ctx, { sources: [ticket], outputs: [plan] }, ATTEMPT);
+  const step = { sources: [ticket], outputs: [spec, plan, notes] };
+
+  const report = await stepFreshness(ctx, step);
+  expect(report.states).toEqual({ "spec.md": "stale", "plan.md": "unfinished", "notes.md": "adoptable" });
+  expect(report.summary).toBe("unfinished");
+
+  // An unreadable input makes every unmarked output unknown; the marked one still leads.
+  store.values.delete("ticket.md");
+  const unreadable = await stepFreshness(ctx, step);
+  expect(unreadable.states).toEqual({ "spec.md": "unknown", "plan.md": "unfinished", "notes.md": "unknown" });
+  expect(unreadable.summary).toBe("unfinished");
+});
+
+test("writeProvenance: a successful attempt replaces the mark with a plain record", async () => {
+  const { ctx, store } = fixture();
+  store.values.set("ticket.md", "one");
+  await markInFlight(ctx, { sources: [ticket], outputs: [spec] }, ATTEMPT);
+  store.values.set("spec.md", "complete");
+
+  await writeProvenance(ctx, spec, "spec", await fingerprintInputs(ctx, [ticket]));
+
+  const record = await readProvenance(ctx, spec);
+  expect(record).not.toHaveProperty("inFlight");
+  expect(await outputFreshness(ctx, spec, await fingerprintInputs(ctx, [ticket]))).toBe("fresh");
+});
+
+// Known limit, left to a later lot (L2c): an output revised in place is neither
+// marked nor erased, exactly as before the mark existed. A revision that writes
+// then fails therefore leaves partial bytes the record of their producer still
+// vouches for.
+test("markInFlight: an output revised in place keeps its bytes and its record, as before the mark", async () => {
+  const { ctx, store } = fixture();
+  const notes = textArtifact("notes.md");
+  store.values.set("ticket.md", "one");
+  store.values.set("notes.md", "first");
+  store.values.set("plan.md", "drafted");
+  const produced = await writeProvenance(ctx, plan, "plan", await fingerprintInputs(ctx, [ticket]));
+  const reviser = { sources: [notes, plan], outputs: [plan, spec] };
+
+  await markInFlight(ctx, reviser, { ...ATTEMPT, stepId: "plan-review" });
+
+  expect(await readProvenance(ctx, plan)).toEqual(produced);
+  // The output the same step produces from scratch is still marked.
+  expect((await readProvenance(ctx, spec))?.inFlight).toMatchObject({ stepId: "plan-review" });
+
+  // The revision writes, then fails: nothing tells its partial bytes apart.
+  store.values.set("plan.md", "half revised");
+  expect(await outputFreshness(ctx, plan, await fingerprintInputs(ctx, [ticket]))).toBe("fresh");
+});
+
+test("mergeProvenance: a revision keeps the mark the attempt that produced the output left", async () => {
+  const { ctx, store } = fixture();
+  const notes = textArtifact("notes.md");
+  store.values.set("ticket.md", "one");
+  store.values.set("notes.md", "first");
+  await markInFlight(ctx, { sources: [ticket], outputs: [plan] }, { ...ATTEMPT, stepId: "plan" });
+  store.values.set("plan.md", "partial");
+
+  const revised = await mergeProvenance(ctx, plan, "plan-review", await fingerprintInputs(ctx, [notes]));
+
+  // Revising partial bytes does not make them a deliverable: the producer runs again.
+  expect(revised.inFlight).toMatchObject({ stepId: "plan" });
+  expect(await outputFreshness(ctx, plan, await fingerprintInputs(ctx, [ticket]))).toBe("unfinished");
+});
+
+test("clearInFlight: a successful step without input leaves no record, and keeps an unmarked one", async () => {
+  const { ctx, store } = fixture();
+  store.values.set("ticket.md", "one");
+  await markInFlight(ctx, { outputs: [spec] }, ATTEMPT);
+  await writeProvenance(ctx, plan, "plan", await fingerprintInputs(ctx, [ticket]));
+
+  await clearInFlight(ctx, { outputs: [spec, plan] });
+
+  expect(store.values.has(`${PROVENANCE_PREFIX}spec.md.json`)).toBe(false);
+  expect(await readProvenance(ctx, plan)).toBeDefined();
+});
+
+test("freshness: the public helper reports a marked artifact as stale, never unfinished", async () => {
+  const { ctx, store } = fixture();
+  store.values.set("ticket.md", "one");
+  store.values.set("spec.md", "partial");
+  await markInFlight(ctx, { sources: [ticket], outputs: [spec] }, ATTEMPT);
+
+  expect(await freshness(ctx, spec)).toBe("stale");
+});
+
+/**
+ * Admission of an output as the runner read it before `inFlight` existed
+ * (7b49932): the record parser and `outputFreshness`, copied verbatim minus the
+ * I/O. A runner of that release reads the work items this one writes.
+ */
+function legacyOutputFreshness(
+  raw: string | undefined,
+  artifactName: string,
+  fingerprints: Record<string, InputFingerprint>,
+): "fresh" | "stale" | "unknown" | "adoptable" {
+  if (Object.values(fingerprints).some((value) => value === null)) return "unknown";
+  let record: ArtifactProvenance | undefined;
+  try {
+    if (raw === undefined) throw new Error("no record");
+    const value = JSON.parse(raw) as Partial<ArtifactProvenance>;
+    if (value.schemaVersion !== 1) throw new Error("unsupported schemaVersion");
+    if (value.artifact !== `artifacts/${artifactName}`) throw new Error("artifact mismatch");
+    if (typeof value.producedBy !== "string" || typeof value.producedAt !== "string") throw new Error("producer");
+    if (!value.inputs || typeof value.inputs !== "object") throw new Error("missing inputs");
+    for (const fingerprint of Object.values(value.inputs)) {
+      if (fingerprint !== null && (typeof fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(fingerprint))) {
+        throw new Error("invalid fingerprint");
+      }
+    }
+    record = value as ArtifactProvenance;
+  } catch {
+    record = undefined;
+  }
+  if (!record) return "adoptable";
+  for (const [key, current] of Object.entries(fingerprints)) {
+    if (!(key in record.inputs)) return "stale";
+    if (record.inputs[key] !== current) return "stale";
+  }
+  return "fresh";
+}
+
+test("compatibility: a runner predating the mark reads it as a record missing its inputs, so stale", async () => {
+  const { ctx, store } = fixture();
+  store.values.set("ticket.md", "one");
+  store.values.set("spec.md", "partial");
+  await markInFlight(ctx, { sources: [ticket], outputs: [spec] }, ATTEMPT);
+
+  const raw = store.values.get(`${PROVENANCE_PREFIX}spec.md.json`);
+  expect(legacyOutputFreshness(raw, "spec.md", await fingerprintInputs(ctx, [ticket]))).toBe("stale");
+  // No new schema version: the mark is an optional field of a version 1 record.
+  expect(JSON.parse(raw ?? "{}").schemaVersion).toBe(1);
+});
+
+test("outputFreshness: reports the five admission states of an unmarked output", async () => {
   const { ctx, store } = fixture();
   store.values.set("ticket.md", "one");
 

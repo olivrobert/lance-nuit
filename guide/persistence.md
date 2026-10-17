@@ -26,7 +26,8 @@ item normally looks like this:
 `ctx.paths.decisionsDir` are the canonical paths. Steps and skills should use
 these context paths rather than rebuilding paths from a ticket name.
 `artifacts/.provenance/<name>.json` is written by the runner for every output of a
-step that declares `input`, and the prefix is reserved: an artifact descriptor
+step that declares `input`, and, until its attempt succeeds, for every output a
+step produces from scratch (below). The prefix is reserved: an artifact descriptor
 cannot claim a name inside it. A record binds one artifact to the bytes it came
 from:
 
@@ -41,11 +42,73 @@ from:
 ```
 
 An input absent when the record was written is stored as `null`, so its
-reappearance invalidates the record instead of being silently adopted. A batch
-(`lot`) receives `reports/<LOT-ID>/`; other
-phases use the work-item's flat `reports/` directory. Artifact descriptors read
-and write through `ctx.artifacts`, which validates names and keeps the logical
-interface independent of the filesystem.
+reappearance invalidates the record instead of being silently adopted.
+
+Before every attempt of a step declaring `output`, with or without `input`, the
+runner writes a record for each output the step produces from scratch, carrying
+an `inFlight` mark: the attempt that is about to write the artifact. The mark
+lists no input.
+
+```json
+{
+  "schemaVersion": 1,
+  "artifact": "artifacts/impl.md",
+  "producedBy": "implement",
+  "producedAt": "2026-09-03T12:00:00.000Z",
+  "inputs": {},
+  "inFlight": {
+    "runId": "20260903T115900.000Z-ticket-a1b2c3",
+    "stepId": "implement",
+    "attempt": 2,
+    "startedAt": "2026-09-03T12:00:00.000Z"
+  }
+}
+```
+
+The mark outlives the run: whatever the attempt leaves is `unfinished` until an
+attempt producing the output from scratch succeeds, and an unfinished output is
+never adopted (see [input freshness](dsl.md#input-freshness)). A failure, an
+interruption, the death of the runner and a failure absorbed by
+`blocking: false` all leave it in place. On success:
+
+- a step declaring `input` replaces the mark with its normal record;
+- a step without `input` removes the record. It records no fingerprint, so its
+  outputs carry no record once they are complete, exactly as before the mark
+  existed: `freshness()` keeps reporting them `unknown`, and adoption keeps
+  ignoring them, since only a step declaring `input` adopts anything.
+
+An output revised in place, declared as both `input` and `output` of the step,
+is not marked: its record is left as it is during the attempt, and the revision
+merges its fingerprints into it on success, as before the mark existed. A
+successful revision therefore keeps the mark of a failed attempt that produced
+the output. Partial bytes left by a failed revision are a known gap: the record
+of their producer still vouches for them (see
+[input freshness](dsl.md#input-freshness)).
+
+The field is optional and additive, so the schema version stays `1`. Presence
+decides: a record that carries an `inFlight` field reads `unfinished`, whatever
+that field holds and even when the rest of the record no longer validates. Only
+a record that is no longer valid JSON reads as no record at all.
+Deleting the record by hand is how an operator keeps an output they repaired
+themselves; see [input freshness](dsl.md#input-freshness) for the procedure.
+
+A runner that predates the mark reads it as an ordinary record:
+
+- for a step declaring `input`, the mark lists none of its inputs, so it is
+  `stale` and the step runs;
+- for a step without `input` in reconcile mode, it only checks that the output
+  exists, so it counts a marked output as present, as it did before the mark.
+
+Mixing releases on one work item has two effects. An attempt made by the older
+runner leaves no mark, so the newer runner may adopt what it left partial, as
+either release did before. And the older runner never removes the mark of a step
+without `input`, so the newer runner then sees `unfinished` and runs the steps
+declaring that output once more.
+
+A batch (`lot`) receives `reports/<LOT-ID>/`; other phases use the work-item's
+flat `reports/` directory. Artifact descriptors read and write through
+`ctx.artifacts`, which validates names and keeps the logical interface
+independent of the filesystem.
 
 `decisions/<subject>.json` holds the current human answer for one subject; an
 approval replaces a rejection and the reverse. A rejection adds the reason the
@@ -401,6 +464,7 @@ kept and read on what it still says.
 | `run.unmetered.authorized` | a human authorized unpriceable spend with `--allow-unmetered` |
 | `step.skipped` | an input decision skipped a step |
 | `step.source.unavailable` | a source the step declares as input could not be read: its freshness is unknown and the step runs (see [external sources](dsl.md#external-sources)) |
+| `step.outputs.unfinished` | outputs the step declares carry the mark of an attempt that never succeeded: they are never adopted and the step runs; carries `outputs` (see [input freshness](dsl.md#input-freshness)) |
 | `step.status.changed` | a step changes status |
 | `step.attempt.started` | an attempt opens |
 | `step.attempt.finished` | an attempt closes (payload table above) |

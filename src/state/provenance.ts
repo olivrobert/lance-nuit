@@ -11,6 +11,11 @@
 //
 // An external source (`dsl.source`) is fingerprinted here too, from the stdout
 // of its command, so that every input of a step answers to the same comparison.
+//
+// A record also says whether its artifact may be the leftover of an attempt that
+// never succeeded (`inFlight`). That fact belongs to the work item, not to the run:
+// a new run, `--fresh`, `--start-at` or a selector all forget the status of the
+// failed pass, and the partial output it wrote must still never be adopted.
 
 import { exitCodeFailReason } from "../exec/bash-runner.js";
 import { runSupervisedCommand } from "../exec/process-runner.js";
@@ -51,6 +56,16 @@ export interface InputReading {
   unavailable: UnavailableSource[];
 }
 
+/** The attempt that may be writing an artifact. Its presence on a record means
+ *  that attempt has not succeeded: it is running, failed, was absorbed by
+ *  `blocking: false`, or the runner died in it. */
+export interface InFlightAttempt {
+  runId: string;
+  stepId: string;
+  attempt: number;
+  startedAt: string;
+}
+
 export interface ArtifactProvenance {
   schemaVersion: 1;
   /** Produced artifact, in the same `artifacts/<name>` form as a decision. */
@@ -58,28 +73,37 @@ export interface ArtifactProvenance {
   /** Step that first produced the artifact. */
   producedBy: string;
   producedAt: string;
-  /** Pure inputs of the producing step, keyed like `artifact`. */
+  /** Pure inputs of the producing step, keyed like `artifact`. A marked record
+   *  lists none, so a runner that predates `inFlight` reads it as `stale` for a
+   *  step declaring input, and runs that step. */
   inputs: Record<string, InputFingerprint>;
+  /** Set before the spawn of every attempt that produces the artifact from
+   *  scratch, cleared only when such an attempt succeeds: a revision in place
+   *  merges into the record and keeps it. Optional and additive: no schema bump. */
+  inFlight?: InFlightAttempt;
 }
 
 /** Freshness of a single output at admission time. */
-export type OutputFreshness = "fresh" | "stale" | "missing" | "unknown" | "adoptable";
+export type OutputFreshness = "fresh" | "stale" | "missing" | "unknown" | "adoptable" | "unfinished";
 
-/** Freshness reported by the public `freshness()` helper. `adoptable` is an
- *  internal admission state and never leaves the runner. */
-export type ArtifactFreshness = Exclude<OutputFreshness, "adoptable">;
+/** Freshness reported by the public `freshness()` helper. `adoptable` and
+ *  `unfinished` are internal admission states and never leave the runner: an
+ *  unfinished artifact is reported `stale`. */
+export type ArtifactFreshness = Exclude<OutputFreshness, "adoptable" | "unfinished">;
 
 export interface StepFreshnessReport {
   /** Per-output state, keyed by artifact name. */
   states: Record<string, OutputFreshness>;
   /** Aggregate label, worst state first, for logs and journal events. */
   summary: OutputFreshness;
-  /** True when at least one output is `missing`, `unknown`, or `stale`. */
+  /** True when at least one output is `missing`, `unfinished`, `unknown`, or `stale`. */
   mustRun: boolean;
   /** True when at least one output is `stale`. */
   stale: boolean;
   /** Outputs that exist without a usable record and can adopt the current inputs. */
   adoptable: Artifact<unknown>[];
+  /** Names of the outputs an attempt that never succeeded left behind. */
+  unfinished: string[];
   /** Fingerprints of the pure inputs, read once for the whole step. */
   fingerprints: Record<string, InputFingerprint>;
   /** Sources whose command failed during this reading. */
@@ -193,19 +217,52 @@ function parseProvenance(value: unknown, artifactName: string): ArtifactProvenan
   return record as ArtifactProvenance;
 }
 
+/** Whether a record carries an in-flight mark: the attempt that wrote its artifact
+ *  has not succeeded. Its presence alone decides, not its shape nor the validity
+ *  of the rest of the record: a record damaged by hand must not turn a partial
+ *  output adoptable. Exported for readers of the raw
+ *  record, such as the dashboard, so the rule lives here only. */
+export function isInFlight(record: { inFlight?: unknown } | undefined): boolean {
+  return record?.inFlight !== undefined;
+}
+
+/** A stored record as admission reads it: the valid record, if any, and whether
+ *  the stored object carries a mark. The two are apart because a mark must hold
+ *  even when the rest of the record no longer validates. */
+interface RecordReading {
+  record: ArtifactProvenance | undefined;
+  inFlight: boolean;
+}
+
+const NO_RECORD: RecordReading = { record: undefined, inFlight: false };
+
+async function readRecord(ctx: PipelineContext, artifact: Artifact<unknown>): Promise<RecordReading> {
+  let value: unknown;
+  try {
+    const raw = await ctx.artifacts.readText(ref(ctx, provenanceName(artifact.name)));
+    if (raw === undefined) return NO_RECORD;
+    value = JSON.parse(raw);
+  } catch {
+    // An absent or unparsable record is no record: the artifact then adopts the
+    // current inputs instead of failing an otherwise valid run. Guessing a mark
+    // inside broken JSON would be a heuristic, not a reading.
+    return NO_RECORD;
+  }
+  const inFlight = typeof value === "object" && value !== null && isInFlight(value);
+  try {
+    return { record: parseProvenance(value, artifact.name), inFlight };
+  } catch {
+    // An invalid record vouches for nothing, but a mark on it still says the
+    // attempt that wrote the artifact never succeeded.
+    return { record: undefined, inFlight };
+  }
+}
+
 export async function readProvenance(
   ctx: PipelineContext,
   artifact: Artifact<unknown>,
 ): Promise<ArtifactProvenance | undefined> {
-  try {
-    const raw = await ctx.artifacts.readText(ref(ctx, provenanceName(artifact.name)));
-    if (raw === undefined) return undefined;
-    return parseProvenance(JSON.parse(raw), artifact.name);
-  } catch {
-    // A missing or malformed record is treated as no record: the artifact then
-    // adopts the current inputs instead of failing an otherwise valid run.
-    return undefined;
-  }
+  return (await readRecord(ctx, artifact)).record;
 }
 
 async function persist(ctx: PipelineContext, artifact: Artifact<unknown>, record: ArtifactProvenance): Promise<void> {
@@ -250,8 +307,48 @@ export async function mergeProvenance(
   return record;
 }
 
-export async function removeProvenance(ctx: PipelineContext, artifact: Artifact<unknown>): Promise<void> {
-  await ctx.artifacts.remove(ref(ctx, provenanceName(artifact.name)));
+/**
+ * Mark the outputs `step` produces from scratch as written by `attempt`, before it
+ * spawns: until the attempt succeeds, whatever it leaves on disk is `unfinished`.
+ * The mark keeps no input: the previous record described bytes the attempt is
+ * about to replace.
+ *
+ * An output revised in place keeps its record untouched, as before the mark
+ * existed: a mark there would make the step that produced it run again even after
+ * a revision that wrote nothing. The price is the opposite case, a revision that
+ * wrote then failed, whose bytes the record still vouches for (guide/dsl.md,
+ * Input freshness).
+ */
+export async function markInFlight(
+  ctx: PipelineContext,
+  step: Pick<StepDefinition, "sources" | "outputs">,
+  attempt: InFlightAttempt,
+): Promise<void> {
+  const revised = revisedInPlace(step);
+  for (const output of step.outputs ?? []) {
+    if (revised.has(output.name)) continue;
+    await persist(ctx, output, {
+      schemaVersion: 1,
+      artifact: recordKey(output.name),
+      producedBy: attempt.stepId,
+      producedAt: attempt.startedAt,
+      inputs: {},
+      inFlight: { ...attempt },
+    });
+  }
+}
+
+/** Settle the marks of a successful step that declares no input: it records no
+ *  fingerprint, so its outputs keep no record at all, as before the mark existed. */
+export async function clearInFlight(
+  ctx: PipelineContext,
+  step: Pick<StepDefinition, "sources" | "outputs">,
+): Promise<void> {
+  for (const output of step.outputs ?? []) {
+    if ((await readRecord(ctx, output)).inFlight) {
+      await ctx.artifacts.remove(ref(ctx, provenanceName(output.name)));
+    }
+  }
 }
 
 /** Inputs a step actually depends on: what it reads minus what it revises. A
@@ -292,10 +389,13 @@ export async function outputFreshness(
 ): Promise<OutputFreshness> {
   const exists = await ctx.artifacts.exists(ref(ctx, output.name));
   if (!exists) return "missing";
+  const { record, inFlight } = await readRecord(ctx, output);
+  // Checked before anything else that exists on disk: no comparison can vouch
+  // for bytes an attempt left behind without succeeding.
+  if (inFlight) return "unfinished";
   // An unreadable input is a safe bias: rerun rather than trust a comparison
   // against something that is not there.
   if (Object.values(fingerprints).some((value) => value === null)) return "unknown";
-  const record = await readProvenance(ctx, output);
   if (!record) return "adoptable";
   // A record that does not list a declared input was written from other inputs —
   // typically by another step producing the same artifact. The output was never
@@ -307,7 +407,10 @@ export async function outputFreshness(
   return "fresh";
 }
 
-const SEVERITY: readonly OutputFreshness[] = ["missing", "unknown", "stale", "adoptable", "fresh"];
+/** `unfinished` ranks with `missing`: either way, there is no deliverable to keep. */
+const SEVERITY: readonly OutputFreshness[] = ["missing", "unfinished", "unknown", "stale", "adoptable", "fresh"];
+
+const MUST_RUN: ReadonlySet<OutputFreshness> = new Set(["missing", "unfinished", "unknown", "stale"]);
 
 /** Aggregate the freshness of every output a step declares. */
 export async function stepFreshness(
@@ -317,19 +420,22 @@ export async function stepFreshness(
   const { fingerprints, unavailable } = await readInputs(ctx, pureInputsOf(step));
   const states: Record<string, OutputFreshness> = {};
   const adoptable: Artifact<unknown>[] = [];
+  const unfinished: string[] = [];
   for (const output of step.outputs ?? []) {
     const state = await outputFreshness(ctx, output, fingerprints);
     states[output.name] = state;
     if (state === "adoptable") adoptable.push(output);
+    if (state === "unfinished") unfinished.push(output.name);
   }
   const values = Object.values(states);
   const summary = SEVERITY.find((state) => values.includes(state)) ?? "fresh";
   return {
     states,
     summary,
-    mustRun: values.some((state) => state === "missing" || state === "unknown" || state === "stale"),
+    mustRun: values.some((state) => MUST_RUN.has(state)),
     stale: values.includes("stale"),
     adoptable,
+    unfinished,
     fingerprints,
     unavailable,
   };
@@ -367,7 +473,10 @@ export async function adoptOutputs(ctx: PipelineContext, stepId: string, report:
 export async function freshness(ctx: PipelineContext, artifact: Artifact<unknown>): Promise<ArtifactFreshness> {
   const exists = await ctx.artifacts.exists(ref(ctx, artifact.name));
   if (!exists) return "missing";
-  const record = await readProvenance(ctx, artifact);
+  const { record, inFlight } = await readRecord(ctx, artifact);
+  // The public vocabulary has no `unfinished`; `stale` is what a pipeline acts on
+  // the same way: the artifact must be produced again.
+  if (inFlight) return "stale";
   if (!record) return "unknown";
   let boundToSource = false;
   for (const [key, recorded] of Object.entries(record.inputs)) {

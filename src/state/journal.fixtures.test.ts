@@ -30,6 +30,7 @@ const FIXTURE_TYPES = [
   "run.unmetered.authorized",
   "step.skipped",
   "step.source.unavailable",
+  "step.outputs.unfinished",
   "step.status.changed",
   "step.attempt.started",
   "step.attempt.finished",

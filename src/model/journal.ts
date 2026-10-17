@@ -67,6 +67,9 @@ export type RunJournalKnownEvent =
   /** A source the step declares as input could not be read: its freshness is
    *  unknown, so the step runs. */
   | (JournalBase & { type: "step.source.unavailable"; stepId: string; source: string; reason: string })
+  /** Outputs the step declares were left by an attempt that never succeeded:
+   *  they are never adopted, so the step runs. */
+  | (JournalBase & { type: "step.outputs.unfinished"; stepId: string; outputs: string[] })
   | (JournalBase & {
       type: "step.status.changed";
       stepId: string;

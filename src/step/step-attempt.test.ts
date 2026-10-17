@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { artifact, source, textArtifact } from "../dsl/artifact.ts";
 import type { AgentSession } from "../contracts/backends.ts";
 import type { executeStep, runWithAgent } from "../exec/runners.ts";
@@ -979,7 +979,8 @@ test("runAttempt: fingerprints are recorded only once the outputs are verified",
   const step = makeStep({ sources: [ticketArtifact], outputs: [specArtifact] });
   const run = makeRun(step, 10);
 
-  // The command succeeds but writes nothing: `require` fails, so nothing is recorded.
+  // The command succeeds but writes nothing: `require` fails, so no fingerprint is
+  // recorded; the in-flight mark written before the spawn stays.
   const failing = await runAttempt(run, step, {
     command: "write the spec",
     context: ctx,
@@ -987,7 +988,9 @@ test("runAttempt: fingerprints are recorded only once the outputs are verified",
     executeStep: async () => ({ output: "", ok: true, stats: { duration_ms: 1 } }),
   });
   expect(failing.ok).toBe(false);
-  expect(values.has(`${PROVENANCE_PREFIX}spec.md.json`)).toBe(false);
+  const marked = await readProvenance(ctx, specArtifact);
+  expect(marked?.inputs).toEqual({});
+  expect(marked?.inFlight).toMatchObject({ stepId: "verify", attempt: 1 });
 
   const ok = await runAttempt(run, step, {
     command: "write the spec",
@@ -1003,6 +1006,7 @@ test("runAttempt: fingerprints are recorded only once the outputs are verified",
   const record = await readProvenance(ctx, specArtifact);
   expect(record?.producedBy).toBe("verify");
   expect(record?.inputs).toEqual({ "artifacts/ticket.md": sha256Text("one") });
+  expect(record).not.toHaveProperty("inFlight");
 });
 
 test("runAttempt: artifacts are recorded as given, sources as the successful attempt left them", async () => {
@@ -1101,7 +1105,7 @@ test("runAttempt: an output declared as input is revised in place, not erased", 
   expect(record?.inputs).toEqual({ "artifacts/ticket.md": sha256Text("answered") });
 });
 
-test("runAttempt: erasing an output erases the record that vouched for it", async () => {
+test("runAttempt: erasing an output replaces the record that vouched for it with an in-flight mark", async () => {
   const { values, ctx } = multiArtifactFixture({ "ticket.md": "one", "spec.md": "stale" });
   const step = makeStep({ sources: [ticketArtifact], outputs: [specArtifact] });
   const run = makeRun(step, 10);
@@ -1119,8 +1123,13 @@ test("runAttempt: erasing an output erases the record that vouched for it", asyn
     },
   });
 
-  expect(recordDuringSpawn).toBeUndefined();
-  expect((await readProvenance(ctx, specArtifact))?.inputs).toEqual({ "artifacts/ticket.md": sha256Text("one") });
+  // Nothing vouches for the output while the attempt runs: the mark names the attempt instead.
+  const mark = JSON.parse(recordDuringSpawn ?? "{}");
+  expect(mark.inputs).toEqual({});
+  expect(mark.inFlight).toMatchObject({ runId: basename(run.run_dir), stepId: "verify", attempt: 1 });
+  const record = await readProvenance(ctx, specArtifact);
+  expect(record?.inputs).toEqual({ "artifacts/ticket.md": sha256Text("one") });
+  expect(record).not.toHaveProperty("inFlight");
 });
 
 test("runAttempt: a step without declared inputs keeps the previous behavior", async () => {
@@ -1142,6 +1151,51 @@ test("runAttempt: a step without declared inputs keeps the previous behavior", a
 
   expect(seenBeforeSpawn).toBeUndefined();
   expect(values.has(`${PROVENANCE_PREFIX}spec.md.json`)).toBe(false);
+});
+
+test("runAttempt: a failed attempt of a step without input leaves its output marked in flight", async () => {
+  const { values, ctx } = multiArtifactFixture();
+  const step = makeStep({ outputs: [specArtifact] });
+
+  const failed = await runAttempt(makeRun(step, 10), step, {
+    command: "write the spec",
+    context: ctx,
+    budget: { cumulative: 0 },
+    executeStep: async () => {
+      values.set("spec.md", "partial");
+      return { output: "", ok: false, failReason: "crashed", stats: { duration_ms: 1 } };
+    },
+  });
+
+  expect(failed.ok).toBe(false);
+  expect(values.get("spec.md")).toBe("partial");
+  expect((await readProvenance(ctx, specArtifact))?.inFlight).toMatchObject({ stepId: "verify", attempt: 1 });
+});
+
+// Known limit, left to a later lot (L2c): a revision in place is not marked, as
+// before the mark existed, so a revision that wrote then failed leaves partial
+// bytes under the record of the step that produced them.
+test("runAttempt: a failed revision in place leaves the record of the output untouched", async () => {
+  const { values, ctx } = multiArtifactFixture({ "ticket.md": "answered", "spec.md": "previous draft" });
+  const step = makeStep({ sources: [ticketArtifact, specArtifact], outputs: [specArtifact] });
+  const produced = await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
+
+  let recordDuringSpawn: unknown;
+  const failed = await runAttempt(makeRun(step, 10), step, {
+    command: "amend the spec",
+    context: ctx,
+    budget: { cumulative: 0 },
+    executeStep: async () => {
+      recordDuringSpawn = await readProvenance(ctx, specArtifact);
+      values.set("spec.md", "half amended");
+      return { output: "", ok: false, failReason: "crashed", stats: { duration_ms: 1 } };
+    },
+  });
+
+  expect(failed.ok).toBe(false);
+  expect(recordDuringSpawn).toEqual(produced);
+  expect(await readProvenance(ctx, specArtifact)).toEqual(produced);
+  expect(values.get("spec.md")).toBe("half amended");
 });
 
 /* ------------------------------------------------------------------------- *
@@ -1293,8 +1347,9 @@ test("capture: a write error is not a refusal — the agent's object was accepte
     exists: async () => false,
     readText: async () => undefined,
     readJson: async () => undefined,
-    writeText: async () => {
-      throw new Error("disk full");
+    // The disk fills after the spawn: the in-flight mark written before it landed.
+    writeText: async (ref: ArtifactRef) => {
+      if (!ref.name.startsWith(PROVENANCE_PREFIX)) throw new Error("disk full");
     },
     remove: async () => {},
   };

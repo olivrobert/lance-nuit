@@ -1192,9 +1192,10 @@ export declare function pendingRejection(ctx: PipelineContext, subject: Decision
     decidedAt: string;
 } | undefined>;
 
-/** Freshness reported by the public `freshness()` helper. `adoptable` is an
- *  internal admission state and never leaves the runner. */
-export type ArtifactFreshness = Exclude<OutputFreshness, "adoptable">;
+/** Freshness reported by the public `freshness()` helper. `adoptable` and
+ *  `unfinished` are internal admission states and never leave the runner: an
+ *  unfinished artifact is reported `stale`. */
+export type ArtifactFreshness = Exclude<OutputFreshness, "adoptable" | "unfinished">;
 
 /** Public freshness of one artifact, read from its own record. A pipeline uses it
  *  to branch on "the source moved" without owning fingerprints itself. A record

@@ -16,7 +16,7 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import { dirname, join } from "node:path";
 import type { PersistedAttempt } from "../../model/persisted.js";
 import { projectStepAttempts } from "../../state/attempt-projection.js";
-import type { ArtifactProvenance } from "../../state/provenance.js";
+import { type ArtifactProvenance, isInFlight } from "../../state/provenance.js";
 import { ATTEMPT_COMMAND_FILE } from "../../state/run-timeline.js";
 import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import { isPathWithin } from "../../state/stores/path-safety.js";
@@ -101,21 +101,24 @@ function excerpt(path: string, limit: number, from: "head" | "tail"): { text: st
   }
 }
 
-/** Artifacts whose provenance record names `stepId` as their producer. Only a
- *  step declaring `input` gets such a record, so the list may be empty for a
- *  step that did write files. */
+/** Artifacts whose provenance record names `stepId` as their producer. Once a
+ *  step succeeds, only one declaring `input` keeps a record, so the list may be
+ *  empty for a step that did write files. A record still marked in flight is left
+ *  out: the attempt that wrote the artifact has not succeeded, and the bytes may
+ *  be partial. */
 function producedBy(workItemDir: string, stepId: string): string[] {
   const dir = join(workItemDir, PROVENANCE_DIR);
   let names: string[];
   try {
     names = readdirSync(dir).filter((name) => name.endsWith(".json"));
   } catch {
-    // No provenance directory: no step of this work item declared input.
+    // No provenance directory: no step of this work item declared output yet.
     return [];
   }
   const produced: string[] = [];
   for (const name of names.sort()) {
     const record = readProvenance(join(dir, name));
+    if (isInFlight(record)) continue;
     const artifact = record?.producedBy === stepId ? record.artifact : undefined;
     if (typeof artifact === "string" && isSafeRelativePath(artifact)) produced.push(artifact);
   }
