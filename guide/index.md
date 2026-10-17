@@ -18,6 +18,11 @@ If you are new to the project, follow this path:
 
 - [DSL](dsl.md) — project and shared pipeline definitions, builders, and
   composition.
+- Resume and reruns — what a rerun replays:
+  [input freshness](dsl.md#input-freshness),
+  [interrupted steps](dsl.md#interrupted-steps), and
+  [reconcile mode](dsl.md#reconcile-mode), where declared outputs, not the
+  run's status, decide what remains to do.
 - [Project DSL and typechecking](dsl-typecheck.md) — generated declarations and
   `lancenuit typecheck`.
 - [Prompt files](prompts.md) — reusable prompts for built-in and project
@@ -56,8 +61,9 @@ provider-specific backend options: [generated DSL API](../docs/DSL-API.md).
 - [CLI options](cli-options.md) — runner flags and propagation rules.
 - [Where kit files live](kit-paths.md) — project/user kit resolution and config
   precedence.
-- [Persistence](persistence.md) — snapshots, artifacts, reports, and machine
-  telemetry.
+- [Persistence](persistence.md) — snapshots, artifacts and their provenance,
+  reports, and machine telemetry; what the run record decides, and what the
+  deliverables decide in reconcile mode.
 - [Architecture](architecture.md) — boot, dispatch, steps, backends, and state.
 
 ## Examples

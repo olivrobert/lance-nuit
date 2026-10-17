@@ -663,7 +663,15 @@ lancenuit run PROJ-28 --worktree
 - On a **resumed** run the selectors are durable, not a one-off view: every step
   they leave out is written to the snapshot as `skipped`. Once no step remains,
   the run finalizes as `PASS` and counts as complete — `--scan` will not pick the
-  work item up again. Use `--fresh` to replay the whole pipeline instead.
+  work item up again. `--fresh` starts a new run instead, which still skips
+  a step declaring `input` whose outputs are up to date
+  ([input freshness](dsl.md#input-freshness)), and in reconcile mode a step
+  whose outputs are present; `--start-at` forces them. In
+  [reconcile mode](dsl.md#reconcile-mode) the selectors hold for one
+  invocation only, and `--start-at` re-admits the `done` steps before `X`
+  (orchestration nodes and the work-item source step keep their status), where
+  the default mode re-checks only rework steps and those declaring `input` or
+  `rerunOnResume`; see its *Selectors* rule.
 - `--scan` discovers work items, and `--limit` caps the number discovered.
   `--steps` and `--skip` apply to each scanned ticket, so a ticket whose
   remaining work they all exclude is complete for later scans. `--until` applies
