@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeRunStep } from "../state/run-step.ts";
+import { makeRunStep } from "../run-record/run-step.ts";
 import { discardStaleReports, extractErrors } from "./report-extraction.ts";
 
 function phpunitStep(reportPaths: string[]) {

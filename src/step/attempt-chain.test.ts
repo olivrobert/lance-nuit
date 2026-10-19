@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Run } from "../model/run.ts";
 import { type AttemptContext, type AttemptMiddleware, type AttemptRecord, compose } from "./attempt-chain.ts";
-import { makeRunStep } from "../state/run-step.ts";
+import { makeRunStep } from "../run-record/run-step.ts";
 
 const step = makeRunStep({ id: "s", name: "S", command: "make test", runner: "bash" });
 const run: Run = { name: "p", pipeline: "p", pipeline_path: "p.ts", run_dir: "/tmp", steps: [step] };

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { writeClosureAt } from "../../state/closure.ts";
+import { writeClosureAt } from "../../run-record/closure.ts";
 import { listItems, readItem, titleOfTicketMarkdown } from "./items.ts";
 import {
   cleanupTempDirs,

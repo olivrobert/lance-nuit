@@ -1,4 +1,4 @@
-// runner/state/closure.ts
+// runner/run-record/closure.ts
 //
 // A human closure of a run: "this ticket was finished by hand, stop showing it".
 //

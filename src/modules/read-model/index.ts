@@ -1,7 +1,7 @@
 // modules/read-model/index.ts
 //
 // Public surface of the read model — the ONLY module allowed to import
-// `src/state` and `src/work-item-store`. The dashboard (`src/modules/ui/`)
+// `src/run-record` and `src/work-item-store`. The dashboard (`src/modules/ui/`)
 // imports this file and nothing below it; a Semgrep `ERROR` rule in
 // `.semgrep.yml` enforces that direction.
 

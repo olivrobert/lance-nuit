@@ -14,10 +14,13 @@ import type { PersistedRun } from "../model/persisted.js";
 import { createRunRef, type RunLogStore, type RunStateSnapshot, type RunStateStore } from "../model/storage-ports.js";
 import { errorMessage } from "../lib/errors.js";
 import { gateDecisionStatus, isValidSubjectToken } from "../work-item-store/index.js";
-import { readRunJournal, type RunJournalReport } from "../state/run-journal.js";
-import { matchesStepSelector } from "../state/run-timeline.js";
-import { FileRunLogStore } from "../state/stores/file-run-log-store.js";
-import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
+import {
+  FileRunLogStore,
+  FileRunStateStore,
+  matchesStepSelector,
+  readRunJournal,
+  type RunJournalReport,
+} from "../run-record/index.js";
 import { isPathWithin } from "../lib/path-safety.js";
 
 export interface DiagnosticsOptions {

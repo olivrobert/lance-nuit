@@ -23,7 +23,7 @@ import { createAbortScope } from "../runtime/abort.ts";
 import type { RunnerEvent } from "../runtime/events.ts";
 import { setLogInterceptor } from "../runtime/logging.ts";
 import type { RunOutput } from "../runtime/run-output.ts";
-import { makeRunStep } from "../state/run-step.ts";
+import { makeRunStep } from "../run-record/run-step.ts";
 import { type ResolveOutcomeInput, resolveOutcome } from "./step-outcome.ts";
 
 afterEach(() => setLogInterceptor(undefined));

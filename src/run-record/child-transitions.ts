@@ -1,4 +1,4 @@
-// runner/state/child-transitions.ts
+// runner/run-record/child-transitions.ts
 //
 // The owner of the persisted child reference of a composed run: the record a
 // `runPipeline` or `forEachPipeline` node keeps, in the PARENT snapshot, for
@@ -18,7 +18,7 @@
 //   has been used: a missing or damaged child snapshot is refused rather than
 //   turned into a second child (`hasJournaledChildStart`).
 // - `accountedCostUsd`, `accountedDurationMs` and `accountedUsage` belong to cost
-//   accounting (`chargeChildReconciliation`, `state/cost-accounting.ts`): what
+//   accounting (`chargeChildReconciliation`, `run-record/cost-accounting.ts`): what
 //   the parent already charged for this child, so a resumed child re-reporting
 //   its history is charged by difference. This module never touches them.
 // - `outcome` is the child's own outcome (or the reason a launch never
@@ -40,7 +40,7 @@
 // Every operation writes its group of fields, the journal event that records the
 // transition when there is one (`pipeline.child.started`,
 // `pipeline.child.finished`), then the parent snapshot — event first, snapshot
-// second, like the run transitions (`state/run-transitions.ts`).
+// second, like the run transitions (`run-record/run-transitions.ts`).
 
 import type { PipelineLot } from "../model/context.js";
 import type { PersistedPipelineChildRef, PersistedPipelineOrchestrationState } from "../model/persisted.js";

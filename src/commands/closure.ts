@@ -3,16 +3,22 @@
 //
 // Like approval-only, these commands take neither the lock nor the git guard:
 // they write one file beside the snapshot and never touch the snapshot itself.
-// A run that moves afterwards invalidates the closure on its own (state/closure.ts).
+// A run that moves afterwards invalidates the closure on its own (run-record/closure.ts).
 
 import { dirname } from "node:path";
 import type { RunnerArgs } from "../model/cli-options.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { log } from "../runtime/logging.js";
-import { closureOf, isClosableStatus, readClosureAt, removeClosureAt, writeClosureAt } from "../state/closure.js";
+import {
+  closureOf,
+  isClosableStatus,
+  latestRunFile,
+  readClosureAt,
+  readRunSnapshot,
+  removeClosureAt,
+  writeClosureAt,
+} from "../run-record/index.js";
 import { decisionActor } from "../work-item-store/index.js";
-import { readRunSnapshot } from "../state/run-snapshot.js";
-import { latestRunFile } from "../state/stores/run-storage.js";
 import { commandRegistries } from "./registries.js";
 import type { RunnerCommand } from "./runner-command.js";
 import { errorMessage, isValidTicket } from "./shared.js";

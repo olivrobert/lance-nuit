@@ -6,7 +6,7 @@ import { artifact } from "../dsl/artifact.js";
 import { bashStep, humanReview, pipeline } from "../dsl.js";
 import type { RunnerArgs } from "../model/cli-options.js";
 import { buildPipelineContext } from "../pipeline/context.js";
-import { pipelineRunsDir } from "../state/stores/run-storage.js";
+import { pipelineRunsDir } from "../run-record/stores/run-storage.js";
 import { textArtifact } from "../dsl/artifact.js";
 import { readDecision } from "../work-item-store/decisions.js";
 import { applyApproval, applyRejection, checkUntil } from "./startup.js";

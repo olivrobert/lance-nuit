@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { splitAttemptStats } from "../../../state/stats/stats.js";
+import { splitAttemptStats } from "../../../run-record/cost-figures.js";
 import { mapOpencodeExecutionResult } from "./result.js";
 import { OPENCODE_MODEL, type RawOpencodeExecutionResult } from "./types.js";
 

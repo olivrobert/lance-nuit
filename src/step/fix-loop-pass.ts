@@ -1,7 +1,7 @@
 import type { StepResult } from "../exec/runners.js";
 import { artifactScopeFor } from "../exec/runners.js";
 import { resolveTemplateAsync } from "../model/definition.js";
-import { saveRun } from "../state/run-repository.js";
+import { saveRun } from "../run-record/index.js";
 import { buildFixContext, type FixRun, selectResumedSession } from "./fix-loop-runtime.js";
 import { type FixResult, runAttempt, runFixAttempt, startFreshSession } from "./step-attempt.js";
 

@@ -18,8 +18,7 @@
 import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import type { RawJournalEvent, RunJournalKnownEvent } from "../../model/journal.js";
 import type { PersistedRun, PersistedStepState } from "../../model/persisted.js";
-import { projectRunState } from "../../state/run-projection.js";
-import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
+import { FileRunEventStore, projectRunState } from "../../run-record/index.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
 import type {

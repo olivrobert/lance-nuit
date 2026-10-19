@@ -1,4 +1,4 @@
-// runner/state/cost-accounting.ts
+// runner/run-record/cost-accounting.ts
 //
 // The one module that WRITES a spend figure, and the one that says what a figure
 // proves.
@@ -13,7 +13,7 @@
 // The four facts that move money:
 //
 //  - `chargeClosedAttempt` — an attempt ends (loop, signal handler, or crash
-//    settled on resume). Called only by `closeAttempt` (`state/attempt-closure.ts`),
+//    settled on resume). Called only by `closeAttempt` (`run-record/attempt-closure.ts`),
 //    which owns the rest of the attempt's ending.
 //  - `chargeAttemptToLedger` — the same attempt reaches the run ledger. Purely
 //    arithmetic and free of I/O: `finishAttempt` (`step/step-attempt.ts`) calls
@@ -63,7 +63,7 @@ import type {
 import type { Run, RunStep } from "../model/run.js";
 import type { RunBudget } from "./budget.js";
 import { appendRunEvent } from "./run-journal.js";
-import { usageDelta } from "./stats/stats.js";
+import { usageDelta } from "./cost-figures.js";
 
 /** Anything that carries an attempt's or a step's settled figures. Structural on
  *  purpose: an in-memory `RunStep`, a `PersistedStepState`, and a
@@ -241,7 +241,7 @@ export function runProvesUnpricedSpend(run: { steps?: SpendingStep[] } | null | 
  * An attempt closes: record its own figures and add them to the step total.
  *
  * Purely arithmetic — the journal event, the status and the timestamps belong to
- * `closeAttempt` (`state/attempt-closure.ts`), the only caller. Returns the
+ * `closeAttempt` (`run-record/attempt-closure.ts`), the only caller. Returns the
  * figures actually stored, which the caller journals.
  */
 export function chargeClosedAttempt(step: SpendFigures, attempt: SpendFigures, settled: SettledSpend): SettledSpend {

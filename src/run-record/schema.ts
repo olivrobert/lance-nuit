@@ -1,4 +1,4 @@
-// state/schema.ts
+// run-record/schema.ts
 //
 // Runtime schema of the persisted run snapshot (`state.json`).
 //
@@ -47,7 +47,7 @@ import { isStepProfileName, STEP_PROFILE_NAMES, type StepProfileName } from "../
  *   (`z.output`) is what readers consume.
  * ------------------------------------------------------------------------- */
 
-/** Shared with `state/journal-schema.ts`: the journal records the same statuses. */
+/** Shared with `run-record/journal-schema.ts`: the journal records the same statuses. */
 export const RUN_STATUSES = [
   "RUNNING",
   "PASS",

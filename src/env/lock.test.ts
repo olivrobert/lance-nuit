@@ -32,7 +32,7 @@ import {
 // written and dropped: hammering N children did not reproduce a TOCTOU window,
 // and it failed to reliably catch even a deliberately broken check-then-write
 // lock, so it proved nothing while costing a second on every run. Cross-process
-// behaviour is covered by `state/stores/run-storage.test.ts`, which has eight
+// behaviour is covered by `run-record/stores/run-storage.test.ts`, which has eight
 // child processes reclaim one stale lock and asserts a single winner.
 
 const lf = () => join(mkdtempSync(join(tmpdir(), "lock-")), "runner.lock");

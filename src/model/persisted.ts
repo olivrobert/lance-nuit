@@ -89,9 +89,9 @@ export interface PipelineLineageEntry {
 
 /** Persisted reference to a run launched by an orchestration node. */
 /** The parent's progress record for one composed child call. Its status,
- *  `runId` and `outcome` move through `state/child-transitions.ts` only; the
+ *  `runId` and `outcome` move through `run-record/child-transitions.ts` only; the
  *  `accounted*` figures through `chargeChildReconciliation`
- *  (`state/cost-accounting.ts`) only. */
+ *  (`run-record/cost-accounting.ts`) only. */
 export interface PersistedPipelineChildRef {
   key: string;
   kind: "main" | "afterEach" | "afterAll";

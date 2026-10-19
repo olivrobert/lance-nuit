@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { RunnerEvent } from "../runtime/events.js";
-import { makeRunStep } from "../state/run-step.js";
+import { makeRunStep } from "../run-record/run-step.js";
 import { formatElapsed, renderStatusLine, StatusLineOutput, type StatusLineStream } from "./status-line.js";
 
 const step = makeRunStep({ id: "implement", name: "Implement", command: "true", runner: "agent" });

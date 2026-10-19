@@ -7,9 +7,9 @@ import { loadOrCreateRun } from "../boot/resume.ts";
 import { commandRegistries } from "../commands/registries.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.ts";
-import { readRunEvents } from "../state/run-journal.ts";
-import { resumeDecision } from "../state/run-predicates.ts";
-import { readRunSnapshot } from "../state/run-snapshot.ts";
+import { readRunEvents } from "../run-record/run-journal.ts";
+import { resumeDecision } from "../run-record/run-predicates.ts";
+import { readRunSnapshot } from "../run-record/run-snapshot.ts";
 import { executeRunSteps } from "../step/step-loop.ts";
 
 // An interruption is the one code path that cannot be exercised in-process: the
@@ -48,10 +48,10 @@ function childSource(root: string, runDir: string, pipelinePath: string, stopSou
     `import { loadOrCreateRun } from ${module("src/boot/resume.ts")};`,
     `import { commandRegistries } from ${module("src/commands/registries.ts")};`,
     `import { buildPipelineContext } from ${module("src/pipeline/context.ts")};`,
-    `import { appendRunEvent } from ${module("src/state/run-journal.ts")};`,
-    `import { saveRun } from ${module("src/state/run-repository.ts")};`,
-    `import { nextAttemptLogPath } from ${module("src/state/run-timeline.ts")};`,
-    `import { updateStep } from ${module("src/state/run-transitions.ts")};`,
+    `import { appendRunEvent } from ${module("src/run-record/run-journal.ts")};`,
+    `import { saveRun } from ${module("src/run-record/run-repository.ts")};`,
+    `import { nextAttemptLogPath } from ${module("src/run-record/run-timeline.ts")};`,
+    `import { updateStep } from ${module("src/run-record/run-transitions.ts")};`,
     `import { installChildKillHandlers } from ${module("src/entry/signals.ts")};`,
     `import { createAbortScope } from ${module("src/runtime/abort.ts")};`,
     `const ctx = buildPipelineContext({ ...commandRegistries(), cwd: ${JSON.stringify(root)}, ticket: "T-9" });`,

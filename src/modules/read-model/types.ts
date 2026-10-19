@@ -1,9 +1,9 @@
 // modules/read-model/types.ts
 //
 // Shapes the dashboard reads. They are deliberately independent from the
-// persisted shapes of `src/state`: the read model translates run state into the
-// vocabulary of the morning box (item, group, stop, approval), so a change in
-// the durable schema never reaches the HTTP layer or the browser.
+// persisted shapes of `src/run-record`: the read model translates run state
+// into the vocabulary of the morning box (item, group, stop, approval), so a
+// change in the durable schema never reaches the HTTP layer or the browser.
 
 import type { Launch } from "../dashboard-home/index.js";
 

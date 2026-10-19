@@ -71,7 +71,7 @@ cycles are forbidden at every level.
 | L1 `contracts` | `src/contracts/` — public extension contracts only | L0. Types and pure functions; no `node:fs`, no `process.*`, no `zod` |
 | L2 `model` | `src/model/` — data shapes and ports | up to L1, no I/O |
 | L3 `infra` | `src/env/` (config, paths, locks, worktrees, capabilities), `src/exec/` (process execution and supervision), `src/runtime/` (context, logging, events, the abort scope, and the `RunOutput` and `LiveFeed` ports) | up to L2 |
-| L4 `core` | `src/validation/`, `src/pipeline/` (context assembly and definition loading), `src/dsl/` and `src/dsl.ts` (authoring primitives, internal authoring surface), `src/builtin-steps/`, `src/extractors/`, `src/engine/` (backend registry and built-in agent integrations), `src/step/` (attempts, retries, fixes, escalation), `src/dispatch/`, `src/boot/`, `src/state/` (persistence, reports, budgets), `src/work-item-store/` (artifacts, human decisions and provenance kept beside a ticket), `src/run-stats/` (the cross-run history: one summary per finished run, and its readers), `src/project/` (public DSL and project typechecking), `src/builtins/` | up to L3 |
+| L4 `core` | `src/validation/`, `src/pipeline/` (context assembly and definition loading), `src/dsl/` and `src/dsl.ts` (authoring primitives, internal authoring surface), `src/builtin-steps/`, `src/extractors/`, `src/engine/` (backend registry and built-in agent integrations), `src/step/` (attempts, retries, fixes, escalation), `src/dispatch/`, `src/boot/`, `src/run-record/` (the run record: snapshot, journal, attempt logs, transitions, cost ledger and budget), `src/work-item-store/` (artifacts, human decisions and provenance kept beside a ticket), `src/run-stats/` (the cross-run history: one summary per finished run, and its readers), `src/project/` (public DSL and project typechecking), `src/builtins/` | up to L3 |
 | L5 `adapters` | `src/output/` (console reports, live feed, watchers), `src/modules/` (domain modules such as the Jira adapter), `src/commands/` | up to L4 |
 | L6 `entry` | `src/entry/` (composition root), `src/cli/` (argument parsing), `src/runner.ts` — process entry point | everything |
 
@@ -113,6 +113,7 @@ in exactly one level, and the level rules apply to it unchanged.
 | `src/engine/` | `default-registry.ts` |
 | `src/work-item-store/` | `index.ts` |
 | `src/run-stats/` | `index.ts` |
+| `src/run-record/` | `index.ts` |
 
 `scripts/layers.cjs` declares them in `MODULES`, next to the levels.
 `.dependency-cruiser.cjs` turns each one into a `module-<name>-entry-only` rule,
@@ -234,7 +235,7 @@ server side enters the bundle.
 
 The server side reads work items only through `src/modules/read-model/`
 (`index.ts` is its public surface, and the only module allowed to import
-`src/state/`, `src/work-item-store/` and `src/run-stats/`; a Semgrep rule enforces the
+`src/run-record/`, `src/work-item-store/` and `src/run-stats/`; a Semgrep rule enforces the
 direction). It projects snapshots into the DTO the front end renders. It takes
 the work-item paths from `workItemLayout` and a stopped gate's decision from
 `gateDecisionStatus`, both in `work-item-store`, the rule the runner's gate and
@@ -277,7 +278,7 @@ component (`.mute`, `.small`, `.tag`, `.proj`).
 Top-level integration and public-surface tests are grouped under `tests/` by domain:
 `tests/dsl/`, `tests/pipeline/`, `tests/project/`, and `tests/runner/`. Tests that are
 tightly coupled to a lower-level module remain beside that module (for example under
-`src/boot/`, `src/engine/`, or `src/state/`). The public DSL is exposed through generated project
+`src/boot/`, `src/engine/`, or `src/run-record/`). The public DSL is exposed through generated project
 declarations rather than by making every internal runner type public.
 
 ## 3. How a pipeline is assembled
@@ -446,8 +447,8 @@ A run keeps operational state close to its work item:
 ```
 
 Persisted formats (`state.json`, `events.jsonl`) and configuration files
-(`config.json`) are read through runtime schemas (`state/schema.ts`,
-`state/journal-schema.ts`, `env/config.schema.ts`). Two rules keep that boundary
+(`config.json`) are read through runtime schemas (`run-record/schema.ts`,
+`run-record/journal-schema.ts`, `env/config.schema.ts`). Two rules keep that boundary
 honest:
 
 - The types stay hand-written interfaces (`PersistedRun`, `PersistedStepState`,
@@ -466,7 +467,7 @@ honest:
   malformed `pricing.json` is reported once by name and treated as absent
   (`env/pricing.schema.ts`), because pricing is optional and statistics readers
   must keep working without it; **no line of the run journal (`events.jsonl`,
-  `state/journal-schema.ts`) is ever discarded** — the file doubles as the live
+  `run-record/journal-schema.ts`) is ever discarded** — the file doubles as the live
   feed, so a reader classifies every line as `known`, `unknown` (a type outside
   the contract, which is most of a real journal), `invalid` (a contracted type
   whose payload was refused, kept with its reason) or `skipped` (not an event at
@@ -493,7 +494,10 @@ The console report is the human-facing projection. The run-stats projector deriv
 phase, model, profile, token, cost, and outcome facts without reading provider state.
 Pricing is optional; exact provider-reported cost wins over token estimation.
 
-Run and step transitions during execution have one owner, `state/run-transitions.ts`:
+The run record — snapshot, journal, attempt logs, transitions, cost ledger and
+budget — is the `src/run-record/` module: code outside it imports
+`run-record/index.ts` only, and the files named below are its internals.
+Run and step transitions during execution have one owner, `run-record/run-transitions.ts`:
 the step status with its timestamps and reason (`updateStep`), the verdict an
 attempt established (`recordStepVerdict`), an absorbed non-blocking failure
 (`absorbStepFailure`) and the inputs it settled at (`recordAbsorbedInputs`),
@@ -503,11 +507,11 @@ a clean stop (`stopRun`), a manual interruption
 the journal event that records them. After an interruption only `finalizeRun`
 still moves the run: it keeps `ABORTED` and completes the outcome, the totals
 and the snapshot, while the other transitions change neither memory nor
-snapshot. Attempt closure (`state/attempt-closure.ts`), cost figures
-(`state/cost-accounting.ts`) and budget stops (`state/cost-stop-events.ts`) keep
+snapshot. Attempt closure (`run-record/attempt-closure.ts`), cost figures
+(`run-record/cost-accounting.ts`) and budget stops (`run-record/cost-stop-events.ts`) keep
 their own owners. The persisted child reference of a composed run — the record a
 `runPipeline` or `forEachPipeline` node keeps in the parent snapshot for each
-child call — moves through `state/child-transitions.ts` only: declared
+child call — moves through `run-record/child-transitions.ts` only: declared
 `pending`, committed and bound to a child run id, skipped, failed at launch, or
 settled from the child's own verdict with the `pipeline.child.started` and
 `pipeline.child.finished` events. The composition code
@@ -515,7 +519,7 @@ settled from the child's own verdict with the `pipeline.child.started` and
 execution, reconciliation, settlement — and calls those operations, cost
 accounting for the child's spend and `finalizeRun` for its verdict, without
 restating their rules. Restoration
-on resume (`boot/resume.ts`, `state/run-projection.ts`) rebuilds state and is
+on resume (`boot/resume.ts`, `run-record/run-projection.ts`) rebuilds state and is
 not a transition. Which of the snapshot and the journal is believed for each
 concept, and what each crash window leaves behind, is tabled in
 [persistence](persistence.md#which-record-is-authoritative). Presentation and

@@ -1,22 +1,22 @@
 ---
 paths:
-  - "src/state/stores/file-*.ts"
+  - "src/run-record/stores/file-*.ts"
   - "src/dispatch/file-scan-store.ts"
   - "src/work-item-store/file-*.ts"
 exclude:
-  - "src/state/stores/*.test.ts"
+  - "src/run-record/stores/*.test.ts"
   - "src/work-item-store/*.test.ts"
 ---
 
 # Constraints — File-backed stores
 
-Scope: `src/state/stores/file-*.ts`, `src/dispatch/file-scan-store.ts` and `src/work-item-store/file-*.ts` matching `Class `File*Store` / `File*Catalog` implementing a persistence port, owning reads and writes of one on-disk artifact.`.
+Scope: `src/run-record/stores/file-*.ts`, `src/dispatch/file-scan-store.ts` and `src/work-item-store/file-*.ts` matching `Class `File*Store` / `File*Catalog` implementing a persistence port, owning reads and writes of one on-disk artifact.`.
 
 Tooling checked: `biome.json`, `eslint.config.mjs`, `tsconfig.json`, `package.json`. None of the rules below are covered by this tooling.
 
 ## Semantic Rules
 
-- MUST: A `File…Store` class explicitly declares the persistence port it implements. Trigger: declaration of a store class in src/state/stores/. Anchor: `implements <Port>` clause on the class declaration, the port coming from a `model/*-ports.ts` module. (5/5)
+- MUST: A `File…Store` class explicitly declares the persistence port it implements. Trigger: declaration of a store class in src/run-record/stores/. Anchor: `implements <Port>` clause on the class declaration, the port coming from a `model/*-ports.ts` module. (5/5)
 - MUST: Publishing a full file goes through a writer-owned temporary file then a rename, with the temporary removed if the write fails. Trigger: full write of an artifact to disk (writeFileSync / writeFile). Anchor: temporary path suffixed `.${process.pid}.<uuid>.tmp`, followed by a rename, with unlink/rm of the temporary in the catch. (3/3)
 - MUST: A store addressing runs by identifier exposes for each operation an `…At` variant taking the run directory explicitly. Trigger: store that resolves a run directory from a runId (runDirs, resolveRunDir). Anchor: method suffixed `At` whose first parameter is `runDir: string`. (3/3)
 - MUST: Content read back from disk goes through a schema parser before being handed to the domain. Trigger: reading a JSON file persisted by the store. Anchor: call to a dedicated parsing function (parseJournalEntry, parseScanRecord, readRunSnapshot, `parse` callback) on the result of JSON.parse. (5/5)

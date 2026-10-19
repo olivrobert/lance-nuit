@@ -3,7 +3,7 @@ import type { StepControl, StepUsage } from "../contracts/backends.js";
 import type { PersistedAttempt } from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
 import { createLogRef, type RunEventStore, type RunLogStore, runRefFromRun } from "../model/storage-ports.js";
-import { type RunJournalEvent, relativeRunPath } from "../state/run-journal.js";
+import { relativeRunPath, type RunJournalEvent } from "../run-record/index.js";
 import type { PhaseStats, RunStatsEntry, TokenCounts, UsageStatus } from "./stats-core.js";
 import { addTokens, zeroTokens } from "./stats-core.js";
 

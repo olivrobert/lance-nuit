@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { CODEX_MODEL } from "../engine/backends/codex/types.js";
 import type { Run } from "../model/run.js";
 import { createLogRef, type RunLogStore } from "../model/storage-ports.js";
-import { makeRunStep } from "../state/run-step.js";
-import { appendRunEvent } from "../state/run-journal.js";
+import { makeRunStep } from "../run-record/run-step.js";
+import { appendRunEvent } from "../run-record/run-journal.js";
 import { buildRunStatsEntry, emitRunStats } from "./run-stats.js";
 
 function fakeRun(overrides: Partial<Run> = {}): Run {

@@ -7,7 +7,7 @@ import { executeStep } from "../exec/runners.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { createProjectDsl, validatePipeline } from "../pipeline/loader.js";
 import { parseRunnerArgs } from "../cli/parse.js";
-import { makeRunStep } from "../state/run-step.js";
+import { makeRunStep } from "../run-record/run-step.js";
 import { createDefaultRunnerRegistries } from "../entry/registries.js";
 import { configStep } from "./config.js";
 import { loadRunnerRegistries } from "./extensions.js";

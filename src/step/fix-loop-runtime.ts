@@ -9,7 +9,7 @@ import type { Run, RunStep } from "../model/run.js";
 import type { AbortScope } from "../runtime/abort.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { deriveContext } from "../pipeline/context.js";
-import type { RunBudget } from "../state/budget.js";
+import type { RunBudget } from "../run-record/index.js";
 
 /** Fix-prompt context enriched with runner diagnostics and extracted errors. */
 export function buildFixContext(

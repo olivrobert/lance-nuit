@@ -15,15 +15,26 @@ import type { RunOutput } from "../runtime/run-output.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { type AbortScope, createAbortScope } from "../runtime/abort.js";
 import { emitRunnerEvent } from "../runtime/events.js";
-import { costDecision, type RunBudget } from "../state/budget.js";
-import { controlForRun, runProvesUnpricedSpend } from "../state/cost-accounting.js";
-import { inheritChildBudgetStop } from "../state/cost-stop-events.js";
+import {
+  controlForRun,
+  costDecision,
+  hasUnfinishedWork,
+  inheritChildBudgetStop,
+  isSettledStatus,
+  lastPassInterrupted,
+  latestAttemptLog,
+  matchesStepSelector,
+  owesWork,
+  recordAbsorbedInputs,
+  type RunBudget,
+  type RunOutcome,
+  runProvesUnpricedSpend,
+  saveRun,
+  stopRun,
+  updateStep,
+} from "../run-record/index.js";
 import { fingerprintInputs, pureInputsOf } from "../work-item-store/index.js";
 
-import { latestAttemptLog, matchesStepSelector } from "../state/run-timeline.js";
-import { saveRun } from "../state/run-repository.js";
-import { hasUnfinishedWork, isSettledStatus, lastPassInterrupted, owesWork } from "../state/run-predicates.js";
-import { type RunOutcome, recordAbsorbedInputs, stopRun, updateStep } from "../state/run-transitions.js";
 import { runFixLoop } from "./fix-loop.js";
 import { executePipelineOrchestration } from "./pipeline-orchestration.js";
 import {
@@ -76,8 +87,8 @@ export function stepLoopDeps(output: RunOutput): StepLoopDeps {
 }
 
 /** Re-exported for the entry point: the shape is owned by the run finalization
- *  it feeds (`state/run-transitions.ts`). */
-export type { RunOutcome } from "../state/run-transitions.js";
+ *  it feeds (`run-record/run-transitions.ts`). */
+export type { RunOutcome } from "../run-record/index.js";
 
 /**
  * Initial step attempt: create a fresh session when the backend provides one, then
@@ -225,7 +236,7 @@ export async function executeRunSteps(
     const restoredTotals = controlForRun(run);
     // RESTORATION, not a transition: the latches below are read back from the
     // snapshot. Their transitions during execution belong to
-    // `state/cost-stop-events.ts` (stops) and `state/cost-accounting.ts` (proof
+    // `run-record/cost-stop-events.ts` (stops) and `run-record/cost-accounting.ts` (proof
     // of unpriceable spend).
     const budget: RunBudget = {
       cumulative: restoredTotals.total_cost_usd ?? 0,

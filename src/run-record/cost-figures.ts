@@ -1,11 +1,11 @@
-// runner/state/stats/stats.ts
+// runner/run-record/cost-figures.ts
 //
 // Turning what a backend reported into the figures the runner stores, plus the
 // difference arithmetic a by-difference charge needs. Nothing here writes: the
-// totals themselves are owned by `state/cost-accounting.ts`, which is the only
+// totals themselves are owned by `run-record/cost-accounting.ts`, which is the only
 // module that can add spend to a step, an attempt, or the run ledger.
 
-import type { AttemptStats, StepControl, StepUsage } from "../../contracts/backends.js";
+import type { AttemptStats, StepControl, StepUsage } from "../contracts/backends.js";
 
 /** Tokens an attempt is known to have consumed. Zero means "measured nothing",
  *  which is why an exact $0 alongside it stays exact. */

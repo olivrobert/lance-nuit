@@ -2,7 +2,7 @@
 //
 // Runtime schema of a persisted scan record (`pipeline-history/scans/*.json`).
 //
-// Same contract as `state/schema.ts`: `model/scan-record.ts` keeps the
+// Same contract as `run-record/schema.ts`: `model/scan-record.ts` keeps the
 // authoritative types, this module proves at compile time that the schema and
 // those types describe the same data, and readers treat a record that fails the
 // schema as absent rather than as an error to raise. `looseObject` everywhere so

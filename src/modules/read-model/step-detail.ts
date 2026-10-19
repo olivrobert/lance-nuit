@@ -15,10 +15,8 @@
 import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PersistedAttempt } from "../../model/persisted.js";
-import { projectStepAttempts } from "../../state/attempt-projection.js";
+import { ATTEMPT_COMMAND_FILE, FileRunEventStore, projectStepAttempts } from "../../run-record/index.js";
 import { isInFlight, standingOf, workItemLayout } from "../../work-item-store/index.js";
-import { ATTEMPT_COMMAND_FILE } from "../../state/run-timeline.js";
-import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import { isPathWithin } from "../../lib/path-safety.js";
 import { isSafeRelativePath, runTreePath } from "./explorer.js";
 import type { ReadModelOptions } from "./projects.js";

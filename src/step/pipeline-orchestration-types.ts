@@ -10,7 +10,7 @@ import type { PipelineContext } from "../model/context.js";
 import type { Run, RunStep } from "../model/run.js";
 import type { AbortScope } from "../runtime/abort.js";
 import type { RunOutput } from "../runtime/run-output.js";
-import type { RunBudget } from "../state/budget.js";
+import type { RunBudget } from "../run-record/index.js";
 
 export interface PipelineOrchestrationInput {
   run: Run;

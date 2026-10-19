@@ -1,5 +1,5 @@
 // The installed DSL declarations are compiled transitively from `project/dsl.ts`.
-// The runtime schemas (`state/schema.ts`, `env/config.schema.ts`) import zod; a
+// The runtime schemas (`run-record/schema.ts`, `env/config.schema.ts`) import zod; a
 // public type written as `z.infer<...>` would drag `import "zod"` into a project
 // that never installed it. The interfaces stay hand-written, and this test is the
 // contract: no declaration reachable from the DSL entry point mentions zod.

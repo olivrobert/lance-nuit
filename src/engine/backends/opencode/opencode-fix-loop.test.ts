@@ -8,7 +8,7 @@ import type { Run } from "../../../model/run.js";
 import { buildPipelineContext } from "../../../pipeline/context.js";
 import { performFixAttempt } from "../../../step/fix-loop-pass.js";
 import { prepareFixRun } from "../../../step/fix-loop-runtime.js";
-import { makeRunStep } from "../../../state/run-step.js";
+import { makeRunStep } from "../../../run-record/run-step.js";
 import { createOpencodeBackendFactory } from "./backend.js";
 import type { OpencodeBackendHost, OpencodeExecutionOptions, RawOpencodeExecutionResult } from "./types.js";
 import { OPENCODE_MODEL } from "./types.js";

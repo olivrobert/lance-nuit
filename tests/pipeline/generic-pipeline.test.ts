@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run } from "../../src/model/run.js";
 import { buildPipelineContext } from "../../src/pipeline/context.js";
-import { finalizeRun } from "../../src/state/run-transitions.js";
-import { makeRunStep } from "../../src/state/run-step.js";
+import { finalizeRun } from "../../src/run-record/run-transitions.js";
+import { makeRunStep } from "../../src/run-record/run-step.js";
 import { NULL_RUN_OUTPUT } from "../../src/runtime/run-output.js";
 import { executeRunSteps, stepLoopDeps } from "../../src/step/step-loop.js";
 

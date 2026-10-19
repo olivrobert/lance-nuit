@@ -1,4 +1,4 @@
-// runner/state/run-selection.ts
+// runner/run-record/run-selection.ts
 //
 // Select a resumed run when `latest` is not enough.
 //

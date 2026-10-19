@@ -3,10 +3,10 @@
 // The cycle of ONE composed child, in order: gate, resolution, identity, boot,
 // start fact, execution, reconciliation, settlement, report. This module orders
 // the steps and owns nothing else: the stop decision and its record belong to
-// `state/budget.ts` and `state/cost-stop-events.ts`, the child's spend to
-// `chargeChildReconciliation` (`state/cost-accounting.ts`), the child run's
-// verdict to `finalizeRun` (`state/run-transitions.ts`), and the persisted child
-// reference to `state/child-transitions.ts`.
+// `run-record/budget.ts` and `run-record/cost-stop-events.ts`, the child's spend to
+// `chargeChildReconciliation` (`run-record/cost-accounting.ts`), the child run's
+// verdict to `finalizeRun` (`run-record/run-transitions.ts`), and the persisted child
+// reference to `run-record/child-transitions.ts`.
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -17,24 +17,29 @@ import type { PipelineInvocationDefinition } from "../model/definition.js";
 import type { PersistedPipelineChildRef } from "../model/persisted.js";
 import type { Run } from "../model/run.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
-import { costDecision, isBudgetExceeded, remainingBudget, type RunBudget } from "../state/budget.js";
 import {
   bindChildRun,
+  chargeChildReconciliation,
   completedSuccessfully,
+  costDecision,
+  createRunId,
   failChildLaunch,
+  FileRunStateStore,
+  finalizeRun,
   hasJournaledChildStart,
+  hasRunSnapshotEntry,
+  isBudgetExceeded,
   isChildSettled,
+  measuredRunCost,
+  pendingSteps,
+  pipelineRunsDir,
   recordChildStarted,
+  recordCostStop,
+  remainingBudget,
+  type RunBudget,
   settleChild,
-} from "../state/child-transitions.js";
-import { chargeChildReconciliation, measuredRunCost } from "../state/cost-accounting.js";
-import { recordCostStop } from "../state/cost-stop-events.js";
-import { pendingSteps } from "../state/run-predicates.js";
-import { hasRunSnapshotEntry } from "../state/run-snapshot.js";
-import { finalizeRun } from "../state/run-transitions.js";
+} from "../run-record/index.js";
 import { emitRunStats } from "../run-stats/index.js";
-import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
-import { createRunId, pipelineRunsDir } from "../state/stores/run-storage.js";
 import type { ChildExecutionResult, PipelineOrchestrationInput } from "./pipeline-orchestration-types.js";
 import {
   childContext,
@@ -253,7 +258,7 @@ export async function executeChild(
 
   // 9. Report. The budget facts come from the child: the stop its loop reported
   //    this generation, the stop it latched in a previous one, or a ledger that
-  //    reached its own ceiling as `state/budget.ts` defines it.
+  //    reached its own ceiling as `run-record/budget.ts` defines it.
   return {
     ok: false,
     stopped: childRun.status === "STOPPED" || childRun.status === "ABORTED",
