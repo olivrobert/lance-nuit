@@ -6,13 +6,11 @@
 // this folder imports this file only (`module-run-record-entry-only` in
 // `.dependency-cruiser.cjs`); the other files are internals.
 //
-// The entry still re-exports every symbol used outside the folder when the
-// files moved here. Each group names the change planned to retire it or narrow
-// it, so the surface left to reduce reads from this file; a group marked "kept"
-// is meant to stay.
+// The groups below say what each part of the surface is for. The entry exports
+// only what code outside the folder calls.
 
-// Status meaning: which status a run or a step stands in, read from a snapshot.
-// Folded into one status map by L6, which also retires `isClosableStatus`.
+// Meaning of a run status, and what a run or a step still owes, read from a
+// snapshot.
 export { isClosableStatus } from "./closure.js";
 export {
   allStepsSettled,
@@ -26,8 +24,8 @@ export {
 } from "./run-predicates.js";
 export { deriveRunStatus, isResumableStatus } from "./run-verdict.js";
 
-// Projected reading of a run: replaced for readers by one `readRun` in L7.
-// `FileRunEventStore` and `FileRunStateStore` stay for boot until L10.
+// Reading a run: its snapshot, its journal, and the projection of one onto the
+// other.
 export { projectStepAttempts } from "./attempt-projection.js";
 export { type RunJournalEvent, type RunJournalReport, readRunJournal } from "./run-journal.js";
 export { projectRunState } from "./run-projection.js";
@@ -35,8 +33,7 @@ export { readRunSnapshot } from "./run-snapshot.js";
 export { FileRunEventStore, runEventsFilePath } from "./stores/file-run-event-store.js";
 export { FileRunStateStore } from "./stores/file-run-state-store.js";
 
-// Attempt and cost: absorbed by `openAttempt`, `settleAttempt`, `costGate` and
-// `openRunLedger` in L8.
+// Attempts and their logs, and the cost ledger and budget a run is held to.
 export { closeAttempt } from "./attempt-closure.js";
 export { costDecision, isBudgetExceeded, type RunBudget, remainingBudget } from "./budget.js";
 export {
@@ -59,8 +56,7 @@ export {
   writeAttemptCommand,
 } from "./run-timeline.js";
 
-// Run and step transitions during execution. L8 absorbs `recordStepVerdict`;
-// L9 adds the remaining named writes; L11 makes the run read-only outside.
+// Run and step transitions during execution.
 export {
   abortRun,
   absorbStepFailure,
@@ -72,7 +68,7 @@ export {
   updateStep,
 } from "./run-transitions.js";
 
-// Composed child calls: kept, already named transitions.
+// Composed child calls: the transitions of a child run's reference.
 export {
   bindChildRun,
   commitChildCall,
@@ -86,8 +82,7 @@ export {
   skipChild,
 } from "./child-transitions.js";
 
-// Opening and restoring a run: absorbed by `openRun` and `loadOrCreateRun` in
-// L10, after which `saveRun` and `appendRunEvent` are no longer exported.
+// Opening and restoring a run, and the raw snapshot and journal writes.
 export { restoreRunTotals } from "./cost-accounting.js";
 export { appendRunEvent, readRunEvents } from "./run-journal.js";
 export { type ProjectedRunState, settleCrashedAttempts } from "./run-projection.js";
@@ -96,13 +91,13 @@ export { describeRunSnapshotProblem, hasRunSnapshotEntry, readRunSnapshotDiagnos
 export { makeRunStep } from "./run-step.js";
 export { type RunDirResolution, releaseRunDir } from "./stores/run-storage.js";
 
-// Run reports: kept, the figures a report prints.
+// Run reports: the figures a report prints.
 export { aggregateControl, aggregateUsage } from "./cost-accounting.js";
 
-// Human closure of a run: kept, `lancenuit close` and the dashboard read it.
+// Human closure of a run, which `lancenuit close` and the dashboard read.
 export { closureOf, isClosureCurrent, readClosureAt, removeClosureAt, writeClosureAt } from "./closure.js";
 
-// Run locations, selection and the run lock: kept.
+// Run locations, selection and the run lock.
 export { relativeRunPath } from "./run-journal.js";
 export { discardedResumeNotice, type ExplicitRunSelection, selectExplicitRun } from "./run-selection.js";
 export { FileRunLogStore } from "./stores/file-run-log-store.js";
