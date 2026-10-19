@@ -11,6 +11,7 @@ import {
 } from "../model/config.js";
 import { type ConfigFile, parseConfigFile } from "./config.schema.js";
 import { CONFIG_FILE, kitFileLayers } from "./kit-paths.js";
+import { DEFAULT_SPEC_PATH } from "./tickets.js";
 
 export type { PipelineLabels, WorkItemConfig } from "../contracts/work-items.js";
 export type { ExtensionsConfig, PipelineConfig, StackPreflightConfig } from "../model/config.js";
@@ -133,7 +134,7 @@ function workItemConfig(file: ConfigFile): WorkItemConfig {
 export function loadPipelineConfig(cwd: string = process.cwd()): PipelineConfig {
   const file = configFile(cwd);
   const labels = file.labels ?? {};
-  const specPath = stringValue(file.specPath, ".lance-nuit/work-items").replace(/\\/g, "/").replace(/\/+$/, "");
+  const specPath = stringValue(file.specPath, DEFAULT_SPEC_PATH).replace(/\\/g, "/").replace(/\/+$/, "");
 
   const stackPreflight = parseStackPreflight(file.stackPreflight);
   const extensions = parseExtensions(file.extensions);
@@ -150,7 +151,7 @@ export function loadPipelineConfig(cwd: string = process.cwd()): PipelineConfig 
     baseBranch: stringValue(file.baseBranch, "main"),
     worktreeMode: file.worktreeMode ?? "full",
     sensitivePaths: file.sensitivePaths ?? DEFAULT_SENSITIVE_PATHS,
-    specPath: specPath || ".lance-nuit/work-items",
+    specPath: specPath || DEFAULT_SPEC_PATH,
     usTokenBudget: file.usTokenBudget ?? 150_000,
     steps: file.steps ?? {},
     profiles: file.profiles ?? {},

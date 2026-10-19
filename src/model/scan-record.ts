@@ -1,7 +1,7 @@
 // runner/model/scan-record.ts
 //
 // Durable outcome of one `--scan` dispatch. Shapes only: writing and reading are
-// `state/stores/file-scan-store.ts`, and the transitions are recorded by
+// `dispatch/file-scan-store.ts`, and the transitions are recorded by
 // `dispatch/scan.ts`.
 //
 // A scan is not a run: the dispatch parent owns no run directory and no

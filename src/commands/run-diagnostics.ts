@@ -1,4 +1,4 @@
-// runner/state/diagnostics.ts
+// commands/run-diagnostics.ts
 //
 // Human-facing inspection of persisted runs. These readers deliberately walk only the
 // durable `runs/<pipeline>/<runId>` tree; they never consult the old run layout or
@@ -12,12 +12,12 @@ import type { RunJournalCounts } from "../model/journal.js";
 import type { PersistedRun } from "../model/persisted.js";
 import { createRunRef, type RunLogStore, type RunStateSnapshot, type RunStateStore } from "../model/storage-ports.js";
 import { errorMessage } from "../lib/errors.js";
-import { approvalStatus, isValidSubjectToken, rejectionStatus } from "./decisions.js";
-import { readRunJournal, type RunJournalReport } from "./run-journal.js";
-import { matchesStepSelector } from "./run-timeline.js";
-import { FileRunLogStore } from "./stores/file-run-log-store.js";
-import { FileRunStateStore } from "./stores/file-run-state-store.js";
-import { isPathWithin } from "./stores/path-safety.js";
+import { approvalStatus, isValidSubjectToken, rejectionStatus } from "../state/decisions.js";
+import { readRunJournal, type RunJournalReport } from "../state/run-journal.js";
+import { matchesStepSelector } from "../state/run-timeline.js";
+import { FileRunLogStore } from "../state/stores/file-run-log-store.js";
+import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
+import { isPathWithin } from "../lib/path-safety.js";
 
 export interface DiagnosticsOptions {
   stateStore?: RunStateStore;

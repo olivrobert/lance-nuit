@@ -2,11 +2,10 @@ import { randomUUID } from "node:crypto";
 import { access, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import type { PipelineConfig } from "../../env/config.js";
-import { resolveTicketDir } from "../../env/tickets.js";
+import { DEFAULT_SPEC_PATH, resolveTicketDir } from "../../env/tickets.js";
 import { isErrno } from "../../lib/errors.js";
 import { type ArtifactRef, createArtifactRef, type WorkItemArtifactStore } from "../../model/artifact-ports.js";
-import { isDescendantPath } from "./path-safety.js";
-import { DEFAULT_SPEC_PATH } from "./run-storage.js";
+import { isDescendantPath } from "../../lib/path-safety.js";
 
 export interface FileWorkItemArtifactStoreOptions {
   cwd?: string;

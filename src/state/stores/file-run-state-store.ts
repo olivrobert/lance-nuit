@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { DEFAULT_SPEC_PATH } from "../../env/tickets.js";
 import type { PipelineContext } from "../../model/context.js";
 import type { PersistedRun } from "../../model/persisted.js";
 import { createRunRef, type RunStateSnapshot, type RunStateStore } from "../../model/storage-ports.js";
 import { readRunSnapshot } from "../run-snapshot.js";
 import { FileRunSnapshotCatalog } from "./file-run-snapshot-catalog.js";
 import {
-  DEFAULT_SPEC_PATH,
   latestRunFile,
   pipelineRunsDir,
   resolveRunDir as resolveStoredRunDir,

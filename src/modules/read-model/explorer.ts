@@ -19,7 +19,7 @@ import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from "
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RunStopState } from "../../model/persisted.js";
 import { isValidSubjectToken, readDecisionAt } from "../../state/decisions.js";
-import { isPathWithin } from "../../state/stores/path-safety.js";
+import { isPathWithin } from "../../lib/path-safety.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
 import type { FileContentKind, FileRead, ImageRead, TreeDirectory, TreeFile, TreeNode, WorkItemTree } from "./types.js";

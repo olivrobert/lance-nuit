@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { isErrno } from "../../lib/errors.js";
 import type { PipelineContext } from "../../model/context.js";
 import { createLogRef, type LogRef, type RunLogStore, type RunRef } from "../../model/storage-ports.js";
-import { isDescendantPath, isPathWithin } from "./path-safety.js";
+import { isDescendantPath, isPathWithin } from "../../lib/path-safety.js";
 import { pipelineRunsDir } from "./run-storage.js";
 
 export interface FileRunLogStoreOptions {

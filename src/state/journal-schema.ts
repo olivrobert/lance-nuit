@@ -7,7 +7,7 @@
 // reason. A line that is not an event at all is *skipped*, a type outside the
 // contract is kept as *unknown*, and a contracted type whose payload is refused
 // is kept as *invalid* with its reason. The three counters are what tells a
-// too-strict schema from a producer bug, and `state/diagnostics.ts` exposes them.
+// too-strict schema from a producer bug, and `commands/run-diagnostics.ts` exposes them.
 //
 // Same rules as `state/schema.ts` and `state/stats/history-schema.ts`:
 //

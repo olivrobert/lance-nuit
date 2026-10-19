@@ -11,14 +11,14 @@
 // The loop itself lives in loop.ts; this file contains scan-specific behavior only.
 //
 // A scan is the only strategy that leaves a durable record
-// (`state/stores/file-scan-store.ts`). The loop stays agnostic: it calls the
+// (`dispatch/file-scan-store.ts`). The loop stays agnostic: it calls the
 // optional `onTicketStarted` / `onTicketFinished` / `onHalted` hooks, and the
 // writes happen here.
 
 import { runSupervisedCommand } from "../exec/process-runner.js";
 import { errorMessage } from "../lib/errors.js";
 import { log } from "../runtime/logging.js";
-import { FileScanStore } from "../state/stores/file-scan-store.js";
+import { FileScanStore } from "./file-scan-store.js";
 import { DispatchAbort } from "./abort.js";
 import type { DispatchEnv, DispatchOutcome, DispatchStrategy } from "./dispatch-strategy.js";
 import { attachScanRecordWriter, ScanRecordWriter, scanRecordWriterOf } from "./scan-record-writer.js";

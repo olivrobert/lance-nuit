@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ScanRecord } from "../../model/scan-record.js";
+import type { ScanRecord } from "../model/scan-record.js";
 import { FileScanStore, scanRecordFileName, scansDir } from "./file-scan-store.js";
 
 function projRoot(): string {

@@ -40,7 +40,6 @@ import {
   type RunSnapshotReader,
 } from "../run-snapshot.js";
 
-export { DEFAULT_SPEC_PATH } from "../../env/tickets.js";
 export const RUNS_DIRECTORY = "runs";
 export const STATE_FILE = "state.json";
 
