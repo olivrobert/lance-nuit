@@ -10,7 +10,7 @@
 import type { Artifact } from "../dsl/artifact.js";
 import type { PipelineContext } from "../model/context.js";
 import type { Pipeline } from "../model/definition.js";
-import { isValidSubjectToken, type RecordedApproval, recordRejection } from "../state/decisions.js";
+import { isValidSubjectToken, type RecordedApproval, recordRejection } from "../work-item-store/index.js";
 
 /**
  * Return the artifact bound to `subject`, or throw with the subjects actually

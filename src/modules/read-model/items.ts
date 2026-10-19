@@ -20,14 +20,19 @@ import { createArtifactRef } from "../../model/artifact-ports.js";
 import type { PersistedRun } from "../../model/persisted.js";
 import { isClosableStatus, isClosureCurrent, readClosureAt } from "../../state/closure.js";
 import { runProvesUnpricedSpend } from "../../state/cost-accounting.js";
-import { approvalFreshness, isValidSubjectToken, readDecisionAt, rejectionPending } from "../../state/decisions.js";
+import {
+  approvalFreshness,
+  FileWorkItemArtifactStore,
+  isValidSubjectToken,
+  readDecisionAt,
+  rejectionPending,
+} from "../../work-item-store/index.js";
 import { projectStepAttempts } from "../../state/attempt-projection.js";
 import { hasUnfinishedWork, lastPassInterrupted, owesWork } from "../../state/run-predicates.js";
 import type { HistoryEntry } from "../../state/stats/history-reader.js";
 import { readHistory } from "../../state/stats/history-reader.js";
 import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
-import { FileWorkItemArtifactStore } from "../../state/stores/file-work-item-artifact-store.js";
 import { latestLaunchByItem } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl } from "./projects.js";
 import { effectiveCwd, latestRuns, selectedRunStatus, ticketDirectories, workItemDirOf } from "./runs.js";

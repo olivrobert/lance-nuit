@@ -8,7 +8,7 @@ import type { RunnerArgs } from "../model/cli-options.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { pipelineRunsDir } from "../state/stores/run-storage.js";
 import { textArtifact } from "../dsl/artifact.js";
-import { readDecision } from "../state/decisions.js";
+import { readDecision } from "../work-item-store/decisions.js";
 import { applyApproval, applyRejection, checkUntil } from "./startup.js";
 
 const budgetArtifact = artifact("budget.json", (value) => value as { amountUsd: number });

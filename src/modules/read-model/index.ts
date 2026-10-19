@@ -1,8 +1,9 @@
 // modules/read-model/index.ts
 //
 // Public surface of the read model — the ONLY module allowed to import
-// `src/state`. The dashboard (`src/modules/ui/`) imports this file and nothing
-// below it; a Semgrep `ERROR` rule in `.semgrep.yml` enforces that direction.
+// `src/state` and `src/work-item-store`. The dashboard (`src/modules/ui/`)
+// imports this file and nothing below it; a Semgrep `ERROR` rule in
+// `.semgrep.yml` enforces that direction.
 
 export type {
   RunReport,
@@ -25,7 +26,7 @@ export {
   TEXT_LIMIT_BYTES,
 } from "./explorer.js";
 // The dashboard must refuse a reason the runner would refuse, before spawning.
-export { MAX_REJECTION_REASON } from "../../state/decisions.js";
+export { MAX_REJECTION_REASON } from "../../work-item-store/index.js";
 export { GROUP_ORDER, listItems, readItem } from "./items.js";
 export { readLaunches, readLaunchesFor } from "./launches.js";
 export {

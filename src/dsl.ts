@@ -28,8 +28,7 @@ import type {
 import type { reject } from "./dsl/preconditions.js";
 import type { FixContext } from "./model/context.js";
 import type { Pipeline } from "./model/definition.js";
-import type { decisionMatchesArtifact, pendingRejection } from "./state/decisions.js";
-import type { freshness } from "./state/provenance.js";
+import type { decisionMatchesArtifact, freshness, pendingRejection } from "./work-item-store/index.js";
 
 export type {
   HumanReviewOptions,
@@ -109,8 +108,8 @@ export type { CodexBackendOptions, CodexModel, CodexSandbox } from "./contracts/
 export { CODEX_MODEL, CODEX_SANDBOX } from "./contracts/backends/codex.js";
 export type { AsyncTemplated, FixContext, PipelineContext, Templated } from "./model/context.js";
 export type { Pipeline, StepCapture } from "./model/definition.js";
-export type { ArtifactFreshness } from "./state/provenance.js";
-export { freshness } from "./state/provenance.js";
+export type { ArtifactFreshness } from "./work-item-store/index.js";
+export { freshness } from "./work-item-store/index.js";
 
 /**
  * Failure policy for a mechanical fix. The restricted Claude tool set and

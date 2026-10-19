@@ -250,7 +250,7 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Injected-only helpers",
-    file: ["dsl/preconditions.d.ts", "state/decisions.d.ts", "state/provenance.d.ts"],
+    file: ["dsl/preconditions.d.ts", "work-item-store/decisions.d.ts", "work-item-store/provenance.d.ts"],
     names: ["reject", "decisionMatchesArtifact", "pendingRejection", "ArtifactFreshness", "freshness"],
     note: "These helpers are available on `Dsl` but are not importable from `@lance-nuit/dsl`.",
   },

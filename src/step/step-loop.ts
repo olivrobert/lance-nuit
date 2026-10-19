@@ -18,7 +18,7 @@ import { emitRunnerEvent } from "../runtime/events.js";
 import { costDecision, type RunBudget } from "../state/budget.js";
 import { controlForRun, runProvesUnpricedSpend } from "../state/cost-accounting.js";
 import { inheritChildBudgetStop } from "../state/cost-stop-events.js";
-import { fingerprintInputs, pureInputsOf } from "../state/provenance.js";
+import { fingerprintInputs, pureInputsOf } from "../work-item-store/index.js";
 
 import { latestAttemptLog, matchesStepSelector } from "../state/run-timeline.js";
 import { saveRun } from "../state/run-repository.js";

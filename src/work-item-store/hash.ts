@@ -1,7 +1,7 @@
 // Content hash shared by mechanisms that bind a decision or a produced artifact
 // to the exact content it came from:
-//   - `state/decisions.ts` - approval applies only to the approved artifact;
-//   - `state/provenance.ts` - an output applies only to the inputs that produced it.
+//   - `decisions.ts` - approval applies only to the approved artifact;
+//   - `provenance.ts` - an output applies only to the inputs that produced it.
 //
 // One algorithm and one place to review it: duplicated hashing would drift when
 // either mechanism changed.

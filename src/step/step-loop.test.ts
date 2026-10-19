@@ -23,8 +23,8 @@ import type { PipelineContext } from "../model/context.ts";
 import type { PipelineStep } from "../model/definition.ts";
 import type { Run, RunStep } from "../model/run.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
-import { sha256Text } from "../state/hash.ts";
-import { writeProvenance } from "../state/provenance.ts";
+import { sha256Text } from "../work-item-store/hash.ts";
+import { writeProvenance } from "../work-item-store/provenance.ts";
 import { readRunEvents } from "../state/run-journal.ts";
 import { finalizeRun } from "../state/run-transitions.ts";
 import { settleStepFailure } from "./non-blocking.ts";
@@ -36,7 +36,7 @@ import { commandRegistries } from "../commands/registries.js";
 import { createAbortScope } from "../runtime/abort.js";
 import { humanReview } from "../builtin-steps/lib/human-review.js";
 import { bashStep as dslBashStep, pipeline } from "../dsl.js";
-import { pendingRejection, recordApproval, recordRejection } from "../state/decisions.js";
+import { pendingRejection, recordApproval, recordRejection } from "../work-item-store/decisions.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 
 function makeRun(steps: RunStep[], maxCost?: number): Run {

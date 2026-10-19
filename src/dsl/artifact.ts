@@ -2,7 +2,7 @@ import type { Artifact, ArtifactParser } from "../model/artifact.js";
 import { createArtifactRef } from "../model/artifact-ports.js";
 import type { AsyncTemplated, PipelineContext } from "../model/context.js";
 import type { Source } from "../model/source.js";
-import { PROVENANCE_PREFIX, readSource } from "../state/provenance.js";
+import { PROVENANCE_PREFIX, readSource } from "../work-item-store/index.js";
 
 export type { Artifact, ArtifactParser } from "../model/artifact.js";
 export type { Source } from "../model/source.js";

@@ -1,4 +1,4 @@
-// runner/state/provenance.ts
+// runner/work-item-store/provenance.ts
 //
 // Input provenance of a produced artifact. A step that declares `input` binds
 // each of its outputs to the exact bytes of the inputs that produced it, so the

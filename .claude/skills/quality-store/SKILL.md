@@ -1,6 +1,6 @@
 ---
 name: quality-store
-description: "Create File-backed stores in src/state/stores/file-*.ts and src/dispatch/file-scan-store.ts. Use whenever a file matching those patterns is added or modified."
+description: "Create File-backed stores in src/state/stores/file-*.ts, src/dispatch/file-scan-store.ts and src/work-item-store/file-*.ts. Use whenever a file matching those patterns is added or modified."
 allowed-tools: Read, Write, Edit, Skill
 ---
 
@@ -15,3 +15,4 @@ allowed-tools: Read, Write, Edit, Skill
 
 - `src/state/stores/file-*.ts`
 - `src/dispatch/file-scan-store.ts`
+- `src/work-item-store/file-*.ts`

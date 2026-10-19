@@ -13,7 +13,7 @@ import {
   type PipelinePaths,
   WORK_ITEM_REGISTRY,
 } from "../model/context.js";
-import { FileWorkItemArtifactStore } from "../state/stores/file-work-item-artifact-store.js";
+import { FileWorkItemArtifactStore } from "../work-item-store/index.js";
 
 export { agentBackendRegistryOf, workItemRegistryOf } from "../model/context.js";
 

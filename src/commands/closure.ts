@@ -10,7 +10,7 @@ import type { RunnerArgs } from "../model/cli-options.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { log } from "../runtime/logging.js";
 import { closureOf, isClosableStatus, readClosureAt, removeClosureAt, writeClosureAt } from "../state/closure.js";
-import { decisionActor } from "../state/decisions.js";
+import { decisionActor } from "../work-item-store/index.js";
 import { readRunSnapshot } from "../state/run-snapshot.js";
 import { latestRunFile } from "../state/stores/run-storage.js";
 import { commandRegistries } from "./registries.js";

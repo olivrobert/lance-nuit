@@ -3,7 +3,7 @@
 import { buildPipelineContext } from "../pipeline/context.js";
 import type { RunnerArgs } from "../model/cli-options.js";
 import { log } from "../runtime/logging.js";
-import { cleanLogs, inspectTicket, logsForTicket } from "./run-diagnostics.js";
+import { cleanLogs, inspectTicket, logsForTicket } from "./diagnostics-readers.js";
 import { FileRunLogStore } from "../state/stores/file-run-log-store.js";
 import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
 import type { RunnerCommand } from "./runner-command.js";

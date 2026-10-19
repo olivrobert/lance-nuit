@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { PersistedRun } from "../../model/persisted.js";
-import { sha256Text } from "../../state/hash.js";
+import { sha256Text } from "../../work-item-store/index.js";
 
 export const SPEC_PATH = ".lance-nuit/work-items";
 

@@ -36,7 +36,7 @@ import { reject } from "../../dsl/preconditions.js";
 import { declareApproval, inferredPipelineName } from "../../dsl/work-item-assembly.js";
 import type { PipelineContext } from "../../model/context.js";
 import type { RunStopState } from "../../model/persisted.js";
-import { decisionMatchesArtifact, readDecision, rejectionStatus } from "../../state/decisions.js";
+import { decisionMatchesArtifact, readDecision, rejectionStatus } from "../../work-item-store/index.js";
 import { abandonWorkItemBranch } from "./branch.js";
 import { workItemEscalateStep } from "./work-item-steps.js";
 

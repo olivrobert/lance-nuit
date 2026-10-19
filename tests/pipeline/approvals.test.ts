@@ -21,7 +21,7 @@ import {
   recordApproval,
   recordRejection,
   rejectionPending,
-} from "../../src/state/decisions.js";
+} from "../../src/work-item-store/decisions.js";
 
 const step = () => bashStep({ id: "noop", name: "Noop", command: "true" });
 

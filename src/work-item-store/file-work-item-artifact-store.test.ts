@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createArtifactRef } from "../../model/artifact-ports.ts";
+import { createArtifactRef } from "../model/artifact-ports.ts";
 import { FileWorkItemArtifactStore } from "./file-work-item-artifact-store.ts";
 
 const roots: string[] = [];

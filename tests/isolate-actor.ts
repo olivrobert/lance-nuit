@@ -2,7 +2,7 @@
 //
 // Suite preload: drop the `LANCENUIT_ACTOR` the developer's shell may export.
 //
-// A decision records that name as its author (state/decisions.ts), so an ambient
+// A decision records that name as its author (work-item-store/decisions.ts), so an ambient
 // value turns every "anonymous human" assertion into the developer's name — a
 // failure that reproduces neither in CI nor on another machine.
 //
