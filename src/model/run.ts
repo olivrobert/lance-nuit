@@ -68,5 +68,5 @@ export type RunStepView = Readonly<RunStep>;
 /** Read-only view of a run for the consumers that inspect or display it — the
  *  console report, the statistics projection — and must never move the run
  *  forward. Execution transitions take a `Run` and live in
- *  `state/run-transitions.ts`. Shallow, like `RunStepView`. */
+ *  `run-record/run-transitions.ts`. Shallow, like `RunStepView`. */
 export type RunView = Readonly<Omit<Run, "steps">> & { readonly steps: readonly RunStepView[] };

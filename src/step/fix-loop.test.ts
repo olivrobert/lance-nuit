@@ -11,7 +11,7 @@ import type { Run, RunStep } from "../model/run.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { buildFixContext, type FixLoopDeps, runFixLoop } from "./fix-loop.ts";
 import { chooseFixBackend } from "./fix-loop-runtime.ts";
-import { makeRunStep } from "../state/run-step.ts";
+import { makeRunStep } from "../run-record/run-step.ts";
 import { executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
 import { commandRegistries } from "../commands/registries.js";
 import { createAbortScope } from "../runtime/abort.js";

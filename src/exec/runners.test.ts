@@ -7,7 +7,7 @@ import {
   type AgentSession,
 } from "../contracts/backends.ts";
 import { AGENT_BACKEND_REGISTRY, type PipelineContext } from "../model/context.ts";
-import { makeRunStep } from "../state/run-step.ts";
+import { makeRunStep } from "../run-record/run-step.ts";
 import { textArtifact } from "../dsl/artifact.ts";
 import { executeStep, normalizeAgentResult, outputFieldsOf, runWithAgent } from "./runners.ts";
 

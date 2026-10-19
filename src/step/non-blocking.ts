@@ -5,7 +5,7 @@
 
 import type { Run, RunStep } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
-import { absorbStepFailure, updateStep } from "../state/run-transitions.js";
+import { absorbStepFailure, updateStep } from "../run-record/index.js";
 
 /**
  * Absorb a non-blocking step failure: keep the reason visible in JSON and the

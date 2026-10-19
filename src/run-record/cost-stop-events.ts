@@ -1,8 +1,8 @@
-// runner/state/cost-stop-events.ts
+// runner/run-record/cost-stop-events.ts
 //
 // The two run-level cost stops: how a `costDecision` that withholds work, or a
 // live guard's kill, is RECORDED — on the shared ledger, on the run, and in the
-// journal. `state/budget.ts` decides; `state/cost-accounting.ts` owns the figures
+// journal. `run-record/budget.ts` decides; `run-record/cost-accounting.ts` owns the figures
 // and the uncertainty they prove; this module owns the stop itself, so no gate
 // synchronizes those three writes by hand.
 //
@@ -16,7 +16,7 @@
 // Every gate that withholds work therefore records the stop here, and records it
 // where the decision is taken rather than where the run is finalized: the run
 // journal is append-only, so the fact survives the next generation rewriting the
-// snapshot. `outcome.stopKind` (`finalizeRun`, `state/run-transitions.ts`) is the same fact on the
+// snapshot. `outcome.stopKind` (`finalizeRun`, `run-record/run-transitions.ts`) is the same fact on the
 // snapshot side.
 //
 // ONCE per stop, per generation. The ledger carries the latch: it is created once

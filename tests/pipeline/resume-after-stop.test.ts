@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { AgentCapabilities, AgentRequest } from "../../src/contracts/backends.js";
 import { createDefaultAgentBackendRegistry } from "../../src/engine/default-registry.js";
 import { buildPipelineContext } from "../../src/pipeline/context.js";
-import { finalizeRun } from "../../src/state/run-transitions.js";
+import { finalizeRun } from "../../src/run-record/run-transitions.js";
 import { loadOrCreateRun } from "../../src/boot/resume.js";
 import { NULL_RUN_OUTPUT } from "../../src/runtime/run-output.js";
 import { executeRunSteps, stepLoopDeps } from "../../src/step/step-loop.js";

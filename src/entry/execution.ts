@@ -22,13 +22,17 @@ import { type RunnerArgs, UNTIL_STOP_EXIT_CODE } from "../model/cli-options.js";
 import type { AbortScope } from "../runtime/abort.js";
 import { subscribe } from "../runtime/events.js";
 import { log } from "../runtime/logging.js";
-import { finalizeRun } from "../state/run-transitions.js";
+import {
+  appendRunEvent,
+  discardedResumeNotice,
+  type ExplicitRunSelection,
+  finalizeRun,
+  saveRun,
+  selectExplicitRun,
+  wouldResumeLatest,
+} from "../run-record/index.js";
 import { emitRunStats } from "../run-stats/index.js";
-import { appendRunEvent } from "../state/run-journal.js";
-import { discardedResumeNotice, selectExplicitRun, type ExplicitRunSelection } from "../state/run-selection.js";
 import { loadOrCreateRun } from "../boot/resume.js";
-import { saveRun } from "../state/run-repository.js";
-import { wouldResumeLatest } from "../state/stores/run-storage.js";
 import type { RunOutcome } from "../step/step-loop.js";
 import type { ReadyRun } from "./startup.js";
 

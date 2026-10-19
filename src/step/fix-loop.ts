@@ -5,7 +5,7 @@
 
 import type { PipelineContext } from "../model/context.js";
 import type { Run, RunStep } from "../model/run.js";
-import type { RunBudget } from "../state/budget.js";
+import type { RunBudget } from "../run-record/index.js";
 import { type FixLoopOpts, prepareFixRun } from "./fix-loop-runtime.js";
 import { runFixRetryLoop } from "./fix-loop-strategies.js";
 

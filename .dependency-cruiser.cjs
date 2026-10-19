@@ -106,9 +106,9 @@ module.exports = {
       name: "no-persistence-barrel",
       severity: "error",
       comment:
-        "`state/stores/persistence.ts` hid pipeline loading behind a storage barrel; it is gone. Import the owning module instead.",
+        "A storage barrel, `stores/persistence.ts`, hid pipeline loading; it is gone. Import the owning module instead.",
       from: {},
-      to: { path: "^src/state/stores/persistence\\.ts$" },
+      to: { path: "^src/run-record/stores/persistence\\.ts$" },
     },
   ],
   options: {

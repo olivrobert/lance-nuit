@@ -11,8 +11,7 @@
 import { readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { PersistedRun } from "../../model/persisted.js";
-import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
-import { runLockHolder } from "../../state/stores/run-storage.js";
+import { FileRunStateStore, runLockHolder } from "../../run-record/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, workItemsRoot } from "./projects.js";
 import type { ItemStatus } from "./types.js";
 

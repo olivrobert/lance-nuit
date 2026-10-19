@@ -7,8 +7,8 @@
 // lines the live feed writes, and raw backend stream lines. Only the first kind
 // is contracted here; the other two are read back as `unknown` entries and kept.
 //
-// Reading is tolerant and writing is strict: `state/journal-schema.ts` validates
-// a line against the union and never discards it, `state/run-journal.ts` appends
+// Reading is tolerant and writing is strict: `run-record/journal-schema.ts` validates
+// a line against the union and never discards it, `run-record/run-journal.ts` appends
 // through the union so a producer cannot invent a field name.
 
 import type { AgentSession, StepControl, StepFailCause, StepUsage } from "../contracts/backends.js";

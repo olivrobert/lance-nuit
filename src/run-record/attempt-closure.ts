@@ -1,4 +1,4 @@
-// runner/state/attempt-closure.ts
+// runner/run-record/attempt-closure.ts
 //
 // The single writer of an attempt's end. Normal completion (`finishAttempt`), a
 // SIGINT/SIGTERM interruption (`abortRun`) and a hard crash detected on resume
@@ -7,7 +7,7 @@
 // set of rules.
 //
 // The spend the attempt reports is not written here: `chargeClosedAttempt`
-// (`state/cost-accounting.ts`) records it on the attempt and adds it to the step
+// (`run-record/cost-accounting.ts`) records it on the attempt and adds it to the step
 // total, so that every figure in the ledger has one owner. This module keeps what
 // is not money: the status, the timestamps, the session, the log path, and the
 // event.
@@ -21,7 +21,7 @@ import type { PersistedAttempt } from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
 import { chargeClosedAttempt, type SettledSpend } from "./cost-accounting.js";
 import { appendRunEvent } from "./run-journal.js";
-import { splitAttemptStats } from "./stats/stats.js";
+import { splitAttemptStats } from "./cost-figures.js";
 
 /** True when the backend measured anything at all: a token count or a price. */
 export function hasSpendFigures(stats?: AttemptStats): boolean {

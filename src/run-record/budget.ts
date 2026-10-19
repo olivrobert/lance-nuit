@@ -1,10 +1,10 @@
-// runner/state/budget.ts
+// runner/run-record/budget.ts
 //
 // The run cost ledger and the stop decisions read off it. PURE helpers, shared by
 // the step loop, the fix loop, and the composed-launch gates.
 //
 // This module declares the ledger; it does not fill it. Every figure in it is
-// written by `state/cost-accounting.ts` (`chargeAttemptToLedger`,
+// written by `run-record/cost-accounting.ts` (`chargeAttemptToLedger`,
 // `chargeChildReconciliation`), which is the only place spend moves.
 
 /**
@@ -32,12 +32,12 @@ export interface RunBudget {
    * guard. The retry loops break on the decision without reporting upward, so the
    * shared ledger is where the stop is recorded; the step loop reads it to name
    * the stop reason in the report instead of blaming the step that happens to be
-   * red. Written by `recordCostStop` (`state/cost-stop-events.ts`) only. */
+   * red. Written by `recordCostStop` (`run-record/cost-stop-events.ts`) only. */
   unaccountedStop?: boolean;
   /** `run.cost.unaccounted` has already been journaled for this generation.
    * Several gates observe the same stop in a row (admission after a retry gate,
    * a composed launch after admission), and the journal must carry one fact per
-   * stop, not one per observer. Owned by `state/cost-stop-events.ts`. */
+   * stop, not one per observer. Owned by `run-record/cost-stop-events.ts`. */
   unaccountedJournaled?: boolean;
   /** A live cost guard killed an attempt mid-flight for crossing `remaining`.
    * `cumulative` may still sit under the ceiling — the guard fires on an estimate

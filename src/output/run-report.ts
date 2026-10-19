@@ -3,8 +3,7 @@ import type { AgentBackendRegistry, AgentSession, BackendSpec, StepControl, Step
 import { backendSpecForStep } from "../contracts/backends.js";
 import type { StepStatus } from "../model/persisted.js";
 import type { RunStepView, RunView } from "../model/run.js";
-import { aggregateControl, aggregateUsage } from "../state/cost-accounting.js";
-import { replayedAfterInterruption } from "../state/run-predicates.js";
+import { aggregateControl, aggregateUsage, replayedAfterInterruption } from "../run-record/index.js";
 
 export interface RunReportOutcome {
   failed: boolean;
@@ -62,7 +61,7 @@ export interface RunReportResource {
  *  `on_failure.resume_session` policy, or a failed step the next attempt reopens.
  *
  *  `"inspect"`: the session survived, but NOTHING will reopen it. An interrupted
- *  run replays its step with a FRESH session (`src/state/run-transitions.ts`,
+ *  run replays its step with a FRESH session (`src/run-record/run-transitions.ts`,
  *  "fresh attempt, no session resume"), so the command is only there for a human
  *  who wants to read the conversation by hand. Printing it without that caveat
  *  reads as a promise the runner does not keep. */

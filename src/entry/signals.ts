@@ -11,7 +11,7 @@ import type { AbortScope } from "../runtime/abort.js";
 import { liveAttemptCost, liveAttemptModel } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
 import { emitRunStats } from "../run-stats/index.js";
-import { abortRun } from "../state/run-transitions.js";
+import { abortRun } from "../run-record/index.js";
 import { NO_STACK_STOP, type StackStop } from "./stack-stop.js";
 
 /**

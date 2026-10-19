@@ -1,4 +1,4 @@
-// state/journal-schema.ts
+// run-record/journal-schema.ts
 //
 // Runtime schema of the run journal (`events.jsonl`), the read side of the
 // contract declared in `model/journal.ts`.
@@ -9,7 +9,7 @@
 // is kept as *invalid* with its reason. The three counters are what tells a
 // too-strict schema from a producer bug, and `commands/diagnostics-readers.ts` exposes them.
 //
-// Same rules as `state/schema.ts` and `run-stats/history-schema.ts`:
+// Same rules as `run-record/schema.ts` and `run-stats/history-schema.ts`:
 //
 // - `z.looseObject` everywhere, so a field added by a later release does not make
 //   the journal unreadable by an earlier one, and vice versa.
@@ -27,7 +27,7 @@
 // The cost of getting this wrong is not academic. `closeAttempt` appends
 // `step.attempt.finished` BEFORE it writes the snapshot: a crash in that window
 // leaves the attempt's price in the journal alone. `reconcileStepSpend`
-// (`state/run-projection.ts`) rebuilds the step total from those events, so an
+// (`run-record/run-projection.ts`) rebuilds the step total from those events, so an
 // event refused for a mistyped `kind` would read as a free attempt and let the
 // resume spend past `max_cost_usd`.
 

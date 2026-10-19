@@ -9,8 +9,7 @@ import { backendSpecForStep } from "../contracts/backends.js";
 import type { RunOutcomeState } from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
 import type { RunEventStore, RunLogStore } from "../model/storage-ports.js";
-import { relativeRunPath } from "../state/run-journal.js";
-import { deriveRunStatus, isResumableStatus } from "../state/run-verdict.js";
+import { deriveRunStatus, isResumableStatus, relativeRunPath } from "../run-record/index.js";
 import {
   type ProjectionAccumulator,
   projectStepStats,

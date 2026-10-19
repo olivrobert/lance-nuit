@@ -14,8 +14,16 @@ import { deliversOutputs, resolveTemplateAsync } from "../model/definition.js";
 import type { RunStopState } from "../model/persisted.js";
 import type { Run, RunStep, StepDefinition } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
-import { costDecision, type RunBudget } from "../state/budget.js";
-import { recordCostStop } from "../state/cost-stop-events.js";
+import {
+  appendRunEvent,
+  costDecision,
+  lastPassInterrupted,
+  owesWork,
+  recordCostStop,
+  type RunBudget,
+  stopRun,
+  updateStep,
+} from "../run-record/index.js";
 import {
   adoptOutputs,
   inputsUnchanged,
@@ -23,9 +31,6 @@ import {
   stepFreshness,
   type UnavailableSource,
 } from "../work-item-store/index.js";
-import { appendRunEvent } from "../state/run-journal.js";
-import { lastPassInterrupted, owesWork } from "../state/run-predicates.js";
-import { stopRun, updateStep } from "../state/run-transitions.js";
 import { absorbNonBlocking } from "./non-blocking.js";
 
 /** Reason logged when declared inputs still match every produced output. */

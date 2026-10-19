@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { splitAttemptStats } from "./stats.js";
+import { splitAttemptStats } from "./cost-figures.js";
 
 test("stats: validates the integration contract", () => {
   const { control, usage } = splitAttemptStats({

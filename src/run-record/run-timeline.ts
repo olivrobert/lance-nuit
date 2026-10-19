@@ -1,4 +1,4 @@
-// runner/state/run-timeline.ts
+// runner/run-record/run-timeline.ts
 //
 // Step logs and informative markdown rendering for a run.
 

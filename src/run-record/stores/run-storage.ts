@@ -1,4 +1,4 @@
-// runner/state/stores/run-storage.ts
+// runner/run-record/stores/run-storage.ts
 //
 // Run locations. Each work item has a diagnostic space separated by pipeline:
 //

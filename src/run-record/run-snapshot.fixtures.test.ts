@@ -1,4 +1,4 @@
-// Real snapshots must stay readable: the schema in `state/schema.ts` is the
+// Real snapshots must stay readable: the schema in `run-record/schema.ts` is the
 // single validator, and these fixtures are the contract it must not narrow.
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

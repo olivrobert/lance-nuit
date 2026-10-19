@@ -1,4 +1,4 @@
-// runner/state/run-transitions.ts
+// runner/run-record/run-transitions.ts
 //
 // The owner of run and step transitions during execution: status, failure
 // reason, verdict fields, timestamps, `run.outcome` and the fields that must
@@ -24,10 +24,10 @@
 //                         last snapshot.
 //
 // Restoration is not a transition and is not here: `boot/resume.ts` and
-// `state/run-projection.ts` rebuild statuses from the snapshot and the journal.
+// `run-record/run-projection.ts` rebuild statuses from the snapshot and the journal.
 // The persisted child references of a composed run have their own owner
-// (`state/child-transitions.ts`). Attempt closure has its own owner
-// (`state/attempt-closure.ts`); the figures belong to `state/cost-accounting.ts`.
+// (`run-record/child-transitions.ts`). Attempt closure has its own owner
+// (`run-record/attempt-closure.ts`); the figures belong to `run-record/cost-accounting.ts`.
 //
 // After `abortRun`, the run is settled by the interruption. What is still
 // allowed: the closure of the killed attempt (done by `abortRun` itself), the

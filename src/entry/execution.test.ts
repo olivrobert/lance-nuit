@@ -3,7 +3,7 @@ import { textArtifact } from "../dsl/artifact.ts";
 import type { RunnerArgs } from "../model/cli-options.ts";
 import type { PipelineStep } from "../model/definition.ts";
 import type { Run, RunStep } from "../model/run.ts";
-import { makeRunStep, type StepStateInput } from "../state/run-step.ts";
+import { makeRunStep, type StepStateInput } from "../run-record/run-step.ts";
 import { announceRun } from "./execution.ts";
 
 // `announceRun` prints what a resume will NOT replay. Its predicate has to stay

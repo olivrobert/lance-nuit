@@ -14,7 +14,7 @@
 import type { AgentSession, AttemptStats, StepFailCause, StepFailKind } from "../contracts/backends.js";
 import type { PersistedAttempt } from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
-import type { RunBudget } from "../state/budget.js";
+import type { RunBudget } from "../run-record/index.js";
 
 /** `step` replays the step command (initial, rerun, or retry after a fix);
  * `fix` is a backend repair pass. The distinction matters because

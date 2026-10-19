@@ -66,7 +66,9 @@ run's journal and ledger: what each step did and how its last pass ended
 sessions it opened, and what it cost against the budget. The deliverables live
 beside it, in the work item: the artifacts in `artifacts/` and their records in
 `artifacts/.provenance/`. They outlive the run, so a new run, `--fresh`
-included, finds them as the last one left them.
+included, finds them as the last one left them. The code that owns the run
+record is the `src/run-record/` module; the rest of the runner reaches it
+through `run-record/index.ts` only.
 
 The two answer different questions, and the mode decides which one says what
 remains to do:
@@ -255,7 +257,7 @@ retries, sessions, profile attribution, usage/cost control data, the highest
 attempt number allocated per step (`last_attempt`), and the run-level verdict,
 totals, and cost decisions. It does **not** carry the attempts or the last
 rendered command: the attempts are projected from the journal on resume, and the
-command is the whole agent prompt, kept in memory (`state/run-repository.ts`
+command is the whole agent prompt, kept in memory (`run-record/run-repository.ts`
 is the one writer of the snapshot, and `model/run.ts` marks both fields as
 runtime-only). Each attempt also copies the command it was given to
 `command.txt` beside its log, once, when it starts; that copy is diagnostic,
@@ -310,12 +312,12 @@ pipeline, so a run created without `.reconcile()` is reconciled from the first
 invocation that loads a definition declaring it (for the way back, see
 [switching back to the default mode](dsl.md#reconcile-mode)).
 
-`state/` only reads, projects and reconciles
-(`state/run-projection.ts`): it reconciles each persisted step with the attempts
+`run-record/` only reads, projects and reconciles
+(`run-record/run-projection.ts`): it reconciles each persisted step with the attempts
 the journal holds and settles the attempts a crash left running, without ever
 knowing about a pipeline definition.
 
-Readers validate a snapshot against a runtime schema (`state/schema.ts`) that
+Readers validate a snapshot against a runtime schema (`run-record/schema.ts`) that
 mirrors the `PersistedRun` interfaces. Unknown fields are kept, so a snapshot
 written by a later release stays readable, and fields an early release could
 omit (`retries`) are normalized on read. Discovery and reporting remain
@@ -443,7 +445,7 @@ intentional recovery action.
 An attempt is closed exactly once, whichever path ends it: a normal completion in
 the step loop, a SIGINT/SIGTERM caught by the signal handler, or a hard crash
 detected when the run is resumed. The three paths go through the same writer
-(`state/attempt-closure.ts`), which sets the attempt status and `finished_at`,
+(`run-record/attempt-closure.ts`), which sets the attempt status and `finished_at`,
 normalizes its control data, charges it (see
 [Where spend is written](budgets-timeouts.md#where-spend-is-written)), and appends
 one `step.attempt.finished` event. A second closer finds the attempt no longer
@@ -482,8 +484,8 @@ A resume reads two files that were written at different instants, and a crash
 can leave either one behind the other. Rather than rebuilding everything from the
 events, each concept has one authoritative record, and a documented rule for the
 case where the other record knows more. `boot/resume.ts` assembles the run from
-the definition and the projection; `state/run-projection.ts` and
-`state/attempt-projection.ts` apply the rules below; `state/cost-accounting.ts`
+the definition and the projection; `run-record/run-projection.ts` and
+`run-record/attempt-projection.ts` apply the rules below; `run-record/cost-accounting.ts`
 owns the spend rules among them (`projectStepSpend`, `restoreAttemptSpend`,
 `restoreRunTotals`). None of them charges anything: a figure read back is a
 projection of spend already accounted for when the attempt closed.
@@ -497,7 +499,7 @@ projection of spend already accounted for when the attempt closed.
 | Run totals (`total_control`, `total_usage`) | derived from the steps | materialized by `finalizeRun` and `abortRun`; read through `controlForRun` / `usageForRun` | Trusted on a **terminal** snapshot only (finalized, and no executable step left under the current definition); dropped on a live resume (`restoreRunTotals`). Every charge that reaches the run — an attempt to the ledger, a child reconciliation — drops them too, so a total from a previous generation never hides spend incurred after it. |
 | Run status, outcome, `aborted`, `stopped_reason` | snapshot | — | Restored as persisted on a terminal snapshot; on a live resume they describe the previous invocation's ending and are reset to a running state. A `RUNNING` (or resumable `ABORTED`) snapshot whose steps are all settled is not terminal: it owes a `finalizeRun`, and is loaded live so the next invocation stamps it. |
 | `budget_exceeded`, `cost_unaccounted`, `allow_unmetered`, `budget_approved` | snapshot | budget ledger flags on resume | The journal is a trace, never the source. `--budget` clears `budget_exceeded` and nothing else; `cost_unaccounted` is a latch nothing clears, and a snapshot written before it existed reads the same fact from the attempts' `cost_unknown`; a new `--allow-unmetered` is applied once at boot and journaled then. |
-| Composed child reference (`status`, `runId`, `outcome`, in the parent snapshot) | parent snapshot | — | The parent's own progress record for one child call, written by `state/child-transitions.ts`: `done` and `skipped` are final and never re-entered; `pending`, `running` and `failed` are re-entered by the next generation under the same bound `runId`. The child run's verdict lives in the child snapshot; the reference carries a copy of its outcome as the parent step's answer. |
+| Composed child reference (`status`, `runId`, `outcome`, in the parent snapshot) | parent snapshot | — | The parent's own progress record for one child call, written by `run-record/child-transitions.ts`: `done` and `skipped` are final and never re-entered; `pending`, `running` and `failed` are re-entered by the next generation under the same bound `runId`. The child run's verdict lives in the child snapshot; the reference carries a copy of its outcome as the parent step's answer. |
 | Composed child identity (`pipeline.child.started`) | journal | — | The reference's `runId` alone is not proof the child started; the start fact lives in the journal only, which is why an unreadable journal fails the resume instead of reading as empty. |
 | Composed child spend (`accountedCostUsd`, `accountedDurationMs`, `accountedUsage`) | parent snapshot | the parent node's `control` and `usage`, the parent ledger | What the parent already charged for this child (`chargeChildReconciliation`). A resumed child re-reports its whole history and is charged by difference; a reference reloaded from a snapshot written before the last reconciliation is charged the missing difference again, never twice. |
 | Location (`worktree`, `cwd`) | snapshot | — | Rewritten by every resume with the invocation's own location. |
@@ -517,7 +519,7 @@ above exist for:
 | Attempt end (`finishAttempt`) | `closeAttempt` (`step.attempt.finished`, step total in memory) → verdict → ledger → snapshot | a priced attempt absent from the step total | `projectStepSpend` rebuilds the step total from the journal when it holds more |
 | Step status (`updateStep`) | `step.status.changed` → snapshot | a step the journal finished and the snapshot still runs | `reconcileStepStatus`, terminal event over unfinished snapshot |
 | Clean stop / interruption / verdict (`stopRun`, `abortRun`, `finalizeRun`) | event → snapshot | a `run.finished` (or `run.stopped`, `run.aborted`) with a snapshot that still says `RUNNING` | the settled-but-unfinalized rule: the run is resumed and finalized again, so the journal carries a second `run.finished`; readers take the last one |
-| Composed child launch (`bindChildRun`, `recordChildStarted`) | parent snapshot (reference `running`, bound to its `runId`) → child run booted (child snapshot) → `pipeline.child.started` | a reference with a `runId` and no start event, or a start event with a child snapshot that later went missing | the reference alone is not proof the child started, so the parent retries the initialization under the same id; once the start event is durable, a missing or damaged child snapshot is refused instead of becoming a second child (`state/child-transitions.ts` owns this rule) |
+| Composed child launch (`bindChildRun`, `recordChildStarted`) | parent snapshot (reference `running`, bound to its `runId`) → child run booted (child snapshot) → `pipeline.child.started` | a reference with a `runId` and no start event, or a start event with a child snapshot that later went missing | the reference alone is not proof the child started, so the parent retries the initialization under the same id; once the start event is durable, a missing or damaged child snapshot is refused instead of becoming a second child (`run-record/child-transitions.ts` owns this rule) |
 | Composed child settlement (`settleChild`) | `chargeChildReconciliation` (`pipeline.child.cost.reconciled`, node total and ledger in memory) → `pipeline.child.finished` → parent snapshot | a finished, reconciled child the parent snapshot still calls `running`, with `accounted*` figures behind the charge | the reference is re-entered: the child snapshot is terminal, so nothing executes; the reconciliation charges the difference the snapshot missed, and the settlement is journaled again — readers take the last `pipeline.child.finished` |
 
 A crash **before** the event leaves nothing of the transition: the attempt never

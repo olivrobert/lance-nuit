@@ -6,7 +6,7 @@ import type { RunnerEvent, RunnerMessageLevel } from "../runtime/events.js";
 import { setRunnerLiveFeed } from "../runtime/live-feed.js";
 import { setLogInterceptor } from "../runtime/logging.js";
 import { CompositeRunOutput, RunnerEventOutput } from "../runtime/run-output.js";
-import { makeRunStep } from "../state/run-step.ts";
+import { makeRunStep } from "../run-record/run-step.ts";
 import { FileLiveFeed } from "./live-feed.ts";
 import { ConsoleRunOutput, LiveFeedOutput } from "./run-output.ts";
 

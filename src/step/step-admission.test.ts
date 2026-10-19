@@ -12,8 +12,8 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { pendingRejection, recordRejection } from "../work-item-store/decisions.js";
 import { fingerprintInputs, markInFlight, writeProvenance } from "../work-item-store/provenance.js";
-import { readRunEvents } from "../state/run-journal.js";
-import { makeRunStep } from "../state/run-step.js";
+import { readRunEvents } from "../run-record/run-journal.js";
+import { makeRunStep } from "../run-record/run-step.js";
 import { admitStep, checkInputs } from "./step-admission.js";
 
 const step = { def: { id: "guard", name: "Guard" } } as unknown as RunStep;

@@ -7,7 +7,7 @@
 // Middleware lives here rather than in attempt-chain.ts because each middleware is
 // tied to its bookkeeping; the chain itself remains runner-agnostic.
 //
-// The attempt itself is closed once, by `closeAttempt` (state/attempt-closure.ts):
+// The attempt itself is closed once, by `closeAttempt` (run-record/attempt-closure.ts):
 // status, stats, merge into the step total and the `step.attempt.finished` event.
 // `finishAttempt` below is the one caller of that closure for a tracked attempt,
 // on the returned-record path and on the rejection path alike, and it charges the
@@ -34,9 +34,22 @@ import type { PersistedAttempt } from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
 import { clearLiveAttemptCost } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
-import { type RunBudget, remainingBudget } from "../state/budget.js";
-import { chargeAttemptToLedger, isUnpricedSpend, type SettledSpend } from "../state/cost-accounting.js";
-import { recordCostStop } from "../state/cost-stop-events.js";
+import {
+  appendRunEvent,
+  chargeAttemptToLedger,
+  closeAttempt,
+  isUnpricedSpend,
+  logicalAttemptLogPath,
+  nextAttemptLogPath,
+  recordCostStop,
+  recordStepVerdict,
+  relativeRunPath,
+  remainingBudget,
+  type RunBudget,
+  saveRun,
+  type SettledSpend,
+  writeAttemptCommand,
+} from "../run-record/index.js";
 import {
   fingerprintInputs,
   type InputFingerprint,
@@ -48,11 +61,6 @@ import {
   revisedInPlace,
   writeProvenance,
 } from "../work-item-store/index.js";
-import { appendRunEvent, relativeRunPath } from "../state/run-journal.js";
-import { closeAttempt } from "../state/attempt-closure.js";
-import { logicalAttemptLogPath, nextAttemptLogPath, writeAttemptCommand } from "../state/run-timeline.js";
-import { saveRun } from "../state/run-repository.js";
-import { recordStepVerdict } from "../state/run-transitions.js";
 import {
   type AttemptContext,
   type AttemptHandler,

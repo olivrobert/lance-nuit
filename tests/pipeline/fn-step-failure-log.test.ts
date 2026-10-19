@@ -6,7 +6,7 @@ import type { Run } from "../../src/model/run.js";
 import { buildPipelineContext } from "../../src/pipeline/context.js";
 import type { RunnerEvent } from "../../src/runtime/events.js";
 import type { RunOutput } from "../../src/runtime/run-output.js";
-import { makeRunStep } from "../../src/state/run-step.js";
+import { makeRunStep } from "../../src/run-record/run-step.js";
 import { executeRunSteps, stepLoopDeps } from "../../src/step/step-loop.js";
 
 test("a code step that throws leaves its message and stack in the output.log the console points to", async () => {

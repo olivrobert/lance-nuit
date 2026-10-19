@@ -7,9 +7,9 @@ import type { PipelineStep, StepFailure } from "../model/definition.ts";
 import type { Run, RunStep } from "../model/run.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { createDefaultAgentBackendRegistry } from "../engine/default-registry.ts";
-import { stepLogPath } from "../state/run-timeline.ts";
+import { stepLogPath } from "../run-record/run-timeline.ts";
 import { type OnFailureContext, onFailureHandlerFor, rerunHandler } from "./on-failure.ts";
-import { makeRunStep } from "../state/run-step.ts";
+import { makeRunStep } from "../run-record/run-step.ts";
 import { createAbortScope } from "../runtime/abort.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 

@@ -16,7 +16,7 @@
 // is a 404 before any directory is opened; a file path is resolved by the read
 // model, which checks containment lexically and again after `realpath`.
 //
-// The module never imports `src/state`: every fact it serves comes from
+// The module never imports `src/run-record`: every fact it serves comes from
 // `src/modules/read-model/`, and a Semgrep `ERROR` rule fails the build if that
 // direction is ever reversed.
 

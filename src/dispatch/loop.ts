@@ -14,8 +14,7 @@ import { DISPATCH_CHILD_ENV, selfSpawnRunner } from "../exec/self-spawn.js";
 import type { PersistedRun } from "../model/persisted.js";
 import { UNTIL_STOP_EXIT_CODE } from "../model/cli-options.js";
 import { log } from "../runtime/logging.js";
-import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
-import { isPersistedRunComplete } from "../state/run-predicates.js";
+import { FileRunStateStore, isPersistedRunComplete } from "../run-record/index.js";
 import { DispatchAbort } from "./abort.js";
 import type { DispatchClassification, DispatchEnv, DispatchOutcome, DispatchStrategy } from "./dispatch-strategy.js";
 

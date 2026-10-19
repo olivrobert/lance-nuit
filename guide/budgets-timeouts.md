@@ -330,7 +330,7 @@ promises the stop it can prove, not an exact invoice.
 ### Where spend is written
 
 One module writes every figure the runner accounts for:
-`src/state/cost-accounting.ts`. It also owns the reads that say what a figure
+`src/run-record/cost-accounting.ts`. It also owns the reads that say what a figure
 proves, so changing a cost rule means changing that file and checking the
 behaviors it names, rather than looking for whoever else might touch a budget.
 

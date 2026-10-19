@@ -1,4 +1,4 @@
-// runner/state/run-journal.ts
+// runner/run-record/run-journal.ts
 //
 // Canonical append-only run journal. `state.json` provides fast resume; this file
 // keeps execution facts and attempts. The snapshot no longer holds the attempts:

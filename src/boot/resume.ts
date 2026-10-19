@@ -1,8 +1,8 @@
 // runner/boot/resume.ts
 //
 // Build or resume a run: load the definition, apply filters, merge it with the
-// state `state/run-projection.ts` read from storage, and create the initial
-// snapshot. Resume is a boot concern: `state/` only reads, projects and
+// state `run-record/run-projection.ts` read from storage, and create the initial
+// snapshot. Resume is a boot concern: `run-record/` only reads, projects and
 // reconciles, it does not know how to turn a definition into a run.
 
 import { basename } from "node:path";
@@ -20,19 +20,28 @@ import type { RunEventStore, RunLogStore, RunStateStore } from "../model/storage
 import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import { log } from "../runtime/logging.js";
-import { restoreRunTotals } from "../state/cost-accounting.js";
-import { isChildSettled } from "../state/child-transitions.js";
-import { appendRunEvent, readRunEvents } from "../state/run-journal.js";
-import { allStepsSettled, owesWork } from "../state/run-predicates.js";
-import { type ProjectedRunState, projectRunState, settleCrashedAttempts } from "../state/run-projection.js";
-import { saveRun } from "../state/run-repository.js";
-import { matchesStepSelector } from "../state/run-timeline.js";
-import { FileRunEventStore } from "../state/stores/file-run-event-store.js";
-import { FileRunLogStore } from "../state/stores/file-run-log-store.js";
-import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
-import { releaseRunDir, type RunDirResolution } from "../state/stores/run-storage.js";
-import { describeRunSnapshotProblem, hasRunSnapshotEntry, readRunSnapshotDiagnostic } from "../state/run-snapshot.js";
-import { makeRunStep } from "../state/run-step.js";
+import {
+  allStepsSettled,
+  appendRunEvent,
+  describeRunSnapshotProblem,
+  FileRunEventStore,
+  FileRunLogStore,
+  FileRunStateStore,
+  hasRunSnapshotEntry,
+  isChildSettled,
+  makeRunStep,
+  matchesStepSelector,
+  owesWork,
+  type ProjectedRunState,
+  projectRunState,
+  readRunEvents,
+  readRunSnapshotDiagnostic,
+  releaseRunDir,
+  restoreRunTotals,
+  type RunDirResolution,
+  saveRun,
+  settleCrashedAttempts,
+} from "../run-record/index.js";
 
 export interface LoadOrCreateRunOptions {
   stateStore?: RunStateStore;

@@ -32,8 +32,7 @@ import { liveFeedFromEnvironment } from "../output/live-feed.js";
 import { setRunnerLiveFeed } from "../runtime/live-feed.js";
 import { log } from "../runtime/logging.js";
 import { type ApprovalDecision, type RecordedApproval, recordApproval } from "../work-item-store/index.js";
-import { resolveLatestRunSnapshot, runLockHolder } from "../state/stores/run-storage.js";
-import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
+import { FileRunStateStore, resolveLatestRunSnapshot, runLockHolder } from "../run-record/index.js";
 import { createDefaultRunnerRegistries } from "./registries.js";
 
 /** A ticket reaches the filesystem (context paths, worktree directory) before any

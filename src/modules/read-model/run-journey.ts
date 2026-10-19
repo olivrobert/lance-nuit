@@ -11,9 +11,7 @@
 // Like a step opened from the timeline, this read parses the whole journal: the
 // Run tab asks for it while it is shown, the item's poll never does.
 
-import type { RunJournalEvent } from "../../state/run-journal.js";
-import { projectStepAttempts } from "../../state/attempt-projection.js";
-import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
+import { FileRunEventStore, projectStepAttempts, type RunJournalEvent } from "../../run-record/index.js";
 import { runTreePath } from "./explorer.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
