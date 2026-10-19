@@ -258,6 +258,7 @@ function statsRun(identity: Pick<StatsRun, "runId" | "pipeline" | "status" | "so
 }
 
 function liveRunView(
+  project: ProjectEntry,
   pipeline: string,
   runDir: string,
   state: PersistedRun,
@@ -268,7 +269,7 @@ function liveRunView(
   const control = state.total_control;
   // The status the morning box shows for the same run: a dead runner's RUNNING
   // snapshot is an interrupted run here too.
-  const { status } = selectedRunStatus({ pipeline, runDir, state });
+  const { status } = selectedRunStatus(project, { pipeline, runDir, state });
   return statsRun(
     { runId: state.runId ?? "", pipeline: state.pipeline || pipeline, status, source: "live" },
     {
@@ -311,7 +312,7 @@ function liveRuns(project: ProjectEntry, store: FileRunStateStore, steps: Readon
         collected.push({
           project: project.name,
           ticket: ticketOfRun(folder, state),
-          run: liveRunView(pipeline, runDir, state, steps),
+          run: liveRunView(project, pipeline, runDir, state, steps),
           workItemDirs: [join(root, folder)],
         });
       }

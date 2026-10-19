@@ -4,7 +4,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { processStartToken } from "../../env/lock.js";
-import { releaseRunDir, runLockHolder, tryClaimRunDir } from "./run-storage.js";
+import { resolveTicketDir } from "../../env/tickets.js";
+import type { PersistedRun } from "../../model/persisted.js";
+import { isRunHeld, releaseRunDir, runLockHolder, tryClaimRunDir } from "./run-storage.js";
 
 /** Above `pid_max` on every supported platform: `kill(pid, 0)` reports ESRCH, so
  *  the lock is unambiguously stale. A recently exited child would risk pid reuse. */
@@ -184,3 +186,85 @@ test("tryClaimRunDir: concurrent runners reclaiming the same stale lock, one win
   // not own, and none is left believing it owns one.
   expect(children.map((child) => String(child.pid))).toContain(String(lockedPid(dir)));
 }, 30_000);
+
+// ---------------------------------------------------------------------------
+// isRunHeld: a composed child is held through the run that composed it
+// ---------------------------------------------------------------------------
+
+const LOCATION = { specPath: "work-items" };
+
+/** A run of `pipeline` for `ticket` under `cwd`, as the runner lays it out: a
+ *  story `PROJ-1-01` lives in `PROJ-1/US-01`. */
+function storedRun(cwd: string, ticket: string, pipeline: string, state: Partial<PersistedRun>): string {
+  const ticketDir = resolveTicketDir(ticket, LOCATION.specPath, cwd);
+  const dir = join(cwd, LOCATION.specPath, ticketDir, "runs", pipeline, state.runId as string);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "state.json"),
+    JSON.stringify({ schemaVersion: 1, name: pipeline, pipeline, ticket, steps: [], ...state }),
+  );
+  return dir;
+}
+
+const lineage = (...tickets: string[]) => tickets.map((ticket, index) => ({ pipelinePath: `/p/${index}.ts`, ticket }));
+
+/** root (PROJ-1) → mid (PROJ-1-01, another work item) → leaf (PROJ-1-01): a
+ *  feature run composing a story run, which composes a lot. None of the children
+ *  took a lock. */
+function composition() {
+  const cwd = mkdtempSync(join(tmpdir(), "run-held-"));
+  const root = storedRun(cwd, "PROJ-1", "feature", { runId: "root" });
+  const mid = storedRun(cwd, "PROJ-1-01", "story", {
+    runId: "mid",
+    parentRunId: "root",
+    rootRunId: "root",
+    pipelineLineage: lineage("PROJ-1", "PROJ-1-01"),
+  });
+  const leafState = {
+    runId: "leaf",
+    ticket: "PROJ-1-01",
+    parentRunId: "mid",
+    rootRunId: "root",
+    pipelineLineage: lineage("PROJ-1", "PROJ-1-01", "PROJ-1-01"),
+  };
+  const leaf = storedRun(cwd, "PROJ-1-01", "lot", leafState);
+  return { location: { ...LOCATION, cwd }, root, mid, leaf, leafState };
+}
+
+test("isRunHeld: a child is held while the runner of its root lives, across work items", () => {
+  const { location, root, leaf, leafState } = composition();
+  expect(isRunHeld(leaf, leafState, location)).toBe(false);
+
+  writeLock(root, JSON.stringify({ pid: process.ppid }));
+  expect(isRunHeld(leaf, leafState, location)).toBe(true);
+
+  writeLock(root, JSON.stringify({ pid: DEAD_PID }));
+  expect(isRunHeld(leaf, leafState, location)).toBe(false);
+});
+
+test("isRunHeld: a child resumed directly holds its own lock, and so its own children", () => {
+  const { location, mid, leaf, leafState } = composition();
+  writeLock(mid, JSON.stringify({ pid: process.ppid }));
+
+  expect(isRunHeld(leaf, leafState, location)).toBe(true);
+});
+
+test("isRunHeld: a parent id that leaves the runs directory, or a parent that is gone, holds nothing", () => {
+  const { location, root, leaf, leafState } = composition();
+  writeLock(root, JSON.stringify({ pid: process.ppid }));
+
+  expect(isRunHeld(leaf, { ...leafState, parentRunId: "../../PROJ-1/runs/feature/root" }, location)).toBe(false);
+  expect(isRunHeld(leaf, { ...leafState, parentRunId: "gone" }, location)).toBe(false);
+});
+
+test("isRunHeld: a lineage that loops back on itself ends", () => {
+  const { location, leaf, leafState } = composition();
+
+  expect(
+    isRunHeld(
+      leaf,
+      { ...leafState, parentRunId: "leaf", pipelineLineage: lineage("PROJ-1-01", "PROJ-1-01") },
+      location,
+    ),
+  ).toBe(false);
+});
