@@ -23,7 +23,7 @@ import {
 } from "../work-item-store/decisions.js";
 import { cleanLogs, inspectTicket, logsForTicket } from "../commands/diagnostics-readers.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
-import { emitRunStats } from "./stats/run-stats.js";
+import { emitRunStats } from "../run-stats/index.js";
 import { saveRun } from "./run-repository.js";
 import { createRunId, latestRunFile, readRunFile, resolveRunDir } from "./stores/run-storage.js";
 

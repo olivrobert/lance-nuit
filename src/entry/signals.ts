@@ -10,7 +10,7 @@ import type { Run } from "../model/run.js";
 import type { AbortScope } from "../runtime/abort.js";
 import { liveAttemptCost, liveAttemptModel } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
-import { emitRunStats } from "../state/stats/run-stats.js";
+import { emitRunStats } from "../run-stats/index.js";
 import { abortRun } from "../state/run-transitions.js";
 import { NO_STACK_STOP, type StackStop } from "./stack-stop.js";
 

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { parseRunnerArgs } from "../cli/parse.js";
 import { setLogInterceptor } from "../runtime/logging.js";
-import { aggregateHistory, type HistoryEntry } from "../state/stats/history-reader.js";
+import { aggregateHistory, type HistoryEntry } from "../run-stats/history-reader.js";
 import { COMMANDS } from "./command.js";
 import { renderStats, statsCommand } from "./stats.js";
 import { WRAPPER_COMMANDS } from "./wrapper-help.js";

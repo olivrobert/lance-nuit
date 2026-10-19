@@ -8,14 +8,16 @@ import type { RunnerArgs } from "../model/cli-options.js";
 import { log } from "../runtime/logging.js";
 import { parseAge } from "./diagnostics-readers.js";
 import {
+  currencyOf,
+  fmtInt,
   type HistoryAggregate,
   type HistoryEntry,
   type HistoryFilter,
   type PipelineTotals,
   pricingTable,
+  statusBadge,
   summarizeHistory,
-} from "../state/stats/history-reader.js";
-import { currencyOf, fmtInt, statusBadge } from "../state/stats/stats-core.js";
+} from "../run-stats/index.js";
 import type { RunnerCommand } from "./runner-command.js";
 import { errorMessage } from "./shared.js";
 

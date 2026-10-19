@@ -38,7 +38,7 @@ const LAYERS = [
   {
     level: 4,
     name: "core",
-    path: "^src/(validation|pipeline|dsl|builtin-steps|extractors|engine|step|dispatch|boot|state|work-item-store|project|builtins)/|^src/dsl\\.ts$",
+    path: "^src/(validation|pipeline|dsl|builtin-steps|extractors|engine|step|dispatch|boot|state|work-item-store|run-stats|project|builtins)/|^src/dsl\\.ts$",
     comment: "Pipeline definition, execution and persistence.",
   },
   {
@@ -74,6 +74,7 @@ const MODULES = [
   { name: "step", path: "src/step", entry: "step-loop.ts" },
   { name: "engine", path: "src/engine", entry: "default-registry.ts" },
   { name: "work-item-store", path: "src/work-item-store", entry: "index.ts" },
+  { name: "run-stats", path: "src/run-stats", entry: "index.ts" },
 ];
 
 function escapeRegex(text) {

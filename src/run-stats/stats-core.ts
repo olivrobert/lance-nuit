@@ -12,8 +12,8 @@
 //     costUsd? }   <- written by the runner (exact CLI cost); estimated from
 //                    pricing.json when absent.
 
-import { matchingPricingKey } from "../../contracts/pricing.js";
-import type { RunOutcomeState } from "../../model/persisted.js";
+import { matchingPricingKey } from "../contracts/pricing.js";
+import type { RunOutcomeState } from "../model/persisted.js";
 
 export interface TokenCounts {
   in: number;

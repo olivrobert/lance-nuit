@@ -32,7 +32,7 @@ import { recordCostStop } from "../state/cost-stop-events.js";
 import { pendingSteps } from "../state/run-predicates.js";
 import { hasRunSnapshotEntry } from "../state/run-snapshot.js";
 import { finalizeRun } from "../state/run-transitions.js";
-import { emitRunStats } from "../state/stats/run-stats.js";
+import { emitRunStats } from "../run-stats/index.js";
 import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
 import { createRunId, pipelineRunsDir } from "../state/stores/run-storage.js";
 import type { ChildExecutionResult, PipelineOrchestrationInput } from "./pipeline-orchestration-types.js";

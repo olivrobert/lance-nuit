@@ -71,7 +71,7 @@ cycles are forbidden at every level.
 | L1 `contracts` | `src/contracts/` — public extension contracts only | L0. Types and pure functions; no `node:fs`, no `process.*`, no `zod` |
 | L2 `model` | `src/model/` — data shapes and ports | up to L1, no I/O |
 | L3 `infra` | `src/env/` (config, paths, locks, worktrees, capabilities), `src/exec/` (process execution and supervision), `src/runtime/` (context, logging, events, the abort scope, and the `RunOutput` and `LiveFeed` ports) | up to L2 |
-| L4 `core` | `src/validation/`, `src/pipeline/` (context assembly and definition loading), `src/dsl/` and `src/dsl.ts` (authoring primitives, internal authoring surface), `src/builtin-steps/`, `src/extractors/`, `src/engine/` (backend registry and built-in agent integrations), `src/step/` (attempts, retries, fixes, escalation), `src/dispatch/`, `src/boot/`, `src/state/` (persistence, stats, reports, budgets), `src/work-item-store/` (artifacts, human decisions and provenance kept beside a ticket), `src/project/` (public DSL and project typechecking), `src/builtins/` | up to L3 |
+| L4 `core` | `src/validation/`, `src/pipeline/` (context assembly and definition loading), `src/dsl/` and `src/dsl.ts` (authoring primitives, internal authoring surface), `src/builtin-steps/`, `src/extractors/`, `src/engine/` (backend registry and built-in agent integrations), `src/step/` (attempts, retries, fixes, escalation), `src/dispatch/`, `src/boot/`, `src/state/` (persistence, reports, budgets), `src/work-item-store/` (artifacts, human decisions and provenance kept beside a ticket), `src/run-stats/` (the cross-run history: one summary per finished run, and its readers), `src/project/` (public DSL and project typechecking), `src/builtins/` | up to L3 |
 | L5 `adapters` | `src/output/` (console reports, live feed, watchers), `src/modules/` (domain modules such as the Jira adapter), `src/commands/` | up to L4 |
 | L6 `entry` | `src/entry/` (composition root), `src/cli/` (argument parsing), `src/runner.ts` — process entry point | everything |
 
@@ -112,6 +112,7 @@ in exactly one level, and the level rules apply to it unchanged.
 | `src/step/` | `step-loop.ts` |
 | `src/engine/` | `default-registry.ts` |
 | `src/work-item-store/` | `index.ts` |
+| `src/run-stats/` | `index.ts` |
 
 `scripts/layers.cjs` declares them in `MODULES`, next to the levels.
 `.dependency-cruiser.cjs` turns each one into a `module-<name>-entry-only` rule,
@@ -233,7 +234,7 @@ server side enters the bundle.
 
 The server side reads work items only through `src/modules/read-model/`
 (`index.ts` is its public surface, and the only module allowed to import
-`src/state/` and `src/work-item-store/`; a Semgrep rule enforces the
+`src/state/`, `src/work-item-store/` and `src/run-stats/`; a Semgrep rule enforces the
 direction). It projects snapshots into the DTO the front end renders. It takes
 the work-item paths from `workItemLayout` and a stopped gate's decision from
 `gateDecisionStatus`, both in `work-item-store`, the rule the runner's gate and
@@ -460,7 +461,7 @@ honest:
   (`diagnoseRunSnapshot`), while execution refuses to select that run or fall
   back to a new one; a line
   of the central history (`pipeline-history/runs.jsonl`,
-  `state/stats/history-schema.ts`) that fails its schema is skipped so one
+  `run-stats/history-schema.ts`) that fails its schema is skipped so one
   truncated write never costs the whole file (`diagnoseHistoryEntry`); a
   malformed `pricing.json` is reported once by name and treated as absent
   (`env/pricing.schema.ts`), because pricing is optional and statistics readers

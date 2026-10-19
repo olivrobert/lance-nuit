@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import type { Run, RunStep } from "../model/run.js";
 import { projectStepAttempts } from "./attempt-projection.js";
 import { readRunEvents } from "./run-journal.js";
-import { attemptFacts } from "./stats/run-stats-projection.js";
+import { attemptFacts } from "../run-stats/run-stats-projection.js";
 import { EVENTS_FILE, FileRunEventStore } from "./stores/file-run-event-store.js";
 
 const FIXTURES = fileURLToPath(new URL("../../tests/fixtures/journal/", import.meta.url));
