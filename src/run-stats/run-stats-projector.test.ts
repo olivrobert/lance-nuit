@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import type { RunJournalEvent } from "../../model/journal.js";
-import type { Run } from "../../model/run.js";
-import { createLogRef, type RunEventStore, type RunLogStore } from "../../model/storage-ports.js";
-import { makeRunStep } from "../run-step.js";
+import type { RunJournalEvent } from "../model/journal.js";
+import type { Run } from "../model/run.js";
+import { createLogRef, type RunEventStore, type RunLogStore } from "../model/storage-ports.js";
+import { makeRunStep } from "../state/run-step.js";
 import { projectRunStatsEntry } from "./run-stats-projector.js";
 
 function runWithStores(eventStore?: RunEventStore, logStore?: RunLogStore): Run {

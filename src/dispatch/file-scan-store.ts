@@ -3,7 +3,7 @@
 // Filesystem adapter for `ScanStore`.
 //
 // Location: `.lance-nuit/pipeline-history/scans/`, resolved exactly like
-// `runs.jsonl` (`state/stats/run-stats-sink.ts`). `pipeline-history/` is already
+// `runs.jsonl` (`run-stats/run-stats-sink.ts`). `pipeline-history/` is already
 // the cross-run telemetry directory a worktree links back to the main clone
 // (`env/worktree.ts`, `SHARED_KIT_DIRS`), and the dispatch parent runs in the
 // main clone: a record written anywhere inside a worktree would die with it.

@@ -28,8 +28,7 @@ import {
 } from "../../work-item-store/index.js";
 import { projectStepAttempts } from "../../state/attempt-projection.js";
 import { hasUnfinishedWork, lastPassInterrupted, owesWork } from "../../state/run-predicates.js";
-import type { HistoryEntry } from "../../state/stats/history-reader.js";
-import { readHistory } from "../../state/stats/history-reader.js";
+import { type HistoryEntry, readHistory } from "../../run-stats/index.js";
 import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
 import { latestLaunchByItem } from "./launches.js";

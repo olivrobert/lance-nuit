@@ -1,4 +1,4 @@
-// state/stats/history-schema.ts
+// run-stats/history-schema.ts
 //
 // Runtime schema of one line of the central history (`pipeline-history/runs.jsonl`).
 //
@@ -28,10 +28,10 @@
 // second source of truth, or a policy, is code.
 
 import * as z from "zod";
-import { FAIL_CAUSES } from "../../contracts/backends.js";
-import type { StepFailKind } from "../../contracts/backends.js";
-import type { AssertAssignable, Plain } from "../../lib/type-assertions.js";
-import type { RunOutcomeState, RunOutcomeStopKind, RunStopKind, RunStopState } from "../../model/persisted.js";
+import { FAIL_CAUSES } from "../contracts/backends.js";
+import type { StepFailKind } from "../contracts/backends.js";
+import type { AssertAssignable, Plain } from "../lib/type-assertions.js";
+import type { RunOutcomeState, RunOutcomeStopKind, RunStopKind, RunStopState } from "../model/persisted.js";
 import type { PhaseStats, RunStatsEntry, UsageStatus } from "./run-stats-projector.js";
 import type { TokenCounts } from "./stats-core.js";
 

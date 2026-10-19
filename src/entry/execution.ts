@@ -23,7 +23,7 @@ import type { AbortScope } from "../runtime/abort.js";
 import { subscribe } from "../runtime/events.js";
 import { log } from "../runtime/logging.js";
 import { finalizeRun } from "../state/run-transitions.js";
-import { emitRunStats } from "../state/stats/run-stats.js";
+import { emitRunStats } from "../run-stats/index.js";
 import { appendRunEvent } from "../state/run-journal.js";
 import { discardedResumeNotice, selectExplicitRun, type ExplicitRunSelection } from "../state/run-selection.js";
 import { loadOrCreateRun } from "../boot/resume.js";

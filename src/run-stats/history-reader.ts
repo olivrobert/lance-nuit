@@ -16,7 +16,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadProjectPricing } from "../../env/pricing.js";
+import { loadProjectPricing } from "../env/pricing.js";
 import { HistoryEntrySchema } from "./history-schema.js";
 import type { RunStatsEntry } from "./run-stats-projector.js";
 import { addTokens, entryCost, type PricingTable, type TokenCounts, zeroTokens } from "./stats-core.js";

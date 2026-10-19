@@ -9,7 +9,7 @@
 // is kept as *invalid* with its reason. The three counters are what tells a
 // too-strict schema from a producer bug, and `commands/diagnostics-readers.ts` exposes them.
 //
-// Same rules as `state/schema.ts` and `state/stats/history-schema.ts`:
+// Same rules as `state/schema.ts` and `run-stats/history-schema.ts`:
 //
 // - `z.looseObject` everywhere, so a field added by a later release does not make
 //   the journal unreadable by an earlier one, and vice versa.
