@@ -42,6 +42,7 @@ test("workItemLayout derives every work-item directory from the work-item direct
 
   expect(layout.artifactsDir).toBe("/w/PROJ-1/artifacts");
   expect(layout.decisionsDir).toBe("/w/PROJ-1/decisions");
+  expect(layout.reportsDir).toBe("/w/PROJ-1/reports");
   expect(layout.provenanceDir).toBe("/w/PROJ-1/artifacts/.provenance");
   expect(layout.decisionPath("plan")).toBe("/w/PROJ-1/decisions/plan.json");
   expect(() => layout.decisionPath("../plan")).toThrow(/invalid decision subject/);
@@ -54,6 +55,18 @@ test("the pipeline context takes its work-item paths from the layout", () => {
 
   expect(ctx.paths.artifactsDir).toBe(layout.artifactsDir);
   expect(ctx.paths.decisionsDir).toBe(layout.decisionsDir);
+  expect(ctx.paths.reportsDir).toBe(layout.reportsDir);
+});
+
+test("a recorded decision names the file the layout gives its subject", async () => {
+  const ctx = ticketContext();
+  writePlan(ctx, "# Plan\n");
+  const decisionFile = workItemLayout(ctx.paths.workItemDir!).decisionPath("plan");
+
+  expect((await recordApproval(ctx, "plan", plan)).path).toBe(decisionFile);
+  // A kept decision names the same file: the one that already holds it.
+  expect(await recordApproval(ctx, "plan", plan)).toMatchObject({ written: false, path: decisionFile });
+  expect((await recordRejection(ctx, "plan", plan, "split step 2", 3)).path).toBe(decisionFile);
 });
 
 test("gateDecisionStatus: absent, fresh, then stale once the artifact changes or disappears", async () => {
@@ -101,6 +114,18 @@ test("gateDecisionStatus: a decision written for another subject decides nothing
 
   expect(await statusOf(ctx)).toEqual({ state: "absent" });
   expect(await decisionMatchesArtifact(ctx, "plan", plan)).toBe(false);
+});
+
+test("decisionMatchesArtifact: a fresh approval of another artifact does not approve this one", async () => {
+  const ctx = ticketContext();
+  writePlan(ctx, "# Plan\n");
+  await recordApproval(ctx, "plan", plan);
+  // Same bytes under another name: only the artifact the decision names tells
+  // the two apart, the hash cannot.
+  writeFileSync(ctx.paths.artifact("draft.md"), "# Plan\n");
+
+  expect(await decisionMatchesArtifact(ctx, "plan", plan)).toBe(true);
+  expect(await decisionMatchesArtifact(ctx, "plan", textArtifact("draft.md"))).toBe(false);
 });
 
 test("gateDecisionStatus: an artifact the reader cannot read proves no approval", async () => {

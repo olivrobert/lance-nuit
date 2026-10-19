@@ -148,7 +148,7 @@ export async function applyApproval(
   try {
     const artifact = await resolveApprovableArtifact(pipelineDef, args.approve, context);
     recorded = await recordApproval(context, args.approve, artifact);
-    log(describeRecordedApproval(recorded, context.paths.decisionsDir));
+    log(describeRecordedApproval(recorded));
   } catch (error) {
     return { kind: "error", message: errorMessage(error) };
   }
@@ -170,7 +170,7 @@ export async function applyRejection(
   let recorded: RecordedApproval;
   try {
     recorded = await rejectSubject(pipelineDef, args.reject, args.reason ?? "", context);
-    log(describeRecordedRejection(recorded, context.paths.decisionsDir));
+    log(describeRecordedRejection(recorded));
   } catch (error) {
     return { kind: "error", message: errorMessage(error) };
   }

@@ -78,7 +78,7 @@ function pathsFor(cwd: string, config: PipelineConfig, ticketDir?: string, lotId
   // way to tell which one produced which. Outside a batch (spec, plan, triage,
   // finalize), the directory remains flat.
   const lot = lotSegment(lotId);
-  const reportsDir = workItemDir ? join(workItemDir, "reports", ...(lot ? [lot] : [])) : undefined;
+  const reportsDir = layout ? join(layout.reportsDir, ...(lot ? [lot] : [])) : undefined;
   const artifact = (name: string): string => {
     if (!workItemDir) throw new Error(`artifact "${name}" requested without a ticket`);
     if (!name || name.startsWith("/") || name.split(/[\\/]/).includes("..")) {
