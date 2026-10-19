@@ -1,9 +1,10 @@
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { DEFAULT_SPEC_PATH } from "../../env/tickets.js";
 import type { PipelineContext } from "../../model/context.js";
 import type { RunStateSnapshot } from "../../model/storage-ports.js";
 import { readRunSnapshot } from "../run-snapshot.js";
-import { baseRunsDir, DEFAULT_SPEC_PATH, STATE_FILE } from "./run-storage.js";
+import { baseRunsDir, STATE_FILE } from "./run-storage.js";
 
 /** Filesystem inventory of snapshots, independent from store CRUD operations. */
 export class FileRunSnapshotCatalog {

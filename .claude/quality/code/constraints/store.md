@@ -1,13 +1,14 @@
 ---
 paths:
   - "src/state/stores/file-*.ts"
+  - "src/dispatch/file-scan-store.ts"
 exclude:
   - "src/state/stores/*.test.ts"
 ---
 
 # Constraints — File-backed stores
 
-Scope: `src/state/stores/file-*.ts` matching `Class `File*Store` / `File*Catalog` implementing a persistence port, owning reads and writes of one on-disk artifact.`.
+Scope: `src/state/stores/file-*.ts` and `src/dispatch/file-scan-store.ts` matching `Class `File*Store` / `File*Catalog` implementing a persistence port, owning reads and writes of one on-disk artifact.`.
 
 Tooling checked: `biome.json`, `eslint.config.mjs`, `tsconfig.json`, `package.json`. None of the rules below are covered by this tooling.
 

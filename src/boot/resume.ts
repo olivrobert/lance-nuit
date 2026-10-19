@@ -6,6 +6,7 @@
 // reconciles, it does not know how to turn a definition into a run.
 
 import { basename } from "node:path";
+import { DEFAULT_SPEC_PATH } from "../env/tickets.js";
 import {
   agentBackendRegistryOf,
   type PipelineContext,
@@ -29,7 +30,7 @@ import { matchesStepSelector } from "../state/run-timeline.js";
 import { FileRunEventStore } from "../state/stores/file-run-event-store.js";
 import { FileRunLogStore } from "../state/stores/file-run-log-store.js";
 import { FileRunStateStore } from "../state/stores/file-run-state-store.js";
-import { DEFAULT_SPEC_PATH, releaseRunDir, type RunDirResolution } from "../state/stores/run-storage.js";
+import { releaseRunDir, type RunDirResolution } from "../state/stores/run-storage.js";
 import { describeRunSnapshotProblem, hasRunSnapshotEntry, readRunSnapshotDiagnostic } from "../state/run-snapshot.js";
 import { makeRunStep } from "../state/run-step.js";
 

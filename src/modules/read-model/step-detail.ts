@@ -19,7 +19,7 @@ import { projectStepAttempts } from "../../state/attempt-projection.js";
 import { isInFlight, standingOf } from "../../state/provenance.js";
 import { ATTEMPT_COMMAND_FILE } from "../../state/run-timeline.js";
 import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
-import { isPathWithin } from "../../state/stores/path-safety.js";
+import { isPathWithin } from "../../lib/path-safety.js";
 import { isSafeRelativePath, runTreePath } from "./explorer.js";
 import type { ReadModelOptions } from "./projects.js";
 import { type ResolvedRun, resolveRun } from "./runs.js";

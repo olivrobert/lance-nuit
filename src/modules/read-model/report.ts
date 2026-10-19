@@ -27,7 +27,7 @@ import {
   type RunReportProof,
   type RunReportReview,
 } from "../../model/run-report.js";
-import { isPathWithin } from "../../state/stores/path-safety.js";
+import { isPathWithin } from "../../lib/path-safety.js";
 import { isSafeRelativePath, TEXT_LIMIT_BYTES } from "./explorer.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";

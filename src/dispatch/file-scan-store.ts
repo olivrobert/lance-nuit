@@ -1,4 +1,4 @@
-// state/stores/file-scan-store.ts
+// dispatch/file-scan-store.ts
 //
 // Filesystem adapter for `ScanStore`.
 //
@@ -15,9 +15,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ScanReadResult, ScanStore } from "../../model/storage-ports.js";
-import type { ScanRecord } from "../../model/scan-record.js";
-import { parseScanRecord } from "../scan-schema.js";
+import type { ScanReadResult, ScanStore } from "../model/storage-ports.js";
+import type { ScanRecord } from "../model/scan-record.js";
+import { parseScanRecord } from "./scan-schema.js";
 
 const SCANS_DIR = "scans";
 

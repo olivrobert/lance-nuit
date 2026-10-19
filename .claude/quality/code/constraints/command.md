@@ -8,6 +8,7 @@ exclude:
   - "src/commands/pipeline-reference.ts"
   - "src/commands/pipeline-templates.ts"
   - "src/commands/registries.ts"
+  - "src/commands/run-diagnostics.ts"
   - "src/commands/runner-command.ts"
   - "src/commands/shared.ts"
 ---

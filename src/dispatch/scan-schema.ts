@@ -1,4 +1,4 @@
-// state/scan-schema.ts
+// dispatch/scan-schema.ts
 //
 // Runtime schema of a persisted scan record (`pipeline-history/scans/*.json`).
 //
