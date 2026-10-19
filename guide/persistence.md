@@ -699,7 +699,9 @@ lancenuit stats --failures --limit 20
 The summary answers what a single run's state cannot: what a pipeline has cost,
 which phase keeps failing, and where the tokens go per profile. Cost is exact when
 the provider reported it, estimated when the runner computed it from a rate table
-or when `stats` derives it from `pipeline-history/pricing.json`, and reported as
+or when `stats` derives it from `pipeline-history/pricing.json` (with the
+runner's own rate lookup and formula, `contracts/pricing.ts`, so a model the
+runner cannot price from that file is unpriced here too), and reported as
 unavailable rather than as zero when neither applies — a total mixing exact and
 estimated figures says how many runs were estimated, and how many were left out.
 Every figure is in USD: a `pricing.json` declaring another `_currency` is ignored

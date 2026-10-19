@@ -12,7 +12,7 @@
 //     costUsd? }   <- written by the runner (exact CLI cost); estimated from
 //                    pricing.json when absent.
 
-import { matchingPricingKey } from "../contracts/pricing.js";
+import { projectPricingForModel, tokenCostUsd } from "../contracts/pricing.js";
 import type { RunOutcomeState } from "../model/persisted.js";
 
 export interface TokenCounts {
@@ -90,7 +90,7 @@ export interface PricingRate {
 // `_currency` shares the table with per-model rates; readers must skip
 // non-object values when iterating models.
 export type PricingTable = { _currency?: string } & {
-  [model: string]: PricingRate | string | undefined;
+  [model: string]: PricingRate | string;
 };
 
 interface RenderFixEvent {
@@ -173,46 +173,35 @@ export const usablePricing = (pricing?: PricingTable | null): PricingTable | nul
 
 const spentTokens = (t: TokenCounts): number => (t.in || 0) + (t.out || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0);
 
-// Same validation as `projectPricingForModel`: at least one rate, and every stated
-// rate a finite number >= 0.
-const isUsableRate = (rate: PricingRate): boolean => {
-  const values = [rate.in, rate.out, rate.cacheRead, rate.cacheWrite];
-  return (
-    values.some((value) => value !== undefined) &&
-    !values.some((value) => value !== undefined && (!Number.isFinite(value) || value < 0))
-  );
-};
-
 // Cost of a run from its model breakdown. Prices are never hardcoded because they
 // change; use the project's pricing.json, otherwise leave the cost absent (null).
 //
+// The rate lookup and the formula are the runner's (`contracts/pricing.ts`): a
+// second copy here priced the same run differently whenever one of them changed.
+// `in` is billed as is: every backend stores the non-cached input there (Codex is
+// normalized where its result is mapped), so cached reads are billed once, through
+// `cacheRead`.
+//
 // A model the table cannot price makes the whole run unpriceable, not cheaper: a
 // silent skip returned $0.00 for a table that simply did not list the model, and
-// the run then read as "priced, estimated" in every total. Keys are matched the
-// way the runner matches them — exactly, then by longest name fragment.
+// the run then read as "priced, estimated" in every total.
 export function costOf(models?: Record<string, TokenCounts> | null, pricing?: PricingTable | null): number | null {
   const table = usablePricing(pricing);
   if (!table) return null;
-  const candidates = Object.keys(table).filter((key) => key !== "_currency" && typeof table[key] === "object");
   let usd = 0;
   let unpriced = 0;
   for (const [model, t] of Object.entries(models || {})) {
-    const key = matchingPricingKey(model, candidates);
-    const p = key ? table[key] : undefined;
-    // A rate that is negative or not a finite number is rejected, not coerced to
-    // zero: the runner refuses the same entry, and a silent 0 would price the run
-    // as free instead of unpriceable.
-    if (!p || typeof p === "string" || !isUsableRate(p)) {
+    const rate = projectPricingForModel(model, table);
+    if (!rate) {
       // A model with no tokens costs nothing whether or not it is listed.
       if (spentTokens(t) > 0) unpriced += 1;
       continue;
     }
-    usd +=
-      (t.in * (p.in || 0) +
-        t.out * (p.out || 0) +
-        t.cacheRead * (p.cacheRead || 0) +
-        t.cacheWrite * (p.cacheWrite || 0)) /
-      1e6;
+    usd += tokenCostUsd(
+      { output_tokens: t.out, cache_read_tokens: t.cacheRead, cache_creation_tokens: t.cacheWrite },
+      rate,
+      t.in,
+    );
   }
   return unpriced > 0 ? null : usd;
 }
