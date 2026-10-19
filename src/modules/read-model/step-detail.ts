@@ -16,7 +16,7 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import { dirname, join } from "node:path";
 import type { PersistedAttempt } from "../../model/persisted.js";
 import { projectStepAttempts } from "../../state/attempt-projection.js";
-import { isInFlight, standingOf } from "../../work-item-store/index.js";
+import { isInFlight, standingOf, workItemLayout } from "../../work-item-store/index.js";
 import { ATTEMPT_COMMAND_FILE } from "../../state/run-timeline.js";
 import { FileRunEventStore } from "../../state/stores/file-run-event-store.js";
 import { isPathWithin } from "../../lib/path-safety.js";
@@ -32,8 +32,6 @@ export const COMMAND_EXCERPT_BYTES = 32 * 1024;
 /** Tail of an output shown inline: where an agent writes its verdict and a
  *  command its failure. */
 export const OUTPUT_EXCERPT_BYTES = 8 * 1024;
-
-const PROVENANCE_DIR = join("artifacts", ".provenance");
 
 function statusOf(status: PersistedAttempt["status"]): StepAttemptStatus {
   switch (status) {
@@ -108,7 +106,8 @@ function excerpt(path: string, limit: number, from: "head" | "tail"): { text: st
  *  no finished attempt vouched for: they may be partial. The rule is the
  *  runner's own (`standingOf`). */
 function producedBy(workItemDir: string, stepId: string): string[] {
-  const dir = join(workItemDir, PROVENANCE_DIR);
+  const layout = workItemLayout(workItemDir);
+  const dir = layout.provenanceDir;
   let names: string[];
   try {
     names = readdirSync(dir).filter((name) => name.endsWith(".json"));
@@ -121,7 +120,7 @@ function producedBy(workItemDir: string, stepId: string): string[] {
     const artifactName = name.slice(0, -".json".length);
     if (!isSafeRelativePath(artifactName)) continue;
     const stored = readJson(join(dir, name));
-    const text = isInFlight(stored) ? readText(join(workItemDir, "artifacts", artifactName)) : undefined;
+    const text = isInFlight(stored) ? readText(join(layout.artifactsDir, artifactName)) : undefined;
     const standing = standingOf(stored, artifactName, text);
     const record = standing.kind === "vouched" ? standing.record : undefined;
     if (record?.producedBy === stepId && isSafeRelativePath(record.artifact)) produced.push(record.artifact);

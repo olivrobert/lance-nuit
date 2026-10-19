@@ -8,7 +8,7 @@
 // visible in the explorer (ticket 03).
 //
 // Every read goes through the state layer's own readers and ports
-// (`RunStateStore`, `WorkItemArtifactStore`, `readDecisionAt`, `approvalFreshness`):
+// (`RunStateStore`, `WorkItemArtifactStore`, `gateDecisionStatus`):
 // this module composes them, it never parses `state.json` itself. Nothing is
 // cached across calls — a per-call cache is enough for a few dozen work items
 // per project, and a persistent one would show a stale morning box.
@@ -21,11 +21,10 @@ import type { PersistedRun } from "../../model/persisted.js";
 import { isClosableStatus, isClosureCurrent, readClosureAt } from "../../state/closure.js";
 import { runProvesUnpricedSpend } from "../../state/cost-accounting.js";
 import {
-  approvalFreshness,
   FileWorkItemArtifactStore,
+  gateDecisionStatus,
   isValidSubjectToken,
-  readDecisionAt,
-  rejectionPending,
+  workItemLayout,
 } from "../../work-item-store/index.js";
 import { projectStepAttempts } from "../../state/attempt-projection.js";
 import { hasUnfinishedWork, lastPassInterrupted, owesWork } from "../../state/run-predicates.js";
@@ -226,19 +225,16 @@ function costOf(state: PersistedRun): ItemCost {
 /**
  * The single pending approval of a stopped run.
  *
- * Gates are sequential, so a stopped run has exactly one. Freshness compares the
- * hash locked in the decision with the artifact as it stands NOW in the
- * effective directory: an artifact rewritten since the approval makes the
- * decision stale, which is precisely what the runner will conclude too. A
- * rejection stays visible only while the rework has not changed the artifact.
+ * Gates are sequential, so a stopped run has exactly one. Its state is the
+ * runner's own reading (`gateDecisionStatus`), judged on the artifact as it
+ * stands NOW in the effective directory: an artifact rewritten since the approval
+ * makes the decision stale, and a rejection the rework answered is `reworked`,
+ * exactly as the gate and `--inspect` will say.
  */
 async function approvalOf(project: ProjectEntry, ticket: string, subject: string): Promise<ItemApproval | undefined> {
   // The subject reaches a file path; an invalid one is dropped rather than
   // joined, so a corrupt snapshot cannot steer the read out of `decisions/`.
   if (!isValidSubjectToken(subject)) return undefined;
-
-  const decision = readDecisionAt(join(workItemDirOf(project, ticket), "decisions", `${subject}.json`));
-  if (!decision) return { subject, state: "absent" };
 
   const store = new FileWorkItemArtifactStore({
     cwd: project.cwd,
@@ -246,31 +242,20 @@ async function approvalOf(project: ProjectEntry, ticket: string, subject: string
     ticket,
     ticketDir: ticket,
   });
-  let body: string | undefined;
-  try {
-    body = await store.readText(createArtifactRef(ticket, decision.artifact.slice("artifacts/".length)));
-  } catch {
-    // An artifact that cannot be read can no longer prove the approval fresh.
-    body = undefined;
-  }
-  if (rejectionPending(decision, body)) {
-    return {
-      subject,
-      state: "rejected",
-      decidedAt: decision.decidedAt,
-      decidedBy: decision.decidedBy,
-      ...(decision.reason ? { reason: decision.reason } : {}),
-      ...(decision.round ? { round: decision.round } : {}),
-    };
-  }
-  // `absent` here is a rejection the rework already answered: no decision holds.
-  const freshness = approvalFreshness(decision, body);
-  if (freshness === "absent") return { subject, state: "absent" };
+  const status = await gateDecisionStatus(workItemDirOf(project, ticket), subject, (name) =>
+    store.readText(createArtifactRef(ticket, name)),
+  );
+  if (status.state === "absent") return { subject, state: "absent" };
+  const { decision } = status;
   return {
     subject,
-    state: freshness,
+    state: status.state,
     decidedAt: decision.decidedAt,
     decidedBy: decision.decidedBy,
+    ...(status.state === "rejected" && decision.reason ? { reason: decision.reason } : {}),
+    ...((status.state === "rejected" || status.state === "reworked") && decision.round
+      ? { round: decision.round }
+      : {}),
   };
 }
 
@@ -356,7 +341,7 @@ function withoutTicketPrefix(title: string, ticket: string): string {
 function readTicketHead(workItemDir: string): string | undefined {
   let fd: number | undefined;
   try {
-    fd = openSync(join(workItemDir, "artifacts", "ticket.md"), "r");
+    fd = openSync(join(workItemLayout(workItemDir).artifactsDir, "ticket.md"), "r");
     const buffer = Buffer.alloc(TICKET_TITLE_READ_BYTES);
     const read = readSync(fd, buffer, 0, buffer.length, 0);
     const text = buffer.subarray(0, read).toString("utf8");

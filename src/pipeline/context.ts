@@ -13,7 +13,7 @@ import {
   type PipelinePaths,
   WORK_ITEM_REGISTRY,
 } from "../model/context.js";
-import { FileWorkItemArtifactStore } from "../work-item-store/index.js";
+import { FileWorkItemArtifactStore, workItemLayout } from "../work-item-store/index.js";
 
 export { agentBackendRegistryOf, workItemRegistryOf } from "../model/context.js";
 
@@ -70,8 +70,9 @@ function realPath(path: string): string {
 function pathsFor(cwd: string, config: PipelineConfig, ticketDir?: string, lotId?: string): PipelinePaths {
   const root = join(cwd, config.specPath);
   const workItemDir = ticketDir ? realPath(join(root, ticketDir)) : undefined;
-  const artifactsDir = workItemDir ? join(workItemDir, "artifacts") : undefined;
-  const decisionsDir = workItemDir ? join(workItemDir, "decisions") : undefined;
+  const layout = workItemDir ? workItemLayout(workItemDir) : undefined;
+  const artifactsDir = layout?.artifactsDir;
+  const decisionsDir = layout?.decisionsDir;
   // Reports from a batch sub-run are isolated under `reports/<LOT-ID>/`,
   // otherwise `reports/constraints/…` mixes the three batches' reports with no
   // way to tell which one produced which. Outside a batch (spec, plan, triage,

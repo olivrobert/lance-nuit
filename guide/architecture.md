@@ -234,7 +234,10 @@ server side enters the bundle.
 The server side reads work items only through `src/modules/read-model/`
 (`index.ts` is its public surface, and the only module allowed to import
 `src/state/` and `src/work-item-store/`; a Semgrep rule enforces the
-direction). It projects snapshots into the DTO the front end renders. The selected run's status goes through
+direction). It projects snapshots into the DTO the front end renders. It takes
+the work-item paths from `workItemLayout` and a stopped gate's decision from
+`gateDecisionStatus`, both in `work-item-store`, the rule the runner's gate and
+`--inspect` read too. The selected run's status goes through
 the runner's `runLockHolder`: a `RUNNING` snapshot no live process holds is
 served as an interrupted `ABORTED` run, so the dashboard and a later resume
 agree on what is live. Its step list is the snapshot reconciled with the

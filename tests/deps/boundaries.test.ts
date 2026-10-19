@@ -135,7 +135,7 @@ test("a baseline entry for a module rule is refused, even justified and matching
   const result = checkDeps("module-entry-only", [PAST_ENTRY_EDGE]);
 
   expect(result.status).not.toBe(0);
-  expect(result.output).toContain("Module rules have no baseline");
+  expect(result.output).toContain("may not list them");
 });
 
 test("rewriting the baseline is refused while an import past a module's entry remains", () => {

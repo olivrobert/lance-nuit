@@ -30,27 +30,24 @@ export {
   writeProvenance,
 } from "./provenance.js";
 
+// Layout: where a work item keeps artifacts, decisions and provenance.
+export { isValidSubjectToken, workItemLayout } from "./layout.js";
+
 // Decisions and approvals.
 export {
   type ApprovalDecision,
-  approvalFreshness,
-  approvalStatus,
   decisionActor,
   decisionMatchesArtifact,
-  isValidSubjectToken,
+  gateDecisionStatus,
   MAX_REJECTION_REASON,
   pendingRejection,
   type RecordedApproval,
   readDecision,
-  readDecisionAt,
+  readDecisionIn,
   recordApproval,
   recordRejection,
-  rejectionPending,
   rejectionStatus,
 } from "./decisions.js";
 
 // Artifact store.
 export { FileWorkItemArtifactStore } from "./file-work-item-artifact-store.js";
-
-// Hash.
-export { sha256Text } from "./hash.js";

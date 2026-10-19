@@ -7,12 +7,13 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
+import { createArtifactRef } from "../model/artifact-ports.js";
 import type { PipelineContext } from "../model/context.js";
 import type { RunJournalCounts } from "../model/journal.js";
 import type { PersistedRun } from "../model/persisted.js";
 import { createRunRef, type RunLogStore, type RunStateSnapshot, type RunStateStore } from "../model/storage-ports.js";
 import { errorMessage } from "../lib/errors.js";
-import { approvalStatus, isValidSubjectToken, rejectionStatus } from "../work-item-store/index.js";
+import { gateDecisionStatus, isValidSubjectToken } from "../work-item-store/index.js";
 import { readRunJournal, type RunJournalReport } from "../state/run-journal.js";
 import { matchesStepSelector } from "../state/run-timeline.js";
 import { FileRunLogStore } from "../state/stores/file-run-log-store.js";
@@ -165,7 +166,8 @@ function journalLine(record: RunRecord): string {
 }
 
 /**
- * The approval a stopped run waits on, judged as its gate will judge it on resume.
+ * The approval a stopped run waits on, judged as its gate will judge it on resume
+ * (`gateDecisionStatus`, the reading the dashboard shows too).
  *
  * An approval granted elsewhere (the dashboard, another terminal) does not change
  * the run's status: only this line tells whoever reads `--inspect` that the gate
@@ -174,20 +176,24 @@ function journalLine(record: RunRecord): string {
  */
 async function approvalLine(context: PipelineContext, state: PersistedRun): Promise<string | undefined> {
   const subject = statusLabel(state) === "STOPPED" ? state.outcome?.stop?.subject : undefined;
-  if (!subject || !isValidSubjectToken(subject) || !context.paths.decisionsDir) return undefined;
-  const rejection = await rejectionStatus(context, subject);
-  if (rejection) {
-    const { decision } = rejection;
-    return rejection.artifact === "reworked"
-      ? `approval: ${subject} — reworked after rejection round ${decision.round}; approve it or reject it again`
-      : `approval: ${subject} — rejected in round ${decision.round} by ${decision.decidedBy} on ${decision.decidedAt}: ${decision.reason}; resume the run to rework it`;
-  }
-  const { freshness, decision } = await approvalStatus(context, subject);
-  if (freshness === "absent" || !decision) return `approval: ${subject} — none recorded`;
+  const { ticket, paths } = context;
+  if (!subject || !isValidSubjectToken(subject) || !ticket || !paths.workItemDir) return undefined;
+  const status = await gateDecisionStatus(paths.workItemDir, subject, (name) =>
+    context.artifacts.readText(createArtifactRef(ticket, name)),
+  );
+  if (status.state === "absent") return `approval: ${subject} — none recorded`;
+  const { decision } = status;
   const by = `${decision.decidedBy} on ${decision.decidedAt}`;
-  return freshness === "fresh"
-    ? `approval: ${subject} — current, by ${by}; resume the run without --approve`
-    : `approval: ${subject} — stale, the artifact changed since ${by} approved it`;
+  switch (status.state) {
+    case "fresh":
+      return `approval: ${subject} — current, by ${by}; resume the run without --approve`;
+    case "stale":
+      return `approval: ${subject} — stale, the artifact changed since ${by} approved it`;
+    case "rejected":
+      return `approval: ${subject} — rejected in round ${decision.round} by ${by}: ${decision.reason}; resume the run to rework it`;
+    case "reworked":
+      return `approval: ${subject} — reworked after rejection round ${decision.round}; approve it or reject it again`;
+  }
 }
 
 export function formatRunRecord(record: RunRecord, approval?: string): string {

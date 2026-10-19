@@ -6,6 +6,7 @@ import { DEFAULT_SPEC_PATH, resolveTicketDir } from "../env/tickets.js";
 import { isErrno } from "../lib/errors.js";
 import { type ArtifactRef, createArtifactRef, type WorkItemArtifactStore } from "../model/artifact-ports.js";
 import { isDescendantPath } from "../lib/path-safety.js";
+import { workItemLayout } from "./layout.js";
 
 export interface FileWorkItemArtifactStoreOptions {
   cwd?: string;
@@ -46,7 +47,7 @@ export class FileWorkItemArtifactStore implements WorkItemArtifactStore {
     if (!isDescendantPath(workItemsRoot, workItemDir)) {
       throw new Error(`ticket directory for "${this.ticket}" is outside the work-item root`);
     }
-    this.artifactsDir = resolve(workItemDir, "artifacts");
+    this.artifactsDir = workItemLayout(workItemDir).artifactsDir;
   }
 
   async exists(ref: ArtifactRef): Promise<boolean> {

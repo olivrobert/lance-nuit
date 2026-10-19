@@ -10,16 +10,15 @@
 // artifact shape is validated by its own parser, not copied rules.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { errorMessage } from "../lib/errors.js";
 import type { Artifact } from "../model/artifact.js";
 import { createArtifactRef } from "../model/artifact-ports.js";
 import type { PipelineContext } from "../model/context.js";
 import { sha256Text } from "./hash.js";
+import { type DecisionSubject, isValidSubjectToken, workItemLayout } from "./layout.js";
 
-/** Approval subject. It is free-form but becomes a filename under `decisions/`,
- * so charset validation is a security guard, not a style convention. */
-export type DecisionSubject = string;
+export type { DecisionSubject };
 export type DecisionValue = "approved" | "rejected" | "applied";
 
 export interface ApprovalDecision {
@@ -46,8 +45,6 @@ export interface ApprovalDecision {
  *  the decision file, so the CLI and the dashboard refuse anything longer. */
 export const MAX_REJECTION_REASON = 2000;
 
-const SUBJECT_CHARSET = /^[\w-]+$/;
-
 /** An actor name reaches a decision file and every reader of it, so it is bounded
  *  and kept to letters, digits, spaces, dots, and dashes. */
 const ACTOR_CHARSET = /^[\w .-]{1,64}$/;
@@ -70,15 +67,13 @@ function isDecisionArtifactRef(value: string): boolean {
   );
 }
 
-/** An approval subject must never escape `decisions/`. */
-export function isValidSubjectToken(value: string): value is DecisionSubject {
-  return SUBJECT_CHARSET.test(value);
+function workItemDirOf(ctx: PipelineContext, subject: DecisionSubject): string {
+  if (!ctx.paths.workItemDir) throw new Error(`decision "${subject}" requested without a ticket`);
+  return ctx.paths.workItemDir;
 }
 
-export function decisionPath(ctx: PipelineContext, subject: DecisionSubject): string {
-  if (!ctx.paths.decisionsDir) throw new Error(`decision "${subject}" requested without a ticket`);
-  if (!isValidSubjectToken(subject)) throw new Error(`invalid decision subject "${subject}" (charset [\\w-])`);
-  return join(ctx.paths.decisionsDir, `${subject}.json`);
+function decisionPath(ctx: PipelineContext, subject: DecisionSubject): string {
+  return workItemLayout(workItemDirOf(ctx, subject)).decisionPath(subject);
 }
 
 function ref(ctx: PipelineContext, name: string) {
@@ -235,17 +230,23 @@ export function readDecisionAt(path: string): ApprovalDecision | undefined {
   }
 }
 
-export function readDecision(ctx: PipelineContext, subject: DecisionSubject): ApprovalDecision | undefined {
-  const decision = readDecisionAt(decisionPath(ctx, subject));
+/** The current decision on `subject` in a work item, or undefined when there is
+ *  none, it is malformed, or it was written for another subject: a decision file
+ *  copied or renamed under `decisions/` decides nothing. */
+export function readDecisionIn(workItemDir: string, subject: DecisionSubject): ApprovalDecision | undefined {
+  const decision = readDecisionAt(workItemLayout(workItemDir).decisionPath(subject));
   return decision?.subject === subject ? decision : undefined;
+}
+
+export function readDecision(ctx: PipelineContext, subject: DecisionSubject): ApprovalDecision | undefined {
+  return readDecisionIn(workItemDirOf(ctx, subject), subject);
 }
 
 /** Whether an approval still holds over the artifact as it stands now.
  *
  *  `absent`: nobody approved. `fresh`: the approval covers this exact content.
  *  `stale`: the artifact changed since, or can no longer be read, so the gate
- *  reopens. The runner's gate and the dashboard both answer through this one
- *  rule, so neither can show an approval the other would refuse. */
+ *  reopens. */
 export type ApprovalFreshness = "absent" | "fresh" | "stale";
 
 export function approvalFreshness(decision: ApprovalDecision | undefined, body: string | undefined): ApprovalFreshness {
@@ -253,36 +254,70 @@ export function approvalFreshness(decision: ApprovalDecision | undefined, body: 
   return body !== undefined && sha256Text(body) === decision.artifactSha256 ? "fresh" : "stale";
 }
 
-/** The approval recorded for `subject` and whether it still holds, judged on the
- *  artifact the decision names. For readers that know a subject but not its
- *  artifact descriptor: a stopped run only records the subject it waits on. */
-export async function approvalStatus(
-  ctx: PipelineContext,
-  subject: DecisionSubject,
-): Promise<{ freshness: ApprovalFreshness; decision?: ApprovalDecision }> {
-  const decision = readDecision(ctx, subject);
-  if (!decision) return { freshness: "absent" };
-  // An artifact that cannot be read can no longer prove the approval fresh.
-  return { freshness: approvalFreshness(decision, await decisionArtifactBody(ctx, decision)), decision };
-}
-
 /** Whether a rejection still waits for its rework. An absent artifact counts as
  *  pending: the step attempt erases its declared outputs before spawning, so a
  *  rework interrupted or failed midway leaves nothing, and treating that as done
- *  would let the gate skip the rework on resume. The admission, the gate and the
- *  dashboard all answer through this one rule. */
+ *  would let the gate skip the rework on resume. */
 export function rejectionPending(decision: ApprovalDecision | undefined, body: string | undefined): boolean {
   if (decision?.decision !== "rejected") return false;
   return body === undefined || sha256Text(body) === decision.artifactSha256;
 }
 
+/** Where the decision on a gate's subject stands against its artifact now.
+ *
+ *  `absent`: no decision holds. `fresh`: an approval covers these exact bytes.
+ *  `stale`: the artifact changed since the approval, or cannot be read. `rejected`:
+ *  the rework has not answered the rejection yet. `reworked`: it has, and the gate
+ *  waits for a new human decision. */
+export type GateDecisionState = "absent" | "fresh" | "stale" | "rejected" | "reworked";
+
+export type GateDecisionStatus =
+  | { state: "absent" }
+  | { state: "fresh" | "stale" | "reworked"; decision: ApprovalDecision }
+  /** `artifact` tells a rework that wrote nothing from one that left the bytes as rejected. */
+  | { state: "rejected"; decision: ApprovalDecision; artifact: "absent" | "unchanged" };
+
+/** Reads an artifact of the work item by its name under `artifacts/`; undefined when it does not exist. */
+export type ArtifactReader = (name: string) => Promise<string | undefined>;
+
+/**
+ * The one reading of a gate's decision. The runner's gate and admission (through
+ * `rejectionStatus` and `decisionMatchesArtifact`), `--inspect` and the dashboard
+ * all answer through it, so none can show a decision another would judge
+ * differently. It takes a work-item directory and a reader rather than a context:
+ * the dashboard has neither a run nor a context, only the files.
+ */
+export async function gateDecisionStatus(
+  workItemDir: string,
+  subject: DecisionSubject,
+  readArtifact: ArtifactReader,
+): Promise<GateDecisionStatus> {
+  const decision = readDecisionIn(workItemDir, subject);
+  if (!decision) return { state: "absent" };
+  const body = await decisionArtifactBody(decision, readArtifact);
+  if (decision.decision === "rejected") {
+    if (!rejectionPending(decision, body)) return { state: "reworked", decision };
+    return { state: "rejected", decision, artifact: body === undefined ? "absent" : "unchanged" };
+  }
+  return { state: approvalFreshness(decision, body) === "fresh" ? "fresh" : "stale", decision };
+}
+
 /** Artifact a decision names, or undefined when it is missing or unreadable. */
-async function decisionArtifactBody(ctx: PipelineContext, decision: ApprovalDecision): Promise<string | undefined> {
+async function decisionArtifactBody(
+  decision: ApprovalDecision,
+  readArtifact: ArtifactReader,
+): Promise<string | undefined> {
   try {
-    return await ctx.artifacts.readText(ref(ctx, decision.artifact.slice("artifacts/".length)));
+    return await readArtifact(decision.artifact.slice("artifacts/".length));
   } catch {
+    // An artifact that cannot be read can no longer prove an approval fresh, and
+    // counts as absent for a rejection: both are the conservative answer.
     return undefined;
   }
+}
+
+function artifactReaderOf(ctx: PipelineContext): ArtifactReader {
+  return (name) => ctx.artifacts.readText(ref(ctx, name));
 }
 
 /** Where a rejection of `subject` stands against the artifact as it is now:
@@ -292,12 +327,11 @@ export async function rejectionStatus(
   ctx: PipelineContext,
   subject: DecisionSubject,
 ): Promise<{ decision: ApprovalDecision; artifact: "absent" | "unchanged" | "reworked" } | undefined> {
-  if (!ctx.paths.decisionsDir) return undefined;
-  const decision = readDecision(ctx, subject);
-  if (decision?.decision !== "rejected") return undefined;
-  const body = await decisionArtifactBody(ctx, decision);
-  if (body === undefined) return { decision, artifact: "absent" };
-  return { decision, artifact: rejectionPending(decision, body) ? "unchanged" : "reworked" };
+  if (!ctx.paths.workItemDir) return undefined;
+  const status = await gateDecisionStatus(ctx.paths.workItemDir, subject, artifactReaderOf(ctx));
+  if (status.state === "rejected") return { decision: status.decision, artifact: status.artifact };
+  if (status.state === "reworked") return { decision: status.decision, artifact: "reworked" };
+  return undefined;
 }
 
 /** Pending rejection of `subject`, for the prompt of the step that reworks it.
@@ -320,14 +354,8 @@ export async function decisionMatchesArtifact(
   subject: DecisionSubject,
   artifact: Artifact<unknown>,
 ): Promise<boolean> {
-  const decision = readDecision(ctx, subject);
-  if (decision?.artifact !== `artifacts/${artifact.name}`) return false;
-  try {
-    return approvalFreshness(decision, await ctx.artifacts.readText(ref(ctx, artifact.name))) === "fresh";
-  } catch {
-    // Artifact lookup failures conservatively invalidate reuse without masking the caller's decision flow.
-    return false;
-  }
+  const status = await gateDecisionStatus(workItemDirOf(ctx, subject), subject, artifactReaderOf(ctx));
+  return status.state === "fresh" && status.decision.artifact === `artifacts/${artifact.name}`;
 }
 
 export async function markDecisionApplied(

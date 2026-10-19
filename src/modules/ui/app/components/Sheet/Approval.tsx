@@ -5,7 +5,9 @@
 // `fresh` means the decision still matches the artifact it was taken on; `stale`
 // means the artifact moved underneath it, and the gate will reopen — which is
 // the only one a reader has to act on. `rejected` waits on the rework, not on a
-// reader: resuming the run hands the reason to the rework step.
+// reader: resuming the run hands the reason to the rework step. `reworked` means
+// the rework answered the rejection: the gate asks for a new decision. The words
+// are the ones `lancenuit inspect` prints for the same case.
 
 import type { JSX } from "react";
 import type { ApprovalState, Item } from "../../api/types.js";
@@ -16,6 +18,7 @@ const LABELS: Record<ApprovalState, string> = {
   fresh: "current",
   stale: "stale",
   rejected: "rejected",
+  reworked: "reworked",
 };
 
 export function Approval({ item }: { item: Item }): JSX.Element {
@@ -36,6 +39,9 @@ export function Approval({ item }: { item: Item }): JSX.Element {
           ) : null}
           {approval.state === "rejected" ? (
             <span>{` — round ${approval.round ?? "?"}: ${approval.reason ?? ""}`}</span>
+          ) : null}
+          {approval.state === "reworked" ? (
+            <span>{` — reworked after rejection round ${approval.round ?? "?"}; approve it or reject it again.`}</span>
           ) : null}
         </>
       )}

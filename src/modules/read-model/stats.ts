@@ -32,6 +32,7 @@ import { asFiniteNumber, asRecord } from "../../lib/json-values.js";
 import type { PersistedRun } from "../../model/persisted.js";
 import { runProvesUnpricedSpend } from "../../state/cost-accounting.js";
 import { FileRunStateStore } from "../../state/stores/file-run-state-store.js";
+import { workItemLayout } from "../../work-item-store/index.js";
 import { dashboardPaths } from "../dashboard-home/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl, workItemsRoot } from "./projects.js";
 import { directoryNames, statusOf, ticketDirectories } from "./runs.js";
@@ -172,7 +173,7 @@ function archiveHandoverOf(value: unknown): StatsHandover | undefined {
 
 function readArtifact(workItemDir: string, file: string): string | undefined {
   try {
-    const body = readFileSync(join(workItemDir, "artifacts", file));
+    const body = readFileSync(join(workItemLayout(workItemDir).artifactsDir, file));
     return body.length <= ARTIFACT_READ_LIMIT_BYTES ? body.toString("utf-8") : undefined;
   } catch {
     // Absent is the common case: most rules match only some pipelines.
