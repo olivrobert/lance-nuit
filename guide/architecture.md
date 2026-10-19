@@ -239,10 +239,10 @@ The server side reads work items only through `src/modules/read-model/`
 direction). It projects snapshots into the DTO the front end renders. It takes
 the work-item paths from `workItemLayout` and a stopped gate's decision from
 `gateDecisionStatus`, both in `work-item-store`, the rule the runner's gate and
-`--inspect` read too. The selected run's status goes through
-the runner's `runLockHolder`: a `RUNNING` snapshot no live process holds is
-served as an interrupted `ABORTED` run, so the dashboard and a later resume
-agree on what is live. Its step list is the snapshot reconciled with the
+`--inspect` read too. The selected run's status is the run record's
+`effectiveStatus`, asked with the runner's `runLockHolder`: a snapshot without a
+verdict that no live process holds is served as an interrupted `ABORTED` run, so
+the dashboard and a later resume agree on what is live. Its step list is the snapshot reconciled with the
 journal by `projectRunState`, the projection a resume applies. Two of its readers take
 content a pipeline wrote rather than runner state: `Item.title`, the first
 `# ` heading of `artifacts/ticket.md` (a leading ticket key dropped), read
@@ -504,7 +504,16 @@ attempt established (`recordStepVerdict`), an absorbed non-blocking failure
 a clean stop (`stopRun`), a manual interruption
 (`abortRun`), and the final verdict, outcome, totals and `run.finished` event
 (`finalizeRun`). Each operation writes the fields that must change together and
-the journal event that records them. After an interruption only `finalizeRun`
+the journal event that records them. What a status means has one owner too,
+`run-record/run-status.ts`: the status a reader shows (`effectiveStatus`, with
+the run lock as a parameter), what each status says (a verdict, completed, a
+failure, waiting on somebody, resumable), the `≥` of a partial total
+(`costIsLowerBound`, in `cost-accounting.ts`), and one precedence table,
+`runEnding`, from which `finalizeRun` takes the status, the console report its
+headline and the entry point its exit code. The dashboard, `--inspect`,
+`lancenuit close`, `clean --keep-failed`, the statistics, the stack stop, the
+signal handler and a composing parent all ask it instead of comparing statuses
+(`tests/runner/run-status-readers.test.ts` refuses a copy). After an interruption only `finalizeRun`
 still moves the run: it keeps `ABORTED` and completes the outcome, the totals
 and the snapshot, while the other transitions change neither memory nor
 snapshot. Attempt closure (`run-record/attempt-closure.ts`), cost figures

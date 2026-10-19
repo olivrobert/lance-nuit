@@ -1,4 +1,5 @@
 import type { PersistedAttempt, PersistedRun, PersistedStepState, StepStatus } from "../model/persisted.js";
+import { isCompleted, isProvisionalStatus } from "./run-status.js";
 
 /**
  * A step in this status has nothing left to execute. Every rule about what a
@@ -65,7 +66,7 @@ export interface ResumeDecision {
  */
 export function settledButUnfinalized(run: PersistedRun | null): boolean {
   if (!run) return false;
-  if (run.status !== "RUNNING" && run.status !== "ABORTED") return false;
+  if (!isProvisionalStatus(run.status)) return false;
   return allStepsSettled(run.steps);
 }
 
@@ -128,6 +129,6 @@ export function isPersistedRunResumable(run: PersistedRun | null): boolean {
 /** A PASS run is complete; interrupted, failed, or running runs are not. */
 export function isPersistedRunComplete(run: PersistedRun | null): boolean {
   if (!run || run.aborted) return false;
-  if (run.status && run.status !== "PASS") return false;
+  if (run.status !== undefined && !isCompleted(run.status)) return false;
   return run.steps.length > 0 && pendingSteps(run).length === 0;
 }

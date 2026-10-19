@@ -27,6 +27,7 @@ import {
   discardedResumeNotice,
   type ExplicitRunSelection,
   finalizeRun,
+  runEnding,
   saveRun,
   selectExplicitRun,
   wouldResumeLatest,
@@ -219,8 +220,9 @@ export function announceRun(run: Run, args: RunnerArgs, reconcile = false): void
 }
 
 /** Finalize the snapshot, emit statistics, print the report, and return the
- *  process exit code. An abort outranks the outcome: it is why the run stopped,
- *  and the exit code names the signal that requested it (Ctrl+C by default). */
+ *  process exit code. The code follows the precedence the status and the report
+ *  read (`runEnding`): an abort outranks the outcome, and its code names the
+ *  signal that requested it (Ctrl+C by default). */
 export function reportRun(
   run: Run,
   outcome: RunOutcome,
@@ -230,11 +232,24 @@ export function reportRun(
   finalizeRun(run, outcome);
   const statsPath = emitRunStats(run, { context });
   consoleReport(run, outcome, { statsPath, registry: agentBackendRegistryOf(context) });
-  if (abort.isAbortRequested() || run.aborted) return abort.requestedSignal() === "SIGTERM" ? 143 : 130;
-  // An accounting stop is a non-zero exit like a budget stop: unattended callers
-  // (--scan, cron, a parent dispatch) must not read unfinished work as success.
-  if (outcome.failed || outcome.budgetExceeded || outcome.costUnaccounted) return 1;
-  // Unfinished too, but where the operator asked: a code of its own, so a caller
-  // tells it from a failure. A failure or a cost stop outranks it above.
-  return outcome.untilStop ? UNTIL_STOP_EXIT_CODE : 0;
+  const { exit } = runEnding({
+    // A signal this process received counts even when no run recorded it yet.
+    aborted: abort.isAbortRequested() || run.aborted,
+    stopped: outcome.stopped,
+    failed: outcome.failed,
+    budgetExceeded: outcome.budgetExceeded,
+    costUnaccounted: outcome.costUnaccounted,
+    costUnaccountedStop: outcome.costUnaccountedStop,
+    untilStop: outcome.untilStop,
+  });
+  switch (exit) {
+    case "interrupted":
+      return abort.requestedSignal() === "SIGTERM" ? 143 : 130;
+    case "failure":
+      return 1;
+    case "until":
+      return UNTIL_STOP_EXIT_CODE;
+    case "success":
+      return 0;
+  }
 }

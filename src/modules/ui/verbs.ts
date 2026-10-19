@@ -180,7 +180,7 @@ export function buildArgv(item: Item, verb: Verb, input: ActionInput = {}): Argv
         };
       }
       const blocked = item.status === "STOPPED" && (!gate || approvedGate(item) || rejectedGate(item));
-      const failed = item.status === "FAIL" || item.status === "ABORTED";
+      const failed = item.failure !== undefined;
       if (!blocked && !failed) return { ok: false, status: 409, reason: "only a blocked or failed run can be resumed" };
       return { ok: true, argv: argvOf(item, verb, "") };
     }
@@ -199,16 +199,8 @@ export function buildArgv(item: Item, verb: Verb, input: ActionInput = {}): Argv
     case "fresh":
       return { ok: true, argv: argvOf(item, verb, "") };
     case "close": {
-      const waiting = item.status === "STOPPED" || item.status === "FAIL" || item.status === "ABORTED";
-      if (!waiting || item.closed)
+      if (!item.awaitsHuman || item.closed)
         return { ok: false, status: 409, reason: "only an open failed or stopped run can be closed" };
-      // `lancenuit close` refuses a snapshot still saying RUNNING.
-      if (item.interrupted)
-        return {
-          ok: false,
-          status: 409,
-          reason: "the runner died without a verdict: rerun or start fresh instead",
-        };
       return { ok: true, argv: argvOf(item, verb, "") };
     }
     case "reopen":
@@ -247,7 +239,7 @@ export function verbsFor(item: Item): VerbAction[] {
 
   const verbs: VerbAction[] = [];
   const stopped = item.status === "STOPPED";
-  const failed = item.status === "FAIL" || item.status === "ABORTED";
+  const failed = item.failure !== undefined;
   if (stopped && undecidedGate(item)) {
     verbs.push(offer(item, "approve-and-rerun", "Approve and rerun", { primary: true }));
     verbs.push(offer(item, "approve", "Approve only"));
@@ -261,7 +253,7 @@ export function verbsFor(item: Item): VerbAction[] {
     if (failed) verbs.push(offer(item, "rerun", "Rerun from failure", { primary: true }));
   }
   if (item.budgetExceeded) verbs.push(offer(item, "budget", "Raise budget"));
-  if ((stopped || failed) && !item.interrupted) verbs.push(offer(item, "close", "Mark as closed"));
+  if (item.awaitsHuman) verbs.push(offer(item, "close", "Mark as closed"));
   if (item.status !== "RUNNING") verbs.push(offer(item, "fresh", "Start fresh", { danger: true }));
   return verbs;
 }

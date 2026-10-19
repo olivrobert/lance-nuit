@@ -11,7 +11,7 @@
 import { readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { PersistedRun } from "../../model/persisted.js";
-import { FileRunStateStore, runLockHolder } from "../../run-record/index.js";
+import { effectiveStatus, FileRunStateStore, runLockHolder } from "../../run-record/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, workItemsRoot } from "./projects.js";
 import type { ItemStatus } from "./types.js";
 
@@ -74,36 +74,16 @@ export function latestRuns(project: ProjectEntry, ticket: string, store: FileRun
   return runs.sort((a, b) => updatedMs(b.state) - updatedMs(a.state));
 }
 
-/** Status as the snapshot alone says it. `UNKNOWN` and a missing status both
- *  describe a run nobody finished, read as running rather than given an invented
- *  verdict; whether anything still runs it is `selectedRunStatus`'s question. */
-export function statusOf(state: PersistedRun): ItemStatus {
-  switch (state.status) {
-    case "PASS":
-    case "FAIL":
-    case "STOPPED":
-    case "ABORTED":
-    case "RUNNING":
-      return state.status;
-    default:
-      return "RUNNING";
-  }
-}
-
 /**
  * Status of the run a ticket is about, as the runner would judge it.
  *
- * A snapshot saying RUNNING is only live while a process holds its run
- * directory: a runner killed without a chance to clean up leaves RUNNING behind
- * forever. `runLockHolder` is the runner's own answer to "who holds this run",
- * so the dashboard and a later `lancenuit run` agree on what can be resumed. The
- * dead run is served as ABORTED, the status the runner persists for an
- * interruption it lived to record.
+ * `runLockHolder` is the runner's own answer to "who holds this run", so the
+ * dashboard and a later `lancenuit run` agree on what can be resumed: a snapshot
+ * without a verdict that no live process holds is served as an interrupted
+ * `ABORTED` run (`effectiveStatus`).
  */
 export function selectedRunStatus(run: SelectedRun): { status: ItemStatus; interrupted: boolean } {
-  const status = statusOf(run.state);
-  if (status === "RUNNING" && runLockHolder(run.runDir) === null) return { status: "ABORTED", interrupted: true };
-  return { status, interrupted: false };
+  return effectiveStatus(run.state, () => runLockHolder(run.runDir) !== null);
 }
 
 /**

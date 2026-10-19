@@ -6,7 +6,8 @@ import type { PersistedRun } from "../model/persisted.js";
 import type { Run } from "../model/run.js";
 import { makeRunStep } from "./run-step.js";
 import { finalizeRun } from "./run-transitions.js";
-import { deriveRunStatus, isResumableStatus } from "./run-verdict.js";
+import { isResumableStatus } from "./run-status.js";
+import { deriveRunStatus } from "./run-verdict.js";
 import { projectRunStatsEntry } from "../run-stats/run-stats-projector.js";
 
 function snapshot(partial: Partial<PersistedRun>): PersistedRun {

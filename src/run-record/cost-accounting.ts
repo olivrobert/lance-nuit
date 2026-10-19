@@ -233,6 +233,29 @@ export function runProvesUnpricedSpend(run: { steps?: SpendingStep[] } | null | 
   return (run?.steps ?? []).some(stepProvesUnpricedSpend);
 }
 
+/**
+ * The run's total is a lower bound (`≥`), whatever the run then did with it.
+ *
+ * Wider than `runProvesUnpricedSpend` on purpose: that one is the evidence a stop
+ * needs, while any unpriced figure makes the total partial, even one an attempt
+ * closed before it reported anything. The run-level latch counts as much as the
+ * figures: a resumed generation can rewrite `total_control` while the run it
+ * continues already spent unpriced tokens. Independent of the stop: an authorized
+ * or uncapped run also prints `≥`.
+ */
+export function costIsLowerBound(run: {
+  cost_unaccounted?: boolean;
+  total_control?: StepControl;
+  steps?: readonly { control?: StepControl; attempts?: readonly SpendFigures[] }[];
+}): boolean {
+  if (run.cost_unaccounted === true || run.total_control?.cost_unknown === true) return true;
+  return (run.steps ?? []).some(
+    (step) =>
+      step.control?.cost_unknown === true ||
+      (step.attempts ?? []).some((attempt) => attempt.control?.cost_unknown === true),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // The charges. Every spend figure the runner stores is written here.
 // ---------------------------------------------------------------------------

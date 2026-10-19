@@ -3,7 +3,15 @@ import type { AgentBackendRegistry, AgentSession, BackendSpec, StepControl, Step
 import { backendSpecForStep } from "../contracts/backends.js";
 import type { StepStatus } from "../model/persisted.js";
 import type { RunStepView, RunView } from "../model/run.js";
-import { aggregateControl, aggregateUsage, replayedAfterInterruption } from "../run-record/index.js";
+import {
+  aggregateControl,
+  aggregateUsage,
+  costIsLowerBound,
+  isCompleted,
+  type RunEndingKind,
+  replayedAfterInterruption,
+  runEnding,
+} from "../run-record/index.js";
 
 export interface RunReportOutcome {
   failed: boolean;
@@ -22,19 +30,12 @@ export interface RunReportOutcome {
   setAside?: readonly string[];
 }
 
-export type RunReportKind =
-  | "success"
-  | "verdict"
-  | "failure"
-  | "stopped"
-  | "aborted"
-  | "budget"
-  /** Spending became unaccountable under a ceiling: a stop of its own, with its
-   *  own recovery flag. Never folded into `budget` — raising the amount cannot
-   *  price a closed attempt — nor into `failure`, which sends a reader to a log
-   *  and a fix loop for something no code change repairs. */
-  | "cost"
-  | "unknown";
+/** Why the run ended, from the precedence the run's status and the exit code read
+ *  too (`runEnding`). `cost` is a stop of its own, with its own recovery flag:
+ *  never folded into `budget` (raising the amount cannot price a closed attempt)
+ *  nor into `failure`, which sends a reader to a log and a fix loop for something
+ *  no code change repairs. */
+export type RunReportKind = RunEndingKind;
 
 export interface RunReportStep {
   id: string;
@@ -165,26 +166,19 @@ function stepDurationMs(step: RunStepView): number | undefined {
   return Number.isFinite(duration) && duration >= 0 ? duration : undefined;
 }
 
+/** The report reads the outcome of this invocation, and the verdict `finalizeRun`
+ *  has just stamped for success. */
 function reportKind(run: RunView, outcome: RunReportOutcome): RunReportKind {
-  if (run.aborted) return "aborted";
-  // A budget stop outranks a failed step: the step that carries the guard's kill
-  // is the CONSEQUENCE of the stop, and headlining it as a technical error would
-  // send an operator to a fix loop. `exceeded` also wins over `unaccounted`, the
-  // precedence `costDecision` settled.
-  if (outcome.budgetExceeded) return "budget";
-  // The accounting stop ranks BELOW a genuine failure. An unpriced ledger sits
-  // beside many outcomes — a step that failed for its own reason on an unpriced
-  // attempt is a failure, and headlining it "Spending unaccounted" would hide the
-  // reason an operator has to act on. `cost` wins only when the gate itself is
-  // what withheld the work; the failed step in that case (an orchestration node
-  // refused at its own gate) IS the stop, so it must not outrank it.
-  const accountingStop = outcome.costUnaccountedStop === true;
-  if (outcome.failed && !accountingStop && run.outcome?.failKind === "verdict") return "verdict";
-  if (outcome.failed && !accountingStop) return "failure";
-  if (accountingStop) return "cost";
-  if (outcome.stopped) return "stopped";
-  if (run.status === "PASS") return "success";
-  return "unknown";
+  return runEnding({
+    aborted: run.aborted,
+    stopped: outcome.stopped,
+    failed: outcome.failed,
+    verdictFailure: run.outcome?.failKind === "verdict",
+    budgetExceeded: outcome.budgetExceeded,
+    costUnaccounted: outcome.costUnaccounted,
+    costUnaccountedStop: outcome.costUnaccountedStop,
+    settled: isCompleted(run.status),
+  }).kind;
 }
 
 function headline(kind: RunReportKind, failedStep?: string): string {
@@ -349,12 +343,8 @@ export function buildRunReport(
       ? {
           spent,
           limit: run.max_cost_usd,
-          // Read from the persisted steps AND the run-level latch: the steps are
-          // the evidence, the latch survives a generation that rewrote the totals
-          // those steps contributed to.
-          ...(run.cost_unaccounted === true || run.steps.some((step) => step.control?.cost_unknown)
-            ? { costUnknown: true }
-            : {}),
+          // The `≥` the dashboard prints for the same run.
+          ...(costIsLowerBound(run) ? { costUnknown: true } : {}),
         }
       : undefined,
     resources,

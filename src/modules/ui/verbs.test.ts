@@ -3,8 +3,11 @@ import type { Item, LaunchRecord } from "../read-model/types.js";
 import { MAX_REJECTION_REASON } from "../read-model/index.js";
 import { actionable, buildArgv, isBusy, MAX_BUDGET_USD, verbsFor } from "./verbs.js";
 
-/** A stopped item at a gate, in a worktree, as the read model would build it. */
+/** A stopped item at a gate, in a worktree, as the read model would build it:
+ *  `awaitsHuman` and `failure` follow the status, as `items.ts` derives them. */
 function item(overrides: Partial<Item> = {}): Item {
+  const status = overrides.status ?? "STOPPED";
+  const failed = status === "FAIL" || status === "ABORTED";
   return {
     key: "demo-app/DEMO-1",
     project: { name: "demo-app", cwd: "/srv/demo-app", provider: "jira" },
@@ -12,8 +15,10 @@ function item(overrides: Partial<Item> = {}): Item {
     pipeline: "feature",
     pipelineRef: "feature",
     runId: "r-1",
-    status: "STOPPED",
+    status,
     group: "decision",
+    awaitsHuman: status === "STOPPED" || failed,
+    ...(failed ? { failure: { phase: "coder", reason: "tests failed" } } : {}),
     stop: { subject: "plan", kind: "needs-decision", detail: "waiting for the plan" },
     cost: { estimated: false },
     updatedAt: "2026-09-05T08:00:00.000Z",
@@ -252,13 +257,15 @@ test("offers: FAIL and ABORTED both rerun from the failure", () => {
   }
 });
 
-test("offers: an interrupted run reruns and starts fresh, but cannot be closed", () => {
+test("offers: an interrupted run reruns, closes and starts fresh like any aborted run", () => {
+  // `lancenuit close` reads the same effective status as the dashboard: a dead
+  // runner's RUNNING snapshot waits on somebody, so closing it is offered too.
   const crashed = quiet({ status: "ABORTED", group: "failure", interrupted: true });
   const offers = verbsFor(crashed);
-  expect(names(offers)).toEqual(["rerun", "fresh"]);
+  expect(names(offers)).toEqual(["rerun", "close", "fresh"]);
   expect(offers[0]?.label).toBe("Rerun from failure");
   expect(isBusy(crashed)).toBe(false);
-  expect(buildArgv(crashed, "close")).toMatchObject({ ok: false, status: 409 });
+  expect(argvOf(buildArgv(crashed, "close"))).toEqual(["close", "DEMO-1", "--pipeline", "feature"]);
   expect(argvOf(buildArgv(crashed, "rerun"))).toEqual(["run", "DEMO-1", "--pipeline", "feature"]);
 });
 
@@ -271,7 +278,7 @@ test("offers: a step cut by a dead runner offers a replay, never a rerun that st
     stop: undefined,
   });
   const offers = verbsFor(crashed);
-  expect(names(offers)).toEqual(["replay-interrupted", "fresh"]);
+  expect(names(offers)).toEqual(["replay-interrupted", "close", "fresh"]);
   expect(offers[0]?.primary).toBe(true);
   expect(argvOf(buildArgv(crashed, "replay-interrupted"))).toEqual([
     "run",

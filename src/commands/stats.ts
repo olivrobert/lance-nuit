@@ -5,6 +5,7 @@
 // project can be summarized without knowing which run to ask about.
 
 import type { RunnerArgs } from "../model/cli-options.js";
+import { isCompleted } from "../run-record/index.js";
 import { log } from "../runtime/logging.js";
 import { parseAge } from "./diagnostics-readers.js";
 import {
@@ -83,7 +84,7 @@ function renderRunRows(entries: readonly HistoryEntry[], currency: string, limit
     const cost =
       typeof entry.costUsd === "number" ? `${entry.costUnknown ? "≥" : ""}${money(entry.costUsd, currency)}` : "-";
     const target = entry.ticket ?? "-";
-    const failure = entry.status !== "PASS" && entry.failPhase ? `  fail: ${entry.failPhase}` : "";
+    const failure = !isCompleted(entry.status) && entry.failPhase ? `  fail: ${entry.failPhase}` : "";
     rows.push(
       `  ${started}  ${statusBadge(entry.status)}  ${entry.pipeline ?? "?"}  ${target}  ${cost}  ${entry.runId}${failure}`,
     );

@@ -11,7 +11,7 @@ import type { AbortScope } from "../runtime/abort.js";
 import { liveAttemptCost, liveAttemptModel } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
 import { emitRunStats } from "../run-stats/index.js";
-import { abortRun } from "../run-record/index.js";
+import { abortRun, hasVerdict } from "../run-record/index.js";
 import { NO_STACK_STOP, type StackStop } from "./stack-stop.js";
 
 /**
@@ -78,7 +78,9 @@ export function installChildKillHandlers(
           // not write a second abort event or duplicate statistics.
           try {
             for (const active of uniqueRuns) {
-              if (active.status === "PASS" || active.status === "STOPPED" || active.status === "ABORTED") continue;
+              // A run that already carries its verdict was finished before the
+              // signal: an interruption has nothing left to record on it.
+              if (hasVerdict(active.status)) continue;
               // Only the leaf with an active attempt receives the process-wide
               // live estimate. Parent orchestration nodes have no attempt of
               // their own and must not duplicate their child's spend.

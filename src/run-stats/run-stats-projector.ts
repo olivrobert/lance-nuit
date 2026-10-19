@@ -9,7 +9,7 @@ import { backendSpecForStep } from "../contracts/backends.js";
 import type { RunOutcomeState } from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
 import type { RunEventStore, RunLogStore } from "../model/storage-ports.js";
-import { deriveRunStatus, isResumableStatus, relativeRunPath } from "../run-record/index.js";
+import { costIsLowerBound, isResumableStatus, recordedVerdict, relativeRunPath } from "../run-record/index.js";
 import {
   type ProjectionAccumulator,
   projectStepStats,
@@ -29,12 +29,6 @@ export interface RunStatsProjectionOptions {
   ticketDir?: string | null;
   /** Resolve the logical outcome log path when no outcome is persisted. */
   logPathForStep?: (stepId: string) => string | null;
-}
-
-/** `finalizeRun` status is authoritative; otherwise derive it identically. */
-function statusOf(run: Run): RunStatsEntry["status"] {
-  if (run.status && run.status !== "RUNNING" && run.status !== "UNKNOWN") return run.status;
-  return deriveRunStatus(run);
 }
 
 function outcomeOf(
@@ -87,7 +81,8 @@ export function projectRunStatsEntry(run: Run, options: RunStatsProjectionOption
     projectStepStats(run, step, eventStore, aggregate);
   }
 
-  const status = statusOf(run);
+  // `finalizeRun` status is authoritative; otherwise derive it identically.
+  const status = recordedVerdict(run);
   const failed = run.steps.find((s) => s.status === "failed");
   const outcome = outcomeOf(run, status, failed, options);
   const warnings = warningsForSteps(run, eventStore);
@@ -115,7 +110,9 @@ export function projectRunStatsEntry(run: Run, options: RunStatsProjectionOption
     totals: aggregate.totals,
     ...(aggregate.usageStatus ? { usageStatus: aggregate.usageStatus } : {}),
     ...(aggregate.costStatus ? { costStatus: aggregate.costStatus } : {}),
-    ...(aggregate.costUnknown ? { costUnknown: true } : {}),
+    // The `≥` the dashboard prints for the same run: the run-level latch counts
+    // as much as the steps.
+    ...(aggregate.costUnknown || costIsLowerBound(run) ? { costUnknown: true } : {}),
     models: aggregate.models,
     profiles: aggregate.profiles,
     // Emission metadata is filled by emitRunStats.

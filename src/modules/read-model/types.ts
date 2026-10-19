@@ -123,7 +123,13 @@ export interface Item {
   runId: string;
   status: ItemStatus;
   group: ItemGroup;
+  /** Somebody has to act on the run: rerun it, decide, or close it. The runner's
+   *  own reading of `status` (stopped, failed or interrupted), so the verbs never
+   *  classify a status themselves. A closure does not change it. */
+  awaitsHuman: boolean;
+  /** Set exactly when the run stopped cleanly (`STOPPED`). */
   stop?: ItemStop;
+  /** Set exactly when the run failed or was interrupted (`FAIL`, `ABORTED`). */
   failure?: ItemFailure;
   approval?: ItemApproval;
   /** The run hit its cost ceiling: the one situation with a verb of its own

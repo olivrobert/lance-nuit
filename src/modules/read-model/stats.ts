@@ -29,12 +29,12 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { asFiniteNumber, asRecord } from "../../lib/json-values.js";
-import type { PersistedRun } from "../../model/persisted.js";
-import { FileRunStateStore, runProvesUnpricedSpend } from "../../run-record/index.js";
+import type { PersistedRun, RunStatus } from "../../model/persisted.js";
+import { costIsLowerBound, effectiveStatus, FileRunStateStore, isCompleted } from "../../run-record/index.js";
 import { workItemLayout } from "../../work-item-store/index.js";
 import { dashboardPaths } from "../dashboard-home/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl, workItemsRoot } from "./projects.js";
-import { directoryNames, statusOf, ticketDirectories } from "./runs.js";
+import { directoryNames, selectedRunStatus, ticketDirectories } from "./runs.js";
 import { isTicketToken } from "./tickets.js";
 import type {
   ItemStatus,
@@ -226,10 +226,6 @@ function realPath(path: string): string | null {
   }
 }
 
-function costUnknownOf(state: PersistedRun): boolean {
-  return state.cost_unaccounted === true || state.total_control?.cost_unknown === true || runProvesUnpricedSpend(state);
-}
-
 /** The figures of a run, live or archived, before they are checked. */
 interface RunFigures {
   costUsd: unknown;
@@ -261,16 +257,24 @@ function statsRun(identity: Pick<StatsRun, "runId" | "pipeline" | "status" | "so
   };
 }
 
-function liveRunView(pipeline: string, state: PersistedRun, steps: ReadonlySet<string> | null): StatsRun {
+function liveRunView(
+  pipeline: string,
+  runDir: string,
+  state: PersistedRun,
+  steps: ReadonlySet<string> | null,
+): StatsRun {
   // The ledger's totals, never a sum of the steps: a run without them reports
   // no figure rather than one that disagrees with what its budget was held to.
   const control = state.total_control;
+  // The status the morning box shows for the same run: a dead runner's RUNNING
+  // snapshot is an interrupted run here too.
+  const { status } = selectedRunStatus({ pipeline, runDir, state });
   return statsRun(
-    { runId: state.runId ?? "", pipeline: state.pipeline || pipeline, status: statusOf(state), source: "live" },
+    { runId: state.runId ?? "", pipeline: state.pipeline || pipeline, status, source: "live" },
     {
       costUsd: control?.total_cost_usd,
       costEstimated: control?.cost_estimated === true,
-      costUnknown: costUnknownOf(state),
+      costUnknown: costIsLowerBound(state),
       activeMs: control?.duration_ms,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
@@ -307,7 +311,7 @@ function liveRuns(project: ProjectEntry, store: FileRunStateStore, steps: Readon
         collected.push({
           project: project.name,
           ticket: ticketOfRun(folder, state),
-          run: liveRunView(pipeline, state, steps),
+          run: liveRunView(pipeline, runDir, state, steps),
           workItemDirs: [join(root, folder)],
         });
       }
@@ -320,17 +324,11 @@ function liveRuns(project: ProjectEntry, store: FileRunStateStore, steps: Readon
 // Archive
 // ---------------------------------------------------------------------------
 
+/** An archived run's status. Its runner finished long ago, so no process can
+ *  hold it: a status without a verdict reads as interrupted, as it would live. */
 function archiveStatusOf(value: unknown): ItemStatus {
-  switch (value) {
-    case "PASS":
-    case "FAIL":
-    case "STOPPED":
-    case "ABORTED":
-    case "RUNNING":
-      return value;
-    default:
-      return "RUNNING";
-  }
+  const status = typeof value === "string" ? (value as RunStatus) : undefined;
+  return effectiveStatus({ status }, () => false).status;
 }
 
 function archivedRun(value: unknown): CollectedRun | undefined {
@@ -439,7 +437,7 @@ function ticketKind(
 function outcomeOf(runs: readonly StatsRun[], delivery: DeliveryRule): TicketOutcome | undefined {
   if (delivery.steps !== null && runs.some((run) => run.handover)) return "PASS";
   const status = runs.find((run) => run.delivery)?.status;
-  return status === "PASS" && delivery.steps !== null ? "UNSHIPPED" : status;
+  return isCompleted(status) && delivery.steps !== null ? "UNSHIPPED" : status;
 }
 
 function buildTicket(

@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { PersistedRun, RunStatus } from "../model/persisted.js";
+import type { PersistedRun } from "../model/persisted.js";
 
 export const CLOSURE_FILE = "closure.json";
 
@@ -27,13 +27,6 @@ export interface RunClosure {
   /** `updatedAt` of the snapshot at closing time: the closure applies to that
    *  snapshot only. */
   runUpdatedAt: string;
-}
-
-/** Statuses a person may close: the ones that wait on somebody. */
-const CLOSABLE: readonly RunStatus[] = ["FAIL", "STOPPED", "ABORTED"];
-
-export function isClosableStatus(status: RunStatus | undefined): boolean {
-  return status !== undefined && CLOSABLE.includes(status);
 }
 
 function isClosure(value: unknown): value is RunClosure {

@@ -9,9 +9,25 @@
 // The groups below say what each part of the surface is for. The entry exports
 // only what code outside the folder calls.
 
-// Meaning of a run status, and what a run or a step still owes, read from a
-// snapshot.
-export { isClosableStatus } from "./closure.js";
+// Meaning of a run status: the status a reader shows, what that status says, and
+// the one precedence that picks a run's status, report headline and exit code.
+export {
+  awaitsFinalization,
+  awaitsHuman,
+  type EffectiveStatus,
+  effectiveStatus,
+  hasVerdict,
+  isCompleted,
+  isFailure,
+  isHalted,
+  isResumableStatus,
+  type RunEndingKind,
+  runEnding,
+  VERDICT_STATUSES,
+} from "./run-status.js";
+export { recordedVerdict } from "./run-verdict.js";
+
+// What a run or a step still owes, read from its steps.
 export {
   allStepsSettled,
   hasUnfinishedWork,
@@ -22,7 +38,6 @@ export {
   pendingSteps,
   replayedAfterInterruption,
 } from "./run-predicates.js";
-export { deriveRunStatus, isResumableStatus } from "./run-verdict.js";
 
 // Reading a run: its snapshot, its journal, and the projection of one onto the
 // other.
@@ -40,6 +55,7 @@ export {
   chargeAttemptToLedger,
   chargeChildReconciliation,
   controlForRun,
+  costIsLowerBound,
   isUnpricedSpend,
   measuredRunCost,
   runProvesUnpricedSpend,

@@ -19,6 +19,7 @@ function item(overrides: Partial<Item> = {}): Item {
     runId: "r-1",
     status: "STOPPED",
     group: "decision",
+    awaitsHuman: true,
     stop: { subject: "plan", kind: "needs-decision", detail: "waiting for the plan" },
     cost: { estimated: false },
     updatedAt: "2026-09-05T08:00:00.000Z",

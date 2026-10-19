@@ -17,6 +17,7 @@ import { runStopHookAsync, type WorktreeSpec } from "../env/worktree.js";
 import { ProcessScope, shutdownAllChildren } from "../exec/process-supervision.js";
 import { errorMessage } from "../lib/errors.js";
 import type { RunStatus } from "../model/persisted.js";
+import { isCompleted } from "../run-record/index.js";
 import { log } from "../runtime/logging.js";
 
 export interface StackStop {
@@ -70,7 +71,8 @@ export function createStackStop(
   };
 }
 
-/** Every status but PASS stops the stack: a PASS work item may still get review fixes. */
+/** Every run but a completed one stops the stack: a PASS work item may still get
+ *  review fixes. */
 export function stopsStack(status: RunStatus | undefined): boolean {
-  return status !== "PASS";
+  return !isCompleted(status);
 }

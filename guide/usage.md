@@ -193,7 +193,8 @@ a morning reader goes through it:
 live process) or a dashboard launch still alive. A run whose snapshot still
 says `RUNNING` but whose runner died without a verdict (crash, `kill -9`,
 reboot) is listed under **Needs you** as `ABORTED`, as a later `lancenuit run`
-would see it.
+would see it. `--inspect`, the costs screen, `lancenuit close` and
+`clean --keep-failed` read it the same way.
 
 A card above them sums up the latest night with a finished run: its run count,
 how many delivered, how many were closed by hand, and its cost. An empty inbox
