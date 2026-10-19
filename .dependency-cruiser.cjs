@@ -1,4 +1,4 @@
-// Executable form of the layering described in guide/architecture.md.
+// Executable form of the layering and modules described in guide/architecture.md.
 // `bun run deps:check` validates this config, cruises `src/`, then compares the
 // violations to `.dependency-cruiser-known-violations.json` (scripts/check-deps.mjs).
 //
@@ -7,7 +7,7 @@
 
 const { existsSync } = require("node:fs");
 
-const { LAYERS, pathAboveLevel } = require("./scripts/layers.cjs");
+const { LAYERS, MODULES, modulePathPattern, moduleEntryPattern, pathAboveLevel } = require("./scripts/layers.cjs");
 
 // `contracts/` is the published surface: pure types and functions. Two `lib/`
 // files are whitelisted so a published contract may reuse them. The list is
@@ -33,6 +33,20 @@ const layerRules = LAYERS.flatMap((layer) => {
   ];
 });
 
+// One rule per module: from outside the module, only its entry may be imported.
+// Inside the module, files import each other freely.
+const moduleRules = MODULES.map((module) => {
+  const inside = modulePathPattern(module);
+
+  return {
+    name: `module-${module.name}-entry-only`,
+    severity: "error",
+    comment: `${module.path}/ is entered through ${module.entry} only; its other files are internals.`,
+    from: { pathNot: inside },
+    to: { path: inside, pathNot: moduleEntryPattern(module) },
+  };
+});
+
 module.exports = {
   forbidden: [
     {
@@ -43,6 +57,7 @@ module.exports = {
       to: { circular: true },
     },
     ...layerRules,
+    ...moduleRules,
     {
       name: "contracts-pure",
       severity: "error",

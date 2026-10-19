@@ -116,6 +116,12 @@ beyond that belongs in the code, in a comment, or in the pull request.
   `to` pair of folders, and an entry carries a fourth field, `removedBy`, naming
   the cut meant to retire it. There is no `--write-baseline` for this one: it is
   edited by hand, and the target is an empty file.
+- `deps:check` also enforces the modules declared in `MODULES`
+  (`scripts/layers.cjs`): each yields a `module-<name>-entry-only` rule, so code
+  outside a module may import only its entry file, and the check fails when a
+  declared entry does not exist. These rules have no baseline: declare a module
+  in the change that routes every outside import through its entry. See
+  [guide/architecture.md](guide/architecture.md#modules).
 - `docs/DSL-API.md` is generated. Never edit it by hand; run `bun run docs:dsl`.
 - Semgrep rules live in `.semgrep.yml`. An `ERROR` rule must match nothing in
   the repository, so a hit always means a regression; a pattern that is

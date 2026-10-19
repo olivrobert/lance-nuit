@@ -94,6 +94,35 @@ That baseline is now empty: `src/` holds no folder cycle at all, and
 `bun run deps:check` defends the state by failing on the first cyclic folder
 edge it finds.
 
+### Modules
+
+Levels say which way an import may go. Modules add a second, independent axis:
+encapsulation, that is, through which file an import may enter. A module is a
+folder with a single entry file; from outside the folder, only that entry may be
+imported, while the files inside import each other freely. A module still sits
+in exactly one level, and the level rules apply to it unchanged.
+
+| Module | Entry |
+| --- | --- |
+| `src/modules/ui/` | `index.ts` |
+| `src/modules/read-model/` | `index.ts` |
+| `src/modules/dashboard-home/` | `index.ts` |
+| `src/modules/work-item/` | `registry.ts` |
+| `src/extractors/` | `registry.ts` |
+| `src/step/` | `step-loop.ts` |
+| `src/engine/` | `default-registry.ts` |
+
+`scripts/layers.cjs` declares them in `MODULES`, next to the levels.
+`.dependency-cruiser.cjs` turns each one into a `module-<name>-entry-only` rule,
+and `bun run deps:check` also fails when a declared entry no longer exists.
+Test files are not cruised, so a test may still reach a module's internals.
+
+These rules have no baseline. A module is declared in the same change that routes
+every outside import through its entry, so a deep import is never recorded as
+debt: it is fixed, or the module is not declared yet. Narrowing what an entry
+exports is then enough to make the corresponding use impossible outside the
+module, without any further rule.
+
 ### The composition root
 
 `src/entry/` composes the registries for normal runs. `src/commands/registries.ts`

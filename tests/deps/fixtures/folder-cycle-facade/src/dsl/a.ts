@@ -1,3 +1,3 @@
-import { s } from "../step/s.js";
+import { s } from "../dispatch/s.js";
 
 export const a = s;

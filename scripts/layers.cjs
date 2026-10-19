@@ -1,4 +1,5 @@
-// Single definition of the architecture layers described in guide/architecture.md.
+// Single definition of the architecture layers and modules described in
+// guide/architecture.md.
 // Both `.dependency-cruiser.cjs` (to build the `layer-<n>-no-upward` rules) and
 // `scripts/check-deps.mjs` (to prove every source file is classified) read it, so
 // a new folder is declared once and both checks see it.
@@ -54,6 +55,48 @@ const LAYERS = [
   },
 ];
 
+// Modules are a second axis, orthogonal to the layers: a layer says which way an
+// import may go, a module says through which file it may enter. Each module
+// becomes a `module-<name>-entry-only` rule in `.dependency-cruiser.cjs`, and
+// `check-deps.mjs` proves every `entry` exists, so a renamed entry cannot leave
+// behind a rule that silently forbids every outside import, the entry included.
+//
+// These rules have no baseline: a module is declared in the change that routes
+// every outside import through its entry.
+
+/** @type {{ name: string, path: string, entry: string }[]} */
+const MODULES = [
+  { name: "ui", path: "src/modules/ui", entry: "index.ts" },
+  { name: "read-model", path: "src/modules/read-model", entry: "index.ts" },
+  { name: "dashboard-home", path: "src/modules/dashboard-home", entry: "index.ts" },
+  { name: "work-item", path: "src/modules/work-item", entry: "registry.ts" },
+  { name: "extractors", path: "src/extractors", entry: "registry.ts" },
+  { name: "step", path: "src/step", entry: "step-loop.ts" },
+  { name: "engine", path: "src/engine", entry: "default-registry.ts" },
+];
+
+function escapeRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * The regex matching every file of `module`.
+ *
+ * @param {{ path: string }} module
+ */
+function modulePathPattern(module) {
+  return `^${escapeRegex(module.path)}/`;
+}
+
+/**
+ * The regex matching only the entry file of `module`.
+ *
+ * @param {{ path: string, entry: string }} module
+ */
+function moduleEntryPattern(module) {
+  return `^${escapeRegex(`${module.path}/${module.entry}`)}$`;
+}
+
 const MATCHERS = LAYERS.map((layer) => ({ layer, regex: new RegExp(layer.path) }));
 
 /**
@@ -90,4 +133,4 @@ function pathAboveLevel(level) {
   return above.length === 0 ? null : above.join("|");
 }
 
-module.exports = { LAYERS, layersOf, layerOf, pathAboveLevel };
+module.exports = { LAYERS, MODULES, layersOf, layerOf, pathAboveLevel, modulePathPattern, moduleEntryPattern };

@@ -3,7 +3,8 @@
 // Architecture gate, run by `bun run deps:check`.
 //
 // Four things, in order:
-//   1. every source file is classified in exactly one layer (scripts/layers.cjs);
+//   1. every source file is classified in exactly one layer, and every declared
+//      module entry exists (scripts/layers.cjs);
 //   2. the dependency-cruiser violations match the known-violations baseline,
 //      entry for entry — a violation missing from the baseline is new debt, a
 //      baseline entry with no matching edge is stale and must be removed;
@@ -42,7 +43,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { layersOf } = require("./layers.cjs");
+const { MODULES, layersOf } = require("./layers.cjs");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_BASELINE = ".dependency-cruiser-known-violations.json";
@@ -110,6 +111,18 @@ function checkClassification() {
   }
 
   return problems;
+}
+
+/**
+ * A module whose entry is gone would forbid every outside import, the entry's
+ * replacement included, and name a file nobody can find. `MODULES` describes
+ * this repository, so the entries are looked up from its root, even when the
+ * cruise runs inside a test fixture.
+ */
+function checkModuleEntries() {
+  return MODULES.filter((module) => !existsSync(join(REPO_ROOT, module.path, module.entry))).map(
+    (module) => `module ${module.name}: entry ${module.path}/${module.entry} does not exist`,
+  );
 }
 
 function cruise(configPath) {
@@ -471,6 +484,18 @@ function main() {
     console.error("Every file under src/ must belong to exactly one layer (scripts/layers.cjs).");
 
     for (const problem of classification) console.error(`  ${problem}`);
+
+    process.exitCode = 1;
+
+    return;
+  }
+
+  const missingEntries = checkModuleEntries();
+
+  if (missingEntries.length > 0) {
+    console.error("Every module declared in scripts/layers.cjs must point to an existing entry.");
+
+    for (const problem of missingEntries) console.error(`  ${problem}`);
 
     process.exitCode = 1;
 
