@@ -7,17 +7,19 @@
 
 import { dirname } from "node:path";
 import type { RunnerArgs } from "../model/cli-options.js";
+import type { PipelineContext } from "../model/context.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { log } from "../runtime/logging.js";
 import {
   awaitsHuman,
   closureOf,
   effectiveStatus,
+  isRunHeld,
   latestRunFile,
   readClosureAt,
   readRunSnapshot,
   removeClosureAt,
-  runLockHolder,
+  runsLocationOf,
   writeClosureAt,
 } from "../run-record/index.js";
 import { decisionActor } from "../work-item-store/index.js";
@@ -30,10 +32,8 @@ type ClosureArgs = Pick<RunnerArgs, "ticket" | "pipelinePath">;
 
 export type ClosureResult = { ok: true; message: string } | { ok: false; message: string };
 
-/** Snapshot path of the latest run of `pipeline` for `ticket`, or `null`. */
-function latestSnapshot(cwd: string, ticket: string, pipeline: string): string | null {
-  const context = buildPipelineContext({ cwd, ticket, ...commandRegistries() });
-  return latestRunFile(pipeline, ticket, context);
+function contextFor(cwd: string, ticket: string): PipelineContext {
+  return buildPipelineContext({ cwd, ticket, ...commandRegistries() });
 }
 
 /**
@@ -43,11 +43,12 @@ function latestSnapshot(cwd: string, ticket: string, pipeline: string): string |
  * runner that died is an interrupted run, which waits on somebody like any other.
  */
 export function closeLatestRun(cwd: string, ticket: string, pipeline: string, actor: string): ClosureResult {
-  const file = latestSnapshot(cwd, ticket, pipeline);
+  const context = contextFor(cwd, ticket);
+  const file = latestRunFile(pipeline, ticket, context);
   const state = file ? readRunSnapshot(file) : null;
   if (!file || !state) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
   const runDir = dirname(file);
-  const { status } = effectiveStatus(state, () => runLockHolder(runDir) !== null);
+  const { status } = effectiveStatus(state, () => isRunHeld(runDir, state, runsLocationOf(context)));
   if (!awaitsHuman(status)) {
     return {
       ok: false,
@@ -63,7 +64,7 @@ export function closeLatestRun(cwd: string, ticket: string, pipeline: string, ac
 
 /** Remove the closure of the latest run of `pipeline`, if it has one. */
 export function reopenLatestRun(cwd: string, ticket: string, pipeline: string): ClosureResult {
-  const file = latestSnapshot(cwd, ticket, pipeline);
+  const file = latestRunFile(pipeline, ticket, contextFor(cwd, ticket));
   if (!file) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
   const runDir = dirname(file);
   if (!readClosureAt(runDir)) return { ok: true, message: `Run of ${ticket} was not closed.` };

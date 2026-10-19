@@ -240,7 +240,8 @@ direction). It projects snapshots into the DTO the front end renders. It takes
 the work-item paths from `workItemLayout` and a stopped gate's decision from
 `gateDecisionStatus`, both in `work-item-store`, the rule the runner's gate and
 `--inspect` read too. The selected run's status is the run record's
-`effectiveStatus`, asked with the runner's `runLockHolder`: a snapshot without a
+`effectiveStatus`, asked with the runner's `isRunHeld` (the run lock, or for a
+composed child the lock of the run that composed it, up to the root): a snapshot without a
 verdict that no live process holds is served as an interrupted `ABORTED` run, so
 the dashboard and a later resume agree on what is live. Its step list is the snapshot reconciled with the
 journal by `projectRunState`, the projection a resume applies. Two of its readers take
@@ -506,7 +507,8 @@ a clean stop (`stopRun`), a manual interruption
 (`finalizeRun`). Each operation writes the fields that must change together and
 the journal event that records them. What a status means has one owner too,
 `run-record/run-status.ts`: the status a reader shows (`effectiveStatus`, with
-the run lock as a parameter), what each status says (a verdict, completed, a
+whether a live process holds the run as a parameter, which `isRunHeld` in
+`stores/run-storage.ts` answers), what each status says (a verdict, completed, a
 failure, waiting on somebody, resumable), the `≥` of a partial total
 (`costIsLowerBound`, in `cost-accounting.ts`), and one precedence table,
 `runEnding`, from which `finalizeRun` takes the status, the console report its

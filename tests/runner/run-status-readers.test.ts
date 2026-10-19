@@ -125,6 +125,74 @@ test("a run a live runner holds is running in every reader, and nobody may close
   expect(existsSync(join(runDir, "steps", "coder", "attempt-001", "output.log"))).toBe(false);
 });
 
+/** A root run stepping through an orchestration node, and the child it composed:
+ *  the child's directory never has a lock of its own, since it runs inside the
+ *  root's process. The child was written last, so it is the run the item is
+ *  about. */
+function composedRuns(project: string): { parentDir: string; childDir: string } {
+  const parentDir = writeRun(project, TICKET, "feature", {
+    runId: "p-1",
+    status: "RUNNING",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    pipelineLineage: [{ pipelinePath: "/pipelines/feature.ts", ticket: TICKET }],
+    steps: [{ id: "lots", status: "running", retries: 0 }],
+  });
+  const childDir = writeRun(project, TICKET, "lot", {
+    runId: "c-1",
+    status: "RUNNING",
+    parentRunId: "p-1",
+    parentNodeId: "lots",
+    rootRunId: "p-1",
+    updatedAt: "2026-01-01T00:00:01.000Z",
+    pipelineLineage: [
+      { pipelinePath: "/pipelines/feature.ts", ticket: TICKET },
+      { pipelinePath: "/pipelines/lot.ts", ticket: TICKET },
+    ],
+    steps: [{ id: "coder", status: "running", retries: 0 }],
+  });
+  return { parentDir, childDir };
+}
+
+async function childStatusesOf({ project, options }: Listed) {
+  const tree = await inspectTicket(contextFor(project), TICKET);
+  const child = await inspectTicket(contextFor(project), TICKET, "c-1");
+  return {
+    sheet: (await readItem("demo-app", TICKET, options))?.status,
+    steps: readSteps("demo-app", TICKET, options)?.status,
+    tree: /^children:\n\s+(\w+)\s+lot \(c-1\)/m.exec(tree)?.[1],
+    inspect: /^status: (.+)$/m.exec(child)?.[1],
+  };
+}
+
+test("a composed child runs as long as the runner of its root lives, though its own directory has no lock", async () => {
+  const listed = listedProject();
+  const { parentDir, childDir } = composedRuns(listed.project);
+  writeRunLock(parentDir, process.ppid);
+  expect(existsSync(join(childDir, "runner.lock"))).toBe(false);
+
+  expect(await childStatusesOf(listed)).toEqual({
+    sheet: "RUNNING",
+    steps: "RUNNING",
+    tree: "RUNNING",
+    inspect: "RUNNING",
+  });
+  expect(closeLatestRun(listed.project, TICKET, "lot", "olivier")).toMatchObject({ ok: false });
+});
+
+test("a composed child whose root's runner died is interrupted, like its root", async () => {
+  const listed = listedProject();
+  const { parentDir } = composedRuns(listed.project);
+  writeRunLock(parentDir, DEAD_PID);
+
+  expect(await childStatusesOf(listed)).toEqual({
+    sheet: "ABORTED",
+    steps: "ABORTED",
+    tree: "ABORTED",
+    inspect: "ABORTED (interrupted: the runner died without a verdict)",
+  });
+  expect(closeLatestRun(listed.project, TICKET, "lot", "olivier")).toMatchObject({ ok: true });
+});
+
 test("the ≥ of a partial total is the same on the sheet and on the costs page", async () => {
   const cases: Array<[string, Partial<PersistedRun>, boolean]> = [
     [
@@ -179,14 +247,15 @@ const STATUS = "RUNNING|PASS|FAIL|STOPPED|ABORTED|UNKNOWN";
 /** Comparing a status to `RUNNING` or `STOPPED` asks only whether the run is in
  *  that state, which needs no rule. Any other classification is a copy: a
  *  comparison to a status that carries a meaning (`PASS` is "completed", `FAIL`
- *  and `ABORTED` are failures), a `case`, a list of statuses, or a regex of
- *  them. */
+ *  and `ABORTED` are failures), a `case`, a list of statuses, a regex of them,
+ *  or a table keyed by status. */
 const COPIES: readonly RegExp[] = [
   /[!=]==\s*"(PASS|FAIL|ABORTED|UNKNOWN)"/,
   /"(PASS|FAIL|ABORTED|UNKNOWN)"\s*[!=]==/,
   new RegExp(`case\\s+"(${STATUS})"\\s*:`),
   new RegExp(`"(${STATUS})"\\s*,\\s*"(${STATUS})"`),
   new RegExp(`\\b(${STATUS})\\|(${STATUS})\\b`),
+  new RegExp(`^\\s*"?(${STATUS})"?\\s*:`, "m"),
 ];
 
 /** Places that spell statuses without deciding anything with them. */
@@ -204,6 +273,11 @@ const ALLOWED: ReadonlyArray<{ file: string; snippet: string; reason: string }> 
     file: "run-stats/history-schema.ts",
     snippet: `const RUN_STATS_STATUSES = [\n  "PASS",\n  "FAIL",\n  "STOPPED",\n  "ABORTED",\n  "UNKNOWN",\n]`,
     reason: "the values the history schema accepts",
+  },
+  {
+    file: "run-stats/stats-core.ts",
+    snippet: `const STATUS_BADGES: Readonly<Record<string, string>> = {\n  PASS: "✅ PASS",\n  FAIL: "❌ FAIL",\n  STOPPED: "⏹ STOPPED",\n  ABORTED: "🛑 ABORTED",\n};`,
+    reason: "the console label of each status",
   },
   {
     file: "commands/stats.ts",

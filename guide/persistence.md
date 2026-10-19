@@ -406,6 +406,13 @@ live runner holds the target, and so does an implicit resume of a resumable
 another run with `--run <runId>`, or start a new one with `--fresh` — rather than
 silently start over and replay work already done and paid for.
 
+A composed child takes no lock of its own: it runs inside the process of the run
+that composed it, which hands it its directory. Its holder is that run's, up to
+the root, unless the child was resumed directly with `--run`, which takes its
+lock. A reader that asks whether a run is live (`--inspect`, `close`, the
+dashboard) follows `parentRunId` up the composition for that reason
+(`isRunHeld`).
+
 Two details of that lock file are worth knowing when reading one by hand:
 
 - Next to the pid, the payload carries a `lockNonce` field: a random value

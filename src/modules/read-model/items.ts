@@ -24,7 +24,9 @@ import {
   FileRunEventStore,
   FileRunStateStore,
   hasUnfinishedWork,
+  hasVerdict,
   isClosureCurrent,
+  isCompleted,
   isFailure,
   lastPassInterrupted,
   owesWork,
@@ -54,13 +56,13 @@ import type {
   Launch,
 } from "./types.js";
 
-const GROUP_BY_STATUS: Record<ItemStatus, ItemGroup> = {
-  STOPPED: "decision",
-  FAIL: "failure",
-  ABORTED: "failure",
-  RUNNING: "running",
-  PASS: "done",
-};
+/** The box an item sits in, from what its status means: a verdict that is
+ *  neither a failure nor a completion waits on a decision. */
+function groupOf(status: ItemStatus): ItemGroup {
+  if (isFailure(status)) return "failure";
+  if (isCompleted(status)) return "done";
+  return hasVerdict(status) ? "decision" : "running";
+}
 
 /** Reading order of the morning box: what waits for a decision first, what is
  *  merely finished last. */
@@ -370,7 +372,7 @@ async function buildItem(
   if (!selected) return undefined;
 
   const { state } = selected;
-  const { status, interrupted } = selectedRunStatus(selected);
+  const { status, interrupted } = selectedRunStatus(project, selected);
   const runId = state.runId ?? "";
   const stop = status === "STOPPED" ? stopOf(state) : undefined;
   const interruptedStep = interruptedStepOf(selected.runDir, state, interrupted, stop);
@@ -386,7 +388,7 @@ async function buildItem(
   const effectiveWorkItemDir = workItemDirOf(project, ticket);
   const ticketHead = readTicketHead(effectiveWorkItemDir);
   const title = ticketHead === undefined ? undefined : titleOfTicketMarkdown(ticketHead, ticket);
-  const group: ItemGroup = launch?.alive ? "running" : closed ? "done" : GROUP_BY_STATUS[status];
+  const group: ItemGroup = launch?.alive ? "running" : closed ? "done" : groupOf(status);
 
   return {
     key,

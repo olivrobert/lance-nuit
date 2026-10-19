@@ -190,7 +190,8 @@ a morning reader goes through it:
 - **Running**: runs in progress.
 
 **Running** holds only a run a live runner holds (its `runner.lock` names a
-live process) or a dashboard launch still alive. A run whose snapshot still
+live process; a composed child takes no lock of its own and is held by the run
+that composed it, up to the root) or a dashboard launch still alive. A run whose snapshot still
 says `RUNNING` but whose runner died without a verdict (crash, `kill -9`,
 reboot) is listed under **Needs you** as `ABORTED`, as a later `lancenuit run`
 would see it. `--inspect`, the costs screen, `lancenuit close` and

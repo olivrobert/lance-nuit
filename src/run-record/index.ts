@@ -119,10 +119,12 @@ export { discardedResumeNotice, type ExplicitRunSelection, selectExplicitRun } f
 export { FileRunLogStore } from "./stores/file-run-log-store.js";
 export {
   createRunId,
+  isRunHeld,
   latestRunFile,
   pipelineRunsDir,
   RUNS_DIRECTORY,
   resolveLatestRunSnapshot,
   runLockHolder,
+  runsLocationOf,
   wouldResumeLatest,
 } from "./stores/run-storage.js";

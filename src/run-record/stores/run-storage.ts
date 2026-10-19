@@ -10,6 +10,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -55,10 +56,23 @@ export function createRunId(pipelineName: string, now = new Date(), uuid = rando
 }
 
 export function baseRunsDir(ticket?: string, context?: PipelineContext): string {
-  const specPath = context?.config.specPath ?? DEFAULT_SPEC_PATH;
-  const root = context?.cwd ?? process.cwd();
-  if (ticket) return join(root, specPath, resolveTicketDir(ticket, specPath, root), RUNS_DIRECTORY);
-  return join(root, ".lance-nuit", RUNS_DIRECTORY);
+  return runsDirAt(runsLocationOf(context), ticket);
+}
+
+/** Where a project keeps its runs. A reader without a pipeline context (the
+ *  dashboard) builds it from the project it lists. */
+export interface RunsLocation {
+  cwd: string;
+  specPath: string;
+}
+
+export function runsLocationOf(context?: PipelineContext): RunsLocation {
+  return { cwd: context?.cwd ?? process.cwd(), specPath: context?.config.specPath ?? DEFAULT_SPEC_PATH };
+}
+
+function runsDirAt({ cwd, specPath }: RunsLocation, ticket?: string): string {
+  if (ticket) return join(cwd, specPath, resolveTicketDir(ticket, specPath, cwd), RUNS_DIRECTORY);
+  return join(cwd, ".lance-nuit", RUNS_DIRECTORY);
 }
 
 export function pipelineRunsDir(pipelineName: string, ticket?: string, context?: PipelineContext): string {
@@ -146,6 +160,60 @@ export function runLockHolder(dir: string): number | null {
   const holder = readRunLock(dir);
   if (!holder || holder.pid === process.pid) return null;
   return defaultIsAlive(holder.pid, holder.start) ? holder.pid : null;
+}
+
+/** What `isRunHeld` reads of a snapshot to find the run that composed it. */
+export type RunAncestry = Pick<PersistedRun, "ticket" | "parentRunId" | "pipelineLineage">;
+
+/**
+ * Whether a live process other than this one holds the run in `runDir`.
+ *
+ * A composed child never takes the lock of its own directory: it runs inside the
+ * process of the run that composed it, which hands it its directory explicitly
+ * (`resolveRunDirSelection`). Its holder is that run's, and so on up to the
+ * root. Its own lock is asked first, because a child resumed directly with
+ * `--run` takes it, and then the runs it composes run under that process.
+ */
+export function isRunHeld(runDir: string, state: RunAncestry, location: RunsLocation): boolean {
+  const visited = new Set<string>();
+  let dir = runDir;
+  let run: RunAncestry | null = state;
+  // A damaged lineage that loops back on itself reads as "nobody holds it".
+  while (!visited.has(dir)) {
+    visited.add(dir);
+    if (runLockHolder(dir) !== null) return true;
+    // An unreadable snapshot still has its lock asked, but names no parent.
+    const parent = run === null ? null : parentRunDir(run, location);
+    if (parent === null) return false;
+    dir = parent;
+    run = readRunSnapshot(statePath(parent));
+  }
+  return false;
+}
+
+/** Directory of the run that composed `run`, or `null` for a root run or a parent
+ *  that is gone. The lineage ends with the run itself, so its parent's ticket is
+ *  the entry before; a snapshot written without a lineage was composed on its
+ *  own ticket. The parent's pipeline is not recorded, so its directory is looked
+ *  up under each pipeline of that ticket. */
+function parentRunDir(run: RunAncestry, location: RunsLocation): string | null {
+  const { parentRunId } = run;
+  // The id comes from a file: it must not climb out of the runs directory.
+  if (parentRunId === undefined || !isLogicalSegment(parentRunId)) return null;
+  const lineage = run.pipelineLineage ?? [];
+  const ticket = lineage.length >= 2 ? lineage[lineage.length - 2]?.ticket : run.ticket;
+  const runsDir = runsDirAt(location, ticket);
+  let pipelines: string[];
+  try {
+    pipelines = readdirSync(runsDir);
+  } catch {
+    // No runs directory for that ticket: the parent's files are gone.
+    return null;
+  }
+  const dir = pipelines
+    .map((pipeline) => join(runsDir, pipeline, parentRunId))
+    .find((candidate) => existsSync(statePath(candidate)));
+  return dir ?? null;
 }
 
 /** Single-writer guard for a run directory. Without it two runner processes can

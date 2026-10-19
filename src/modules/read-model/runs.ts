@@ -11,7 +11,7 @@
 import { readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { PersistedRun } from "../../model/persisted.js";
-import { effectiveStatus, FileRunStateStore, runLockHolder } from "../../run-record/index.js";
+import { effectiveStatus, FileRunStateStore, isRunHeld } from "../../run-record/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, workItemsRoot } from "./projects.js";
 import type { ItemStatus } from "./types.js";
 
@@ -77,13 +77,17 @@ export function latestRuns(project: ProjectEntry, ticket: string, store: FileRun
 /**
  * Status of the run a ticket is about, as the runner would judge it.
  *
- * `runLockHolder` is the runner's own answer to "who holds this run", so the
- * dashboard and a later `lancenuit run` agree on what can be resumed: a snapshot
- * without a verdict that no live process holds is served as an interrupted
- * `ABORTED` run (`effectiveStatus`).
+ * `isRunHeld` is the runner's own answer to "who holds this run", a composed
+ * child included, so the dashboard and a later `lancenuit run` agree on what can
+ * be resumed: a snapshot without a verdict that no live process holds is served
+ * as an interrupted `ABORTED` run (`effectiveStatus`).
  */
-export function selectedRunStatus(run: SelectedRun): { status: ItemStatus; interrupted: boolean } {
-  return effectiveStatus(run.state, () => runLockHolder(run.runDir) !== null);
+export function selectedRunStatus(
+  project: ProjectEntry,
+  run: SelectedRun,
+): { status: ItemStatus; interrupted: boolean } {
+  const location = { cwd: project.cwd, specPath: project.specPath };
+  return effectiveStatus(run.state, () => isRunHeld(run.runDir, run.state, location));
 }
 
 /**
@@ -142,7 +146,7 @@ export function resolveRun(
     project,
     ticket,
     run,
-    ...selectedRunStatus(run),
+    ...selectedRunStatus(project, run),
     cwd: effectiveCwd(project, run.state),
     workItemDir: workItemDirOf(project, ticket),
   };
