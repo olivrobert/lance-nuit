@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeClosureAt } from "../../state/closure.ts";
 import { listItems, readItem, titleOfTicketMarkdown } from "./items.ts";
@@ -415,7 +415,43 @@ test("items: a pending rejection shows its reason and round, a reworked artifact
     reason: "split step 2",
     round: 1,
   });
-  expect(reworked!.approval).toEqual({ subject: "plan", state: "absent" });
+  // The rework answered the rejection: the gate waits on a new decision, and the
+  // item says so in the runner's word rather than as if nobody had decided.
+  expect(reworked!.approval).toEqual({
+    subject: "plan",
+    state: "reworked",
+    decidedAt: "2026-09-05T08:00:00.000Z",
+    decidedBy: "Olivier",
+    round: 1,
+  });
+});
+
+test("items: a decision written for another subject is not shown as the gate's approval", async () => {
+  const project = listedProject();
+  writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "STOPPED",
+    updatedAt: "2026-09-05T09:00:00.000Z",
+    outcome: {
+      phase: "plan",
+      reason: "plan needs approval",
+      logPath: null,
+      resumable: true,
+      stop: { subject: "plan", kind: "needs-decision", detail: "plan needs approval" },
+    },
+  });
+  writeArtifact(project, "DEMO-1", "plan.md", "# plan\n");
+  writeDecision(project, "DEMO-1", "spec", "plan.md", "# plan\n");
+  // A decision file copied under the gate's name: the runner's gate refuses it,
+  // so the dashboard must not offer a Rerun as if the gate were lifted.
+  renameSync(
+    join(workItemDir(project, "DEMO-1"), "decisions", "spec.json"),
+    join(workItemDir(project, "DEMO-1"), "decisions", "plan.json"),
+  );
+
+  const [item] = await listItems();
+
+  expect(item!.approval).toEqual({ subject: "plan", state: "absent" });
 });
 
 /** A worktree run stopped on the `plan` gate, approved from the main clone. */

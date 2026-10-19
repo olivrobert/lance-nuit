@@ -30,11 +30,12 @@ export type ItemFailKind = "judgment" | "incident";
  *  sends them to the environment. The runner persists `blocked`. */
 export type ItemFailCause = "blocked";
 
-/** Freshness of the approval that lifts the pending gate. `absent` also covers
- *  "not required": the two are indistinguishable on disk. `rejected` is a
- *  rejection the rework has not answered yet; once the artifact changed, the
- *  gate waits on a new decision and the state falls back to `absent`. */
-export type ApprovalState = "absent" | "fresh" | "stale" | "rejected";
+/** Where the decision that lifts the pending gate stands, in the words of the
+ *  runner's `GateDecisionState`, so the dashboard and `--inspect` name each case
+ *  alike. `absent` also covers "not required": the two are indistinguishable on
+ *  disk. `rejected` is a rejection the rework has not answered yet; `reworked`,
+ *  one it has, so the gate waits on a new decision. */
+export type ApprovalState = "absent" | "fresh" | "stale" | "rejected" | "reworked";
 
 export interface ItemProject {
   /** Last segment of the project path. */
@@ -70,8 +71,9 @@ export interface ItemApproval {
   state: ApprovalState;
   decidedAt?: string;
   decidedBy?: string;
-  /** Present on a `rejected` state: why, and which rework round it opened. */
+  /** Present on a `rejected` state: why the human rejected the artifact. */
   reason?: string;
+  /** Present on a `rejected` or `reworked` state: the rework round the rejection opened. */
   round?: number;
 }
 

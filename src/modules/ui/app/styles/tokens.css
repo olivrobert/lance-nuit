@@ -221,6 +221,10 @@ details > summary {
   color: var(--fail);
   background: var(--fail-bg);
 }
+.tag.reworked {
+  color: var(--stop);
+  background: var(--stop-bg);
+}
 .tag.fresh {
   color: var(--ok);
   background: var(--ok-bg);

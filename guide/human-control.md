@@ -201,9 +201,13 @@ matter:
 - `run --approve <subject>` on a run that another runner is already resuming
   records nothing new and starts no second run.
 - `lancenuit inspect <ticket>` prints, for a stopped run, the state of the
-  approval it waits on: `none recorded`, `current` (resume without `--approve`),
-  or `stale` (the artifact changed since). The dashboard reads the same rule:
-  once the approval is current it offers **Rerun** rather than another approval.
+  decision it waits on: `none recorded`, `current` (resume without `--approve`),
+  `stale` (the artifact changed since), `rejected` (the rework has not run yet)
+  or `reworked` (the rework rewrote the artifact; approve it or reject it
+  again). The dashboard reads the same rule and shows the same words: once the
+  approval is current it offers **Rerun** rather than another approval. A
+  decision file whose `subject` is not the gate's own decides nothing, for the
+  gate and for both views.
 
 ### Who approved
 

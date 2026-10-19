@@ -16,7 +16,7 @@
 //
 // Pure: nothing here spawns or writes; `launcher.ts` does.
 
-import { type Item, MAX_REJECTION_REASON } from "../read-model/index.js";
+import { type Item, isValidSubjectToken, MAX_REJECTION_REASON } from "../read-model/index.js";
 
 export const VERBS = [
   "approve-and-rerun",
@@ -146,7 +146,8 @@ export function buildArgv(item: Item, verb: Verb, input: ActionInput = {}): Argv
       if (typeof input.subject !== "string" || input.subject !== gate) {
         return { ok: false, status: 400, reason: `subject must be the pending gate "${gate}"` };
       }
-      if (!/^[\w-]+$/.test(gate)) return { ok: false, status: 409, reason: "the pending subject is not a valid token" };
+      if (!isValidSubjectToken(gate))
+        return { ok: false, status: 409, reason: "the pending subject is not a valid token" };
       return { ok: true, argv: argvOf(item, verb, "") };
     }
     case "reject-and-rerun": {
@@ -156,7 +157,8 @@ export function buildArgv(item: Item, verb: Verb, input: ActionInput = {}): Argv
       if (typeof input.subject !== "string" || input.subject !== gate) {
         return { ok: false, status: 400, reason: `subject must be the pending gate "${gate}"` };
       }
-      if (!/^[\w-]+$/.test(gate)) return { ok: false, status: 409, reason: "the pending subject is not a valid token" };
+      if (!isValidSubjectToken(gate))
+        return { ok: false, status: 409, reason: "the pending subject is not a valid token" };
       const reason = formatReason(input.reason);
       if (!reason) {
         return {

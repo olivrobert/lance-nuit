@@ -2,11 +2,11 @@
 // project tree, and work items whose runs are written exactly as the runner
 // writes them (`runs/<pipeline>/<runId>/state.json` plus the `latest` link).
 
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { PersistedRun } from "../../model/persisted.js";
-import { sha256Text } from "../../work-item-store/index.js";
 
 export const SPEC_PATH = ".lance-nuit/work-items";
 
@@ -123,7 +123,9 @@ export function writeRunLock(runDir: string, pid: number): void {
 }
 
 /** An approval decision locked to `body`; pass the body the artifact had when it
- *  was approved to build a stale one. */
+ *  was approved to build a stale one. The hash is computed here, not borrowed
+ *  from the runner: the fixture states the file format, the code under test
+ *  must read it. */
 export function writeDecision(
   root: string,
   ticket: string,
@@ -137,7 +139,7 @@ export function writeDecision(
     decision: rejection ? "rejected" : "approved",
     subject,
     artifact: `artifacts/${artifact}`,
-    artifactSha256: sha256Text(body),
+    artifactSha256: createHash("sha256").update(body).digest("hex"),
     decidedAt: "2026-09-05T08:00:00.000Z",
     decidedBy: "Olivier",
     ...(rejection ?? {}),

@@ -25,8 +25,8 @@ export {
   readTree,
   TEXT_LIMIT_BYTES,
 } from "./explorer.js";
-// The dashboard must refuse a reason the runner would refuse, before spawning.
-export { MAX_REJECTION_REASON } from "../../work-item-store/index.js";
+// The dashboard must refuse a reason or a subject the runner would refuse, before spawning.
+export { isValidSubjectToken, MAX_REJECTION_REASON } from "../../work-item-store/index.js";
 export { GROUP_ORDER, listItems, readItem } from "./items.js";
 export { readLaunches, readLaunchesFor } from "./launches.js";
 export {

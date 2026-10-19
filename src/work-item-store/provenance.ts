@@ -32,9 +32,10 @@ import { resolveTemplateAsync } from "../model/definition.js";
 import type { StepDefinition } from "../model/run.js";
 import { isSource, type Source, type StepInput } from "../model/source.js";
 import { sha256Bytes, sha256Text } from "./hash.js";
+import { PROVENANCE_DIRNAME } from "./layout.js";
 
 /** Reserved artifact-name prefix owned by the runner. */
-export const PROVENANCE_PREFIX = ".provenance/";
+export const PROVENANCE_PREFIX = `${PROVENANCE_DIRNAME}/`;
 
 /** Fingerprint of one declared input: its SHA-256, or `null` when the input was
  *  absent at the time the record was written — for a source, when its command

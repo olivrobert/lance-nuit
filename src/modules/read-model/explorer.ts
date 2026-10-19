@@ -18,7 +18,7 @@
 import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RunStopState } from "../../model/persisted.js";
-import { isValidSubjectToken, readDecisionAt } from "../../work-item-store/index.js";
+import { isValidSubjectToken, readDecisionIn } from "../../work-item-store/index.js";
 import { isPathWithin } from "../../lib/path-safety.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
@@ -232,7 +232,7 @@ function gateArtifactPath(workItemDir: string, stop: RunStopState): string | und
   const subject = stop.subject;
   if (!subject || !isValidSubjectToken(subject)) return undefined;
 
-  const decision = readDecisionAt(join(workItemDir, "decisions", `${subject}.json`));
+  const decision = readDecisionIn(workItemDir, subject);
   if (decision && isFile(join(workItemDir, decision.artifact))) return decision.artifact;
 
   for (const extension of GATE_EXTENSIONS) {

@@ -28,6 +28,7 @@ import {
   type RunReportReview,
 } from "../../model/run-report.js";
 import { isPathWithin } from "../../lib/path-safety.js";
+import { workItemLayout } from "../../work-item-store/index.js";
 import { isSafeRelativePath, TEXT_LIMIT_BYTES } from "./explorer.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
@@ -344,7 +345,7 @@ export function parseRunReport(value: unknown, runId: string): ReportRead {
  *  within the text cap; otherwise the reason it is not read, or `null` when it
  *  simply is not there. */
 function readReportText(workItemDir: string): { text: string } | { error: string } | null {
-  const path = join(workItemDir, "artifacts", RUN_REPORT_FILE);
+  const path = join(workItemLayout(workItemDir).artifactsDir, RUN_REPORT_FILE);
   let real: string;
   let root: string;
   try {
