@@ -19,11 +19,13 @@ import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import { createArtifactRef } from "../../model/artifact-ports.js";
 import type { PersistedRun } from "../../model/persisted.js";
 import {
+  awaitsHuman,
+  costIsLowerBound,
   FileRunEventStore,
   FileRunStateStore,
   hasUnfinishedWork,
-  isClosableStatus,
   isClosureCurrent,
+  isFailure,
   lastPassInterrupted,
   owesWork,
   projectStepAttempts,
@@ -89,13 +91,6 @@ function budgetExceededOf(state: PersistedRun): boolean {
   if (state.budget_exceeded === true) return true;
   const text = `${state.outcome?.reason ?? ""} ${state.stopped_reason ?? ""}`;
   return /budget exceeded|cost limit/i.test(text);
-}
-
-/** A total that is a lower bound (`≥`), whatever the run then did with it: the
- *  run-level latch or the totals themselves say so. Independent of the stop —
- *  an authorized or uncapped run also prints `≥`. */
-function costUnknownOf(state: PersistedRun): boolean {
-  return state.cost_unaccounted === true || state.total_control?.cost_unknown === true;
 }
 
 /**
@@ -219,11 +214,10 @@ function costOf(state: PersistedRun): ItemCost {
   return {
     ...(typeof usd === "number" ? { usd } : {}),
     estimated: state.total_control?.cost_estimated === true,
-    // The latch counts as much as the totals: a resumed generation can rewrite
-    // `total_control` while the run it continues already spent unpriced tokens.
     // Deliberately NOT the stop condition: the `≥` is a property of the figure,
-    // and it outlives an authorization that let the run continue.
-    ...(costUnknownOf(state) ? { unknown: true } : {}),
+    // and it outlives an authorization that let the run continue. The costs page
+    // reads the same rule.
+    ...(costIsLowerBound(state) ? { unknown: true } : {}),
   };
 }
 
@@ -272,7 +266,7 @@ async function approvalOf(project: ProjectEntry, ticket: string, subject: string
  * waits on (PASS, RUNNING) is ignored too, rather than hiding a live run.
  */
 function closureOfRun(runDir: string, state: PersistedRun, status: ItemStatus): ItemClosure | undefined {
-  if (!isClosableStatus(status)) return undefined;
+  if (!awaitsHuman(status)) return undefined;
   const closure = readClosureAt(runDir);
   if (!closure || !isClosureCurrent(closure, state)) return undefined;
   return { at: closure.closedAt, by: closure.closedBy };
@@ -409,10 +403,11 @@ async function buildItem(
     runId,
     status,
     group,
+    awaitsHuman: awaitsHuman(status),
     ...(stop ? { stop } : {}),
     ...(interrupted
       ? { failure: interruptedFailureOf(state) }
-      : status === "FAIL" || status === "ABORTED"
+      : isFailure(status)
         ? { failure: failureOf(state) }
         : {}),
     ...(approval ? { approval } : {}),

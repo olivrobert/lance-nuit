@@ -23,6 +23,7 @@ import { log } from "../runtime/logging.js";
 import {
   allStepsSettled,
   appendRunEvent,
+  awaitsFinalization,
   describeRunSnapshotProblem,
   FileRunEventStore,
   FileRunLogStore,
@@ -129,11 +130,7 @@ function hydrate(
   // it now: the verdict on disk judged that work, so it cannot stand for the run
   // the selection leaves. Loaded as terminal, `--skip` of the step it ended on
   // would change nothing and leave a run no later invocation resumes.
-  const awaitingVerdict =
-    allSettled &&
-    (selectionTookWork ||
-      persisted.status === "RUNNING" ||
-      (persisted.status === "ABORTED" && persisted.outcome?.resumable !== false));
+  const awaitingVerdict = allSettled && (selectionTookWork || awaitsFinalization(persisted));
   const terminal = persisted.status !== undefined && allSettled && !awaitingVerdict;
   return {
     name: persisted.name,

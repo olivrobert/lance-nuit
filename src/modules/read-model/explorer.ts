@@ -18,6 +18,7 @@
 import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RunStopState } from "../../model/persisted.js";
+import { isFailure } from "../../run-record/index.js";
 import { isValidSubjectToken, readDecisionIn } from "../../work-item-store/index.js";
 import { isPathWithin } from "../../lib/path-safety.js";
 import type { ReadModelOptions } from "./projects.js";
@@ -285,7 +286,7 @@ export function readTree(
   const gate = gateCandidate ? findFile(children, gateCandidate) : undefined;
   if (gate) gate.gate = true;
 
-  const failed = resolved.status === "FAIL" || resolved.status === "ABORTED";
+  const failed = isFailure(resolved.status);
   const stateCandidate = detached
     ? `${RUN_PREFIX}/state.json`
     : `${treePath(realRoot(root) ?? root, runDir)}/state.json`;

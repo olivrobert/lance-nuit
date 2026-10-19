@@ -233,3 +233,24 @@ process.on("SIGINT", () => setTimeout(() => process.exit(7), 200));`,
   expect(existsSync(join(root, "skipped"))).toBe(false);
   expect(readRunSnapshot(join(runDir, "state.json"))!.status).not.toBe("ABORTED");
 }, 30_000);
+
+test("a signal never rewrites a run that already carries its verdict, a failed one included", async () => {
+  // `runner.ts` stops handing its run to the handler once `reportRun` finalized
+  // it; the handler still refuses to rewrite a verdict it is given, and a FAIL is
+  // a verdict like PASS or STOPPED: rewriting it as ABORTED would lose the step
+  // and the reason it failed on.
+  const finalize = JSON.stringify(join(REPO_ROOT, "src/run-record/run-transitions.ts"));
+  const { exitCode, runDir } = await interruptRunner(
+    "SIGINT",
+    () => `import { finalizeRun } from ${finalize};
+updateStep(run, run.steps[1], "failed", "tests failed");
+finalizeRun(run, { failed: true });
+const stop = { run: () => Promise.resolve(), inProgress: () => false, skip: () => {} };`,
+  );
+
+  expect(exitCode).toBe(130);
+  const snapshot = readRunSnapshot(join(runDir, "state.json"))!;
+  expect(snapshot.status).toBe("FAIL");
+  expect(snapshot.outcome?.phase).toBe("b");
+  expect(readRunEvents(runDir).some((event) => event.type === "run.aborted")).toBe(false);
+}, 30_000);

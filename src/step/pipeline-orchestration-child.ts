@@ -30,6 +30,7 @@ import {
   hasRunSnapshotEntry,
   isBudgetExceeded,
   isChildSettled,
+  isHalted,
   measuredRunCost,
   pendingSteps,
   pipelineRunsDir,
@@ -261,7 +262,9 @@ export async function executeChild(
   //    reached its own ceiling as `run-record/budget.ts` defines it.
   return {
     ok: false,
-    stopped: childRun.status === "STOPPED" || childRun.status === "ABORTED",
+    // A child halted short of its work without failing it (a clean stop, an
+    // interruption) stops the parent the same way.
+    stopped: isHalted(childRun.status),
     budgetExceeded:
       childOutcome.budgetExceeded ||
       childRun.budget_exceeded === true ||

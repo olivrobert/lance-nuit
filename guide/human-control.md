@@ -325,4 +325,7 @@ approval) and the snapshot's `updatedAt`. The dashboard moves the item out of
 `CLOSED` tag.
 The closure only applies to the snapshot it was taken on: once a later rerun or
 approval writes the snapshot again, it no longer applies, and the item comes back
-to **Needs you**. Passed and running runs cannot be closed.
+to **Needs you**. Passed and running runs cannot be closed. A run whose snapshot
+still says `RUNNING` but whose runner died is closed like an aborted one: the
+command reads the status the dashboard shows, which asks the run lock whether a
+live process still holds the run.

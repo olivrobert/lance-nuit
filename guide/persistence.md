@@ -721,4 +721,6 @@ lancenuit logs PROJ-28 --run <run-id>
 
 `lancenuit clean` requires `--logs-only`; it compresses/removes old per-attempt log
 files, preserves `state.json`, `events.jsonl`, snapshots, and central history, and
-can retain failed/interrupted runs with `--keep-failed`.
+can retain failed, stopped and interrupted runs with `--keep-failed`. A snapshot
+without a verdict that no live process holds counts as interrupted, as it does on
+the dashboard.

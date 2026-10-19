@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { VERDICT_STATUSES } from "../run-record/index.js";
 import { log } from "../runtime/logging.js";
 import type { LiveFeed } from "../runtime/live-feed.js";
 import { liveFeedFromEnvironment } from "./live-feed.js";
@@ -12,6 +13,10 @@ function shellQuote(value: string): string {
 function resolveLiveFeed(feed?: LiveFeed): LiveFeed | undefined {
   return feed ?? liveFeedFromEnvironment();
 }
+
+/** A snapshot carrying one of these statuses was written by a runner that is done:
+ *  the pane has shown everything there is to show. */
+const VERDICT_PATTERN = `"status"[[:space:]]*:[[:space:]]*"(${VERDICT_STATUSES.join("|")})"`;
 
 /**
  * Build the pane shell separately from the tmux spawn so the ergonomics contract
@@ -26,7 +31,7 @@ export function buildWatcherCommand(live: string, state: string, formatterComman
     // Format everything once the terminal snapshot has been written.
     `setsid bash -c ${shellQuote(pipeline)} &`,
     "watcher_pid=$!",
-    `while kill -0 "$watcher_pid" 2>/dev/null; do if grep -Eq ${shellQuote('"status"[[:space:]]*:[[:space:]]*"(PASS|FAIL|STOPPED|ABORTED)"')} ${shellQuote(state)} 2>/dev/null; then kill -TERM -- "-$watcher_pid" 2>/dev/null || true; break; fi; sleep 0.25; done`,
+    `while kill -0 "$watcher_pid" 2>/dev/null; do if grep -Eq ${shellQuote(VERDICT_PATTERN)} ${shellQuote(state)} 2>/dev/null; then kill -TERM -- "-$watcher_pid" 2>/dev/null || true; break; fi; sleep 0.25; done`,
     'wait "$watcher_pid" 2>/dev/null || true',
   ].join("\n");
 }

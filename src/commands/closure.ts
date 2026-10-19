@@ -10,12 +10,14 @@ import type { RunnerArgs } from "../model/cli-options.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { log } from "../runtime/logging.js";
 import {
+  awaitsHuman,
   closureOf,
-  isClosableStatus,
+  effectiveStatus,
   latestRunFile,
   readClosureAt,
   readRunSnapshot,
   removeClosureAt,
+  runLockHolder,
   writeClosureAt,
 } from "../run-record/index.js";
 import { decisionActor } from "../work-item-store/index.js";
@@ -34,21 +36,28 @@ function latestSnapshot(cwd: string, ticket: string, pipeline: string): string |
   return latestRunFile(pipeline, ticket, context);
 }
 
-/** Close the latest run of `pipeline`. Refused on a run nobody waits on. */
+/**
+ * Close the latest run of `pipeline`. Refused on a run nobody waits on.
+ *
+ * The status is the one the dashboard shows: a snapshot left `RUNNING` by a
+ * runner that died is an interrupted run, which waits on somebody like any other.
+ */
 export function closeLatestRun(cwd: string, ticket: string, pipeline: string, actor: string): ClosureResult {
   const file = latestSnapshot(cwd, ticket, pipeline);
   const state = file ? readRunSnapshot(file) : null;
   if (!file || !state) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
-  if (!isClosableStatus(state.status)) {
+  const runDir = dirname(file);
+  const { status } = effectiveStatus(state, () => runLockHolder(runDir) !== null);
+  if (!awaitsHuman(status)) {
     return {
       ok: false,
-      message: `Run ${state.runId ?? dirname(file)} is ${state.status ?? "UNKNOWN"}: only a failed or stopped run can be closed.`,
+      message: `Run ${state.runId ?? runDir} is ${status}: only a failed or stopped run can be closed.`,
     };
   }
-  writeClosureAt(dirname(file), closureOf(state, actor));
+  writeClosureAt(runDir, closureOf(state, actor));
   return {
     ok: true,
-    message: `Run ${state.runId ?? dirname(file)} of ${ticket} closed by ${actor} (status kept: ${state.status}).`,
+    message: `Run ${state.runId ?? runDir} of ${ticket} closed by ${actor} (status kept: ${status}).`,
   };
 }
 

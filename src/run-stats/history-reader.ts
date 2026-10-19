@@ -17,6 +17,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadProjectPricing } from "../env/pricing.js";
+import { isCompleted } from "../run-record/index.js";
 import { HistoryEntrySchema } from "./history-schema.js";
 import type { RunStatsEntry } from "./run-stats-projector.js";
 import { addTokens, entryCost, type PricingTable, type TokenCounts, zeroTokens } from "./stats-core.js";
@@ -146,7 +147,7 @@ export function filterHistory(entries: readonly HistoryEntry[], filter: HistoryF
     if (!filter.includeChildren && isChild(entry)) return false;
     if (filter.pipeline && entry.pipeline !== filter.pipeline) return false;
     if (filter.ticket && entry.ticket !== filter.ticket) return false;
-    if (filter.failuresOnly && entry.status === "PASS") return false;
+    if (filter.failuresOnly && isCompleted(entry.status)) return false;
     if (filter.sinceMs !== undefined) {
       const started = startedMs(entry);
       // A run with no usable timestamp cannot be placed in the window; excluding it
@@ -253,7 +254,7 @@ export function aggregateHistory(
       perProfile.costUsd += usage?.costUsd ?? 0;
     }
 
-    if (status !== "PASS") {
+    if (!isCompleted(entry.status)) {
       const phase = entry.failPhase || "(unknown)";
       aggregate.byFailPhase[phase] = (aggregate.byFailPhase[phase] ?? 0) + 1;
     }

@@ -48,6 +48,7 @@ import type { Run, RunStep } from "../model/run.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
 import { isSettledStatus } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
+import { isCompleted } from "./run-status.js";
 
 /** The call a node wants to make, as the definition currently describes it. */
 export interface ChildCall {
@@ -174,7 +175,7 @@ export function failChildLaunch(parent: Run, ref: PersistedPipelineChildRef, pha
 
 /** What `done` means for a child run: a PASS the interruption did not settle. */
 export function completedSuccessfully(child: Run): boolean {
-  return child.status === "PASS" && !child.aborted;
+  return isCompleted(child.status) && !child.aborted;
 }
 
 /**

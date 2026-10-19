@@ -40,11 +40,14 @@ const CODER_PROFILE = "coder";
 const TAIL_BYTES = 64 * 1024;
 
 /** Persisted step status in the dashboard's vocabulary; shared with the recap so
- *  both views name a step's state the same way. */
-export function stepStatusOf(step: PersistedStepState): RunStepStatus {
+ *  both views name a step's state the same way. A step still `running` in a run
+ *  whose runner died runs nowhere: it is shown `aborted`, as the runner writes
+ *  the step it was in when it is interrupted. */
+export function stepStatusOf(step: PersistedStepState, interrupted: boolean): RunStepStatus {
   switch (step.status) {
-    case "pending":
     case "running":
+      return interrupted ? "aborted" : "running";
+    case "pending":
     case "done":
     case "failed":
     case "skipped":
@@ -70,15 +73,12 @@ function failCauseOf(cause: StepFailCause | undefined): ItemFailCause | undefine
   return cause === "blocked" ? "blocked" : undefined;
 }
 
-/** A step still `running` in a run whose runner died runs nowhere: it is shown
- *  `aborted`, as the runner writes the step it was in when it is interrupted. */
 function stepView(step: PersistedStepState, interrupted: boolean): RunStepView {
   const failKind = failKindOf(step.fail_kind);
   const failCause = failCauseOf(step.fail_cause);
-  const status = stepStatusOf(step);
   return {
     id: step.id,
-    status: interrupted && status === "running" ? "aborted" : status,
+    status: stepStatusOf(step, interrupted),
     ...(step.started_at ? { startedAt: step.started_at } : {}),
     ...(step.finished_at ? { finishedAt: step.finished_at } : {}),
     ...(typeof step.retries === "number" && step.retries > 0 ? { retries: step.retries } : {}),

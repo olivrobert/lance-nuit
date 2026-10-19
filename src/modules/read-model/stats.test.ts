@@ -311,7 +311,9 @@ test("stats: archived runs are merged, and a run present in both is read live", 
     costUsd: 2,
     costEstimated: true,
     activeMs: 60_000,
-    outcome: "RUNNING",
+    // A status the archive cannot vouch for, on a run nothing holds any more:
+    // an interrupted run, as the morning box would serve it live.
+    outcome: "ABORTED",
   });
   expect(old?.ticketUrl).toBeUndefined();
 });

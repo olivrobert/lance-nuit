@@ -3,14 +3,13 @@
 // Single derivation of a run verdict from its steps.
 //
 // `finalizeRun` writes this verdict to the snapshot; `run-stats-projector` recalculates
-// it when the snapshot has no usable verdict. Precedence lives only here, so
-// runs.jsonl and persisted state cannot diverge on it.
+// it when the snapshot has no usable verdict. The precedence is the one table of
+// `run-status.ts`, which also names the report headline and the exit code, so
+// runs.jsonl, the persisted state and the console cannot diverge on it.
 
-import type { PersistedRun, RunStatus } from "../model/persisted.js";
+import type { PersistedRun } from "../model/persisted.js";
 import { allStepsSettled } from "./run-predicates.js";
-
-/** Final verdict; an active run is never derived and remains `RUNNING`. */
-export type RunVerdict = Exclude<RunStatus, "RUNNING">;
+import { hasVerdict, type RunVerdict, runEnding } from "./run-status.js";
 
 /** Signals known only to the run loop and absent from steps. */
 export interface RunVerdictSignals {
@@ -26,25 +25,25 @@ export interface RunVerdictSignals {
 type VerdictInput = Pick<PersistedRun, "aborted" | "steps" | "stopped_reason">;
 
 /**
- * Precedence: interruption > clean stop > failure > success > unknown.
+ * The run's verdict from its steps and the loop's signals.
  *
  * An `aborted` step means interruption even without the run flag: its attempt was
- * killed, usage is partial, and the run cannot resume as-is.
+ * killed, usage is partial, and the run cannot resume as-is. A failed step or a
+ * persisted stop reason counts like the loop's own signal.
  */
 export function deriveRunStatus(run: VerdictInput, signals: RunVerdictSignals = {}): RunVerdict {
-  if (run.aborted || run.steps.some((step) => step.status === "aborted")) return "ABORTED";
-  if (signals.stopped || run.stopped_reason) return "STOPPED";
-  if (
-    signals.failed ||
-    signals.budgetExceeded ||
-    signals.costUnaccounted ||
-    run.steps.some((step) => step.status === "failed")
-  )
-    return "FAIL";
-  return allStepsSettled(run.steps) ? "PASS" : "UNKNOWN";
+  return runEnding({
+    aborted: run.aborted === true || run.steps.some((step) => step.status === "aborted"),
+    stopped: signals.stopped === true || Boolean(run.stopped_reason),
+    failed: signals.failed === true || run.steps.some((step) => step.status === "failed"),
+    budgetExceeded: signals.budgetExceeded,
+    costUnaccounted: signals.costUnaccounted,
+    settled: allStepsSettled(run.steps),
+  }).status;
 }
 
-/** Completed (PASS) runs do not resume; interrupted or failed runs do. */
-export function isResumableStatus(status: RunVerdict): boolean {
-  return status === "FAIL" || status === "STOPPED" || status === "ABORTED" || status === "UNKNOWN";
+/** The verdict `finalizeRun` stamped, or the same derivation when the snapshot
+ *  has none a reader can use. */
+export function recordedVerdict(run: VerdictInput & Pick<PersistedRun, "status">): RunVerdict {
+  return hasVerdict(run.status) ? run.status : deriveRunStatus(run);
 }

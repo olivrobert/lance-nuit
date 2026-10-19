@@ -47,7 +47,8 @@ import { appendRunEvent, relativeRunPath } from "./run-journal.js";
 import { isSettledStatus } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
 import { latestAttemptLog } from "./run-timeline.js";
-import { deriveRunStatus, isResumableStatus } from "./run-verdict.js";
+import { isResumableStatus } from "./run-status.js";
+import { deriveRunStatus } from "./run-verdict.js";
 
 export function updateStep(run: Run, step: RunStep, status: RunStep["status"], errors?: string): void {
   if (run.aborted) return;

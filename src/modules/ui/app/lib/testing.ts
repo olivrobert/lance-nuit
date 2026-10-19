@@ -13,6 +13,7 @@ export function makeItem(overrides: Partial<Item> = {}): Item {
     runId: "run-1",
     status: "STOPPED",
     group: "decision",
+    awaitsHuman: true,
     cost: { estimated: false },
     updatedAt: "2026-01-10T10:00:00.000Z",
     worktree: false,

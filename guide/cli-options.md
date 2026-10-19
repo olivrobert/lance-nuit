@@ -44,7 +44,7 @@ flags.
 | `--clean` | | Remove old step logs; requires `--logs-only` |
 | `--logs-only` | | With `--clean`, remove only step log files (snapshots/history are preserved) |
 | `--older-than <duration>` | | With `--clean`, age threshold such as `30d` or `12h` |
-| `--keep-failed` | | With `--clean`, preserve logs from failed/interrupted runs |
+| `--keep-failed` | | With `--clean`, preserve logs from failed, stopped and interrupted runs, a run whose runner died without a verdict included |
 | `--stats` | | Subcommand: summarize `pipeline-history/runs.jsonl` across runs — status, cost, tokens, failing phases, per-profile spend |
 | `--since <duration>` | | With `--stats`, keep runs started within `30d`, `12h`, `45m`... A run with no start timestamp is excluded |
 | `--failures` | | With `--stats`, keep only runs that did not pass |

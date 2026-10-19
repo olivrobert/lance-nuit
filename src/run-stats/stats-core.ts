@@ -67,8 +67,9 @@ export interface RunStatsEntry {
   totals: TokenCounts;
   usageStatus?: UsageStatus;
   costStatus?: UsageStatus;
-  /** Set when any step is `costUnknown`: the run's `costUsd` under-counts the
-   *  real spend and a reader must not present it as exact. */
+  /** Set when the run's total is a lower bound (`costIsLowerBound`: a step is
+   *  `costUnknown`, or the run latched unpriced spend): the run's `costUsd`
+   *  under-counts the real spend and a reader must not present it as exact. */
   costUnknown?: true;
   models: Record<string, TokenCounts>;
   profiles: Record<string, { steps: number; tokens: TokenCounts; costUsd?: number }>;
@@ -134,16 +135,17 @@ export const addTokens = (acc: TokenCounts, t?: Partial<TokenCounts> | null): vo
 
 export const fmtInt = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
+/** Console badge of a history status; a status this runner does not know is
+ *  printed as it was recorded. */
+const STATUS_BADGES: Readonly<Record<string, string>> = {
+  PASS: "✅ PASS",
+  FAIL: "❌ FAIL",
+  STOPPED: "⏹ STOPPED",
+  ABORTED: "🛑 ABORTED",
+};
+
 export const statusBadge = (s?: string): string =>
-  s === "PASS"
-    ? "✅ PASS"
-    : s === "FAIL"
-      ? "❌ FAIL"
-      : s === "STOPPED"
-        ? "⏹ STOPPED"
-        : s === "ABORTED"
-          ? "🛑 ABORTED"
-          : `⚪ ${s || "?"}`;
+  s !== undefined && Object.hasOwn(STATUS_BADGES, s) ? (STATUS_BADGES[s] as string) : `⚪ ${s || "?"}`;
 
 // fixEvents.details comes from an HTML-escaped workflow result.
 export const unescapeHtml = (s: string): string =>

@@ -131,7 +131,11 @@ function childModels(parent: RunLocation, step: PersistedStepState, store: FileR
     .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
 }
 
-function recapStep(step: PersistedStepState, childSplit: RunModelCost[] | undefined): RunRecapStep {
+function recapStep(
+  step: PersistedStepState,
+  childSplit: RunModelCost[] | undefined,
+  interrupted: boolean,
+): RunRecapStep {
   const control = step.control;
   const durationMs = durationOf(control);
   const costUsd = control?.total_cost_usd;
@@ -142,7 +146,7 @@ function recapStep(step: PersistedStepState, childSplit: RunModelCost[] | undefi
   const tokens = tokensOf(step.usage);
   return {
     id: step.id,
-    status: stepStatusOf(step),
+    status: stepStatusOf(step, interrupted),
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof costUsd === "number" ? { costUsd } : {}),
     ...(control?.cost_estimated === true ? { costEstimated: true as const } : {}),
@@ -185,7 +189,7 @@ export function readRecap(projectName: string, ticket: string, options: ReadMode
   const location: RunLocation = { project: resolved.project, runDir: resolved.run.runDir, state };
   const store = new FileRunStateStore();
   const steps = state.steps.map((step) =>
-    recapStep(step, step.orchestration ? childModels(location, step, store) : undefined),
+    recapStep(step, step.orchestration ? childModels(location, step, store) : undefined, resolved.interrupted),
   );
   return {
     pipeline: resolved.run.pipeline,
