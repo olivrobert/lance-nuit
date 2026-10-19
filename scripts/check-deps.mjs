@@ -30,6 +30,12 @@
 // per line keeps the diffs readable, which is why biome.json excludes both
 // files from the formatter.
 //
+// The `module-<name>-entry-only` rules are kept out of the file baseline
+// altogether: a module is declared in the change that routes every outside
+// import through its entry, so an import past an entry is fixed, never recorded.
+// A baseline entry naming one of these rules is refused, and `--write-baseline`
+// refuses to run while one is observed.
+//
 // Since the closing lot every entry must carry a `why` and a `reviewedOn` date:
 // the baseline is no longer a bulk record of what the refactor had not reached
 // yet, it is a short list of edges someone argued for and dated. And once the
@@ -43,12 +49,13 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { MODULES, layersOf } = require("./layers.cjs");
+const { MODULES, layersOf, moduleRuleName } = require("./layers.cjs");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_BASELINE = ".dependency-cruiser-known-violations.json";
 const DEFAULT_FOLDER_BASELINE = ".dependency-cruiser-known-folder-cycles.json";
 const DEFAULT_CONFIG = ".dependency-cruiser.cjs";
+const MODULE_RULES = new Set(MODULES.map(moduleRuleName));
 
 // Kept in sync with `options.exclude.path` of the dependency-cruiser config:
 // the cruise never reports these files, so the classification must not demand
@@ -60,6 +67,7 @@ function parseArgs(argv) {
     baseline: DEFAULT_BASELINE,
     folderBaseline: DEFAULT_FOLDER_BASELINE,
     config: DEFAULT_CONFIG,
+    modulesRoot: REPO_ROOT,
     write: false,
   };
 
@@ -70,6 +78,7 @@ function parseArgs(argv) {
     else if (arg === "--baseline") options.baseline = argv[++index];
     else if (arg === "--folder-baseline") options.folderBaseline = argv[++index];
     else if (arg === "--config") options.config = argv[++index];
+    else if (arg === "--modules-root") options.modulesRoot = argv[++index];
     else throw new Error(`unknown option: ${arg}`);
   }
 
@@ -117,10 +126,11 @@ function checkClassification() {
  * A module whose entry is gone would forbid every outside import, the entry's
  * replacement included, and name a file nobody can find. `MODULES` describes
  * this repository, so the entries are looked up from its root, even when the
- * cruise runs inside a test fixture.
+ * cruise runs inside a test fixture; `--modules-root` moves that root so a test
+ * can show the check failing.
  */
-function checkModuleEntries() {
-  return MODULES.filter((module) => !existsSync(join(REPO_ROOT, module.path, module.entry))).map(
+function checkModuleEntries(root) {
+  return MODULES.filter((module) => !existsSync(join(root, module.path, module.entry))).map(
     (module) => `module ${module.name}: entry ${module.path}/${module.entry} does not exist`,
   );
 }
@@ -441,6 +451,21 @@ function checkFolderBaseline(baselinePath, observed) {
   return added.length > 0 || stale.length > 0;
 }
 
+function isModuleViolation(entry) {
+  return MODULE_RULES.has(entry.rule);
+}
+
+function edgeOf(entry) {
+  return `  ${entry.rule}: ${entry.from} -> ${entry.to}`;
+}
+
+function printPastEntries(entries) {
+  console.error(`Import past a module entry: ${entries.length} violation(s). Module rules have no baseline.`);
+  console.error("Import through the module's entry, exporting from it what is missing (scripts/layers.cjs):");
+
+  for (const entry of entries) console.error(edgeOf(entry));
+}
+
 /** The same comparison, on the file to file baseline. */
 function checkFileBaseline(baselinePath, observed) {
   const known = readBaseline(baselinePath);
@@ -454,10 +479,25 @@ function checkFileBaseline(baselinePath, observed) {
     return true;
   }
 
+  const recordedPastEntries = known.filter(isModuleViolation);
+
+  if (recordedPastEntries.length > 0) {
+    console.error(`Module rules have no baseline: ${baselinePath} may not list them.`);
+    console.error("Remove these lines, and import through the module's entry instead:");
+
+    for (const entry of recordedPastEntries) console.error(lineOf(entry));
+
+    return true;
+  }
+
   const knownKeys = new Set(known.map(keyOf));
   const observedKeys = new Set(observed.map(keyOf));
-  const added = observed.filter((entry) => !knownKeys.has(keyOf(entry)));
+  const unknown = observed.filter((entry) => !knownKeys.has(keyOf(entry)));
+  const pastEntries = unknown.filter(isModuleViolation);
+  const added = unknown.filter((entry) => !isModuleViolation(entry));
   const stale = known.filter((entry) => !observedKeys.has(keyOf(entry))).sort(compareEntries);
+
+  if (pastEntries.length > 0) printPastEntries(pastEntries);
 
   if (added.length > 0) {
     console.error(`New architecture debt: ${added.length} violation(s) absent from ${baselinePath}.`);
@@ -473,7 +513,7 @@ function checkFileBaseline(baselinePath, observed) {
     for (const entry of stale) console.error(lineOf(entry));
   }
 
-  return added.length > 0 || stale.length > 0;
+  return unknown.length > 0 || stale.length > 0;
 }
 
 function main() {
@@ -490,7 +530,7 @@ function main() {
     return;
   }
 
-  const missingEntries = checkModuleEntries();
+  const missingEntries = checkModuleEntries(options.modulesRoot);
 
   if (missingEntries.length > 0) {
     console.error("Every module declared in scripts/layers.cjs must point to an existing entry.");
@@ -511,6 +551,15 @@ function main() {
     // would turn every new violation into a recorded fact instead of a fix.
     if (existsSync(options.baseline) && readBaseline(options.baseline).length === 0) {
       console.error(`${options.baseline} is empty: architecture debt may no longer be recorded, only fixed.`);
+      process.exitCode = 1;
+
+      return;
+    }
+
+    const pastEntries = observed.filter(isModuleViolation);
+
+    if (pastEntries.length > 0) {
+      printPastEntries(pastEntries);
       process.exitCode = 1;
 
       return;

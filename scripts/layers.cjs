@@ -81,6 +81,16 @@ function escapeRegex(text) {
 }
 
 /**
+ * The name of the dependency-cruiser rule guarding `module`. `check-deps.mjs`
+ * reads it back to refuse these rules in the baseline, so both sides share it.
+ *
+ * @param {{ name: string }} module
+ */
+function moduleRuleName(module) {
+  return `module-${module.name}-entry-only`;
+}
+
+/**
  * The regex matching every file of `module`.
  *
  * @param {{ path: string }} module
@@ -134,4 +144,13 @@ function pathAboveLevel(level) {
   return above.length === 0 ? null : above.join("|");
 }
 
-module.exports = { LAYERS, MODULES, layersOf, layerOf, pathAboveLevel, modulePathPattern, moduleEntryPattern };
+module.exports = {
+  LAYERS,
+  MODULES,
+  layersOf,
+  layerOf,
+  pathAboveLevel,
+  moduleRuleName,
+  modulePathPattern,
+  moduleEntryPattern,
+};

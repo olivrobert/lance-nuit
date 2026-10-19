@@ -7,7 +7,14 @@
 
 const { existsSync } = require("node:fs");
 
-const { LAYERS, MODULES, modulePathPattern, moduleEntryPattern, pathAboveLevel } = require("./scripts/layers.cjs");
+const {
+  LAYERS,
+  MODULES,
+  moduleRuleName,
+  modulePathPattern,
+  moduleEntryPattern,
+  pathAboveLevel,
+} = require("./scripts/layers.cjs");
 
 // `contracts/` is the published surface: pure types and functions. Two `lib/`
 // files are whitelisted so a published contract may reuse them. The list is
@@ -39,7 +46,7 @@ const moduleRules = MODULES.map((module) => {
   const inside = modulePathPattern(module);
 
   return {
-    name: `module-${module.name}-entry-only`,
+    name: moduleRuleName(module),
     severity: "error",
     comment: `${module.path}/ is entered through ${module.entry} only; its other files are internals.`,
     from: { pathNot: inside },
