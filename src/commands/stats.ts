@@ -6,7 +6,7 @@
 
 import type { RunnerArgs } from "../model/cli-options.js";
 import { log } from "../runtime/logging.js";
-import { parseAge } from "./run-diagnostics.js";
+import { parseAge } from "./diagnostics-readers.js";
 import {
   type HistoryAggregate,
   type HistoryEntry,

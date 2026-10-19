@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { sha256Text } from "../../state/hash.ts";
+import { sha256Text } from "../../work-item-store/hash.ts";
 import { OUTPUT_EXCERPT_BYTES, readStepDetail, readStepSession } from "./step-detail.ts";
 import {
   cleanupTempDirs,

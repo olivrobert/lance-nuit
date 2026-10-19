@@ -14,7 +14,7 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import { log } from "../runtime/logging.js";
 import type { PipelineContext } from "../model/context.js";
-import { recordApproval } from "../state/decisions.js";
+import { recordApproval } from "../work-item-store/index.js";
 import {
   describeRecordedApproval,
   describeRecordedRejection,

@@ -5,7 +5,7 @@ import {
   stepsWithoutDeliverable,
   withoutDeliverableMessage,
 } from "../model/definition.js";
-import { isValidSubjectToken } from "../state/decisions.js";
+import { isValidSubjectToken } from "../work-item-store/index.js";
 import type { Artifact } from "./artifact.js";
 import { StepBuilder } from "./dsl-steps.js";
 import type { ForEachWorkItemOptions, PipelineEntry } from "./dsl-types.js";

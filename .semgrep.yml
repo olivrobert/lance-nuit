@@ -216,15 +216,16 @@ rules:
 
   # --------------------------------------------------------------------------
   # Architecture. The dashboard reads runner state through one layer only:
-  # `ui -> read-model -> src/state`, never `ui -> src/state`. The rule is here
+  # `ui -> read-model -> src/state`, never `ui -> src/state`; the same holds for
+  # `src/work-item-store`. The rule is here
   # rather than in a review checklist because the shortcut is one import away
   # and invisible once merged. The browser's own store lives under
   # `src/modules/ui/app/store/`, not `state/`, so it never trips this pattern.
   # --------------------------------------------------------------------------
   - id: lance-nuit.architecture.ui-imports-state
     message: >-
-      The dashboard reached into `src/state` directly. Only
-      `src/modules/read-model/` may import the state layer; `src/modules/ui/`
+      The dashboard reached into `src/state` or `src/work-item-store` directly.
+      Only `src/modules/read-model/` may import them; `src/modules/ui/`
       consumes the items and files that module exposes, so a change to the
       persisted schema stops at the read model instead of reaching the HTTP
       routes and the browser.
@@ -248,4 +249,4 @@ rules:
           - pattern: require("$PATH")
       - metavariable-regex:
           metavariable: $PATH
-          regex: (^|.*/)state(/|$)
+          regex: (^|.*/)(state|work-item-store)(/|$)

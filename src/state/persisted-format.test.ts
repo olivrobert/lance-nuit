@@ -20,8 +20,8 @@ import {
   readDecision,
   readDecisionAt,
   recordApproval,
-} from "./decisions.js";
-import { cleanLogs, inspectTicket, logsForTicket } from "../commands/run-diagnostics.js";
+} from "../work-item-store/decisions.js";
+import { cleanLogs, inspectTicket, logsForTicket } from "../commands/diagnostics-readers.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
 import { emitRunStats } from "./stats/run-stats.js";
 import { saveRun } from "./run-repository.js";

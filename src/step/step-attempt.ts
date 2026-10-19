@@ -47,7 +47,7 @@ import {
   readInputs,
   revisedInPlace,
   writeProvenance,
-} from "../state/provenance.js";
+} from "../work-item-store/index.js";
 import { appendRunEvent, relativeRunPath } from "../state/run-journal.js";
 import { closeAttempt } from "../state/attempt-closure.js";
 import { logicalAttemptLogPath, nextAttemptLogPath, writeAttemptCommand } from "../state/run-timeline.js";

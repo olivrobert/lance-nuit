@@ -97,7 +97,7 @@ adopted, within that run.
 output: which step produced it, and from which bytes. Every attempt of a step
 declaring `output`, orchestration nodes aside, writes one per output, with the
 fingerprints of its pure inputs when the step declares `input` and none
-otherwise; `state/provenance.ts` is the only writer. The prefix is reserved:
+otherwise; `work-item-store/provenance.ts` is the only writer. The prefix is reserved:
 an artifact descriptor cannot claim a name inside it. A record binds one
 artifact to the bytes it came from:
 

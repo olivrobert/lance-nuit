@@ -12,8 +12,8 @@ import {
   type RunStateStore,
 } from "../model/storage-ports.js";
 import { buildPipelineContext } from "../pipeline/context.js";
-import { diagnoseRunJournals, inspectTicket, logsForTicket } from "./run-diagnostics.js";
-import { recordApproval, recordRejection } from "../state/decisions.js";
+import { diagnoseRunJournals, inspectTicket, logsForTicket } from "./diagnostics-readers.js";
+import { recordApproval, recordRejection } from "../work-item-store/decisions.js";
 
 function snapshot(runId: string, pipeline: string, updatedAt: string): PersistedRun {
   return {

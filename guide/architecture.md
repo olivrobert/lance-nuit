@@ -71,7 +71,7 @@ cycles are forbidden at every level.
 | L1 `contracts` | `src/contracts/` — public extension contracts only | L0. Types and pure functions; no `node:fs`, no `process.*`, no `zod` |
 | L2 `model` | `src/model/` — data shapes and ports | up to L1, no I/O |
 | L3 `infra` | `src/env/` (config, paths, locks, worktrees, capabilities), `src/exec/` (process execution and supervision), `src/runtime/` (context, logging, events, the abort scope, and the `RunOutput` and `LiveFeed` ports) | up to L2 |
-| L4 `core` | `src/validation/`, `src/pipeline/` (context assembly and definition loading), `src/dsl/` and `src/dsl.ts` (authoring primitives, internal authoring surface), `src/builtin-steps/`, `src/extractors/`, `src/engine/` (backend registry and built-in agent integrations), `src/step/` (attempts, retries, fixes, escalation), `src/dispatch/`, `src/boot/`, `src/state/` (persistence, stats, reports, budgets), `src/project/` (public DSL and project typechecking), `src/builtins/` | up to L3 |
+| L4 `core` | `src/validation/`, `src/pipeline/` (context assembly and definition loading), `src/dsl/` and `src/dsl.ts` (authoring primitives, internal authoring surface), `src/builtin-steps/`, `src/extractors/`, `src/engine/` (backend registry and built-in agent integrations), `src/step/` (attempts, retries, fixes, escalation), `src/dispatch/`, `src/boot/`, `src/state/` (persistence, stats, reports, budgets), `src/work-item-store/` (artifacts, human decisions and provenance kept beside a ticket), `src/project/` (public DSL and project typechecking), `src/builtins/` | up to L3 |
 | L5 `adapters` | `src/output/` (console reports, live feed, watchers), `src/modules/` (domain modules such as the Jira adapter), `src/commands/` | up to L4 |
 | L6 `entry` | `src/entry/` (composition root), `src/cli/` (argument parsing), `src/runner.ts` — process entry point | everything |
 
@@ -111,6 +111,7 @@ in exactly one level, and the level rules apply to it unchanged.
 | `src/extractors/` | `registry.ts` |
 | `src/step/` | `step-loop.ts` |
 | `src/engine/` | `default-registry.ts` |
+| `src/work-item-store/` | `index.ts` |
 
 `scripts/layers.cjs` declares them in `MODULES`, next to the levels.
 `.dependency-cruiser.cjs` turns each one into a `module-<name>-entry-only` rule,
@@ -230,8 +231,8 @@ server side enters the bundle.
 
 The server side reads work items only through `src/modules/read-model/`
 (`index.ts` is its public surface, and the only module allowed to import
-`src/state/`; a Semgrep rule enforces the direction). It projects snapshots
-into the DTO the front end renders. The selected run's status goes through
+`src/state/` and `src/work-item-store/`; a Semgrep rule enforces the
+direction). It projects snapshots into the DTO the front end renders. The selected run's status goes through
 the runner's `runLockHolder`: a `RUNNING` snapshot no live process holds is
 served as an interrupted `ABORTED` run, so the dashboard and a later resume
 agree on what is live. Its step list is the snapshot reconciled with the
@@ -387,7 +388,7 @@ and each rule they read has one owner:
 | --- | --- |
 | **Re-admission**: whether a settled step goes through admission again, and, in reconcile mode, whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). Boot (`boot/resume.ts`) applies the selectors to the snapshot in the default mode only; in both modes it requeues the `--start-at` target and the steps after it |
 | **Admission**: budget, `when`, a pending rejection, the freshness or presence of the outputs, the interruption guard, then the environment guard | `step/step-admission.ts` (`admitStep`; `answersToOutputs` says whether the outputs decide, `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished) |
-| **Standing of an output**: `missing`, `unfinished`, `unknown`, `stale`, `fresh` or adoptable, and the doubt `unguaranteed` carries | `state/provenance.ts`, the only writer of `artifacts/.provenance/`. `standingOf` is the one reading rule for a record: admission (`stepFreshness`), the public `freshness()` and the dashboard all read it there. The attempt (`step/step-attempt.ts`) only chooses when to write: the in-flight mark before each attempt (`markInFlight`), the record after a success |
+| **Standing of an output**: `missing`, `unfinished`, `unknown`, `stale`, `fresh` or adoptable, and the doubt `unguaranteed` carries | `work-item-store/provenance.ts`, the only writer of `artifacts/.provenance/`. `standingOf` is the one reading rule for a record: admission (`stepFreshness`), the public `freshness()` and the dashboard all read it there. The attempt (`step/step-attempt.ts`) only chooses when to write: the in-flight mark before each attempt (`markInFlight`), the record after a success |
 | **Reconcile classification**: which steps the mode re-admits (those declaring `output` or `rerunOnResume`), the build error for a step declaring neither, and the orchestration nodes that keep the authority of their status | `model/definition.ts` (`deliversOutputs`, `reconcilable`, `stepsWithoutDeliverable`), shared by the build (`.reconcile()`), the loader's validation (`validation/structure.ts`), admission and the loop; `rerunsOnResume`, which leaves a node's `rerunOnResume` without effect in this mode, is used by `reconcilable`, the loop and the resume header |
 
 Two run facts beside the decision are runtime-only and never persisted

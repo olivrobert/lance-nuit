@@ -15,9 +15,14 @@ import type { RunStopState } from "../model/persisted.js";
 import type { Run, RunStep, StepDefinition } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { costDecision, type RunBudget } from "../state/budget.js";
-import { pendingRejection } from "../state/decisions.js";
 import { recordCostStop } from "../state/cost-stop-events.js";
-import { adoptOutputs, inputsUnchanged, stepFreshness, type UnavailableSource } from "../state/provenance.js";
+import {
+  adoptOutputs,
+  inputsUnchanged,
+  pendingRejection,
+  stepFreshness,
+  type UnavailableSource,
+} from "../work-item-store/index.js";
 import { appendRunEvent } from "../state/run-journal.js";
 import { lastPassInterrupted, owesWork } from "../state/run-predicates.js";
 import { stopRun, updateStep } from "../state/run-transitions.js";
@@ -135,7 +140,7 @@ export type OperatorSelectionSkip = "settled" | "unfinished";
  * pass would replay without anyone authorizing it, and a failed one would lose
  * the rerun its run owes it (`passLeftUnfinished`). Whether its outputs can be
  * adopted is not decided here: the in-flight mark answers that on every
- * invocation, whatever the status (`state/provenance.ts`).
+ * invocation, whatever the status (`work-item-store/provenance.ts`).
  */
 export function skipForOperatorSelection(run: Run, step: RunStep, output: RunOutput): OperatorSelectionSkip {
   if (passLeftUnfinished(step) || lastPassInterrupted(step)) {
@@ -237,7 +242,7 @@ function admissionsToEvaluate(step: RunStep): readonly StepInputCondition[] {
 /** The last pass of this run started and did not complete: the run owes it a
  *  rerun, whatever freshness would say of the outputs it left. A run fact, lost
  *  once the step settles or is requeued; the in-flight mark is what keeps a
- *  partial output from being adopted beyond that (`state/provenance.ts`). */
+ *  partial output from being adopted beyond that (`work-item-store/provenance.ts`). */
 function passLeftUnfinished(step: RunStep): boolean {
   return step.status !== "pending" && owesWork(step.status);
 }

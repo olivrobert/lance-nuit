@@ -1,4 +1,4 @@
-// runner/state/decisions.ts
+// runner/work-item-store/decisions.ts
 //
 // Human decisions. The runner is the only writer: `--approve <subject>` and
 // `--reject <subject>` validate the artifact, hash it, and write the decision
