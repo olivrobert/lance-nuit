@@ -73,19 +73,19 @@ export async function rejectSubject(
 }
 
 /** What both `--reject` paths print once the rejection is settled. */
-export function describeRecordedRejection({ decision, written }: RecordedApproval, decisionsDir?: string): string {
+export function describeRecordedRejection({ decision, written, path }: RecordedApproval): string {
   if (!written) {
     return `Decision ${decision.subject} already rejected by ${decision.decidedBy} on ${decision.decidedAt} with this reason — kept.`;
   }
-  return `Decision ${decision.subject}=rejected (round ${decision.round}) written to ${decisionsDir}/${decision.subject}.json — its rework step reruns on the next resume.`;
+  return `Decision ${decision.subject}=rejected (round ${decision.round}) written to ${path} — its rework step reruns on the next resume.`;
 }
 
 /** What both `--approve` paths print once the decision is settled. A kept decision
  *  names who approved and when, so whoever repeated the approval sees it was
  *  already granted rather than a second write. */
-export function describeRecordedApproval({ decision, written }: RecordedApproval, decisionsDir?: string): string {
+export function describeRecordedApproval({ decision, written, path }: RecordedApproval): string {
   if (!written) {
     return `Decision ${decision.subject} already ${decision.decision} by ${decision.decidedBy} on ${decision.decidedAt} for this artifact — kept.`;
   }
-  return `Decision ${decision.subject}=approved written to ${decisionsDir}/${decision.subject}.json (SHA-256 ${decision.artifactSha256}).`;
+  return `Decision ${decision.subject}=approved written to ${path} (SHA-256 ${decision.artifactSha256}).`;
 }

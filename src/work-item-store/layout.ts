@@ -28,6 +28,9 @@ export interface WorkItemLayout {
   readonly artifactsDir: string;
   /** One file per approval subject: the current human decision. */
   readonly decisionsDir: string;
+  /** What steps report beside the artifacts; a batch sub-run gets its own
+   *  subdirectory, which the run context adds. */
+  readonly reportsDir: string;
   /** One record per produced artifact: the inputs it was produced from. */
   readonly provenanceDir: string;
   /** File of the decision on `subject`. Throws on a subject outside the charset. */
@@ -41,6 +44,7 @@ export function workItemLayout(workItemDir: string): WorkItemLayout {
     workItemDir,
     artifactsDir,
     decisionsDir,
+    reportsDir: join(workItemDir, "reports"),
     provenanceDir: join(artifactsDir, PROVENANCE_DIRNAME),
     decisionPath: (subject) => {
       if (!isValidSubjectToken(subject)) throw new Error(`invalid decision subject "${subject}" (charset [\\w-])`);

@@ -113,6 +113,8 @@ function atomicWrite(path: string, value: ApprovalDecision): void {
 export interface RecordedApproval {
   decision: ApprovalDecision;
   written: boolean;
+  /** The decision file: the one just written, or the one kept. */
+  path: string;
 }
 
 export async function recordApproval(
@@ -125,9 +127,10 @@ export async function recordApproval(
   // agent, a terminal — often for the same gate. Rewriting it would replace the
   // person who decided with whoever repeated it, and turn an `applied` decision
   // back into a pending one.
+  const path = decisionPath(ctx, subject);
   const existing = readDecision(ctx, subject);
   if (existing?.artifact === `artifacts/${artifact.name}` && approvalFreshness(existing, validated.body) === "fresh") {
-    return { decision: existing, written: false };
+    return { decision: existing, written: false, path };
   }
   const decision: ApprovalDecision = {
     schemaVersion: 1,
@@ -138,8 +141,8 @@ export async function recordApproval(
     decidedAt: new Date().toISOString(),
     decidedBy: decisionActor(),
   };
-  atomicWrite(decisionPath(ctx, subject), decision);
-  return { decision, written: true };
+  atomicWrite(path, decision);
+  return { decision, written: true, path };
 }
 
 /**
@@ -162,11 +165,12 @@ export async function recordRejection(
   }
   const validated = await validateArtifact(ctx, subject, artifact, "reject");
   const sha = sha256Text(validated.body);
+  const path = decisionPath(ctx, subject);
   const existing = readDecision(ctx, subject);
   const previous =
     existing?.decision === "rejected" && existing.artifact === `artifacts/${artifact.name}` ? existing : undefined;
   const sameBytes = previous?.artifactSha256 === sha;
-  if (sameBytes && previous.reason === trimmed) return { decision: previous, written: false };
+  if (sameBytes && previous.reason === trimmed) return { decision: previous, written: false, path };
   const round = previous ? (previous.round ?? 1) + (sameBytes ? 0 : 1) : 1;
   if (round > maxRounds) {
     throw new Error(
@@ -185,8 +189,8 @@ export async function recordRejection(
     reason: trimmed,
     round,
   };
-  atomicWrite(decisionPath(ctx, subject), decision);
-  return { decision, written: true };
+  atomicWrite(path, decision);
+  return { decision, written: true, path };
 }
 
 /**

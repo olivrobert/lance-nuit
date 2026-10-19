@@ -177,7 +177,7 @@ test("approving an artifact already approved keeps the first decision", async ()
     // The same gate lifted again from another place: the author is not replaced.
     delete process.env.LANCENUIT_ACTOR;
     const again = await recordApproval(context, "budget", budgetArtifact);
-    expect(again).toEqual({ decision: first.decision, written: false });
+    expect(again).toEqual({ decision: first.decision, written: false, path: first.path });
 
     // An applied decision stays applied rather than turning pending again.
     await markDecisionApplied(context, "budget", budgetArtifact);
@@ -277,6 +277,7 @@ test("rejecting the same bytes again keeps the round: same reason writes nothing
   expect(await recordRejection(context, "budget", budgetArtifact, "too expensive ", 3)).toEqual({
     decision: first.decision,
     written: false,
+    path: first.path,
   });
   const reworded = await recordRejection(context, "budget", budgetArtifact, "halve it", 3);
   expect(reworded.written).toBe(true);

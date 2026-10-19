@@ -78,7 +78,7 @@ export const approvalCommand: RunnerCommand = {
     const { context, pipelineDef } = loaded;
     try {
       const artifact = await resolveApprovableArtifact(pipelineDef, args.approve, context);
-      log(describeRecordedApproval(await recordApproval(context, args.approve, artifact), context.paths.decisionsDir));
+      log(describeRecordedApproval(await recordApproval(context, args.approve, artifact)));
       return 0;
     } catch (error) {
       log(errorMessage(error));
@@ -114,7 +114,7 @@ export const rejectionCommand: RunnerCommand = {
     const { context, pipelineDef } = loaded;
     try {
       const recorded = await rejectSubject(pipelineDef, args.reject, args.reason, context);
-      log(describeRecordedRejection(recorded, context.paths.decisionsDir));
+      log(describeRecordedRejection(recorded));
       return 0;
     } catch (error) {
       log(errorMessage(error));
