@@ -120,7 +120,9 @@ Test files are not cruised, so a test may still reach a module's internals.
 
 These rules have no baseline. A module is declared in the same change that routes
 every outside import through its entry, so a deep import is never recorded as
-debt: it is fixed, or the module is not declared yet. Narrowing what an entry
+debt: it is fixed, or the module is not declared yet. `deps:check` enforces it: it
+refuses a baseline entry naming a `module-<name>-entry-only` rule, and
+`--write-baseline` refuses to run while such a violation remains. Narrowing what an entry
 exports is then enough to make the corresponding use impossible outside the
 module, without any further rule.
 

@@ -119,8 +119,9 @@ beyond that belongs in the code, in a comment, or in the pull request.
 - `deps:check` also enforces the modules declared in `MODULES`
   (`scripts/layers.cjs`): each yields a `module-<name>-entry-only` rule, so code
   outside a module may import only its entry file, and the check fails when a
-  declared entry does not exist. These rules have no baseline: declare a module
-  in the change that routes every outside import through its entry. See
+  declared entry does not exist. These rules have no baseline: the check refuses
+  an entry naming one, so declare a module in the change that routes every
+  outside import through its entry. See
   [guide/architecture.md](guide/architecture.md#modules).
 - `docs/DSL-API.md` is generated. Never edit it by hand; run `bun run docs:dsl`.
 - Semgrep rules live in `.semgrep.yml`. An `ERROR` rule must match nothing in
