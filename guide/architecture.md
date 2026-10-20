@@ -102,18 +102,18 @@ folder with a single entry file; from outside the folder, only that entry may be
 imported, while the files inside import each other freely. A module still sits
 in exactly one level, and the level rules apply to it unchanged.
 
-| Module | Entry |
-| --- | --- |
-| `src/modules/ui/` | `index.ts` |
-| `src/modules/read-model/` | `index.ts` |
-| `src/modules/dashboard-home/` | `index.ts` |
-| `src/modules/work-item/` | `registry.ts` |
-| `src/extractors/` | `registry.ts` |
-| `src/step/` | `step-loop.ts` |
-| `src/engine/` | `default-registry.ts` |
-| `src/work-item-store/` | `index.ts` |
-| `src/run-stats/` | `index.ts` |
-| `src/run-record/` | `index.ts` |
+| Module | Level | Entry | Owns |
+| --- | --- | --- | --- |
+| `src/run-record/` | L4 | `index.ts` | A run: its snapshot (`state.json`), journal (`events.jsonl`), attempt logs and closure file; the meaning of a run status; every write to a run (transitions, named writes, opening and restoring); the cost ledger, budget and cost gate. Outside it a run is a read-only `RunView` (§7). |
+| `src/work-item-store/` | L4 | `index.ts` | What the runner keeps beside a ticket, outside any run: artifacts, the human decisions bound to them and the gate status they give, provenance and freshness, and the work-item layout. |
+| `src/run-stats/` | L4 | `index.ts` | The cross-run history (`pipeline-history/runs.jsonl`): one summary per finished run, its readers, and the cost they estimate with the runner's rate lookup. |
+| `src/step/` | L4 | `step-loop.ts` | Executing a step: admission, attempts, retries, verdicts, repairs, composed children. |
+| `src/engine/` | L4 | `default-registry.ts` | The agent backends and their registry. |
+| `src/extractors/` | L4 | `registry.ts` | Error extractors and their discovery. |
+| `src/modules/work-item/` | L5 | `registry.ts` | The tracker adapters (Jira, GitHub, …) behind the work-item contract. |
+| `src/modules/read-model/` | L5 | `index.ts` | The dashboard's read model: a read-only view over runs, work items and history. |
+| `src/modules/dashboard-home/` | L5 | `index.ts` | The dashboard's own files under `~/.lance-nuit/ui/`. |
+| `src/modules/ui/` | L5 | `index.ts` | The dashboard server and its browser bundle. |
 
 `scripts/layers.cjs` declares them in `MODULES`, next to the levels.
 `.dependency-cruiser.cjs` turns each one into a `module-<name>-entry-only` rule,
