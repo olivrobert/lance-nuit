@@ -24,7 +24,8 @@ export function reasonOf(item: Item): string {
   if (item.group === "decision") return item.stop ? item.stop.detail : "stopped";
   if (item.group === "failure") {
     if (!item.failure) return item.status === "ABORTED" ? "aborted" : "failed";
-    return `${item.failure.phase} — ${item.failure.reason}`;
+    // A run that failed outside any step, or whose runner died between steps, has no phase.
+    return item.failure.phase ? `${item.failure.phase} — ${item.failure.reason}` : item.failure.reason;
   }
   if (item.group === "running") return "running";
   if (item.closed) return `closed by ${item.closed.by}`;

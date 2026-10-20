@@ -10,10 +10,11 @@
 // The whole journal is read only when it can say more than the snapshot. The
 // snapshot is written right after each event, so it can be behind its journal
 // only when the runner died in between: a run is projected when it is
-// interrupted (no verdict, nobody holds it) and still has a step left pending or
-// running, the only steps a journal event moves. A run a live runner holds is at
-// most one write behind, and a verdict is written after every event of the pass
-// that reached it. That keeps the dashboard's poll, the costs page and the
+// interrupted (no verdict, nobody holds it) and still has a step that owes work
+// (`owesWork`: pending, running, failed or aborted). That is wider than the steps
+// a journal event can move (pending or running), never narrower. A run a live
+// runner holds is at most one write behind, and a verdict is written after every
+// event of the pass that reached it. That keeps the dashboard's poll, the costs page and the
 // dispatch loop from parsing the journal of every run they list.
 //
 // Attempts are not in the snapshot at all: `readRunHistory` projects them, with

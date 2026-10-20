@@ -14,6 +14,9 @@ describe("reasonOf and headlineOf", () => {
     expect(
       reasonOf(makeItem({ group: "failure", status: "FAIL", failure: { phase: "build", reason: "exit 1" } })),
     ).toBe("build — exit 1");
+    expect(
+      reasonOf(makeItem({ group: "failure", status: "ABORTED", failure: { phase: "", reason: "runner died" } })),
+    ).toBe("runner died");
     expect(reasonOf(makeItem({ group: "failure", status: "ABORTED" }))).toBe("aborted");
   });
 

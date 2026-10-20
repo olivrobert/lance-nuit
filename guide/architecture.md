@@ -523,7 +523,9 @@ one owner as well, `run-record/run-read.ts`: `readRun` returns the snapshot, its
 steps reconciled with the journal when the runner died before writing what the
 journal holds, and the status a reader shows; `readRunHistory` returns the
 attempts and events only the journal records. The journal is parsed only for an
-interrupted run that still has a step pending or running: a live runner's
+interrupted run that still has a step owing work (`owesWork`: pending, running,
+failed or aborted, wider than the pending or running steps a journal event can
+move): a live runner's
 snapshot is at most one write behind, and a verdict is written after every event
 of its pass. The dashboard, `--inspect`, `--logs`, `clean`, `close`, the dispatch
 loop and `--run` read through it, and a run is opened for execution by

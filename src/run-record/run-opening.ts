@@ -114,7 +114,9 @@ export interface OpenRunRequest {
 
 export interface OpenedRun {
   run: RunView;
-  /** An existing snapshot was restored, rather than a new run created. */
+  /** An existing snapshot was restored, rather than a new run created. A run
+   *  that already has its verdict and is reopened (`--run` on a finished run)
+   *  counts too: true does not mean the run had work left. */
   resumed: boolean;
 }
 
