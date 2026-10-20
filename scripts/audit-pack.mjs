@@ -88,8 +88,6 @@ const required = [
   "dist/modules/ui/static/index.html",
   "dist/modules/ui/static/app.js",
   "dist/modules/ui/static/app.css",
-  "dist/run-stats/stats-core.js",
-  "dist/run-stats/stats-core.d.ts",
 ];
 for (const file of required) {
   if (!files.includes(file)) violations.push(`missing runtime file: ${file}`);

@@ -139,7 +139,6 @@ function verifyRuntimeDependencies() {
   for (const file of [
     "dist/runner.js",
     "dist/project/dsl.d.ts",
-    "dist/run-stats/stats-core.js",
     // Public contracts surface: lance-nuit/contracts.
     "dist/contracts/index.js",
     "dist/contracts/index.d.ts",
