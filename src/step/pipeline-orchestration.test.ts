@@ -606,6 +606,9 @@ export default ({ pipeline, runPipeline, actionStep }) => pipeline("parent")
     "parent:P",
   ]);
 
+  expect(JSON.parse(readFileSync(join(run.run_dir, "state.json"), "utf8")).pipelineLineage).toEqual([
+    { pipelinePath: parentPath, ticket: "P" },
+  ]);
   const parentState = run.steps[0]!.orchestration!;
   const middleRef = parentState.children.find((child) => child.key === "main")!;
   expect(middleRef.status).toBe("done");

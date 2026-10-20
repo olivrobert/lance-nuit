@@ -196,9 +196,7 @@ export async function executePipelineOrchestration(
     updateStep(input.run, input.step, "failed", "orchestration definition missing");
     return { action: "failed", budgetExceeded: false };
   }
-  // The lineage first: the snapshot that opens the node carries it.
-  currentLineage(input.run);
-  const state = openOrchestration(input.run, input.step, def.kind);
+  const state = openOrchestration(input.run, input.step, def.kind, currentLineage(input.run));
   try {
     return def.kind === "runPipeline"
       ? await executeRunPipeline(input, def, state)
