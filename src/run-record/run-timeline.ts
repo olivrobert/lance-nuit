@@ -1,6 +1,8 @@
 // runner/run-record/run-timeline.ts
 //
-// Step logs and informative markdown rendering for a run.
+// Step logs and their paths for a run: where an attempt's log and command go,
+// and how a reader finds them. Registering an attempt is not done here
+// (`run-record/attempt-lifecycle.ts`).
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -35,8 +37,8 @@ export function logicalAttemptLogPath(stepId: string, attempt: number): string {
 }
 
 /** Path for the next attempt, retained for callers that explicitly request a path
- *  before spawning. Attempt registration remains the responsibility of
- *  `nextAttemptLogPath`/`beginAttempt`. */
+ *  before spawning. Registering the attempt belongs to `openAttempt`
+ *  (`run-record/attempt-lifecycle.ts`). */
 export function stepLogPath(run: Run, step: RunStep): string {
   return attemptLogPath(run, step, nextAttemptNumber(step));
 }
@@ -44,7 +46,7 @@ export function stepLogPath(run: Run, step: RunStep): string {
 /** Next attempt number is max(existing)+1, not length+1: a journal with a lost
  *  head can leave holes (e.g. attempts [1, 3]), and length+1 would collide with
  *  an existing attempt directory and append into its log. */
-function nextAttemptNumber(step: RunStep): number {
+export function nextAttemptNumber(step: RunStep): number {
   const attempts = step.attempts ?? [];
   let max = step.last_attempt ?? 0;
   for (const entry of attempts) {
@@ -73,22 +75,6 @@ export const ATTEMPT_COMMAND_FILE = "command.txt";
  *  command — next to the attempt log. */
 export function writeAttemptCommand(stepLogPath: string, command: string): void {
   writeFileSync(join(dirname(stepLogPath), ATTEMPT_COMMAND_FILE), command, { encoding: "utf-8" });
-}
-
-/** Allocate and register the next attempt before spawning. */
-export function nextAttemptLogPath(run: Run, step: RunStep, kind: "step" | "fix" = "step"): string {
-  const attempt = nextAttemptNumber(step);
-  step.last_attempt = attempt;
-  const path = attemptLogPath(run, step, attempt);
-  step.attempts ??= [];
-  step.attempts.push({
-    attempt,
-    kind,
-    status: "running",
-    started_at: new Date().toISOString(),
-    log_path: logicalAttemptLogPath(step.id, attempt),
-  });
-  return path;
 }
 
 export function latestAttemptLog(run: Run, step: RunStep): string | null {

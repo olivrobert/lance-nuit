@@ -5,7 +5,8 @@ import { join } from "node:path";
 import type { Run } from "../../model/run.js";
 import { createLogRef, createRunRef, type RunLogStore } from "../../model/storage-ports.js";
 import { makeRunStep } from "../run-step.js";
-import { attemptLogPath, findStepLog, latestAttemptLog, nextAttemptLogPath } from "../run-timeline.js";
+import { attemptLogPath, findStepLog, latestAttemptLog } from "../run-timeline.js";
+import { allocateAttempt } from "../attempt-lifecycle.js";
 import { FileRunLogStore } from "./file-run-log-store.js";
 
 test("file-run-log-store: validates the integration contract", () => {
@@ -115,7 +116,7 @@ test("file-run-log-store: validates the integration contract", () => {
   };
 
   expect(attemptLogPath(run, step, 3)).toBe(join(root, "virtual", "quality.tests", "3", "output.log"));
-  expect(nextAttemptLogPath(run, step)).toBe(join(root, "virtual", "quality.tests", "1", "output.log"));
+  expect(allocateAttempt(run, step).logPath).toBe(join(root, "virtual", "quality.tests", "1", "output.log"));
   expect(step.attempts?.[0]?.log_path).toBe("steps/quality.tests/attempt-001/output.log");
   expect(latestAttemptLog(run, step)).toBe(join(root, "virtual", "quality.tests", "1", "output.log"));
   expect(findStepLog(run, step.id)).toBe(join(root, "virtual", "quality.tests", "1", "output.log"));

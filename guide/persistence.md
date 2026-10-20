@@ -530,8 +530,8 @@ above exist for:
 
 | Transition | Order | Event alone leaves | Resolved on resume by |
 | --- | --- | --- | --- |
-| Attempt start (`runTrackedAttempt`) | attempt pushed in memory → `step.attempt.started` → snapshot (`last_attempt`) | an attempt the journal calls `running` and the snapshot never numbered | `settleCrashedAttempts` closes it failed and unpriced, journals the finish with `interrupted: true`; the number is taken from the journal |
-| Attempt end (`finishAttempt`) | `closeAttempt` (`step.attempt.finished`, step total in memory) → verdict → ledger → snapshot | a priced attempt absent from the step total | `projectStepSpend` rebuilds the step total from the journal when it holds more |
+| Attempt start (`openAttempt`) | attempt pushed in memory → `step.attempt.started` → snapshot (`last_attempt`) | an attempt the journal calls `running` and the snapshot never numbered | `settleCrashedAttempts` closes it failed and unpriced, journals the finish with `interrupted: true`; the number is taken from the journal |
+| Attempt end (`settleAttempt`) | `closeAttempt` (`step.attempt.finished`, step total in memory) → verdict → ledger → live-guard stops → `step.cost.unaccounted` → snapshot | a priced attempt absent from the step total | `projectStepSpend` rebuilds the step total from the journal when it holds more |
 | Step status (`updateStep`) | `step.status.changed` → snapshot | a step the journal finished and the snapshot still runs | `reconcileStepStatus`, terminal event over unfinished snapshot |
 | Clean stop / interruption / verdict (`stopRun`, `abortRun`, `finalizeRun`) | event → snapshot | a `run.finished` (or `run.stopped`, `run.aborted`) with a snapshot that still says `RUNNING` | the settled-but-unfinalized rule: the run is resumed and finalized again, so the journal carries a second `run.finished`; readers take the last one |
 | Composed child launch (`bindChildRun`, `recordChildStarted`) | parent snapshot (reference `running`, bound to its `runId`) → child run booted (child snapshot) → `pipeline.child.started` | a reference with a `runId` and no start event, or a start event with a child snapshot that later went missing | the reference alone is not proof the child started, so the parent retries the initialization under the same id; once the start event is durable, a missing or damaged child snapshot is refused instead of becoming a second child (`run-record/child-transitions.ts` owns this rule) |
@@ -599,7 +599,7 @@ the `unknown` lines as ignored live feed, since they are expected and large. It
 names the refused types when there are any; a journal it cannot read is printed
 as `journal: unreadable` with the reason. `invalid` is the number that matters: on a `step.attempt.*` it means the attempt is missing
 from the projections a resume rebuilds. The concrete loss is accounting, not log
-paths — `nextAttemptLogPath` also seeds from the step's `last_attempt`, so
+paths — attempt numbering (`allocateAttempt`) also seeds from the step's `last_attempt`, so
 numbering does not silently restart at 1 — but a closed attempt is journaled
 *before* the snapshot is written, so a crash in that window leaves its price in
 the journal alone: an event refused whole reads as a free attempt, and the resume

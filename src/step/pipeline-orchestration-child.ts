@@ -3,7 +3,7 @@
 // The cycle of ONE composed child, in order: gate, resolution, identity, boot,
 // start fact, execution, reconciliation, settlement, report. This module orders
 // the steps and owns nothing else: the stop decision and its record belong to
-// `run-record/budget.ts` and `run-record/cost-stop-events.ts`, the child's spend to
+// `costGate` (`run-record/cost-stop-events.ts`), the child's spend to
 // `chargeChildReconciliation` (`run-record/cost-accounting.ts`), the child run's
 // verdict to `finalizeRun` (`run-record/run-transitions.ts`), and the persisted child
 // reference to `run-record/child-transitions.ts`.
@@ -21,7 +21,7 @@ import {
   bindChildRun,
   chargeChildReconciliation,
   completedSuccessfully,
-  costDecision,
+  costGate,
   createRunId,
   failChildLaunch,
   FileRunStateStore,
@@ -35,7 +35,6 @@ import {
   pendingSteps,
   pipelineRunsDir,
   recordChildStarted,
-  recordCostStop,
   remainingBudget,
   type RunBudget,
   settleChild,
@@ -90,12 +89,11 @@ export function childLaunchGate(
   key: string,
   stepId: string | null = null,
 ): ChildExecutionResult | undefined {
-  const decision = costDecision(parent.max_cost_usd, budget);
-  if (decision === "continue") return undefined;
   // The refused launch is recorded on the PARENT: the child it would have run has
   // no journal of its own, and the stop belongs to the scope that owns the ceiling.
-  recordCostStop(parent, budget, decision, { kind: "gate", stepId });
-  if (decision === "exceeded") {
+  const stop = costGate(parent, budget, stepId);
+  if (!stop) return undefined;
+  if (stop === "exceeded") {
     return { ok: false, budgetExceeded: true, reason: `parent budget exhausted before ${key}` };
   }
   return {

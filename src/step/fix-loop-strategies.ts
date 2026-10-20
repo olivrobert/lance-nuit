@@ -1,4 +1,4 @@
-import { costDecision, recordCostStop, saveRun, updateStep } from "../run-record/index.js";
+import { costGate, saveRun, updateStep } from "../run-record/index.js";
 import { EscalationLatch, escalationLadderFor } from "./escalation.js";
 import { performFixAttempt, runStepCommandFresh } from "./fix-loop-pass.js";
 import type { FixRun } from "./fix-loop-runtime.js";
@@ -37,8 +37,10 @@ export async function runFixRetryLoop(
   while (!fx.abort.isRunAborted(run) && step.retries < maxRetries) {
     // A cost stop ends repair as it ends rerun: an unaccountable spend is not a
     // defect a fix pass could repair, so no attempt is paid for trying.
-    const beforeFix = costDecision(run.max_cost_usd, budget);
-    if (beforeFix !== "continue") {
+    // A withheld repair pass is withheld work, recorded by the gate like a
+    // withheld retry.
+    const beforeFix = costGate(run, budget, step.id);
+    if (beforeFix) {
       fx.output.emit({
         type: "runner.message",
         level: "warn",
@@ -47,8 +49,6 @@ export async function runFixRetryLoop(
             ? `  Spending unaccounted, stopping retries`
             : `  Budget exceeded, stopping retries`,
       });
-      // A withheld repair pass is withheld work, like a withheld retry.
-      recordCostStop(run, budget, beforeFix, { kind: "gate", stepId: step.id });
       costStopped = true;
       break;
     }
@@ -114,8 +114,8 @@ export async function runFixRetryLoop(
       break;
     }
 
-    const beforeRetry = costDecision(run.max_cost_usd, budget);
-    if (beforeRetry !== "continue") {
+    const beforeRetry = costGate(run, budget, step.id);
+    if (beforeRetry) {
       fx.output.emit({
         type: "runner.message",
         level: "warn",
@@ -124,7 +124,6 @@ export async function runFixRetryLoop(
             ? `  Spending unaccounted, stopping retries`
             : `  Budget exceeded, stopping retries`,
       });
-      recordCostStop(run, budget, beforeRetry, { kind: "gate", stepId: step.id });
       costStopped = true;
       break;
     }

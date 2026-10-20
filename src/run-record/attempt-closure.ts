@@ -1,6 +1,6 @@
 // runner/run-record/attempt-closure.ts
 //
-// The single writer of an attempt's end. Normal completion (`finishAttempt`), a
+// The single writer of an attempt's end. Normal completion (`settleAttempt`), a
 // SIGINT/SIGTERM interruption (`abortRun`) and a hard crash detected on resume
 // (`settleCrashedAttempts`) all close their attempt through `closeAttempt`, so the
 // status, the stats and the `step.attempt.finished` event have one shape and one

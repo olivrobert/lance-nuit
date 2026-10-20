@@ -10,7 +10,7 @@ import { projectStepAttempts } from "./attempt-projection.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
 import { loadOrCreateRun } from "../boot/resume.js";
 import { saveRun } from "./run-repository.js";
-import { nextAttemptLogPath } from "./run-timeline.js";
+import { allocateAttempt } from "./attempt-lifecycle.js";
 
 function writeFixture(dir: string): string {
   const path = join(dir, "pipeline-attempts.ts");
@@ -157,7 +157,7 @@ test("attempt projection: validates the integration contract", async () => {
   // Two attempts recorded the way the runner records them: allocation, then the
   // pair of journal events.
   for (const attempt of [1, 2] as const) {
-    nextAttemptLogPath(run, step, attempt === 1 ? "step" : "fix");
+    allocateAttempt(run, step, attempt === 1 ? "step" : "fix").logPath;
     appendRunEvent(run, "step.attempt.started", {
       stepId: step.id,
       attempt,
@@ -199,7 +199,7 @@ test("attempt projection: validates the integration contract", async () => {
 
   // The load path of this whole projection: the next attempt must not reuse a
   // number, or it would overwrite the logs of a previous attempt.
-  const next = nextAttemptLogPath(resumed, resumedStep, "step");
+  const next = allocateAttempt(resumed, resumedStep, "step").logPath;
   expect(next).toContain("attempt-003");
 });
 

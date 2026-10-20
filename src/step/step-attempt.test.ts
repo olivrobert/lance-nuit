@@ -15,7 +15,8 @@ import { chargeAttemptToLedger } from "../run-record/cost-accounting.ts";
 import { sha256Text } from "../work-item-store/hash.ts";
 import { outputFreshness, PROVENANCE_PREFIX, readProvenance, writeProvenance } from "../work-item-store/provenance.ts";
 import { readRunEvents } from "../run-record/run-journal.ts";
-import { attemptLogPath, nextAttemptLogPath } from "../run-record/run-timeline.ts";
+import { attemptLogPath } from "../run-record/run-timeline.ts";
+import { allocateAttempt } from "../run-record/attempt-lifecycle.ts";
 import { abortRun } from "../run-record/run-transitions.ts";
 import { makeRunStep, type StepStateInput } from "../run-record/run-step.ts";
 import { applyStepSession, runAttempt, runFixAttempt } from "./step-attempt.ts";
@@ -183,7 +184,7 @@ test("a fix pass settling after abort is not charged twice either", async () => 
 test("abort on a step without totals yet: the step total is the aborted attempt itself", () => {
   const step = makeStep({ runner: "agent", backend: { id: "claude" } });
   const run = makeRun(step, 10);
-  nextAttemptLogPath(run, step, "step");
+  allocateAttempt(run, step, "step").logPath;
 
   abortRun(run, "SIGINT", { estimatedCostUsd: 0.4 });
 
@@ -198,7 +199,7 @@ test("abort on a step without totals yet: the step total is the aborted attempt 
 test("abort keeps the model the killed attempt reported when the step recorded none", () => {
   const step = makeStep();
   const run = makeRun(step, 10);
-  nextAttemptLogPath(run, step, "fix");
+  allocateAttempt(run, step, "fix").logPath;
 
   abortRun(run, "SIGINT", { estimatedCostUsd: 0.4, model: "claude-opus-5-5" });
 
@@ -212,7 +213,7 @@ test("abort on a step already charged: the estimate is added and the total flagg
     { control: { duration_ms: 5, total_cost_usd: 1, model: "m", provider: "claude" } },
   );
   const run = makeRun(step, 10);
-  nextAttemptLogPath(run, step, "step");
+  allocateAttempt(run, step, "step").logPath;
 
   abortRun(run, "SIGINT", { estimatedCostUsd: 0.4 });
 
@@ -237,7 +238,7 @@ test("abort on a step already charged: the estimate is added and the total flagg
 test("abort without a live estimate on an agent step is an unaccounted spend", () => {
   const step = makeStep({ runner: "agent", backend: { id: "claude" } });
   const run = makeRun(step, 10);
-  nextAttemptLogPath(run, step, "step");
+  allocateAttempt(run, step, "step").logPath;
 
   abortRun(run, "SIGINT");
 
@@ -253,7 +254,7 @@ test("abort without a live estimate on an agent step is an unaccounted spend", (
 test("abort without a live estimate on a bash step stays free", () => {
   const step = makeStep();
   const run = makeRun(step, 10);
-  nextAttemptLogPath(run, step, "step");
+  allocateAttempt(run, step, "step").logPath;
 
   abortRun(run, "SIGINT");
 

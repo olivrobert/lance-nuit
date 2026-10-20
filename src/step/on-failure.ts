@@ -12,7 +12,7 @@ import type { StepFailure } from "../model/definition.js";
 import type { Run, RunStep } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import type { AbortScope } from "../runtime/abort.js";
-import { costDecision, recordCostStop, type RunBudget, saveRun, updateStep } from "../run-record/index.js";
+import { costGate, type RunBudget, saveRun, updateStep } from "../run-record/index.js";
 import { type EscalationLadder, EscalationLatch, escalationLadderFor } from "./escalation.js";
 import type { runFixLoop } from "./fix-loop.js";
 import { settleStepFailure } from "./non-blocking.js";
@@ -112,17 +112,16 @@ async function retryStepCommand(ctx: OnFailureContext, spec: RetryLoopSpec): Pro
     // Both cost stops end the loop, and neither is a technical failure to repair:
     // the step keeps the reason of its own last attempt, and the run reports the
     // accounting stop.
-    const cost = costDecision(run.max_cost_usd, budget);
-    if (cost !== "continue") {
+    // A withheld retry is withheld work: the gate records it so the report names
+    // the accounting stop rather than the step it left red.
+    const stop = costGate(run, budget, step.id);
+    if (stop) {
       runOutput.emit({
         type: "runner.message",
         level: "warn",
         message:
-          cost === "unaccounted" ? "  Spending unaccounted, stopping retries" : "  Budget exceeded, stopping retries",
+          stop === "unaccounted" ? "  Spending unaccounted, stopping retries" : "  Budget exceeded, stopping retries",
       });
-      // A withheld retry is withheld work: recorded so the report names the
-      // accounting stop rather than the step it left red.
-      recordCostStop(run, budget, cost, { kind: "gate", stepId: step.id });
       state.costStopped = true;
       break;
     }

@@ -50,7 +50,7 @@ function childSource(root: string, runDir: string, pipelinePath: string, stopSou
     `import { buildPipelineContext } from ${module("src/pipeline/context.ts")};`,
     `import { appendRunEvent } from ${module("src/run-record/run-journal.ts")};`,
     `import { saveRun } from ${module("src/run-record/run-repository.ts")};`,
-    `import { nextAttemptLogPath } from ${module("src/run-record/run-timeline.ts")};`,
+    `import { allocateAttempt } from ${module("src/run-record/attempt-lifecycle.ts")};`,
     `import { updateStep } from ${module("src/run-record/run-transitions.ts")};`,
     `import { installChildKillHandlers } from ${module("src/entry/signals.ts")};`,
     `import { createAbortScope } from ${module("src/runtime/abort.ts")};`,
@@ -60,7 +60,7 @@ function childSource(root: string, runDir: string, pipelinePath: string, stopSou
     )}, false, undefined, ctx);`,
     'updateStep(run, run.steps[0], "done");',
     'updateStep(run, run.steps[1], "running");',
-    'const logPath = nextAttemptLogPath(run, run.steps[1], "step");',
+    'const logPath = allocateAttempt(run, run.steps[1], "step").logPath;',
     'appendRunEvent(run, "step.attempt.started", { stepId: "b", attempt: 1, kind: "step", logPath });',
     "saveRun(run);",
     ...(stopSource

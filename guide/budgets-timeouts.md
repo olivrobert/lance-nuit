@@ -341,14 +341,14 @@ Four facts move money, and each has its own entry point there:
 | An attempt closes (loop, signal handler, or a crash settled on resume) | `chargeClosedAttempt` | the attempt's own figures, and the step total that seeds the ledger on resume |
 | The same attempt reaches the run ledger | `chargeAttemptToLedger` | the cumulative total and the accounting latch derived from it |
 | A composed child reports an aggregated cost the parent never saw as attempts | `chargeChildReconciliation` | the orchestration node's total, the parent ledger, and one `pipeline.child.cost.reconciled` event |
-| A resume reads figures back from the snapshot and the journal | `projectStepSpend`, `restoreAttemptSpend`, `restoreRunTotals` | nothing new — a total already accounted for is rebuilt or restored, never charged again |
+| A resume reads figures back from the snapshot and the journal, and an execution opens its ledger from them | `projectStepSpend`, `restoreAttemptSpend`, `restoreRunTotals`, `openRunLedger` | nothing new — a total already accounted for is rebuilt or restored, never charged again |
 
-`chargeAttemptToLedger` is purely arithmetic and performs no I/O: the attempt
-lifecycle (`finishAttempt` in `src/step/step-attempt.ts`) calls it with the
-figures `closeAttempt` accepted, on every exit of an attempt — a returned verdict
-or a rejected spawn alike — and the gate that decides to stop is what journals
-the stop. The charge is not a middleware: nothing in the optional attempt chain
-can skip it or absorb its failure. Summing two sets of figures is private to the
+`chargeAttemptToLedger` is purely arithmetic and performs no I/O: the attempt's
+settlement (`settleAttempt` in `src/run-record/attempt-lifecycle.ts`) calls it
+with the figures `closeAttempt` accepted, on every exit of an attempt — a
+returned verdict or a rejected spawn alike — and the gate that decides to stop is
+what journals the stop. The charge is not a middleware: nothing in the optional
+attempt chain can skip it or absorb its failure. Summing two sets of figures is private to the
 module, so there is no way to add spend to a step, an attempt, or the ledger from
 outside it. A run's `total_control` and `total_usage` remain derived values,
 recomputed from the steps when a run is finalized or aborted, restored by a
@@ -356,6 +356,19 @@ resume only from a terminal snapshot (`restoreRunTotals`), and dropped by every
 charge that reaches the run — an attempt to the ledger or a child
 reconciliation. Which record a resume believes for each concept is tabled in
 [persistence](persistence.md#which-record-is-authoritative).
+
+Every site about to spend asks one gate, `costGate`
+(`src/run-record/cost-stop-events.ts`): step admission, the re-ask of a refused
+capture, a rerun, a repair pass, the replay after a repair, and a composed launch.
+It decides from the ledger and records the stop, so the same ledger gives the
+same `run.budget.exceeded` or `run.cost.unaccounted` whichever site observed it.
+
+The ledger is a counter, not a sum read off the steps. Each charge adds the same
+figure to the ledger and to a step total, so the two agree, with one exception:
+on SIGINT or SIGTERM the signal handler closes the killed attempt on its step
+total, with the live estimate, and the loop stops without spending again. The
+console report therefore prints the larger of the two for an interrupted run,
+and the next execution opens its ledger from the step totals, estimate included.
 
 ## Wall-clock timeouts
 
