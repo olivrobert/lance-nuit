@@ -61,13 +61,13 @@ function formatNumber(value: number): string {
  * Deliberately NOT reported on a run total: each step opens its own session, so
  * summing or averaging occupancies would describe a context that never existed.
  * Only a single step's figure means anything. */
-export function fmtContextShare(control?: StepControl): string | undefined {
+export function fmtContextShare(control?: DeepReadonly<StepControl>): string | undefined {
   const { last_turn_context_tokens: tokens, context_window: window } = control ?? {};
   if (!tokens || !window) return undefined;
   return formatContextShare(tokens / window);
 }
 
-function metrics(control?: StepControl, usage?: DeepReadonly<StepUsage>): string[] {
+function metrics(control?: DeepReadonly<StepControl>, usage?: DeepReadonly<StepUsage>): string[] {
   const parts: string[] = [];
   const duration = formatDuration(control?.duration_ms);
   if (duration) parts.push(duration);
@@ -99,18 +99,18 @@ function paintMetrics(parts: string[], highlight?: string): string {
 }
 
 /** The part to highlight, if the occupancy has reached the warning threshold. */
-function contextHighlight(control?: StepControl): string | undefined {
+function contextHighlight(control?: DeepReadonly<StepControl>): string | undefined {
   const { last_turn_context_tokens: tokens, context_window: window } = control ?? {};
   if (!tokens || !window || tokens / window < CONTEXT_WARN_PCT) return undefined;
   return fmtContextShare(control);
 }
 
-function withContext(parts: string[], control?: StepControl): string[] {
+function withContext(parts: string[], control?: DeepReadonly<StepControl>): string[] {
   const context = fmtContextShare(control);
   return context ? [...parts, context] : parts;
 }
 
-export function fmtInlineStats(control?: StepControl, usage?: DeepReadonly<StepUsage>): string {
+export function fmtInlineStats(control?: DeepReadonly<StepControl>, usage?: DeepReadonly<StepUsage>): string {
   const painted = paintMetrics(withContext(metrics(control, usage), control), contextHighlight(control));
   return painted ? ` ${dim("·")} ${painted}` : "";
 }

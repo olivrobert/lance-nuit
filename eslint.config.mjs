@@ -47,9 +47,11 @@ export default [
   {
     // Only the run record writes a run. Outside `src/run-record/` a run is a
     // `RunView`, read-only at every depth (`model/run.ts`), and `tsc` refuses a
-    // write through it; an assertion back to a mutable shape is the one way
-    // around that, so it is refused here. Tests set fixtures up through the
-    // module's internals instead (`run-record/run.ts`, `writable`).
+    // write through it. An assertion back to a mutable run or record would turn
+    // the view writable, so it is refused here; the writes `tsc` still accepts
+    // (a view given to a mutable value type, `Object.assign`) are refused by the
+    // scan of `tests/runner/run-view-readonly.test.ts`. Tests set fixtures up
+    // through the module's internals instead (`run-record/run.ts`, `writable`).
     files: ["src/**/*.ts", "src/**/*.tsx"],
     ignores: ["src/run-record/**", "**/*.test.ts", "**/*.test.tsx"],
     rules: {

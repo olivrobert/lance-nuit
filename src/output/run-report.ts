@@ -43,7 +43,7 @@ export interface RunReportStep {
   status: StepStatus;
   durationMs?: number;
   retries: number;
-  control?: StepControl;
+  control?: DeepReadonly<StepControl>;
   usage?: DeepReadonly<StepUsage>;
   detail?: string;
   /** The runner died during an earlier attempt and the step ran again: its side
@@ -92,7 +92,7 @@ export interface RunReport {
   failedStep?: string;
   steps: RunReportStep[];
   statusCounts: Record<StepStatus, number>;
-  totalControl: StepControl;
+  totalControl: DeepReadonly<StepControl>;
   totalUsage?: DeepReadonly<StepUsage>;
   /** `costUnknown`: an attempt spent tokens no pricing table could price, so
    * `spent` is a lower bound and the limit was not strictly enforceable. */
