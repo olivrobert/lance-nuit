@@ -1,7 +1,5 @@
-// stats-core — single source for the run-stats schema and rendering.
-//
-// Shared by the runner state projection and optional statistics readers that
-// consume the central history.
+// stats-core — single source for the run-stats schema, its token arithmetic,
+// and the cost and labels the history readers print.
 //
 // Shape of an entry in the central pipeline-history/runs.jsonl projection:
 //   { runId, pipeline, ticket, ticketDir, sessionId, startedAt, endedAt,
@@ -94,35 +92,9 @@ export type PricingTable = { _currency?: string } & {
   [model: string]: PricingRate | string;
 };
 
-interface RenderFixEvent {
-  kind?: string;
-  phase?: string;
-  iter?: number;
-  contract?: string;
-  details?: string;
-}
-
-/** Structural subset of RunStatsEntry needed by the markdown renderer, so
- *  external history readers can call it on partially-populated entries. */
-export interface RunMarkdownEntry {
-  runId?: string;
-  pipeline?: string;
-  ticket?: string | null;
-  lot?: string | null;
-  lotTitle?: string | null;
-  sessionId?: string | null;
-  startedAt?: string | null;
-  endedAt?: string | null;
-  status?: string;
-  failPhase?: string | null;
-  failReason?: string | null;
-  outcome?: { logPath?: string | null } | null;
-  phases?: Record<string, { agents?: number; fixLoops?: number; tokens?: Partial<TokenCounts> }>;
-  totals?: Partial<TokenCounts>;
+/** What `entryCost` reads of a history entry. */
+export interface CostedEntry {
   models?: Record<string, TokenCounts>;
-  profiles?: Record<string, { steps?: number; tokens?: Partial<TokenCounts>; costUsd?: number }>;
-  commit?: string | null;
-  fixEvents?: readonly unknown[];
   costUsd?: number;
 }
 
@@ -147,28 +119,20 @@ const STATUS_BADGES: Readonly<Record<string, string>> = {
 export const statusBadge = (s?: string): string =>
   s !== undefined && Object.hasOwn(STATUS_BADGES, s) ? (STATUS_BADGES[s] as string) : `⚪ ${s || "?"}`;
 
-// fixEvents.details comes from an HTML-escaped workflow result.
-export const unescapeHtml = (s: string): string =>
-  String(s)
-    .replace(/&gt;/g, ">")
-    .replace(/&lt;/g, "<")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&");
-
 // Symbol displayed before amounts; pricing.json rates use the
 // currency entered by the project ("_currency": "€" for euro pricing), default "$".
+// Read as `pricingTable()` and the runner's rate lookup read it, so an empty
+// string is a currency other than the dollar there and here alike.
 export const currencyOf = (pricing?: PricingTable | null): string =>
-  (pricing && typeof pricing._currency === "string" && pricing._currency) || "$";
+  pricing && typeof pricing._currency === "string" ? pricing._currency : "$";
 
 /**
  * A pricing table these helpers may actually use, or null.
  *
  * A non-USD table is dropped exactly as `pricingTable()` drops it at the command
  * boundary: the runner's `costUsd` is always in dollars and takes precedence over
- * any estimate, so keeping a euro table would label dollar amounts "€". Every
- * exported helper that mixes a `costUsd` with `currencyOf` funnels through here,
- * so a direct caller cannot reintroduce the mismatch.
+ * any estimate, so keeping a euro table would label dollar amounts "€". `costOf`
+ * funnels through here, so a direct caller cannot reintroduce the mismatch.
  */
 export const usablePricing = (pricing?: PricingTable | null): PricingTable | null =>
   pricing && currencyOf(pricing) === "$" ? pricing : null;
@@ -210,113 +174,7 @@ export function costOf(models?: Record<string, TokenCounts> | null, pricing?: Pr
 
 // Entry cost: costUsd written by the runner (the exact Claude CLI cost, including
 // subagents) takes precedence over the token × pricing estimate.
-export function entryCost(entry: RunMarkdownEntry | null | undefined, pricing?: PricingTable | null): number | null {
+export function entryCost(entry: CostedEntry | null | undefined, pricing?: PricingTable | null): number | null {
   if (entry && typeof entry.costUsd === "number") return entry.costUsd;
   return costOf(entry?.models, pricing);
-}
-
-// Detailed markdown summary of one run: a readable mirror of the history entry
-// with the header, tokens, phase/model breakdown, and fix loops.
-// opts.lotCostBudget is the per-lot run budget; overruns are shown in the header
-// and feed recalibration. Callers must not pass it for a parent entry that
-// aggregates several lots: the sum is not comparable with a per-lot budget.
-// The budget applies to COST, not output tokens: SDK `usage.output_tokens` covers
-// only the last assistant message and excludes subagents, while `total_cost_usd`
-// is cumulative.
-export function renderRunMarkdown(
-  entry: RunMarkdownEntry,
-  rawPricing?: PricingTable | null,
-  opts: { lotCostBudget?: number } = {},
-): string {
-  // `entryCost` and the profile costs are dollar figures written by the runner, so
-  // the symbol printed beside them must be the dollar too: a euro table is dropped
-  // rather than allowed to relabel them.
-  const pricing = usablePricing(rawPricing);
-  const tokLine = (o: Partial<TokenCounts>) =>
-    `${fmtInt(o.in || 0)} | ${fmtInt(o.out || 0)} | ${fmtInt(o.cacheRead || 0)} | ${fmtInt(o.cacheWrite || 0)}`;
-  const dur =
-    entry.startedAt && entry.endedAt
-      ? `${Math.round((Date.parse(entry.endedAt) - Date.parse(entry.startedAt)) / 60000)}min`
-      : "?";
-  const cost = entryCost(entry, pricing);
-  const out: string[] = [];
-  out.push(`# Run ${entry.ticket || entry.runId} — ${statusBadge(entry.status)}`, "");
-  out.push(`- **Pipeline**: ${entry.pipeline || "?"}`);
-  // Detail entry: the portion of a parent run restricted to one lot.
-  if (entry.lot) out.push(`- **Lot**: ${entry.lot}${entry.lotTitle ? ` — ${entry.lotTitle}` : ""}`);
-  out.push(`- **Duration**: ${dur}${entry.startedAt ? ` (${entry.startedAt} → ${entry.endedAt || "?"})` : ""}`);
-  if (entry.failPhase) out.push(`- **Failure phase**: ${entry.failPhase}`);
-  if (entry.failReason) out.push(`- **Reason**: ${entry.failReason}`);
-  if (entry.outcome?.logPath) out.push(`- **Log**: \`${entry.outcome.logPath}\``);
-  if (entry.commit) out.push(`- **Commit**: \`${String(entry.commit).slice(0, 7)}\``);
-  if (entry.sessionId) out.push(`- **Session**: \`${entry.sessionId}\``);
-  out.push(`- **Run id**: \`${entry.runId || "?"}\``);
-  if (cost != null) out.push(`- **Cost**: ≈ ${currencyOf(pricing)}${cost.toFixed(2)}`);
-
-  const budget = opts.lotCostBudget;
-  if (budget != null && budget > 0 && cost != null && cost > budget)
-    out.push(
-      `- **⚠️ Budget exceeded**: ${currencyOf(pricing)}${cost.toFixed(2)} > ${currencyOf(pricing)}${budget} (\`lotCostBudget\`)`,
-    );
-
-  out.push(
-    "",
-    "## Tokens",
-    "",
-    "| | in | out | cache read | cache write |",
-    "|---|--:|--:|--:|--:|",
-    `| **Total** | ${tokLine(entry.totals || {})} |`,
-  );
-
-  const phases = Object.entries(entry.phases || {}).sort((a, b) => (b[1].tokens?.out || 0) - (a[1].tokens?.out || 0));
-  if (phases.length) {
-    out.push(
-      "",
-      "## Phases",
-      "",
-      "| Phase | Agents | Fix | in | out | cache read | cache write |",
-      "|---|--:|--:|--:|--:|--:|--:|",
-    );
-    for (const [name, p] of phases)
-      out.push(`| ${name} | ${p.agents || 0} | ${p.fixLoops || 0} | ${tokLine(p.tokens || {})} |`);
-  }
-
-  const models = Object.entries(entry.models || {}).sort((a, b) => (b[1].out || 0) - (a[1].out || 0));
-  if (models.length) {
-    out.push("", "## Models", "", "| Model | in | out | cache read | cache write |", "|---|--:|--:|--:|--:|");
-    for (const [m, u] of models) out.push(`| ${m} | ${tokLine(u)} |`);
-  }
-
-  const profiles = Object.entries(entry.profiles || {}).sort(
-    (a, b) => (b[1].costUsd || 0) - (a[1].costUsd || 0) || (b[1].tokens?.out || 0) - (a[1].tokens?.out || 0),
-  );
-  if (profiles.length) {
-    out.push(
-      "",
-      "## Profiles",
-      "",
-      "| Profile | Steps | in | out | cache read | cache write | Cost |",
-      "|---|--:|--:|--:|--:|--:|--:|",
-    );
-    for (const [name, p] of profiles) {
-      const profileCost = typeof p.costUsd === "number" ? `${currencyOf(pricing)}${p.costUsd.toFixed(2)}` : "—";
-      out.push(`| ${name} | ${p.steps || 0} | ${tokLine(p.tokens || {})} | ${profileCost} |`);
-    }
-  }
-
-  if (Array.isArray(entry.fixEvents) && entry.fixEvents.length) {
-    out.push("", "## Fix-loops", "");
-    for (const raw of entry.fixEvents) {
-      const ev = raw as RenderFixEvent;
-      const kind = ev.kind === "fail" ? "🔴" : ev.kind === "fix" ? "🟢" : "·";
-      const first =
-        unescapeHtml(String(ev.details || ""))
-          .split("\n")
-          .find((l) => l.trim()) || "";
-      out.push(
-        `- ${kind} **${ev.phase || "?"}** iter ${ev.iter ?? "?"} · \`${ev.contract || "?"}\` — ${first.slice(0, 200)}`,
-      );
-    }
-  }
-  return `${out.join("\n")}\n`;
 }

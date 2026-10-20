@@ -1,7 +1,7 @@
 // history-reader — cross-run reader over the central `pipeline-history/runs.jsonl`.
 //
-// The sink writes one logical line per run and `stats-core.ts` renders a single
-// entry; nothing read the projection across runs, so the questions the history was
+// The sink writes one logical line per run; nothing read the projection across
+// runs, so the questions the history was
 // built to answer ("what did this pipeline cost", "which phase keeps failing")
 // could not be asked. This module is that reader: filter, aggregate, render.
 //
