@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run } from "../model/run.js";
 import type { RunBudget } from "./budget.js";
-import { inheritChildBudgetStop, recordCostStop } from "./cost-stop-events.js";
+import { inheritChildBudgetStop, ledgerStops, recordCostStop } from "./cost-stop-events.js";
 import { readRunEvents } from "./run-journal.js";
 
 function makeRun(maxCostUsd?: number): Run {
@@ -151,4 +151,33 @@ test("cost stop: a child's guard stop is inherited as latches, without a parent 
   expect(budget.exceeded).toBe(true);
   expect(parent.budget_exceeded).toBe(true);
   expect(readRunEvents(parent.run_dir)).toHaveLength(0);
+});
+
+test("ledger stops: the accounting latch names the stop only once a gate withheld work", () => {
+  // A run whose step failed on its own while the ledger held the latch ends on
+  // that failure: the total is a lower bound, but no gate withheld anything, so
+  // the report must blame the step and not the accounting.
+  const run = makeRun(1);
+  const latched: RunBudget = { cumulative: 0.2, costUnknown: true };
+  expect(ledgerStops(run, latched, true)).toEqual({
+    budgetExceeded: false,
+    costUnaccounted: true,
+    costUnaccountedStop: false,
+  });
+
+  // Once a gate withheld work over the same uncertainty, the uncertainty is the
+  // reason the run ended.
+  recordCostStop(run, latched, "unaccounted", { kind: "gate", stepId: "b" });
+  expect(ledgerStops(run, latched, true)).toEqual({
+    budgetExceeded: false,
+    costUnaccounted: true,
+    costUnaccountedStop: true,
+  });
+
+  // A run with nothing left to do has nothing a stop could have withheld.
+  expect(ledgerStops(run, latched, false)).toEqual({
+    budgetExceeded: false,
+    costUnaccounted: false,
+    costUnaccountedStop: false,
+  });
 });

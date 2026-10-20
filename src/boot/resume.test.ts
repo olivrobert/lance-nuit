@@ -1,5 +1,14 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildPipelineContext } from "../pipeline/context.js";
@@ -353,6 +362,60 @@ test("resume: an attempt left running by a crash is projected as interrupted on 
   // Settlement wrote the marker once; the next resume reads it back from the journal.
   const again = await loadOrCreateRun(path, "T-6b", undefined, undefined, dir, false, undefined, ctx);
   expect(again.steps[0]!.attempts[0]).toMatchObject({ status: "failed", interrupted: true });
+});
+
+test("resume: an attempt the loop opened is read back and settled after a crash during its spawn", async () => {
+  // The state the other crash tests fabricate, produced here by the loop itself:
+  // what `openAttempt` persisted before spawn is all a killed runner leaves.
+  const root = mkdtempSync(join(tmpdir(), "resume-crash-in-spawn-"));
+  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6f" });
+  const path = pipelineFile(root);
+  const dir = resolveRunDir("p", "T-6f", undefined, true, ctx);
+  const run = await loadOrCreateRun(path, "T-6f", undefined, undefined, dir, false, undefined, ctx);
+  const { deps } = countingDeps([]);
+  const spawn = deps.executeStep;
+  let onDisk: { state: string; events: string } | undefined;
+  deps.executeStep = async (...args) => {
+    if (args[0].id === "b") {
+      onDisk = {
+        state: readFileSync(join(dir, "state.json"), "utf8"),
+        events: readFileSync(join(dir, "events.jsonl"), "utf8"),
+      };
+    }
+    return spawn(...args);
+  };
+  await executeRunSteps(run, "T-6f", undefined, { resuming: false }, deps, ctx);
+  if (!onDisk) throw new Error("step b never spawned");
+  // The runner dies while b's process runs: the disk keeps what it held then.
+  writeFileSync(join(dir, "state.json"), onDisk.state);
+  writeFileSync(join(dir, "events.jsonl"), onDisk.events);
+
+  const snapshot = readRunSnapshot(join(dir, "state.json"));
+  expect(snapshot?.steps.map((step) => [step.id, step.status, step.last_attempt])).toEqual([
+    ["a", "done", 1],
+    ["b", "running", 1],
+    ["c", "pending", undefined],
+  ]);
+
+  const resumed = await loadOrCreateRun(path, "T-6f", undefined, undefined, dir, false, undefined, ctx);
+  const b = resumed.steps[1]!;
+  expect(b.attempts).toHaveLength(1);
+  expect(b.attempts[0]).toMatchObject({
+    attempt: 1,
+    kind: "step",
+    status: "failed",
+    interrupted: true,
+    errors: "runner died before the attempt reported its result (crash, OOM, or SIGKILL)",
+  });
+  expect(b.last_attempt).toBe(1);
+  const finished = readRunEvents(dir).filter((event) => event.type === "step.attempt.finished" && event.stepId === "b");
+  expect(finished).toHaveLength(1);
+  expect(finished[0]).toMatchObject({ attempt: 1, status: "failed", interrupted: true });
+
+  // Settled as an interrupted pass: the next execution asks before replaying it.
+  const next = countingDeps([]);
+  expect((await executeRunSteps(resumed, "T-6f", undefined, { resuming: true }, next.deps, ctx)).stopped).toBe(true);
+  expect(next.spawned).toEqual([]);
 });
 
 /** Leave step `id` as a runner death leaves it: `running`, its attempt started
