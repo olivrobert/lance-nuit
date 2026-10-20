@@ -80,7 +80,9 @@ function fakeDeps(results: Array<Partial<StepResult>> = []): {
 }
 
 test("admitStep: validates the contract", async () => {
-  const step = bashStep("a", "echo a");
+  // The command template may read artifacts: a stopped admission never renders it.
+  let rendered = 0;
+  const step = bashStep("a", "", { command: () => `echo ${++rendered}` });
   const run = makeRun([step], 1);
 
   const admission = await admitStep({
@@ -92,7 +94,7 @@ test("admitStep: validates the contract", async () => {
   });
 
   expect(admission.kind).toBe("budget-exceeded");
-  expect(step.last_command).toBeUndefined();
+  expect(rendered).toBe(0);
   // Unfunded, not skipped: the step stays executable so raising the ceiling and
   // resuming picks it up instead of replaying the whole pipeline.
   expect(step.status).toBe("pending");
@@ -110,7 +112,8 @@ test("admitStep: validates the contract", async () => {
 });
 
 test("admitStep: an unpriced attempt stops a capped run with its own reason", async () => {
-  const step = bashStep("a", "echo a");
+  let rendered = 0;
+  const step = bashStep("a", "", { command: () => `echo ${++rendered}` });
   const run = makeRun([step], 5);
 
   const admission = await admitStep({
@@ -127,7 +130,7 @@ test("admitStep: an unpriced attempt stops a capped run with its own reason", as
   // Same treatment as a budget stop: unfunded, not skipped, so the run resumes
   // where it stopped instead of replaying and repaying settled steps.
   expect(step.status).toBe("pending");
-  expect(step.last_command).toBeUndefined();
+  expect(rendered).toBe(0);
   // The stop is a journal fact, not only a console sentence: `cumulativeUsd` is
   // the lower bound the gate refused to spend past.
   const events = readRunEvents(run.run_dir).filter((event) => event.type === "run.cost.unaccounted");
@@ -258,7 +261,7 @@ test("executeRunSteps: a completed run is not failed after the fact for unknown 
 
 test("admitStep: validates the contract", async () => {
   // Use case: build the command from an artifact that only asynchronous reading
-  // can provide. Without await here, `last_command` would be "[object Promise]"
+  // can provide. Without await here, the command would be "[object Promise]"
   // and the step would run this string unchanged.
   const step = bashStep("a", "", { command: async (ctx) => `echo ${ctx.ticket ?? "sans-ticket"}` });
   const run = makeRun([step]);
@@ -273,7 +276,6 @@ test("admitStep: validates the contract", async () => {
 
   expect(admission.kind).toBe("ready");
   expect(admission.kind === "ready" ? admission.command : "").toBe("echo PROJ-9");
-  expect(step.last_command).toBe("echo PROJ-9");
 });
 
 test("admitStep: validates the contract", async () => {
@@ -293,8 +295,8 @@ test("admitStep: validates the contract", async () => {
   });
 
   expect(admission.kind).toBe("skip");
+  // Rendering would have thrown on the missing artifact: the skip came first.
   expect(step.status).toBe("skipped");
-  expect(step.last_command).toBeUndefined();
 });
 
 test("admitStep: validates the contract", async () => {

@@ -669,6 +669,62 @@ test("persisted format: a snapshot written before cost_unaccounted existed still
   expect(run.cost_unaccounted).toBe(true);
 }, 20_000);
 
+test("persisted format: a snapshot that still carries a step's last_command opens, and the next save drops it", async () => {
+  const root = mkdtempSync(join("/tmp", "pipeline-state-last-command-"));
+  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "PROJ-11" });
+  const pipelinePath = join(root, "p.ts");
+  writeFileSync(
+    pipelinePath,
+    `export default ({ pipeline, actionStep }) => pipeline("p")
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
+  .build();`,
+  );
+  const runDir = resolveRunDir("p", "PROJ-11", undefined, true, ctx);
+  // Older releases kept the last rendered prompt of a step in the snapshot; the
+  // field is gone, and such a run must still resume.
+  writeFileSync(
+    join(runDir, "state.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      runId: basename(runDir),
+      name: "p",
+      ticket: "PROJ-11",
+      pipeline: "p",
+      pipeline_path: relative(root, pipelinePath),
+      status: "RUNNING",
+      steps: [
+        { id: "a", status: "done", retries: 0, last_command: "the whole prompt of a" },
+        { id: "b", status: "pending", retries: 0 },
+      ],
+    }),
+  );
+
+  const { run, resumed } = await loadOrCreateRun({
+    pipelinePath,
+    ticket: "PROJ-11",
+    runDir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
+  expect(resumed).toBe(true);
+  expect(run.steps.map((step) => step.status)).toEqual(["done", "pending"]);
+  expect("last_command" in run.steps[0]!).toBe(false);
+
+  const deps: StepLoopDeps = {
+    executeStep: async () => ({ output: "", ok: true, stats: { duration_ms: 1 } }),
+    extractErrors: async () => ({ hasErrors: false, errors: "" }),
+    runFixLoop: async () => ({ failed: false }),
+    output: NULL_RUN_OUTPUT,
+  };
+  await executeRunSteps(run, "PROJ-11", undefined, { resuming: true }, deps, ctx);
+
+  const saved = JSON.parse(readFileSync(join(runDir, "state.json"), "utf-8"));
+  expect(saved.steps.map((step: { status: string }) => step.status)).toEqual(["done", "done"]);
+  expect(saved.steps[0].last_command).toBeUndefined();
+}, 20_000);
+
 test("persisted format: a minimal step flagged cost_unknown with nothing measured does not stop the run", async () => {
   const root = mkdtempSync(join("/tmp", "pipeline-state-minimal-unmeasured-"));
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "PROJ-10" });

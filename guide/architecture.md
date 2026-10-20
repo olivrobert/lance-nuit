@@ -543,8 +543,7 @@ the step layer and the entry point move during execution have named operations
 too (`run-record/step-bookkeeping.ts`), each of which writes its field, the
 journal event that already recorded it, and the snapshot: a retry quota spent or
 given back (`consumeRetry`, `refundRetry`), the session a step continues
-(`bindSession`), its last command (`recordLastCommand`, memory only: the snapshot
-leaves it out), a source it could not read (`recordUnavailableSource`, journal
+(`bindSession`), a source it could not read (`recordUnavailableSource`, journal
 only) and the decision `--approve` or `--reject` recorded (`recordDecision`); no
 code in `step/` or `entry/` calls `saveRun`. The persisted child reference of a composed run — the record a
 `runPipeline` or `forEachPipeline` node keeps in the parent snapshot for each

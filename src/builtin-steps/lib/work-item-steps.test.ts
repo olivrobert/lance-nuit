@@ -218,7 +218,7 @@ test("escalation: true precondition → step executable", async () => {
   expect(await checkInputs({ def: step } as never, ctx)).toEqual({ action: "pass" });
 });
 
-test("escalation: description remains traceable in last_command", () => {
+test("escalation: description remains traceable in the rendered command", () => {
   const step = escalate();
   const rendered = typeof step.command === "function" ? step.command(setup().ctx) : step.command;
   expect(rendered).toContain(TICKET);
