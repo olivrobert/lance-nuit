@@ -12,17 +12,18 @@
 //
 // One figure is not in the parent's ledger: which models a composed node's
 // spend went to. A node composing pipelines ran no agent of its own, so the
-// recap reads its child runs' snapshots and groups their step costs by model.
-// That split explains the node's cost; it never replaces it.
+// recap reads its child runs through the run record, as it reads the run itself,
+// and groups their step costs by model. That split explains the node's cost; it
+// never replaces it.
 
 import { dirname, join } from "node:path";
 import type { StepControl, StepUsage } from "../../contracts/backends.js";
 import { resolveTicketDir } from "../../env/tickets.js";
 import { isLogicalSegment } from "../../model/artifact-ports.js";
 import type { PersistedPipelineChildRef, PersistedRun, PersistedStepState } from "../../model/persisted.js";
-import { FileRunStateStore, RUNS_DIRECTORY } from "../../run-record/index.js";
+import { RUNS_DIRECTORY, readRun } from "../../run-record/index.js";
 import { type ProjectEntry, type ReadModelOptions, workItemsRoot } from "./projects.js";
-import { resolveRun } from "./runs.js";
+import { resolveRun, runsLocationOfProject } from "./runs.js";
 import { stepStatusOf } from "./steps.js";
 import { isTicketToken } from "./tickets.js";
 import type { RunModelCost, RunRecap, RunRecapStep, RunTokens } from "./types.js";
@@ -88,15 +89,10 @@ function childRunDir(parent: RunLocation, ref: PersistedPipelineChildRef): strin
 
 /** Add every agent step of `location`'s run — and of the runs it composed — to
  *  `costs`, keyed by model. */
-function collectModelCosts(
-  location: RunLocation,
-  store: FileRunStateStore,
-  costs: Map<string, number | undefined>,
-  depth: number,
-): void {
+function collectModelCosts(location: RunLocation, costs: Map<string, number | undefined>, depth: number): void {
   for (const step of location.state.steps) {
     if (step.orchestration) {
-      if (depth < MAX_CHILD_DEPTH) collectChildCosts(location, step, store, costs, depth + 1);
+      if (depth < MAX_CHILD_DEPTH) collectChildCosts(location, step, costs, depth + 1);
       continue;
     }
     const cost = step.control?.total_cost_usd;
@@ -110,22 +106,21 @@ function collectModelCosts(
 function collectChildCosts(
   parent: RunLocation,
   step: PersistedStepState,
-  store: FileRunStateStore,
   costs: Map<string, number | undefined>,
   depth: number,
 ): void {
   for (const ref of step.orchestration?.children ?? []) {
     const runDir = childRunDir(parent, ref);
-    const state = runDir ? store.readAt(runDir) : null;
+    const child = runDir ? readRun(runDir, runsLocationOfProject(parent.project)) : null;
     // A child never started, or whose snapshot is gone, leaves no split to show.
-    if (runDir && state) collectModelCosts({ project: parent.project, runDir, state }, store, costs, depth);
+    if (child) collectModelCosts({ project: parent.project, runDir: child.runDir, state: child.state }, costs, depth);
   }
 }
 
 /** Models a composed node's children ran, costliest first. */
-function childModels(parent: RunLocation, step: PersistedStepState, store: FileRunStateStore): RunModelCost[] {
+function childModels(parent: RunLocation, step: PersistedStepState): RunModelCost[] {
   const costs = new Map<string, number | undefined>();
-  collectChildCosts(parent, step, store, costs, 1);
+  collectChildCosts(parent, step, costs, 1);
   return [...costs]
     .map(([model, costUsd]) => ({ model, ...(costUsd !== undefined ? { costUsd } : {}) }))
     .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
@@ -187,9 +182,8 @@ export function readRecap(projectName: string, ticket: string, options: ReadMode
   const startedAt = text(state.createdAt);
   const endedAt = text(state.updatedAt);
   const location: RunLocation = { project: resolved.project, runDir: resolved.run.runDir, state };
-  const store = new FileRunStateStore();
   const steps = state.steps.map((step) =>
-    recapStep(step, step.orchestration ? childModels(location, step, store) : undefined, resolved.interrupted),
+    recapStep(step, step.orchestration ? childModels(location, step) : undefined, resolved.interrupted),
   );
   return {
     pipeline: resolved.run.pipeline,

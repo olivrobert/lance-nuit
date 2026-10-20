@@ -14,7 +14,6 @@
 export {
   awaitsFinalization,
   awaitsHuman,
-  type EffectiveStatus,
   effectiveStatus,
   hasVerdict,
   isCompleted,
@@ -39,14 +38,20 @@ export {
   replayedAfterInterruption,
 } from "./run-predicates.js";
 
-// Reading a run: its snapshot, its journal, and the projection of one onto the
-// other.
-export { projectStepAttempts } from "./attempt-projection.js";
-export { type RunJournalEvent, type RunJournalReport, readRunJournal } from "./run-journal.js";
-export { projectRunState } from "./run-projection.js";
-export { readRunSnapshot } from "./run-snapshot.js";
-export { FileRunEventStore, runEventsFilePath } from "./stores/file-run-event-store.js";
-export { FileRunStateStore } from "./stores/file-run-state-store.js";
+// Reading a run: the snapshot reconciled with its journal and the status a
+// reader shows, the attempts and events only the journal holds, and the journal
+// health `--inspect` reports.
+export {
+  lastJournalEvent,
+  type RunHistory,
+  type RunRead,
+  readLatestRun,
+  readListedRun,
+  readRun,
+  readRunHistory,
+} from "./run-read.js";
+export { type RunJournalReport, readRunJournal } from "./run-journal.js";
+export { runEventsFilePath } from "./stores/file-run-event-store.js";
 
 // Attempts and their logs, and the cost ledger and budget a run is held to.
 export { closeAttempt } from "./attempt-closure.js";
@@ -98,10 +103,16 @@ export {
   skipChild,
 } from "./child-transitions.js";
 
-// Opening and restoring a run, and the raw snapshot and journal writes.
+// Opening and restoring a run: the stores and the projection boot reads a run
+// with before executing it, and the raw snapshot and journal writes. The stores
+// also serve as ports: the statistics of the run a process just executed read
+// its journal through one, and `--inspect` lists snapshots through the other
+// before reading each with `readListedRun`.
 export { restoreRunTotals } from "./cost-accounting.js";
 export { appendRunEvent, readRunEvents } from "./run-journal.js";
-export { type ProjectedRunState, settleCrashedAttempts } from "./run-projection.js";
+export { type ProjectedRunState, projectRunState, settleCrashedAttempts } from "./run-projection.js";
+export { FileRunEventStore } from "./stores/file-run-event-store.js";
+export { FileRunStateStore } from "./stores/file-run-state-store.js";
 export { saveRun } from "./run-repository.js";
 export { describeRunSnapshotProblem, hasRunSnapshotEntry, readRunSnapshotDiagnostic } from "./run-snapshot.js";
 export { makeRunStep } from "./run-step.js";
@@ -119,12 +130,12 @@ export { discardedResumeNotice, type ExplicitRunSelection, selectExplicitRun } f
 export { FileRunLogStore } from "./stores/file-run-log-store.js";
 export {
   createRunId,
-  isRunHeld,
   latestRunFile,
   pipelineRunsDir,
   RUNS_DIRECTORY,
   resolveLatestRunSnapshot,
   runLockHolder,
+  type RunsLocation,
   runsLocationOf,
   wouldResumeLatest,
 } from "./stores/run-storage.js";

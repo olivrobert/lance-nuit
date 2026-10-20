@@ -30,11 +30,11 @@ import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { asFiniteNumber, asRecord } from "../../lib/json-values.js";
 import type { PersistedRun, RunStatus } from "../../model/persisted.js";
-import { costIsLowerBound, effectiveStatus, FileRunStateStore, isCompleted } from "../../run-record/index.js";
+import { costIsLowerBound, effectiveStatus, isCompleted, type RunRead, readRun } from "../../run-record/index.js";
 import { workItemLayout } from "../../work-item-store/index.js";
 import { dashboardPaths } from "../dashboard-home/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl, workItemsRoot } from "./projects.js";
-import { directoryNames, selectedRunStatus, ticketDirectories } from "./runs.js";
+import { directoryNames, runsLocationOfProject, ticketDirectories } from "./runs.js";
 import { isTicketToken } from "./tickets.js";
 import type {
   ItemStatus,
@@ -257,19 +257,13 @@ function statsRun(identity: Pick<StatsRun, "runId" | "pipeline" | "status" | "so
   };
 }
 
-function liveRunView(
-  project: ProjectEntry,
-  pipeline: string,
-  runDir: string,
-  state: PersistedRun,
-  steps: ReadonlySet<string> | null,
-): StatsRun {
+function liveRunView(pipeline: string, run: RunRead, steps: ReadonlySet<string> | null): StatsRun {
+  const { state, status } = run;
   // The ledger's totals, never a sum of the steps: a run without them reports
   // no figure rather than one that disagrees with what its budget was held to.
   const control = state.total_control;
-  // The status the morning box shows for the same run: a dead runner's RUNNING
-  // snapshot is an interrupted run here too.
-  const { status } = selectedRunStatus(project, { pipeline, runDir, state });
+  // `status` is the one the morning box shows for the same run (`readRun`): a
+  // dead runner's RUNNING snapshot is an interrupted run here too.
   return statsRun(
     { runId: state.runId ?? "", pipeline: state.pipeline || pipeline, status, source: "live" },
     {
@@ -295,7 +289,8 @@ function ticketOfRun(folder: string, state: PersistedRun): string {
 }
 
 /** Every root run of one project, each read once. */
-function liveRuns(project: ProjectEntry, store: FileRunStateStore, steps: ReadonlySet<string> | null): CollectedRun[] {
+function liveRuns(project: ProjectEntry, steps: ReadonlySet<string> | null): CollectedRun[] {
+  const location = runsLocationOfProject(project);
   const seen = new Set<string>();
   const collected: CollectedRun[] = [];
   const root = workItemsRoot(project);
@@ -306,13 +301,13 @@ function liveRuns(project: ProjectEntry, store: FileRunStateStore, steps: Readon
         const runDir = realPath(join(runsDir, pipeline, runName));
         if (!runDir || seen.has(runDir)) continue;
         seen.add(runDir);
-        const state = store.readAt(runDir);
-        if (!state || text(state.parentRunId)) continue;
+        const run = readRun(runDir, location);
+        if (!run || text(run.state.parentRunId)) continue;
 
         collected.push({
           project: project.name,
-          ticket: ticketOfRun(folder, state),
-          run: liveRunView(project, pipeline, runDir, state, steps),
+          ticket: ticketOfRun(folder, run.state),
+          run: liveRunView(pipeline, run, steps),
           workItemDirs: [join(root, folder)],
         });
       }
@@ -499,8 +494,7 @@ export function readStats(options: ReadModelOptions = {}): StatsRead {
   const rules = parseKindRules(config.status === "ok" ? config.value : undefined);
   const delivery = parseDelivery(config.status === "ok" ? config.value : undefined);
   const projects = readProjects(options).filter((project) => project.found);
-  const store = new FileRunStateStore();
-  const live = projects.flatMap((project) => liveRuns(project, store, delivery.steps));
+  const live = projects.flatMap((project) => liveRuns(project, delivery.steps));
   const archive = readArchive(options);
 
   const liveIds = new Set(live.map(({ project, ticket, run }) => `${project}/${ticket}/${run.runId}`));

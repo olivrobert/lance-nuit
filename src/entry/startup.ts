@@ -294,7 +294,6 @@ export async function startup(argv: string[]): Promise<StartupOutcome> {
       limit: args.limit,
       ctx: context,
       def: pipelineDef,
-      stateStore,
     });
     return { kind: "exit", code };
   }

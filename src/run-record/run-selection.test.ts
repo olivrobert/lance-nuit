@@ -194,6 +194,30 @@ test("--run resumes a run whose only missing piece is the verdict", () => {
   expect(resolveExplicitRunDir("feature", "DEMO-1", "run-sigint", aborted)).toBe(abortedDir);
 });
 
+test("--run reads what is left as every reader does: a step the journal finished is done", () => {
+  // The runner died after the journal recorded the last step done and before the
+  // snapshot did. Read alone, the snapshot owes `create-mr`; projected, the run
+  // owes only its verdict. Both are selectable, and the notice counts what a
+  // resume would actually run.
+  const context = fixtureContext();
+  const runDir = writeRun(context, "feature", "DEMO-1", "run-dead", {
+    status: "RUNNING",
+    outcome: { phase: "create-mr", reason: null, logPath: null, resumable: false },
+    steps: [
+      { id: "plan", status: "done" },
+      { id: "create-mr", status: "running" },
+    ],
+  });
+  writeFileSync(
+    join(runDir, "events.jsonl"),
+    `${JSON.stringify({ ts: "2026-09-05T08:00:00.000Z", type: "step.status.changed", stepId: "create-mr", status: "done" })}\n`,
+  );
+  pointLatest(context, "feature", "DEMO-1", "run-dead");
+
+  expect(discardedResumeNotice("feature", "DEMO-1", context)).toContain("its verdict was never stamped");
+  expect(resolveExplicitRunDir("feature", "DEMO-1", "run-dead", context)).toBe(runDir);
+});
+
 test("--run rejects a snapshot whose persisted identity differs from its directory", () => {
   const context = fixtureContext();
   writeRun(context, "feature", "DEMO-1", "run-mismatch", {

@@ -11,7 +11,7 @@
 import { readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { PersistedRun } from "../../model/persisted.js";
-import { effectiveStatus, FileRunStateStore, isRunHeld } from "../../run-record/index.js";
+import { type RunRead, readRun, type RunsLocation } from "../../run-record/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, workItemsRoot } from "./projects.js";
 import type { ItemStatus } from "./types.js";
 
@@ -55,39 +55,36 @@ function updatedMs(state: PersistedRun): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export interface SelectedRun {
+/** A run as the run record reads it, with the pipeline it ran. */
+export interface SelectedRun extends RunRead {
   pipeline: string;
-  runDir: string;
-  state: PersistedRun;
 }
 
-/** Latest run of each pipeline, most recently updated first. */
-export function latestRuns(project: ProjectEntry, ticket: string, store: FileRunStateStore): SelectedRun[] {
+/** Where `project` keeps its runs: what the run record needs to tell who holds
+ *  a run, a composed child included. */
+export function runsLocationOfProject(project: ProjectEntry): RunsLocation {
+  return { cwd: project.cwd, specPath: project.specPath };
+}
+
+/**
+ * Latest run of each pipeline, most recently updated first.
+ *
+ * Each is read through the run record (`readRun`), so its status is the one the
+ * runner would judge — a snapshot without a verdict that no live process holds
+ * is an interrupted `ABORTED` run — and its steps are the ones a resume would
+ * start from. The dashboard and a later `lancenuit run` agree on what is live.
+ */
+export function latestRuns(project: ProjectEntry, ticket: string): SelectedRun[] {
   const runsDir = join(workItemsRoot(project), ticket, "runs");
+  const location = runsLocationOfProject(project);
   const runs: SelectedRun[] = [];
   for (const pipeline of directoryNames(runsDir)) {
     const runDir = latestRunDir(join(runsDir, pipeline));
     if (!runDir) continue;
-    const state = store.readAt(runDir);
-    if (state) runs.push({ pipeline, runDir, state });
+    const run = readRun(runDir, location);
+    if (run) runs.push({ pipeline, ...run });
   }
   return runs.sort((a, b) => updatedMs(b.state) - updatedMs(a.state));
-}
-
-/**
- * Status of the run a ticket is about, as the runner would judge it.
- *
- * `isRunHeld` is the runner's own answer to "who holds this run", a composed
- * child included, so the dashboard and a later `lancenuit run` agree on what can
- * be resumed: a snapshot without a verdict that no live process holds is served
- * as an interrupted `ABORTED` run (`effectiveStatus`).
- */
-export function selectedRunStatus(
-  project: ProjectEntry,
-  run: SelectedRun,
-): { status: ItemStatus; interrupted: boolean } {
-  const location = { cwd: project.cwd, specPath: project.specPath };
-  return effectiveStatus(run.state, () => isRunHeld(run.runDir, run.state, location));
 }
 
 /**
@@ -139,14 +136,15 @@ export function resolveRun(
   const project = readProjects(options).find((entry) => entry.name === projectName && entry.found);
   if (!project || !ticketDirectories(project).includes(ticket)) return undefined;
 
-  const [run] = latestRuns(project, ticket, new FileRunStateStore());
+  const [run] = latestRuns(project, ticket);
   if (!run) return undefined;
 
   return {
     project,
     ticket,
     run,
-    ...selectedRunStatus(project, run),
+    status: run.status,
+    interrupted: run.interrupted,
     cwd: effectiveCwd(project, run.state),
     workItemDir: workItemDirOf(project, ticket),
   };

@@ -5,7 +5,7 @@
 //
 // The attempts come from the journal, not from `state.json`: the snapshot keeps
 // only what a resume needs, and the journal is where every attempt is recorded
-// once. The projection is the runner's own (`projectStepAttempts`), so the
+// once. The run record projects them (`readRunHistory`) as a resume does, so the
 // dashboard numbers attempts exactly as a resume would.
 //
 // This read is made when a reader opens a step, never by the item's poll: the
@@ -15,7 +15,7 @@
 import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PersistedAttempt } from "../../model/persisted.js";
-import { ATTEMPT_COMMAND_FILE, FileRunEventStore, projectStepAttempts } from "../../run-record/index.js";
+import { ATTEMPT_COMMAND_FILE, readRunHistory } from "../../run-record/index.js";
 import { isInFlight, standingOf, workItemLayout } from "../../work-item-store/index.js";
 import { isPathWithin } from "../../lib/path-safety.js";
 import { isSafeRelativePath, runTreePath } from "./explorer.js";
@@ -150,7 +150,7 @@ function readText(path: string): string | undefined {
 function attemptsOf(resolved: ResolvedRun, stepId: string): PersistedAttempt[] | undefined {
   const { runDir, state } = resolved.run;
   if (!state.steps.some((step) => step.id === stepId)) return undefined;
-  return projectStepAttempts(new FileRunEventStore().readAt(runDir)).get(stepId) ?? [];
+  return readRunHistory(runDir).attempts.get(stepId) ?? [];
 }
 
 /**

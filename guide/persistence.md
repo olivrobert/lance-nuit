@@ -317,6 +317,14 @@ invocation that loads a definition declaring it (for the way back, see
 the journal holds and settles the attempts a crash left running, without ever
 knowing about a pipeline definition.
 
+The readers see the same reconciliation (`readRun`, `run-record/run-read.ts`).
+When a runner died after the journal recorded a step finished and before the
+snapshot did, the dashboard, `--inspect`, `close` and `--run` all show that step
+finished, as the resume will treat it, and number its attempts the same way. The
+journal is parsed for that only when it can say more than the snapshot: the run
+has no verdict, no live process holds it, and a step is still pending or
+running. A live run is read from its snapshot alone, at most one write behind.
+
 Readers validate a snapshot against a runtime schema (`run-record/schema.ts`) that
 mirrors the `PersistedRun` interfaces. Unknown fields are kept, so a snapshot
 written by a later release stays readable, and fields an early release could

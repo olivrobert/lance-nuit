@@ -3,11 +3,10 @@
 // Where a run stands, step by step.
 //
 // The step list answers "how far did it get" the way a resume would: the
-// snapshot's steps, in pipeline order, reconciled with the journal by the
-// runner's own projection (`projectRunState`). The snapshot is written after
-// each event, so a crash between the two leaves a terminal status in the journal
-// alone; only a step the snapshot left pending or running can move, so the whole
-// journal is read only when one is.
+// snapshot's steps, in pipeline order, as the run record reads them (`readRun`).
+// The snapshot is written after each event, so a runner that died between the
+// two leaves a terminal status in the journal alone; the run record reconciles
+// the two for such a run, and every other view of the run reads the same steps.
 //
 // The journal also answers "is anything happening right now", and only for a run
 // a live runner holds, where the snapshot is by definition behind. So its last
@@ -17,8 +16,8 @@
 
 import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import type { RawJournalEvent, RunJournalKnownEvent } from "../../model/journal.js";
-import type { PersistedRun, PersistedStepState } from "../../model/persisted.js";
-import { FileRunEventStore, projectRunState } from "../../run-record/index.js";
+import type { PersistedStepState } from "../../model/persisted.js";
+import { lastJournalEvent } from "../../run-record/index.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
 import type {
@@ -106,30 +105,12 @@ function eventView(event: RawJournalEvent | RunJournalKnownEvent): RunEventView 
 /** Last line of `events.jsonl`, or `undefined` when the journal is absent, empty,
  *  or made only of lines no reader can parse.
  *
- *  Read from `entries`, not from `events`: the journal is also the live feed, and
- *  the answer to "is anything happening right now" is usually one of the feed's
- *  own lines, which the journal contract does not describe. */
+ *  Any line, not only the contracted events: the journal is also the live feed,
+ *  and the answer to "is anything happening right now" is usually one of the
+ *  feed's own lines, which the journal contract does not describe. */
 function lastEvent(runDir: string): RunEventView | undefined {
-  const page = new FileRunEventStore().readTailAt(runDir, { maxBytes: TAIL_BYTES });
-  const entry = page.entries.at(-1);
-  return entry ? eventView(entry.event) : undefined;
-}
-
-/** The snapshot's steps as the runner projects them with its journal, in
- *  snapshot order. Steps the journal alone knows are left out: the list shows
- *  the pipeline the snapshot describes. */
-function projectedSteps(runDir: string, state: PersistedRun): PersistedStepState[] {
-  if (!state.steps.some((step) => step.status === "pending" || step.status === "running")) return state.steps;
-  let events: ReturnType<FileRunEventStore["readAt"]>;
-  try {
-    events = new FileRunEventStore().readAt(runDir);
-  } catch {
-    // An unreadable journal costs the reconciliation, not the step list: the
-    // snapshot is still what the runner last persisted.
-    return state.steps;
-  }
-  const projected = projectRunState(state, events);
-  return state.steps.map((step) => projected.steps.get(step.id)?.state ?? step);
+  const event = lastJournalEvent(runDir, TAIL_BYTES);
+  return event ? eventView(event) : undefined;
 }
 
 /**
@@ -153,7 +134,7 @@ export function readSteps(
     runId: resolved.run.state.runId ?? "",
     runDir: resolved.run.runDir,
     status: resolved.status,
-    steps: projectedSteps(resolved.run.runDir, resolved.run.state).map((step) => stepView(step, resolved.interrupted)),
+    steps: resolved.run.state.steps.map((step) => stepView(step, resolved.interrupted)),
     ...(event ? { lastEvent: event } : {}),
     ...(coder ? { coderStep: coder.id } : {}),
   };

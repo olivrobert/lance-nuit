@@ -16,14 +16,14 @@ import { errorMessage } from "../lib/errors.js";
 import { gateDecisionStatus, isValidSubjectToken } from "../work-item-store/index.js";
 import {
   awaitsHuman,
-  type EffectiveStatus,
-  effectiveStatus,
   FileRunLogStore,
   FileRunStateStore,
   matchesStepSelector,
-  readRunJournal,
-  isRunHeld,
   type RunJournalReport,
+  type RunRead,
+  type RunsLocation,
+  readListedRun,
+  readRunJournal,
   runsLocationOf,
 } from "../run-record/index.js";
 import { isPathWithin } from "../lib/path-safety.js";
@@ -33,12 +33,18 @@ export interface DiagnosticsOptions {
   logStore?: RunLogStore;
 }
 
+/** A listed run as the run record reads it (`readListedRun`): `state` carries
+ *  the steps a resume would start from, and `status` the one the dashboard shows
+ *  for the same run. */
 export interface RunRecord {
   dir: string;
   statePath: string;
   pipeline: string;
   runId: string;
   state: PersistedRun;
+  status: RunRead["status"];
+  /** No verdict and no live holder: the runner died. `status` is then `ABORTED`. */
+  interrupted: boolean;
   isLatest?: boolean;
   modifiedAt?: number;
 }
@@ -74,14 +80,16 @@ function recordsFor(
   };
 }
 
-function toRecord(snapshot: RunStateSnapshot): RunRecord {
-  const state = snapshot.state;
+function toRecord(snapshot: RunStateSnapshot, location: RunsLocation): RunRecord {
+  const { state, status, interrupted } = readListedRun(snapshot, location);
   return {
     dir: snapshot.runDir ?? "",
     statePath: snapshot.statePath ?? "",
     pipeline: state.pipeline,
     runId: state.runId!,
     state,
+    status,
+    interrupted,
     isLatest: snapshot.isLatest,
     modifiedAt: snapshot.modifiedAt,
   };
@@ -90,9 +98,12 @@ function toRecord(snapshot: RunStateSnapshot): RunRecord {
 export function listRunRecords(context: PipelineContext, ticket?: string, options?: DiagnosticsOptions): RunRecord[] {
   const stateStore = stateStoreFor(context, ticket, options);
   const snapshots = stateStore.listSnapshots?.(ticket, context) ?? [];
+  const location = runsLocationOf(context);
   return [
     ...new Map(
-      snapshots.map(toRecord).map((record) => [record.dir || `${record.pipeline}:${record.runId}`, record]),
+      snapshots
+        .map((snapshot) => toRecord(snapshot, location))
+        .map((record) => [record.dir || `${record.pipeline}:${record.runId}`, record]),
     ).values(),
   ];
 }
@@ -133,16 +144,6 @@ function latestPerPipeline(records: RunRecord[], stateStore: RunStateStore, tick
 export function selectRunRecord(records: RunRecord[], runId?: string): RunRecord | undefined {
   if (runId) return records.find((record) => record.runId === runId || basename(record.dir) === runId);
   return sortNewest(records)[0];
-}
-
-/** The status the dashboard shows for the same run: a snapshot without a verdict
- *  that no live process holds is an interrupted run. A record without a
- *  directory has no lock to ask, so nothing can be holding it. */
-function statusOf(context: PipelineContext, record: RunRecord): EffectiveStatus {
-  return effectiveStatus(
-    record.state,
-    () => record.dir !== "" && isRunHeld(record.dir, record.state, runsLocationOf(context)),
-  );
 }
 
 function outcomeLine(state: PersistedRun): string {
@@ -189,7 +190,7 @@ function journalLine(record: RunRecord): string {
  * by whether the rework has answered it yet.
  */
 async function approvalLine(context: PipelineContext, record: RunRecord): Promise<string | undefined> {
-  const subject = statusOf(context, record).status === "STOPPED" ? record.state.outcome?.stop?.subject : undefined;
+  const subject = record.status === "STOPPED" ? record.state.outcome?.stop?.subject : undefined;
   const { ticket, paths } = context;
   if (!subject || !isValidSubjectToken(subject) || !ticket || !paths.workItemDir) return undefined;
   const status = await gateDecisionStatus(paths.workItemDir, subject, (name) =>
@@ -210,9 +211,8 @@ async function approvalLine(context: PipelineContext, record: RunRecord): Promis
   }
 }
 
-export function formatRunRecord(context: PipelineContext, record: RunRecord, approval?: string): string {
-  const state = record.state;
-  const { status, interrupted } = statusOf(context, record);
+export function formatRunRecord(record: RunRecord, approval?: string): string {
+  const { state, status, interrupted } = record;
   const lines = [
     `Run ${record.runId}`,
     `pipeline: ${record.pipeline}`,
@@ -237,24 +237,24 @@ function childrenOf(parent: RunRecord, records: RunRecord[]): RunRecord[] {
   return sortNewest(records.filter((record) => record.state.parentRunId === parent.runId)).reverse();
 }
 
-function formatChildLine(context: PipelineContext, record: RunRecord): string {
+function formatChildLine(record: RunRecord): string {
   const state = record.state;
   const lot = state.lot ? ` ${state.lot.title || state.lot.id}` : "";
   const failed = state.steps.find((step) => step.status === "failed" && step.errors);
   const error = failed ? ` — ${failed.id}: ${failed.errors!.split("\n", 1)[0]}` : "";
-  return `${statusOf(context, record).status.padEnd(9)} ${record.pipeline}${lot} (${record.runId})${error}`;
+  return `${record.status.padEnd(9)} ${record.pipeline}${lot} (${record.runId})${error}`;
 }
 
 /** Render a run followed by its sub-run tree, one indented line per child. A
  * `forEachPipeline` run spawns one child per item; listing them here is the only
  * way to see the whole run without grepping `parentRunId` in the snapshots. */
 async function formatRunTree(context: PipelineContext, record: RunRecord, records: RunRecord[]): Promise<string> {
-  const lines = [formatRunRecord(context, record, await approvalLine(context, record))];
+  const lines = [formatRunRecord(record, await approvalLine(context, record))];
   const render = (parent: RunRecord, depth: number) => {
     const children = childrenOf(parent, records);
     if (depth === 1 && children.length > 0) lines.push("children:");
     for (const child of children) {
-      lines.push(`${"  ".repeat(depth)}${formatChildLine(context, child)}`);
+      lines.push(`${"  ".repeat(depth)}${formatChildLine(child)}`);
       render(child, depth + 1);
     }
   };
@@ -405,7 +405,7 @@ export function cleanLogs(
   for (const record of listRunRecords(context, ticket)) {
     if (recordDate(record) > cutoff) continue;
     // Kept: what a person still has to look at, an interrupted run included.
-    if (keepFailed && awaitsHuman(statusOf(context, record).status)) continue;
+    if (keepFailed && awaitsHuman(record.status)) continue;
     const stepsDir = join(record.dir, "steps");
     const removed = removeStepLogs(stepsDir);
     // `events.jsonl` is the append-only audit journal and also the live feed for
