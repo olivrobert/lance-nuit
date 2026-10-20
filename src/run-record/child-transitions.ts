@@ -43,11 +43,16 @@
 // second, like the run transitions (`run-record/run-transitions.ts`).
 //
 // The node's own state, which holds those references, has two writes of its
-// own: `openOrchestration` finds or creates it on the step, and
-// `freezeOrchestrationItems` fixes the items a `forEachPipeline` iterates.
+// own: `openOrchestration` finds or creates it on the step (and records the
+// run's lineage), and `freezeOrchestrationItems` fixes the items a
+// `forEachPipeline` iterates.
 
 import type { PipelineLot } from "../model/context.js";
-import type { PersistedPipelineChildRef, PersistedPipelineOrchestrationState } from "../model/persisted.js";
+import type {
+  PersistedPipelineChildRef,
+  PersistedPipelineOrchestrationState,
+  PipelineLineageEntry,
+} from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
 import { isSettledStatus } from "./run-predicates.js";
@@ -58,12 +63,19 @@ import { isCompleted } from "./run-status.js";
  * The state of an orchestration node, found on its step or created empty, and
  * persisted. A resumed node whose kind changed is refused: its children were
  * declared for another kind of call.
+ *
+ * The run's lineage is recorded in the same snapshot, once: a top-level run
+ * gets its root entry here, a child run keeps the lineage it was booted with.
+ * Its children check recursion and depth against it, and the run list reads
+ * ancestry from it.
  */
 export function openOrchestration(
   parent: Run,
   step: RunStep,
   kind: PersistedPipelineOrchestrationState["kind"],
+  lineage: readonly PipelineLineageEntry[],
 ): PersistedPipelineOrchestrationState {
+  if (!parent.pipelineLineage?.length) parent.pipelineLineage = [...lineage];
   const state = step.orchestration ?? { kind, children: [] };
   if (state.kind !== kind) throw new Error(`Step "${step.id}": orchestration type changed during resume`);
   step.orchestration = state;

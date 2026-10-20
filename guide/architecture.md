@@ -545,11 +545,10 @@ given back (`consumeRetry`, `refundRetry`), the session a step continues
 (`bindSession`), its last command (`recordLastCommand`, memory only: the snapshot
 leaves it out), a source it could not read (`recordUnavailableSource`, journal
 only) and the decision `--approve` or `--reject` recorded (`recordDecision`); no
-code in `step/` or `entry/` calls `saveRun`. One run field is still written
-from `step/`: the lineage of a composed run
-(`step/pipeline-orchestration-resolution.ts`), persisted by `openOrchestration`. The persisted child reference of a composed run — the record a
+code in `step/` or `entry/` calls `saveRun`. The persisted child reference of a composed run — the record a
 `runPipeline` or `forEachPipeline` node keeps in the parent snapshot for each
-child call — and the node state that holds them (`openOrchestration`,
+child call — and the node state that holds them (`openOrchestration`, which
+also records the run's lineage in the snapshot that opens the node, and
 `freezeOrchestrationItems`) move through `run-record/child-transitions.ts` only: declared
 `pending`, committed and bound to a child run id, skipped, failed at launch, or
 settled from the child's own verdict with the `pipeline.child.started` and

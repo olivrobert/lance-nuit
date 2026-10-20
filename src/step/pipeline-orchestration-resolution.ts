@@ -15,16 +15,16 @@ function canonicalPipelinePath(path: string): string {
   return realpathSync(pathResolve(path));
 }
 
+/** The run's lineage: the persisted one, or the root entry a top-level run has
+ *  not recorded yet. Pure: `openOrchestration` records it on the run. */
 export function currentLineage(run: Run): PipelineLineageEntry[] {
   if (run.pipelineLineage?.length) return run.pipelineLineage;
-  const lineage: PipelineLineageEntry[] = [
+  return [
     {
       pipelinePath: canonicalPipelinePath(run.pipeline_path),
       ...(run.ticket !== undefined ? { ticket: run.ticket } : {}),
     },
   ];
-  run.pipelineLineage = lineage;
-  return lineage;
 }
 
 function formatLineage(lineage: readonly PipelineLineageEntry[]): string {

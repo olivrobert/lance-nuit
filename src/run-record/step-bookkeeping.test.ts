@@ -21,6 +21,8 @@ function makeRun(step: RunStep): Run {
   return { name: "p", pipeline: "p", pipeline_path: "p.ts", run_dir: dir, steps: [step] };
 }
 
+const ROOT_LINEAGE = [{ pipelinePath: "/pipelines/p.ts", ticket: "T-1" }];
+
 function runningStep(): RunStep {
   return makeRunStep({ id: "a", name: "a", command: "work", runner: "bash" }, { status: "running" });
 }
@@ -107,18 +109,20 @@ test("orchestration node: opened once, persisted, and refused when its kind chan
   const step = runningStep();
   const run = makeRun(step);
 
-  const state = openOrchestration(run, step, "forEachPipeline");
+  const state = openOrchestration(run, step, "forEachPipeline", ROOT_LINEAGE);
   expect(state).toEqual({ kind: "forEachPipeline", children: [] });
-  expect(openOrchestration(run, step, "forEachPipeline")).toBe(state);
+  expect(openOrchestration(run, step, "forEachPipeline", ROOT_LINEAGE)).toBe(state);
   expect(savedStep(run)?.orchestration).toEqual({ kind: "forEachPipeline", children: [] });
 
-  expect(() => openOrchestration(run, step, "runPipeline")).toThrow(/orchestration type changed during resume/);
+  expect(() => openOrchestration(run, step, "runPipeline", ROOT_LINEAGE)).toThrow(
+    /orchestration type changed during resume/,
+  );
 });
 
 test("orchestration node: the items are frozen as a copy and persisted", () => {
   const step = runningStep();
   const run = makeRun(step);
-  const state = openOrchestration(run, step, "forEachPipeline");
+  const state = openOrchestration(run, step, "forEachPipeline", ROOT_LINEAGE);
   const items = ["T-1", "T-2"];
 
   const frozen = freezeOrchestrationItems(run, state, items);
@@ -127,4 +131,18 @@ test("orchestration node: the items are frozen as a copy and persisted", () => {
   expect(frozen).toEqual(["T-1", "T-2"]);
   expect(state.items).toBe(frozen);
   expect(savedStep(run)?.orchestration?.items).toEqual(["T-1", "T-2"]);
+});
+
+test("orchestration node: the snapshot that opens it carries the run's lineage, recorded once", () => {
+  const step = runningStep();
+  const run = makeRun(step);
+
+  openOrchestration(run, step, "runPipeline", ROOT_LINEAGE);
+  expect(readRunSnapshot(join(run.run_dir, "state.json"))?.pipelineLineage).toEqual(ROOT_LINEAGE);
+
+  const booted = [...ROOT_LINEAGE, { pipelinePath: "/pipelines/child.ts", ticket: "T-1-01" }];
+  const child = makeRun(runningStep());
+  child.pipelineLineage = booted;
+  openOrchestration(child, child.steps[0]!, "runPipeline", ROOT_LINEAGE);
+  expect(readRunSnapshot(join(child.run_dir, "state.json"))?.pipelineLineage).toEqual(booted);
 });
