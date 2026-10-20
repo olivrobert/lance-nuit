@@ -38,8 +38,9 @@ export interface LoadOrCreateRunOptions extends RunScope {
   startAt?: string;
   context?: PipelineContext;
   /** Whether this invocation runs inside a worktree: the entry point passes its
-   *  boot's answer, a composed child its parent's. */
-  worktree?: boolean;
+   *  boot's answer, a composed child its parent's. Required, so that a caller
+   *  cannot record a run as outside a worktree by forgetting it. */
+  worktree: boolean;
   stateStore?: RunStateStore;
   eventStore?: RunEventStore;
   logStore?: RunLogStore;
@@ -136,7 +137,7 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
     // Where this invocation actually reads artifacts and writes decisions. The
     // worktree boot step has already chdir'd, so the context cwd is the effective
     // one; a reader outside the runner cannot infer it from the run directory.
-    location: { worktree: worktree ?? false, cwd: buildContext.cwd },
+    location: { worktree, cwd: buildContext.cwd },
     scope,
     stateStore,
     eventStore,

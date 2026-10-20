@@ -151,7 +151,7 @@ test("attempt projection: validates the integration contract", async () => {
   // Loading a definition builds the DSL against the run's registry: the caller
   // supplies the context, nothing falls back to the built-in composition.
   const context = buildPipelineContext({ ...commandRegistries(), cwd: dir });
-  const run = writable((await loadOrCreateRun({ pipelinePath, runDir, fresh: true, context })).run);
+  const run = writable((await loadOrCreateRun({ pipelinePath, runDir, fresh: true, context, worktree: false })).run);
   const step = run.steps[0]!;
 
   // Two attempts recorded the way the runner records them: allocation, then the
@@ -182,7 +182,9 @@ test("attempt projection: validates the integration contract", async () => {
   expect(snapshot.steps[0]?.attempts).toBeUndefined();
   expect(projectStepAttempts(readRunEvents(runDir)).get(step.id)).toHaveLength(2);
 
-  const resumed = writable((await loadOrCreateRun({ pipelinePath, runDir, fresh: false, context })).run);
+  const resumed = writable(
+    (await loadOrCreateRun({ pipelinePath, runDir, fresh: false, context, worktree: false })).run,
+  );
   const resumedStep = resumed.steps[0]!;
   expect(resumedStep.attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
   expect(resumedStep.attempts.map((attempt) => attempt.kind)).toEqual(["step", "fix"]);

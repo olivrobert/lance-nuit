@@ -103,6 +103,7 @@ async function open(
     allowUnmetered: extra.allowUnmetered,
     maxCostUsd: extra.maxCostUsd,
     budgetApproved: extra.budgetApproved,
+    worktree: false,
   });
   return { run, resumed, writes };
 }
@@ -243,6 +244,7 @@ test("a composed child resumed on its own with --run keeps its lineage and refus
     rootRunId: "root-1",
     budgetScopeId: "root-1",
     budgetApproved: true,
+    worktree: false,
   });
   expect(child.budget_approved).toBe(true);
   updateStep(child, child.steps[0]!, "done");
@@ -261,6 +263,7 @@ test("a composed child resumed on its own with --run keeps its lineage and refus
     eventStore: new RecordingEventStore(explicit.dir, writes),
     allowUnmetered: true,
     strictSnapshot: explicit.strictSnapshot,
+    worktree: false,
   });
   explicit.commit();
 
@@ -336,7 +339,7 @@ test("the opening records the location its caller gives, never the worktree flag
   const previous = process.env.RUNNER_IN_WORKTREE;
   process.env.RUNNER_IN_WORKTREE = "1";
   try {
-    await loadOrCreateRun({ pipelinePath: f.path, ticket: "T-loc", runDir: f.dir, context: f.ctx });
+    await loadOrCreateRun({ pipelinePath: f.path, ticket: "T-loc", runDir: f.dir, context: f.ctx, worktree: false });
     expect(snapshotAt(f.dir).worktree).toBe(false);
     await loadOrCreateRun({ pipelinePath: f.path, ticket: "T-loc", runDir: f.dir, context: f.ctx, worktree: true });
     expect(snapshotAt(f.dir).worktree).toBe(true);

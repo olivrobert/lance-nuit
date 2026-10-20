@@ -82,7 +82,14 @@ test("run snapshot fixtures: a real resume through loadOrCreateRun reads a snaps
   const dir = resolveRunDir("quality", "QUALITY", undefined, true, ctx);
   writeSnapshot(dir, raw);
 
-  const { run } = await loadOrCreateRun({ pipelinePath, ticket: "QUALITY", runDir: dir, fresh: false, context: ctx });
+  const { run } = await loadOrCreateRun({
+    pipelinePath,
+    ticket: "QUALITY",
+    runDir: dir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   // Resumed, not recreated: identity and step state come from the fixture.
   expect(run.runId).toBe(raw.runId as string);
   expect(run.status).toBe("PASS");

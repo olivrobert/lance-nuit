@@ -645,7 +645,14 @@ test("persisted format: a snapshot written before cost_unaccounted existed still
     }),
   );
 
-  const { run } = await loadOrCreateRun({ pipelinePath, ticket: "PROJ-9", runDir, fresh: false, context: ctx });
+  const { run } = await loadOrCreateRun({
+    pipelinePath,
+    ticket: "PROJ-9",
+    runDir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   expect(run.cost_unaccounted).toBeUndefined();
   expect(run.allow_unmetered).toBeUndefined();
 
@@ -761,7 +768,14 @@ test("persisted format: a minimal step flagged cost_unknown with nothing measure
     }),
   );
 
-  const { run } = await loadOrCreateRun({ pipelinePath, ticket: "PROJ-10", runDir, fresh: false, context: ctx });
+  const { run } = await loadOrCreateRun({
+    pipelinePath,
+    ticket: "PROJ-10",
+    runDir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   const spawned: string[] = [];
   const deps: StepLoopDeps = {
     executeStep: async (step) => {

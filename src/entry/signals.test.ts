@@ -159,7 +159,14 @@ test("a real SIGTERM during a step persists the abort and leaves a resumable run
   // The relaunch: the same directory, loaded by the same boot path, executed by
   // the real loop. The completed step must not be spawned again.
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-9" });
-  const { run: resumed } = await loadOrCreateRun({ pipelinePath, ticket: "T-9", runDir, fresh: false, context: ctx });
+  const { run: resumed } = await loadOrCreateRun({
+    pipelinePath,
+    ticket: "T-9",
+    runDir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   expect(resumed.steps.map((step) => step.status)).toEqual(["done", "aborted", "pending"]);
   const spawned: string[] = [];
   const outcome = await executeRunSteps(

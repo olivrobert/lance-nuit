@@ -137,7 +137,9 @@ test("run-state-store: validates the integration contract", async () => {
     runnerDir: root,
   });
 
-  const run = writable((await loadOrCreateRun({ pipelinePath, runDir, fresh: true, context, stateStore: store })).run);
+  const run = writable(
+    (await loadOrCreateRun({ pipelinePath, runDir, fresh: true, context, stateStore: store, worktree: false })).run,
+  );
 
   expect(run.run_dir).toBe(runDir);
   expect(run.stateStore).toBe(store);
@@ -163,7 +165,14 @@ test("run-state-store: validates the integration contract", async () => {
   expect(store.loadLatest("fixture")).toBe(store.calls.saveAt[0]!.snapshot);
   expect(existsSync(join(runDir, "state.json"))).toBe(false);
 
-  const { run: resumed } = await loadOrCreateRun({ pipelinePath, runDir, fresh: false, context, stateStore: store });
+  const { run: resumed } = await loadOrCreateRun({
+    pipelinePath,
+    runDir,
+    fresh: false,
+    context,
+    stateStore: store,
+    worktree: false,
+  });
 
   expect(resumed.runId).toBe(run.runId);
   expect(store.calls.load).toEqual([basename(runDir), basename(runDir)]);
@@ -189,6 +198,7 @@ test("loadOrCreateRun resumes via loadLatest for has store without extension loc
     fresh: false,
     context,
     stateStore: store,
+    worktree: false,
   });
   const { run: resumed } = await loadOrCreateRun({
     pipelinePath,
@@ -196,6 +206,7 @@ test("loadOrCreateRun resumes via loadLatest for has store without extension loc
     fresh: false,
     context,
     stateStore: store,
+    worktree: false,
   });
 
   expect(resumed.runId).toBe(first.runId);

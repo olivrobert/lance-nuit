@@ -45,7 +45,13 @@ export default ({ pipeline, actionStep, reject }) => pipeline("gated")
   );
   const ctx = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
 
-  const { run: first } = await loadOrCreateRun({ pipelinePath, ticket: "P-01", fresh: false, context: ctx });
+  const { run: first } = await loadOrCreateRun({
+    pipelinePath,
+    ticket: "P-01",
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   finalizeRun(
     first,
     await executeRunSteps(first, "P-01", undefined, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), ctx),
@@ -55,7 +61,13 @@ export default ({ pipeline, actionStep, reject }) => pipeline("gated")
 
   // The human approves and relaunches.
   rmSync(blocker);
-  const { run: second } = await loadOrCreateRun({ pipelinePath, ticket: "P-01", fresh: false, context: ctx });
+  const { run: second } = await loadOrCreateRun({
+    pipelinePath,
+    ticket: "P-01",
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   finalizeRun(
     second,
     await executeRunSteps(second, "P-01", undefined, { resuming: true }, stepLoopDeps(NULL_RUN_OUTPUT), ctx),
@@ -127,7 +139,14 @@ export default ({ pipeline, llmStep, actionStep }) => pipeline("costly")
     config: { ...base.config, profiles: { ...base.config.profiles, coder: { backends: { [BACKEND]: {} } } } },
   });
 
-  const { run: first } = await loadOrCreateRun({ pipelinePath, ticket: "P-01", runDir, fresh: true, context: ctx });
+  const { run: first } = await loadOrCreateRun({
+    pipelinePath,
+    ticket: "P-01",
+    runDir,
+    fresh: true,
+    context: ctx,
+    worktree: false,
+  });
   const firstOutcome = await executeRunSteps(
     first,
     "P-01",
@@ -141,7 +160,14 @@ export default ({ pipeline, llmStep, actionStep }) => pipeline("costly")
   expect(first.steps.map((step) => step.status)).toEqual(["done", "pending"]);
 
   // Resuming without approving hits the same ceiling and changes nothing.
-  const { run: retry } = await loadOrCreateRun({ pipelinePath, ticket: "P-01", runDir, fresh: false, context: ctx });
+  const { run: retry } = await loadOrCreateRun({
+    pipelinePath,
+    ticket: "P-01",
+    runDir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   const retryOutcome = await executeRunSteps(
     retry,
     "P-01",
@@ -161,6 +187,7 @@ export default ({ pipeline, llmStep, actionStep }) => pipeline("costly")
     fresh: false,
     context: ctx,
     maxCostUsd: 20,
+    worktree: false,
   });
   const approvedOutcome = await executeRunSteps(
     approved,
@@ -227,7 +254,13 @@ export default ({ pipeline, actionStep, textArtifact }) => {
   );
   const ctx = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
   const resume = async (resuming: boolean) => {
-    const { run } = await loadOrCreateRun({ pipelinePath, ticket: "P-01", fresh: false, context: ctx });
+    const { run } = await loadOrCreateRun({
+      pipelinePath,
+      ticket: "P-01",
+      fresh: false,
+      context: ctx,
+      worktree: false,
+    });
     finalizeRun(run, await executeRunSteps(run, "P-01", undefined, { resuming }, stepLoopDeps(NULL_RUN_OUTPUT), ctx));
     return run;
   };
