@@ -32,7 +32,7 @@ import { resolveTemplateAsync } from "../model/definition.js";
 import type { StepDefinition } from "../model/run.js";
 import { isSource, type Source, type StepInput } from "../model/source.js";
 import { sha256Bytes, sha256Text } from "./hash.js";
-import { PROVENANCE_DIRNAME } from "./layout.js";
+import { artifactKey, PROVENANCE_DIRNAME } from "./layout.js";
 
 /** Reserved artifact-name prefix owned by the runner. */
 export const PROVENANCE_PREFIX = `${PROVENANCE_DIRNAME}/`;
@@ -141,12 +141,6 @@ export interface StepFreshnessReport {
   unavailable: UnavailableSource[];
 }
 
-/** Record key of an artifact, aligned with the `artifacts/<name>` form used by
- *  human decisions so both files can be read side by side. */
-function recordKey(name: string): string {
-  return `artifacts/${name}`;
-}
-
 const SOURCE_KEY_PREFIX = "source:";
 
 /** Record key of a source. Its prefix differs from `artifacts/`, so a source
@@ -156,7 +150,7 @@ export function sourceKey(name: string): string {
 }
 
 function inputKey(input: StepInput): string {
-  return isSource(input) ? sourceKey(input.name) : recordKey(input.name);
+  return isSource(input) ? sourceKey(input.name) : artifactKey(input.name);
 }
 
 function provenanceName(artifactName: string): string {
@@ -233,7 +227,8 @@ function parseProvenance(value: unknown, artifactName: string): ArtifactProvenan
   if (!value || typeof value !== "object") throw new Error(`provenance of ${artifactName}: not an object`);
   const record = value as Partial<ArtifactProvenance>;
   if (record.schemaVersion !== 1) throw new Error(`provenance of ${artifactName}: unsupported schemaVersion`);
-  if (record.artifact !== recordKey(artifactName)) throw new Error(`provenance of ${artifactName}: artifact mismatch`);
+  if (record.artifact !== artifactKey(artifactName))
+    throw new Error(`provenance of ${artifactName}: artifact mismatch`);
   if (typeof record.producedBy !== "string" || typeof record.producedAt !== "string") {
     throw new Error(`provenance of ${artifactName}: missing producer`);
   }
@@ -295,7 +290,7 @@ function revisionOf(stored: unknown): Partial<NonNullable<InFlightAttempt["revis
 /** The record kept inside a revision mark, restored as a full record. */
 function previousRecord(previous: unknown, artifactName: string): ArtifactProvenance | undefined {
   if (typeof previous !== "object" || previous === null) return undefined;
-  return tryParse({ ...previous, schemaVersion: 1, artifact: recordKey(artifactName) }, artifactName);
+  return tryParse({ ...previous, schemaVersion: 1, artifact: artifactKey(artifactName) }, artifactName);
 }
 
 /** A record's standing apart from any mark: a doubt it carries, or what it vouches for. */
@@ -364,7 +359,7 @@ export async function writeProvenance(
 ): Promise<ArtifactProvenance> {
   const record: ArtifactProvenance = {
     schemaVersion: 1,
-    artifact: recordKey(artifact.name),
+    artifact: artifactKey(artifact.name),
     producedBy,
     producedAt: new Date().toISOString(),
     inputs: { ...fingerprints },
@@ -391,7 +386,7 @@ export async function mergeProvenance(
   const doubt = start.revisedBy && { revisedBy: [...new Set([...start.revisedBy, stepId])] };
   const record: ArtifactProvenance = {
     schemaVersion: 1,
-    artifact: recordKey(artifact.name),
+    artifact: artifactKey(artifact.name),
     // Bytes nobody vouched for are adopted by the step that revised them.
     producedBy: doubt ? stepId : (start.base?.producedBy ?? stepId),
     producedAt: new Date().toISOString(),
@@ -481,7 +476,7 @@ export async function markInFlight(
 function fromScratchMark(output: Artifact<unknown>, attempt: Omit<InFlightAttempt, "revision">): ArtifactProvenance {
   return {
     schemaVersion: 1,
-    artifact: recordKey(output.name),
+    artifact: artifactKey(output.name),
     producedBy: attempt.stepId,
     producedAt: attempt.startedAt,
     inputs: {},
@@ -503,7 +498,7 @@ function revisionMark(
   const kept = Object.entries(previous?.inputs ?? {}).filter(([key]) => !ownInputs.has(key));
   return {
     schemaVersion: 1,
-    artifact: recordKey(output.name),
+    artifact: artifactKey(output.name),
     producedBy: previous?.producedBy ?? attempt.stepId,
     producedAt: previous?.producedAt ?? attempt.startedAt,
     inputs: Object.fromEntries(kept),

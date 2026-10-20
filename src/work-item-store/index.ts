@@ -31,7 +31,7 @@ export {
 } from "./provenance.js";
 
 // Layout: where a work item keeps artifacts, decisions and provenance.
-export { isValidSubjectToken, workItemLayout } from "./layout.js";
+export { artifactKey, isValidSubjectToken, workItemLayout } from "./layout.js";
 
 // Decisions and approvals.
 export {

@@ -40,7 +40,9 @@ the original identifier. `ctx.paths.artifactsDir`, `reportsDir`, and
 `decisionsDir` are the canonical subdirectories; use artifact descriptors or
 `ctx.artifacts` instead of assembling artifact paths manually. Inside the
 runner, `workItemLayout` (`src/work-item-store/layout.ts`) is the one place these
-names are spelled: the context and the dashboard both derive them from it.
+names are spelled: the context and the dashboard both derive them from it. The
+relative reference a decision, a provenance record or a gate stop persists for
+an artifact (`artifacts/<name>`) is spelled once too, by `artifactKey` beside it.
 
 The resolver also supports explicit nested identifiers such as
 `exports/PROJ-1478`. Numeric sub-work-item identifiers can resolve

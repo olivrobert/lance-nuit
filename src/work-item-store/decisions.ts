@@ -16,7 +16,7 @@ import type { Artifact } from "../model/artifact.js";
 import { createArtifactRef } from "../model/artifact-ports.js";
 import type { PipelineContext } from "../model/context.js";
 import { sha256Text } from "./hash.js";
-import { type DecisionSubject, isValidSubjectToken, workItemLayout } from "./layout.js";
+import { artifactKey, type DecisionSubject, isValidSubjectToken, workItemLayout } from "./layout.js";
 
 export type { DecisionSubject };
 export type DecisionValue = "approved" | "rejected" | "applied";
@@ -129,14 +129,14 @@ export async function recordApproval(
   // back into a pending one.
   const path = decisionPath(ctx, subject);
   const existing = readDecision(ctx, subject);
-  if (existing?.artifact === `artifacts/${artifact.name}` && approvalFreshness(existing, validated.body) === "fresh") {
+  if (existing?.artifact === artifactKey(artifact.name) && approvalFreshness(existing, validated.body) === "fresh") {
     return { decision: existing, written: false, path };
   }
   const decision: ApprovalDecision = {
     schemaVersion: 1,
     decision: "approved",
     subject,
-    artifact: `artifacts/${artifact.name}`,
+    artifact: artifactKey(artifact.name),
     artifactSha256: sha256Text(validated.body),
     decidedAt: new Date().toISOString(),
     decidedBy: decisionActor(),
@@ -168,7 +168,7 @@ export async function recordRejection(
   const path = decisionPath(ctx, subject);
   const existing = readDecision(ctx, subject);
   const previous =
-    existing?.decision === "rejected" && existing.artifact === `artifacts/${artifact.name}` ? existing : undefined;
+    existing?.decision === "rejected" && existing.artifact === artifactKey(artifact.name) ? existing : undefined;
   const sameBytes = previous?.artifactSha256 === sha;
   if (sameBytes && previous.reason === trimmed) return { decision: previous, written: false, path };
   const round = previous ? (previous.round ?? 1) + (sameBytes ? 0 : 1) : 1;
@@ -182,7 +182,7 @@ export async function recordRejection(
     schemaVersion: 1,
     decision: "rejected",
     subject,
-    artifact: `artifacts/${artifact.name}`,
+    artifact: artifactKey(artifact.name),
     artifactSha256: sha,
     decidedAt: new Date().toISOString(),
     decidedBy: decisionActor(),
@@ -359,7 +359,7 @@ export async function decisionMatchesArtifact(
   artifact: Artifact<unknown>,
 ): Promise<boolean> {
   const status = await gateDecisionStatus(workItemDirOf(ctx, subject), subject, artifactReaderOf(ctx));
-  return status.state === "fresh" && status.decision.artifact === `artifacts/${artifact.name}`;
+  return status.state === "fresh" && status.decision.artifact === artifactKey(artifact.name);
 }
 
 export async function markDecisionApplied(

@@ -17,6 +17,13 @@ const SUBJECT_CHARSET = /^[\w-]+$/;
  *  runner, which writes it through the artifact store like any artifact. */
 export const PROVENANCE_DIRNAME = ".provenance";
 
+/** The reference a decision, a provenance record or a gate stop persists for an
+ *  artifact: relative to the work item, so the same record reads from any clone
+ *  or worktree. A persisted format, not a path to open. */
+export function artifactKey(name: string): string {
+  return `artifacts/${name}`;
+}
+
 /** An approval subject must never escape `decisions/`. */
 export function isValidSubjectToken(value: string): value is DecisionSubject {
   return SUBJECT_CHARSET.test(value);
