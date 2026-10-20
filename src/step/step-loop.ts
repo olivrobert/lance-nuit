@@ -16,19 +16,18 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { type AbortScope, createAbortScope } from "../runtime/abort.js";
 import { emitRunnerEvent } from "../runtime/events.js";
 import {
-  controlForRun,
-  costDecision,
   hasUnfinishedWork,
   inheritChildBudgetStop,
   isSettledStatus,
   lastPassInterrupted,
   latestAttemptLog,
+  ledgerStops,
   matchesStepSelector,
+  openRunLedger,
   owesWork,
   recordAbsorbedInputs,
   type RunBudget,
   type RunOutcome,
-  runProvesUnpricedSpend,
   saveRun,
   stopRun,
   updateStep,
@@ -130,7 +129,6 @@ async function runInitialAttempt(input: {
     executeStep: input.executeStep,
     spawn: { session: step.session },
   });
-  saveRun(run);
   return { result, stepLog: latestAttemptLog(run, step) ?? join(stepLogDir, "attempt-001", "output.log") };
 }
 
@@ -231,36 +229,8 @@ export async function executeRunSteps(
       output: deps.output,
     };
 
-    // One run budget is mutated by every phase. All persisted cost counts, including
-    // failed/running previous attempts, or resume would undercount the budget.
-    const restoredTotals = controlForRun(run);
-    // RESTORATION, not a transition: the latches below are read back from the
-    // snapshot. Their transitions during execution belong to
-    // `run-record/cost-stop-events.ts` (stops) and `run-record/cost-accounting.ts` (proof
-    // of unpriceable spend).
-    const budget: RunBudget = {
-      cumulative: restoredTotals.total_cost_usd ?? 0,
-      // A guard stop persisted by a previous generation still holds: the ledger
-      // alone can read the ceiling as affordable when the guard fired on an estimate.
-      ...(run.budget_exceeded ? { exceeded: true } : {}),
-      // Uncertainty is restored from the run latch, or re-derived from the
-      // reconciled attempts that PROVE it (`runProvesUnpricedSpend`) — failed,
-      // interrupted and composed ones included. It is a projection, not an
-      // independent counter, so a resume cannot launder an unpriced attempt by
-      // starting a fresh ledger over the same spend, and reading the attempts is
-      // what makes an OLD snapshot — written before the latch existed — stop
-      // exactly like a new one. A bare `total_control.cost_unknown` is NOT enough:
-      // the aggregate cannot say whether an attempt consumed anything, and an
-      // attempt that died before reporting a figure must not stop the run.
-      ...(run.cost_unaccounted === true || runProvesUnpricedSpend(run) ? { costUnknown: true } : {}),
-      // Strict unless a human said otherwise. The authorization is persisted on the
-      // run (`--allow-unmetered`, or propagation from the budget scope's owner), so
-      // a later resume needs no flag and no environment switch.
-      ...(run.allow_unmetered ? { allowUnmetered: true } : {}),
-    };
-    // Upgrade an old snapshot in place: the uncertainty its attempts prove becomes
-    // the durable latch, so nothing has to re-derive it from the attempt history.
-    if (budget.costUnknown === true) run.cost_unaccounted = true;
+    // One ledger, shared by every phase of this execution.
+    const budget = openRunLedger(run);
     let failed = false;
     let stopped = false;
     let budgetExceeded = false;
@@ -439,26 +409,12 @@ export async function executeRunSteps(
       }
     }
 
-    // A live guard kill is a budget stop even though the step itself failed: the
-    // ledger carries the flag so the report names the ceiling instead of blaming
-    // a technical error.
-    // The retry and fix loops break on the same decision without reporting it
-    // upward, so the final read of the ledger is what names an accounting stop
-    // reached inside them. `exceeded` keeps its precedence here as in
-    // `costDecision`: a reached ceiling is the harder fact of the two.
-    //
-    // Only unfinished work can be stopped: a run that completed every step under
-    // an unenforceable ceiling has nothing left to withhold, and turning its
-    // verdict into a stop after the fact would fail a pipeline that did its job.
-    // The unpriced attempt is still reported — the warning fired at closure and
-    // the totals stay marked as a lower bound.
-    //
-    // "Unfinished work" is not only a pending step: an orchestration node whose
-    // fan-out stopped mid-list is done with none of its items, and its own step
-    // may already read `done` from a previous generation.
-    //
-    // The same holds for a guard stop restored from the snapshot: once a resume
-    // skipped the step the guard killed, the latch has nothing left to withhold.
+    // A live guard kill is a budget stop even though the step itself failed, and
+    // the retry and fix loops break on the gate's decision without reporting it
+    // upward: the ledger names the stops reached inside them, for unfinished work
+    // only (`ledgerStops`). "Unfinished work" is not only a pending step: an
+    // orchestration node whose fan-out stopped mid-list is done with none of its
+    // items, and its own step may already read `done` from a previous generation.
     const unfinished = hasUnfinishedWork(run);
     // A bound with nothing owed after it changes nothing: the run completes.
     const untilStop = boundReached && bound !== undefined && unfinished;
@@ -470,16 +426,16 @@ export async function executeRunSteps(
     const ranToEnd = !failed && !stopped && !budgetExceeded && !costUnaccounted && !untilStop && !isAborted();
     const selectionStop = ranToEnd ? leftUnfinished : undefined;
     if (selectionStop) stopOnUnfinishedSelection(run, selectionStop, loopDeps.output);
-    const finalDecision = unfinished ? costDecision(run.max_cost_usd, budget) : "continue";
+    const ledger = ledgerStops(run, budget, unfinished);
     return {
       failed,
       stopped: stopped || untilStop || selectionStop !== undefined,
       untilStop,
-      budgetExceeded: budgetExceeded || (budget.exceeded === true && unfinished),
-      costUnaccounted: costUnaccounted || finalDecision === "unaccounted",
+      budgetExceeded: budgetExceeded || ledger.budgetExceeded,
+      costUnaccounted: costUnaccounted || ledger.costUnaccounted,
       // The retry and fix gates record their refusal on the shared ledger; the
       // admission gate and the orchestration gates report theirs directly.
-      costUnaccountedStop: costUnaccountedStop || (budget.unaccountedStop === true && finalDecision === "unaccounted"),
+      costUnaccountedStop: costUnaccountedStop || ledger.costUnaccountedStop,
       cumulativeCost: budget.cumulative,
       setAside,
     };

@@ -7,13 +7,12 @@
 // Middleware lives here rather than in attempt-chain.ts because each middleware is
 // tied to its bookkeeping; the chain itself remains runner-agnostic.
 //
-// The attempt itself is closed once, by `closeAttempt` (run-record/attempt-closure.ts):
-// status, stats, merge into the step total and the `step.attempt.finished` event.
-// `finishAttempt` below is the one caller of that closure for a tracked attempt,
-// on the returned-record path and on the rejection path alike, and it charges the
-// in-loop ledger from the figures the closure accepted. Middleware observes the
-// attempt (banner, session, remaining budget before spawn); none of it is needed
-// for the accounting to be right.
+// The run record opens and settles the attempt (`openAttempt`, `settleAttempt`):
+// numbering, journal, closure, verdict, ledger, cost stops and snapshots. This
+// file runs the spawn between the two, settles on the returned-record path and on
+// the rejection path alike, and words the cost warning the settlement reports.
+// Middleware observes the attempt (banner, session, remaining budget before
+// spawn); none of it is needed for the accounting to be right.
 
 import { appendFileSync } from "node:fs";
 import { basename } from "node:path";
@@ -23,32 +22,24 @@ import type {
   AgentSession,
   ArtifactScope,
   BackendSpec,
-  StepControl,
-  StepUsage,
 } from "../contracts/backends.js";
 import type { executeStep, runWithAgent, StepResult } from "../exec/runners.js";
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineContext } from "../model/context.js";
 import type { PipelineStep } from "../model/definition.js";
-import type { PersistedAttempt } from "../model/persisted.js";
 import type { Run, RunStep } from "../model/run.js";
 import { clearLiveAttemptCost } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
 import {
+  type AttemptResult,
   appendRunEvent,
-  chargeAttemptToLedger,
-  closeAttempt,
-  isUnpricedSpend,
-  logicalAttemptLogPath,
-  nextAttemptLogPath,
-  recordCostStop,
-  recordStepVerdict,
-  relativeRunPath,
+  type CostWarning,
+  type OpenedAttempt,
+  openAttempt,
   remainingBudget,
   type RunBudget,
-  saveRun,
-  type SettledSpend,
-  writeAttemptCommand,
+  settleAttempt,
+  strictCostAccountingFor,
 } from "../run-record/index.js";
 import {
   fingerprintInputs,
@@ -69,21 +60,18 @@ import {
   compose,
 } from "./attempt-chain.js";
 
-/** Warn ONCE per attempt when spend was left at an unknown price. Silence here
- * would read as a free attempt: the ledger stops advancing, so `max_cost_usd` can
- * never be reached and the run spends without a ceiling.
- *
- * Guarded on `cost_unknown`: the warning belongs to the uncertainty itself, not
- * to the strict stop, so it also fires for an attempt that died before reporting
- * any figure — whose total is a lower bound even though the run keeps going. A
- * control with a usable price is silent. */
-function warnUnaccountedCost(run: Run, step: RunStep, control: StepControl, usage: StepUsage | undefined): void {
-  if (control.cost_unknown !== true) return;
-  const model = control.model ?? "unknown model";
+/** Say ONCE per attempt that spend was left at an unknown price, as the
+ * settlement reported it. Silence here would read as a free attempt: the ledger
+ * stops advancing, so `max_cost_usd` can never be reached and the run spends
+ * without a ceiling. The settlement reports the uncertainty itself, not the
+ * strict stop, so this also fires for an attempt that died before reporting any
+ * figure — whose total is a lower bound even though the run keeps going. */
+function warnUnaccountedCost(run: Run, warning: CostWarning): void {
+  const model = warning.model ?? "unknown model";
   // Name the uncertainty the figures actually show. "no pricing entry" over an
   // attempt that reported no usage at all (a 400 before the first token, a
   // transport break) sent an operator to fix a rate table that was complete.
-  const cause = isUnpricedSpend(control, usage) ? "no pricing entry" : "no usage reported by the attempt";
+  const cause = warning.cause === "unpriced" ? "no pricing entry" : "no usage reported by the attempt";
   // `log.warn` and not `runner.message`: this warning is raised from the attempt
   // lifecycle (`runTrackedAttempt`), which carries no `RunOutput`. Threading the
   // port through every attempt entry point is the way to move it onto the bus;
@@ -93,7 +81,6 @@ function warnUnaccountedCost(run: Run, step: RunStep, control: StepControl, usag
     `  Cost not computable (${model}: ${cause}) — spend is not counted toward the budget` +
       (run.max_cost_usd != null ? `; the $${run.max_cost_usd} ceiling is no longer guaranteed` : ""),
   );
-  appendRunEvent(run, "step.cost.unaccounted", { stepId: step.id, model: control.model ?? null });
 }
 
 /**
@@ -143,40 +130,6 @@ export const sessionMiddleware: AttemptMiddleware = async (ctx, next) => {
   return record;
 };
 
-/**
- * The accepted closure reaches the in-loop budget ledger.
- *
- * Called by `finishAttempt` with the figures `closeAttempt` actually stored, so
- * the ledger, the attempt and the step total never disagree on what one attempt
- * cost: there is one normalization, and it happened at closure. The charge itself
- * is arithmetic and owned by cost accounting; the journaling below belongs to the
- * stop decisions, not to the charge.
- */
-function chargeLedger(run: Run, step: RunStep, budget: RunBudget, settled: SettledSpend, result: AttemptRecord): void {
-  const { control, usage } = settled;
-  // The ledger, the materialized run totals it invalidates, and the accounting
-  // latch derived from the figures are one charge, owned by cost accounting.
-  // Two roads to that latch: the attempt closed on figures that PROVE unpriceable
-  // consumption, or a live guard proved the usage unpriceable and killed the
-  // process before it could report figures a mapper could normalize — which is
-  // why the second proof is read from the record rather than from the figures.
-  chargeAttemptToLedger(run, budget, control, usage, {
-    guardProvedUnpriced: result.costUnaccounted === true,
-  });
-  // A guard kill is a budget verdict, not a technical break, and a live
-  // accounting kill is a STOP, not just the latch above: the guard withheld the
-  // rest of this attempt the way a gate withholds the next one. Both are recorded
-  // by the stop owner (ledger latches, `run.budget_exceeded`, journal), so the
-  // retry loops stop and the report headlines the cost stop instead of the
-  // process the guard had to kill to reach it.
-  const origin = { kind: "live-guard", stepId: step.id } as const;
-  if (result.budgetExceeded) recordCostStop(run, budget, "exceeded", origin);
-  if (result.costUnaccounted === true) recordCostStop(run, budget, "unaccounted", origin);
-  // The uncertainty is worth saying out loud in both cases: the report will print
-  // the total as a lower bound either way.
-  warnUnaccountedCost(run, step, result.costUnaccounted === true ? { ...control, cost_unknown: true } : control, usage);
-}
-
 /** Pass the remaining cost budget to spawn. As the innermost middleware, it reads
  * the changing cumulative value at the last moment. Removing it disables
  * max_cost_usd enforcement. */
@@ -185,21 +138,9 @@ export const budgetGateMiddleware: AttemptMiddleware = async (ctx, next) => {
   return next(ctx);
 };
 
-/**
- * Whether a live guard must stop this attempt on provably unpriceable usage.
- *
- * Both conditions of the strict policy, read at spawn time: a ceiling exists,
- * and no human authorized spend nobody can price. Without the ceiling there is
- * nothing to enforce; with the authorization the run has already accepted the
- * uncertainty and the attempt runs to completion.
- */
-export function strictCostAccountingFor(run: Run, budget: RunBudget): boolean {
-  return run.max_cost_usd != null && budget.allowUnmetered !== true;
-}
-
 /** Order from outermost to innermost. Removing an entry disables that middleware;
  * budgetGateMiddleware must remain last. The ledger charge is not a middleware:
- * it belongs to the attempt lifecycle (`finishAttempt`) and cannot be removed. */
+ * it belongs to the attempt's settlement (`settleAttempt`) and cannot be removed. */
 export const DEFAULT_ATTEMPT_MIDDLEWARES: readonly AttemptMiddleware[] = [
   bannerMiddleware,
   sessionMiddleware,
@@ -243,55 +184,34 @@ export interface RunTrackedAttemptOptions<R extends AttemptRecord> extends Attem
 
 /**
  * The one exit of an attempt started by `runTrackedAttempt`, whether the chain
- * returned a record or rejected: closure, then — for an accepted closure only —
- * the step verdict fields and the ledger charge, then the snapshot.
+ * returned a record or rejected: the run record settles it, and the warning it
+ * reports is said here, where the attempt runs.
  *
  * An attempt the signal handler already closed and charged from live telemetry
- * returns no figures here, so a backend resolving while its process drains cannot
+ * is not settled again, so a backend resolving while its process drains cannot
  * charge the same work twice, cannot rewrite `fail_kind`/`fail_cause` from a
  * result the resumed step will not give — and the run keeps the step session as
  * it was, since the abort promises a fresh attempt on resume.
  */
-function finishAttempt(
-  run: Run,
-  step: RunStep,
-  kind: "step" | "fix",
-  attempt: PersistedAttempt,
-  path: string,
-  budget: RunBudget,
-  result: AttemptRecord,
-): void {
-  const logPath = run.logStore
-    ? logicalAttemptLogPath(step.id, attempt.attempt)
-    : (relativeRunPath(run.run_dir, path) ?? attempt.log_path);
-  const settled = closeAttempt(run, step, attempt, {
-    status: result.ok ? "done" : "failed",
-    stats: result.stats,
-    session: result.session,
-    reason: result.failReason,
-    logPath,
-  });
-  // A refused closure means another closer already settled this attempt — the
-  // signal handler, or a crash reconciliation — and its late result no longer
-  // describes the step: neither the verdict nor the ledger read it. Nothing of
-  // the run changed here, so the snapshot the earlier closer wrote stands as is.
-  if (!settled) return;
-  // A fix pass repairs rather than judging; only kind === "step" carries the
-  // command verdict to return.
-  if (kind === "step") {
-    recordStepVerdict(run, step, { ok: result.ok, failKind: result.failKind, failCause: result.failCause });
-  }
-  chargeLedger(run, step, budget, settled, result);
-  saveRun(run);
+function finishAttempt(run: Run, step: RunStep, opened: OpenedAttempt, budget: RunBudget, result: AttemptResult): void {
+  const { costWarning } = settleAttempt(run, step, opened, result, budget);
+  if (costWarning) warnUnaccountedCost(run, costWarning);
+}
+
+/** The session an attempt runs in, as its start event names it: a step attempt
+ *  runs in the session it was given or resumes, a repair pass only in a session it
+ *  resumes — a fresh fix session is not the step's. */
+function attemptSession(kind: "step" | "fix", spawn: SpawnOptions | undefined): AgentSession | undefined {
+  return kind === "step" ? (spawn?.session ?? spawn?.resumeSession) : spawn?.resumeSession;
 }
 
 /**
  * Execute one attempt end to end.
  *
- * Every attempt follows the same lifecycle: allocation before spawn, start event
- * and snapshot, middleware chain, finalization, and end snapshot. The facades only
- * provide their invocation; the generic type preserves the exact result, including
- * step output, without exposing it to bookkeeping.
+ * Every attempt follows the same lifecycle: opening (number, log, start event
+ * and snapshot, before spawn), middleware chain, settlement. The facades only
+ * provide their invocation; the generic type preserves the exact result,
+ * including step output, without exposing it to bookkeeping.
  *
  * Spawn errors remain visible to callers, but close the attempt as failed before
  * rethrowing so a snapshot never leaves an interrupted attempt as `running`.
@@ -301,38 +221,16 @@ export async function runTrackedAttempt<R extends AttemptRecord>(options: RunTra
   // The complete attempt lifecycle owns the live-cost slot. A transport can exit
   // before output validation and durable bookkeeping have completed.
   clearLiveAttemptCost();
-  const stepLogPath = nextAttemptLogPath(run, step, kind);
-  // `nextAttemptLogPath` has just pushed the running attempt; it is the object
-  // every closer identifies the attempt by.
-  const attempt = step.attempts!.at(-1)!;
-  if (command) {
-    try {
-      writeAttemptCommand(stepLogPath, command);
-    } catch {
-      // A diagnostic copy of the prompt: losing it costs the dashboard a view,
-      // failing the attempt over it would cost the run.
-    }
-  }
-  appendRunEvent(run, "step.attempt.started", {
-    stepId: step.id,
-    attempt: attempt.attempt,
-    kind,
-    sessionId:
-      kind === "step" ? (spawn?.session?.id ?? spawn?.resumeSession?.id ?? null) : (spawn?.resumeSession?.id ?? null),
-    logPath: attempt.log_path ?? relativeRunPath(run.run_dir, stepLogPath),
-  });
-  // Snapshot the attempt before spawn: a kill may happen before the runner can
-  // persist its result.
-  saveRun(run);
+  const opened = openAttempt(run, step, { kind, command, session: attemptSession(kind, spawn) });
 
   const context: AttemptContext = {
     run,
     step,
-    attempt,
+    attempt: opened.attempt,
     kind,
     command,
     banner: options.banner,
-    stepLogPath,
+    stepLogPath: opened.logPath,
     budget: options.budget,
   };
 
@@ -344,7 +242,7 @@ export async function runTrackedAttempt<R extends AttemptRecord>(options: RunTra
     try {
       // The same exit as a returned record: an attempt that rejected still closed,
       // still reached the ledger, and still invalidated the materialized totals.
-      finishAttempt(run, step, kind, attempt, stepLogPath, options.budget, { ok: false, failReason });
+      finishAttempt(run, step, opened, options.budget, { ok: false, failReason });
     } catch {
       // Never mask the spawn error with a finalization persistence error; the
       // public API must continue to rethrow it.
@@ -353,7 +251,7 @@ export async function runTrackedAttempt<R extends AttemptRecord>(options: RunTra
     throw error;
   }
 
-  finishAttempt(run, step, kind, attempt, stepLogPath, options.budget, result);
+  finishAttempt(run, step, opened, options.budget, result);
   clearLiveAttemptCost();
   return result;
 }
@@ -409,7 +307,7 @@ export async function runAttempt(run: Run, step: RunStep, options: RunAttemptOpt
           ...options.spawn,
           stepLogPath: ctx.stepLogPath,
           budgetRemaining: ctx.budget.remaining,
-          strictCostAccounting: strictCostAccountingFor(ctx.run, ctx.budget),
+          strictCostAccounting: strictCostAccountingFor(ctx.run.max_cost_usd, ctx.budget.allowUnmetered),
         },
         options.context,
       );
@@ -563,7 +461,7 @@ export async function runFixAttempt(run: Run, step: RunStep, options: RunFixAtte
         ...options.spawn,
         stepLogPath: ctx.stepLogPath,
         budgetRemaining: ctx.budget.remaining,
-        strictCostAccounting: strictCostAccountingFor(ctx.run, ctx.budget),
+        strictCostAccounting: strictCostAccountingFor(ctx.run.max_cost_usd, ctx.budget.allowUnmetered),
         registry: options.registry,
       }),
   });

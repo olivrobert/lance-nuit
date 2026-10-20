@@ -20,7 +20,7 @@
 // snapshot side.
 //
 // ONCE per stop, per generation. The ledger carries the latch: it is created once
-// per `executeRunSteps` and shared by admission, the retry and fix gates, the
+// per execution (`openRunLedger`) and shared by admission, the retry and fix gates, the
 // composed-launch gates, and the live guards, which are exactly the sites that can
 // observe the same stop one after another. A resume decides again, on a new
 // ledger, and journals again — that is a new stop, not a duplicate.
@@ -33,7 +33,7 @@
 // - `budget.exceeded` / `run.budget_exceeded` — a live guard established that the
 //   ceiling was crossed, on an estimate the ledger may never confirm. Written
 //   here (`live-guard` origin, and inherited from a stopped child); restored by
-//   `executeRunSteps` from the snapshot and wiped by a `--budget` resume in
+//   `openRunLedger` from the snapshot and wiped by a `--budget` resume in
 //   `boot/resume.ts`.
 // - `budget.unaccountedStop` — work was actually WITHHELD over the uncertainty.
 //   Written here only; read by the step loop to name the stop reason.
@@ -44,7 +44,7 @@
 //   this module never touches it.
 
 import type { Run } from "../model/run.js";
-import type { CostDecision, RunBudget } from "./budget.js";
+import { type CostDecision, costDecision, type RunBudget } from "./budget.js";
 import { appendRunEvent } from "./run-journal.js";
 
 /** A `costDecision` that stops the run. */
@@ -103,6 +103,54 @@ export function recordCostStop(run: Run, budget: RunBudget, stop: CostStop, orig
   // already covers it per attempt.
   budget.unaccountedStop = true;
   journalCostUnaccounted(run, budget, origin.stepId);
+}
+
+/**
+ * The one cost gate: decide whether a capped run may spend on the next unit of
+ * work, and record the stop when it may not.
+ *
+ * Every site that is about to spend asks here — step admission, the re-ask of a
+ * refused capture, a rerun, a repair pass, the replay after a repair, and a
+ * composed launch (child or callback) — and keeps only its own message, so the
+ * same budget gives the same stop record whichever site observed it. The stop is
+ * recorded on `run`: for a composed launch that is the parent, the scope that
+ * owns the ceiling.
+ */
+export function costGate(run: Run, budget: RunBudget, stepId: string | null): CostStop | undefined {
+  const decision = costDecision(run.max_cost_usd, budget);
+  if (decision === "continue") return undefined;
+  recordCostStop(run, budget, decision, { kind: "gate", stepId });
+  return decision;
+}
+
+/** The cost stops the step loop reports once it returns. */
+export interface LedgerStops {
+  budgetExceeded: boolean;
+  costUnaccounted: boolean;
+  costUnaccountedStop: boolean;
+}
+
+/**
+ * What the shared ledger says about the run when the step loop returns: the
+ * stops reached inside the retry and fix loops, which break on the gate's
+ * decision without reporting it upward. Reads only, records nothing: each stop
+ * was recorded where it was observed.
+ *
+ * Only unfinished work can be stopped. A run that completed every step under an
+ * unenforceable ceiling has nothing left to withhold, and turning its verdict
+ * into a stop after the fact would fail a pipeline that did its job; the same
+ * holds for a guard stop restored from the snapshot once a resume skipped the
+ * step the guard killed. "Unfinished" is the caller's reading of the steps
+ * (`hasUnfinishedWork`). `exceeded` keeps its precedence over `unaccounted`, as
+ * in `costDecision`.
+ */
+export function ledgerStops(run: Run, budget: RunBudget, unfinished: boolean): LedgerStops {
+  const decision = unfinished ? costDecision(run.max_cost_usd, budget) : "continue";
+  return {
+    budgetExceeded: budget.exceeded === true && unfinished,
+    costUnaccounted: decision === "unaccounted",
+    costUnaccountedStop: budget.unaccountedStop === true && decision === "unaccounted",
+  };
 }
 
 /**

@@ -1,14 +1,16 @@
 // runner/run-record/budget.ts
 //
-// The run cost ledger and the stop decisions read off it. PURE helpers, shared by
-// the step loop, the fix loop, and the composed-launch gates.
+// The run cost ledger and the stop decisions read off it. PURE helpers: the cost
+// gate (`costGate`, `run-record/cost-stop-events.ts`) decides through them, the
+// live guards and the dashboard read the strict policy from them.
 //
 // This module declares the ledger; it does not fill it. Every figure in it is
-// written by `run-record/cost-accounting.ts` (`chargeAttemptToLedger`,
-// `chargeChildReconciliation`), which is the only place spend moves.
+// written by `run-record/cost-accounting.ts` (`openRunLedger`,
+// `chargeAttemptToLedger`, `chargeChildReconciliation`), which is the only place
+// spend moves.
 
 /**
- * MUTABLE ledger for run spending. Created once by `executeRunSteps` and shared by
+ * MUTABLE ledger for run spending. Opened once per execution (`openRunLedger`) and shared by
  * all phases (admission, attempts, verdict, repair, child runs): no signature
  * passes `cumulativeCost` back and forth, and each phase can update the value it
  * changed without rewriting the whole budget.
@@ -17,7 +19,15 @@
  * captured before spawn: `cumulative` changes between attempts of the same step.
  */
 export interface RunBudget {
-  /** Cumulative run cost, in dollars. */
+  /** Cumulative run cost, in dollars: what the steps carried when the ledger was
+   * opened, plus every charge since. A counter rather than a sum read off the
+   * steps: the two agree on every charge, and differ only where a counter is
+   * the safer figure — a total the previous generation materialized seeds it
+   * whole, and the order of the additions is the order the spend happened. One
+   * closer moves a step total without it: the signal handler (`abortRun`), which
+   * holds no ledger and after which the loop spends nothing more; the console
+   * report reads the larger of the two for that run, and the next execution
+   * seeds from the step totals. */
   cumulative: number;
   /** Budget remaining passed to spawn; `undefined` = no limit defined. */
   remaining?: number;
@@ -46,7 +56,7 @@ export interface RunBudget {
    * into `run.budget_exceeded` so a resume without `--budget` stops the same way.
    * Latched by `recordCostStop` on a live-guard stop and by
    * `inheritChildBudgetStop` when a composed child stopped at its guard; restored
-   * from the snapshot by `executeRunSteps`. */
+   * from the snapshot by `openRunLedger`. */
   exceeded?: boolean;
   /** `run.budget.exceeded` has already been journaled for this generation, with
    * the same one-fact-per-stop rule as `unaccountedJournaled`. */
@@ -89,8 +99,23 @@ export function isBudgetExceeded(maxCost: number | undefined, cumulativeCost: nu
  */
 export function costDecision(maxCost: number | undefined, budget: RunBudget): CostDecision {
   if (budget.exceeded === true || isBudgetExceeded(maxCost, budget.cumulative)) return "exceeded";
-  if (maxCost != null && budget.costUnknown === true && budget.allowUnmetered !== true) return "unaccounted";
+  if (budget.costUnknown === true && strictCostAccountingFor(maxCost, budget.allowUnmetered)) return "unaccounted";
   return "continue";
+}
+
+/**
+ * Whether unpriceable spend stops this run: a ceiling exists, and no human
+ * authorized spend nobody can price. Without the ceiling there is nothing to
+ * enforce; with the authorization the run has already accepted the uncertainty.
+ *
+ * The one statement of the strict policy, read by the stop decision above, by
+ * the live guards at spawn time, and by the dashboard over a persisted run.
+ */
+export function strictCostAccountingFor(
+  maxCost: number | null | undefined,
+  allowUnmetered: boolean | undefined,
+): boolean {
+  return maxCost != null && allowUnmetered !== true;
 }
 
 /** Remaining budget (>= 0), or undefined when no limit is set. */

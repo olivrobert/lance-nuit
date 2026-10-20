@@ -73,7 +73,7 @@ function applyFinished(attempt: PersistedAttempt, event: AttemptFinishedEvent): 
  * Project the attempts of every step from a run journal, keyed by step id and
  * ordered by attempt number.
  *
- * Attempt numbering depends on this projection: `nextAttemptLogPath` derives the
+ * Attempt numbering depends on this projection: `allocateAttempt` derives the
  * next number from the list length, so a resume that lost the history would
  * restart at 1 and overwrite the logs of the previous attempts.
  */

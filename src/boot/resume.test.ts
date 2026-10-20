@@ -9,7 +9,7 @@ import { pendingSteps, resumeDecision } from "../run-record/run-predicates.js";
 import { saveRun } from "../run-record/run-repository.js";
 import { readRunSnapshot } from "../run-record/run-snapshot.js";
 import { abortRun, finalizeRun, stopRun, updateStep } from "../run-record/run-transitions.js";
-import { nextAttemptLogPath } from "../run-record/run-timeline.js";
+import { allocateAttempt } from "../run-record/attempt-lifecycle.js";
 import { controlForRun } from "../run-record/cost-accounting.js";
 import { resolveRunDir } from "../run-record/stores/run-storage.js";
 import { FileRunStateStore } from "../run-record/stores/file-run-state-store.js";
@@ -835,7 +835,7 @@ test("resume: a failed journal append keeps the attempt numbering through the sn
     eventStore,
   });
   updateStep(run, run.steps[0]!, "running");
-  const first = nextAttemptLogPath(run, run.steps[0]!, "step");
+  const first = allocateAttempt(run, run.steps[0]!, "step").logPath;
   expect(first).toContain("attempt-001");
   run.steps[0]!.attempts[0]!.status = "failed";
   run.steps[0]!.control = { duration_ms: 1, total_cost_usd: 1 };
@@ -850,7 +850,7 @@ test("resume: a failed journal append keeps the attempt numbering through the sn
   expect(step.attempts).toEqual([]);
   expect(step.last_attempt).toBe(1);
   expect(step.control?.total_cost_usd).toBe(1);
-  expect(nextAttemptLogPath(resumed, step, "step")).toContain("attempt-002");
+  expect(allocateAttempt(resumed, step, "step").logPath).toContain("attempt-002");
 });
 
 // Resuming is idempotent: a second load of the same run reads the same spend and
@@ -881,7 +881,7 @@ test("resume: loading the same run twice neither adds spend nor reuses an attemp
     expect(resumed.steps[0]!.control?.total_cost_usd).toBe(1);
     expect(resumed.steps[0]!.usage?.input_tokens).toBe(10);
     expect(controlForRun(resumed).total_cost_usd).toBe(1);
-    expect(nextAttemptLogPath(resumed, resumed.steps[0]!, "step")).toContain("attempt-002");
+    expect(allocateAttempt(resumed, resumed.steps[0]!, "step").logPath).toContain("attempt-002");
   }
   const events = readRunEvents(dir);
   expect(events.filter((event) => event.type === "step.attempt.finished")).toHaveLength(1);

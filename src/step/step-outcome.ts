@@ -12,14 +12,7 @@ import { type PipelineContext, requireAgentBackendRegistry } from "../model/cont
 import type { Run, RunStep } from "../model/run.js";
 import type { AbortScope } from "../runtime/abort.js";
 import type { RunOutput } from "../runtime/run-output.js";
-import {
-  costDecision,
-  latestAttemptLog,
-  recordCostStop,
-  type RunBudget,
-  stopRun,
-  updateStep,
-} from "../run-record/index.js";
+import { costGate, latestAttemptLog, type RunBudget, stopRun, updateStep } from "../run-record/index.js";
 import type { runFixLoop } from "./fix-loop.js";
 import { absorbNonBlocking, settleStepFailure } from "./non-blocking.js";
 import { onFailureHandlerFor } from "./on-failure.js";
@@ -81,7 +74,7 @@ function sameStructuredOutput(a: StepResult, b: StepResult): boolean {
  * not resume its own session through `onFail`. The runner therefore owns it.
  *
  * A full attempt of its own (log, ledger, verdict), never a second spawn inside
- * the refused attempt: `finishAttempt` charges one result per attempt. Returns
+ * the refused attempt: `settleAttempt` charges one result per attempt. Returns
  * the re-asked result, or `undefined` when no re-ask was made — no refusal, no
  * session to resume, a backend that cannot resume, or a budget that withholds it.
  */
@@ -96,14 +89,13 @@ async function reaskRefusedCapture(input: ResolveOutcomeInput): Promise<StepResu
 
   // A withheld re-ask is withheld work, recorded like a withheld retry so the
   // report names the accounting stop rather than the step it left red.
-  const cost = costDecision(run.max_cost_usd, budget);
-  if (cost !== "continue") {
+  const stop = costGate(run, budget, step.id);
+  if (stop) {
     input.output.emit({
       type: "runner.message",
       level: "warn",
-      message: cost === "unaccounted" ? "  Spending unaccounted, no re-ask" : "  Budget exceeded, no re-ask",
+      message: stop === "unaccounted" ? "  Spending unaccounted, no re-ask" : "  Budget exceeded, no re-ask",
     });
-    recordCostStop(run, budget, cost, { kind: "gate", stepId: step.id });
     return undefined;
   }
 

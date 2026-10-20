@@ -16,10 +16,9 @@ import type { Run, RunStep, StepDefinition } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import {
   appendRunEvent,
-  costDecision,
+  costGate,
   lastPassInterrupted,
   owesWork,
-  recordCostStop,
   type RunBudget,
   stopRun,
   updateStep,
@@ -291,15 +290,18 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
   const { run, step, baseCtx } = input;
   const cumulativeCost = input.budget.cumulative;
 
-  const decision = costDecision(run.max_cost_usd, input.budget);
-  if (decision !== "continue") {
+  // The console line is transient and `outcome.reason` is a sentence; the stop
+  // the gate records is the fact a post-mortem reads, and what tells the final
+  // report the cost stop is the REASON the run ended.
+  const stop = costGate(run, input.budget, step.id);
+  if (stop) {
     // Leave the remaining steps `pending`. They are not skipped work, they are
     // unfunded work: marking them `skipped` would settle the run and force the
     // next invocation to replay — and repay — every step already completed. The
     // same treatment applies to both stops: an unaccountable run resumes where it
     // stopped once the operator decides how to continue.
     const remaining = run.steps.filter((other) => other.status === "pending").length;
-    if (decision === "unaccounted") {
+    if (stop === "unaccounted") {
       input.output.emit({
         type: "runner.message",
         level: "warn",
@@ -318,10 +320,6 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
           `\n  ↳ It authorizes the unknown spend only: the known ≥ $${cumulativeCost.toFixed(2)} still obeys the $${run.max_cost_usd} ceiling.` +
           `\n  ↳ Pending steps are left resumable.`,
       });
-      // The console line is transient and `outcome.reason` is a sentence; the
-      // recorded stop is the fact a post-mortem reads, and what tells the final
-      // report the accounting stop is the REASON the run ended.
-      recordCostStop(run, input.budget, decision, { kind: "gate", stepId: step.id });
       return { kind: "cost-unaccounted" };
     }
     input.output.emit({
@@ -333,7 +331,6 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
         // (--scan, cron) has nobody watching. Spending more is a human decision.
         `\n  ↳ To approve a higher ceiling and resume where it stopped, rerun with --budget <usd>`,
     });
-    recordCostStop(run, input.budget, decision, { kind: "gate", stepId: step.id });
     return { kind: "budget-exceeded" };
   }
 

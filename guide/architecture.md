@@ -532,7 +532,12 @@ still moves the run: it keeps `ABORTED` and completes the outcome, the totals
 and the snapshot, while the other transitions change neither memory nor
 snapshot. Attempt closure (`run-record/attempt-closure.ts`), cost figures
 (`run-record/cost-accounting.ts`) and budget stops (`run-record/cost-stop-events.ts`) keep
-their own owners. The persisted child reference of a composed run — the record a
+their own owners. The step layer reaches them through three operations of the
+entry: `openAttempt` and `settleAttempt` (`run-record/attempt-lifecycle.ts`)
+number, journal and persist an attempt before spawn, then close it, record its
+verdict, charge the ledger, record a live guard's stops and persist it; every
+site about to spend asks `costGate`, which decides and records the stop; and
+`openRunLedger` opens the ledger an execution spends against. The persisted child reference of a composed run — the record a
 `runPipeline` or `forEachPipeline` node keeps in the parent snapshot for each
 child call — moves through `run-record/child-transitions.ts` only: declared
 `pending`, committed and bound to a child run id, skipped, failed at launch, or

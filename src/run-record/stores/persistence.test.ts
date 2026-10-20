@@ -6,7 +6,8 @@ import type { Run } from "../../model/run.ts";
 import { buildPipelineContext } from "../../pipeline/context.ts";
 import { makeRunStep } from "../run-step.ts";
 import { readRunEvents } from "../run-journal.ts";
-import { findStepLog, matchesStepSelector, nextAttemptLogPath } from "../run-timeline.ts";
+import { findStepLog, matchesStepSelector } from "../run-timeline.ts";
+import { allocateAttempt } from "../attempt-lifecycle.ts";
 import { controlForRun } from "../cost-accounting.ts";
 import { loadOrCreateRun } from "../../boot/resume.ts";
 import { saveRun } from "../run-repository.ts";
@@ -558,7 +559,7 @@ test("last_attempt prevents log-number reuse when the journal is missing", () =>
   step.last_attempt = 4;
   step.attempts = [];
 
-  expect(nextAttemptLogPath(run, step)).toContain("attempt-005");
+  expect(allocateAttempt(run, step).logPath).toContain("attempt-005");
   saveRun(run);
   const saved = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
   expect(saved.steps[0].last_attempt).toBe(5);

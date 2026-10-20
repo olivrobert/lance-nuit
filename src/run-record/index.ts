@@ -53,28 +53,31 @@ export {
 export { type RunJournalReport, readRunJournal } from "./run-journal.js";
 export { runEventsFilePath } from "./stores/file-run-event-store.js";
 
-// Attempts and their logs, and the cost ledger and budget a run is held to.
-export { closeAttempt } from "./attempt-closure.js";
-export { costDecision, isBudgetExceeded, type RunBudget, remainingBudget } from "./budget.js";
+// Attempts and their logs, and the cost ledger and budget a run is held to: an
+// attempt is opened and settled here, the ledger an execution spends against is
+// opened here, and every site about to spend asks the one cost gate.
 export {
-  chargeAttemptToLedger,
+  type AttemptResult,
+  type CostWarning,
+  type OpenedAttempt,
+  openAttempt,
+  settleAttempt,
+} from "./attempt-lifecycle.js";
+export { isBudgetExceeded, type RunBudget, remainingBudget, strictCostAccountingFor } from "./budget.js";
+export {
   chargeChildReconciliation,
-  controlForRun,
   costIsLowerBound,
-  isUnpricedSpend,
   measuredRunCost,
+  openRunLedger,
   runProvesUnpricedSpend,
-  type SettledSpend,
 } from "./cost-accounting.js";
-export { inheritChildBudgetStop, recordCostStop } from "./cost-stop-events.js";
+export { costGate, inheritChildBudgetStop, ledgerStops } from "./cost-stop-events.js";
 export {
   ATTEMPT_COMMAND_FILE,
   findStepLog,
   latestAttemptLog,
   logicalAttemptLogPath,
   matchesStepSelector,
-  nextAttemptLogPath,
-  writeAttemptCommand,
 } from "./run-timeline.js";
 
 // Run and step transitions during execution.

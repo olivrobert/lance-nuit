@@ -16,15 +16,16 @@
 //    settled on resume). Called only by `closeAttempt` (`run-record/attempt-closure.ts`),
 //    which owns the rest of the attempt's ending.
 //  - `chargeAttemptToLedger` — the same attempt reaches the run ledger. Purely
-//    arithmetic and free of I/O: `finishAttempt` (`step/step-attempt.ts`) calls
-//    it with the figures `closeAttempt` accepted, on every exit of a tracked
-//    attempt.
+//    arithmetic and free of I/O: `settleAttempt` (`run-record/attempt-lifecycle.ts`)
+//    calls it with the figures `closeAttempt` accepted, on every exit of a
+//    tracked attempt.
 //  - `chargeChildReconciliation` — a composed child run reports an aggregated cost
 //    the parent never saw pass as attempts.
-//  - `projectStepSpend` / `restoreAttemptSpend` / `restoreRunTotals` — figures
-//    read back from the snapshot and the journal on resume. Projections, not
-//    charges: the spend was accounted for when the attempt closed, and charging
-//    it again would double it.
+//  - `projectStepSpend` / `restoreAttemptSpend` / `restoreRunTotals` /
+//    `openRunLedger` — figures read back from the snapshot and the journal on
+//    resume, and the ledger seeded from them. Projections, not charges: the spend
+//    was accounted for when the attempt closed, and charging it again would
+//    double it.
 //
 // The run's `total_control` / `total_usage` are DERIVED: `finalizeRun` and
 // `abortRun` materialize them from the step totals, a resume trusts them only on
@@ -304,9 +305,9 @@ function invalidateRunTotals(run: Pick<Run, "total_control" | "total_usage">): v
 /**
  * The same attempt reaches the run ledger.
  *
- * PURELY ARITHMETIC and free of I/O: `finishAttempt` calls it from the attempt
- * lifecycle, which carries no `RunOutput`. Whoever holds the stop decision
- * journals it, not this function.
+ * PURELY ARITHMETIC and free of I/O: `settleAttempt` calls it with the figures
+ * the closure stored. Whoever holds the stop decision journals it, not this
+ * function.
  *
  * `guardProvedUnpriced` is the second road to the accounting latch: a live guard
  * proved the usage unpriceable and killed the process before it could report
@@ -336,6 +337,46 @@ export function chargeAttemptToLedger(
     // even if a later generation rewrites the totals this attempt contributed to.
     run.cost_unaccounted = true;
   }
+}
+
+/**
+ * Open the ledger an execution of the run spends against.
+ *
+ * RESTORATION, not a charge: the figures and latches are read back from the run.
+ * Every persisted cost counts, failed and interrupted attempts included, or a
+ * resume would undercount the budget; the seed goes through `controlForRun`, so a
+ * total the previous generation materialized stands until a charge drops it. The
+ * latches change during execution only through `cost-stop-events.ts` (stops) and
+ * the charges above (proof of unpriceable spend).
+ *
+ * One ledger per execution, shared by every phase (admission, attempts, verdict,
+ * repair, composed children): a resume opens a new one over the same run.
+ */
+export function openRunLedger(run: Run): RunBudget {
+  const ledger: RunBudget = {
+    cumulative: controlForRun(run).total_cost_usd ?? 0,
+    // A guard stop persisted by a previous generation still holds: the ledger
+    // alone can read the ceiling as affordable when the guard fired on an estimate.
+    ...(run.budget_exceeded ? { exceeded: true } : {}),
+    // Uncertainty is restored from the run latch, or re-derived from the
+    // reconciled attempts that PROVE it (`runProvesUnpricedSpend`) — failed,
+    // interrupted and composed ones included. It is a projection, not an
+    // independent counter, so a resume cannot launder an unpriced attempt by
+    // starting a fresh ledger over the same spend, and reading the attempts is
+    // what makes an OLD snapshot — written before the latch existed — stop
+    // exactly like a new one. A bare `total_control.cost_unknown` is NOT enough:
+    // the aggregate cannot say whether an attempt consumed anything, and an
+    // attempt that died before reporting a figure must not stop the run.
+    ...(run.cost_unaccounted === true || runProvesUnpricedSpend(run) ? { costUnknown: true } : {}),
+    // Strict unless a human said otherwise. The authorization is persisted on the
+    // run (`--allow-unmetered`, or propagation from the budget scope's owner), so
+    // a later resume needs no flag and no environment switch.
+    ...(run.allow_unmetered ? { allowUnmetered: true } : {}),
+  };
+  // Upgrade an old snapshot in place: the uncertainty its attempts prove becomes
+  // the durable latch, so nothing has to re-derive it from the attempt history.
+  if (ledger.costUnknown === true) run.cost_unaccounted = true;
+  return ledger;
 }
 
 export interface ChildReconciliation {
@@ -444,7 +485,7 @@ export function chargeChildReconciliation(input: ChildReconciliation): number {
  * Step spend to seed the budget ledger with: the snapshot total, unless the
  * journal knows of more.
  *
- * `finishAttempt` appends the finish event before it writes the snapshot. A hard
+ * `settleAttempt` appends the finish event before it writes the snapshot. A hard
  * death in that window leaves an attempt priced in the journal but absent from
  * the step total, and the ledger — seeded from step totals — would then read that
  * attempt as free and let the resume spend past the ceiling. The journal is what

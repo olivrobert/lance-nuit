@@ -155,8 +155,8 @@ takes over from there. The refused object is appended to the log of the attempt
 that produced it.
 
 The re-ask is bounded to one and is withheld when the step has no resumable
-session, when the backend cannot resume, or when `costDecision` withholds work —
-the same accounting stop a retry observes, recorded the same way. A re-ask that
+session, when the backend cannot resume, or when the cost gate withholds work —
+the same gate a retry asks, recording the same stop. A re-ask that
 hands back the very object that was refused is reported as such and not insisted
 upon.
 

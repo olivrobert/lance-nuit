@@ -7,7 +7,7 @@ import type { Run, RunStep } from "../model/run.ts";
 import { makeRunStep, type StepStateInput } from "./run-step.ts";
 import { closeAttempt, hasSpendFigures, settleAttemptStats } from "./attempt-closure.ts";
 import { readRunEvents } from "./run-journal.ts";
-import { nextAttemptLogPath } from "./run-timeline.ts";
+import { allocateAttempt } from "./attempt-lifecycle.ts";
 
 function makeRun(step: RunStep): Run {
   return {
@@ -77,7 +77,7 @@ test("settleAttemptStats: a measured or successful attempt keeps its figures", (
 test("closeAttempt: closes a running attempt once, the second call is a no-op", () => {
   const step = makeStep();
   const run = makeRun(step);
-  nextAttemptLogPath(run, step);
+  allocateAttempt(run, step).logPath;
   const attempt = step.attempts[0]!;
 
   // An accepted closure hands back the figures it stored.
@@ -100,7 +100,7 @@ test("closeAttempt: closes a running attempt once, the second call is a no-op", 
 test("closeAttempt: writes the single finished payload", () => {
   const step = makeStep(AGENT);
   const run = makeRun(step);
-  nextAttemptLogPath(run, step);
+  allocateAttempt(run, step).logPath;
   const attempt = step.attempts[0]!;
   const session = { provider: "claude", id: "sess-1", resumable: true };
 
@@ -143,7 +143,7 @@ test("closeAttempt: writes the single finished payload", () => {
 test("closeAttempt: omits optional payload fields it has no value for", () => {
   const step = makeStep();
   const run = makeRun(step);
-  nextAttemptLogPath(run, step);
+  allocateAttempt(run, step).logPath;
   const attempt = step.attempts[0]!;
   closeAttempt(run, step, attempt, { status: "done", stats: { duration_ms: 1 } });
   const [event] = finishedEvents(run);
@@ -161,7 +161,7 @@ test("closeAttempt: omits optional payload fields it has no value for", () => {
 test("closeAttempt: an explicit control wins over stats and still obeys the cost_unknown rule", () => {
   const step = makeStep(AGENT);
   const run = makeRun(step);
-  nextAttemptLogPath(run, step);
+  allocateAttempt(run, step).logPath;
   const attempt = step.attempts[0]!;
   closeAttempt(run, step, attempt, {
     status: "aborted",
@@ -189,7 +189,7 @@ test("closeAttempt: cost_unknown marks the total as estimated on every path", ()
   for (const kind of ["step", "fix"] as const) {
     const step = makeStep(AGENT);
     const run = makeRun(step);
-    nextAttemptLogPath(run, step, kind);
+    allocateAttempt(run, step, kind).logPath;
     const attempt = step.attempts[0]!;
     closeAttempt(run, step, attempt, { status: "failed", control: attempt.control, reason: "crashed" });
     expect(attempt.control).toMatchObject({ duration_ms: 0, cost_unknown: true, cost_estimated: true });
@@ -198,7 +198,7 @@ test("closeAttempt: cost_unknown marks the total as estimated on every path", ()
   // A bash step attempt closed the same way stays unflagged.
   const step = makeStep();
   const run = makeRun(step);
-  nextAttemptLogPath(run, step);
+  allocateAttempt(run, step).logPath;
   closeAttempt(run, step, step.attempts[0]!, { status: "failed", reason: "crashed" });
   expect(step.control?.cost_unknown).toBeUndefined();
   expect(step.control?.cost_estimated).toBeUndefined();
@@ -210,7 +210,7 @@ test("closeAttempt: merges into a step that already carries totals", () => {
     usage: { input_tokens: 10, tools_used: ["Read"] },
   });
   const run = makeRun(step);
-  nextAttemptLogPath(run, step);
+  allocateAttempt(run, step).logPath;
   closeAttempt(run, step, step.attempts[0]!, {
     status: "done",
     stats: { duration_ms: 50, total_cost_usd: 0.25, model: "opus", input_tokens: 5, tools_used: ["Edit"] },
@@ -229,7 +229,7 @@ test("closeAttempt: leaves the step status and the run untouched", () => {
   const step = makeStep();
   const run = makeRun(step);
   run.status = "RUNNING";
-  nextAttemptLogPath(run, step);
+  allocateAttempt(run, step).logPath;
   closeAttempt(run, step, step.attempts[0]!, { status: "failed", reason: "exit 1" });
   expect(step.status).toBe("running");
   expect(step.fail_kind).toBeUndefined();
@@ -241,7 +241,7 @@ test("closeAttempt: leaves the step status and the run untouched", () => {
 test("closeAttempt: keeps the session, reason and log path already on the attempt", () => {
   const step = makeStep(AGENT);
   const run = makeRun(step);
-  nextAttemptLogPath(run, step);
+  allocateAttempt(run, step).logPath;
   const attempt = step.attempts[0]!;
   attempt.session = { provider: "claude", id: "sess-0", resumable: true };
   attempt.errors = "earlier cause";

@@ -33,6 +33,7 @@ import {
   readClosureAt,
   readRunHistory,
   runProvesUnpricedSpend,
+  strictCostAccountingFor,
 } from "../../run-record/index.js";
 import {
   FileWorkItemArtifactStore,
@@ -109,7 +110,7 @@ function budgetExceededOf(state: PersistedRun): boolean {
  * the report printed for a run older still.
  */
 function costUnaccountedOf(state: PersistedRun): boolean {
-  if (state.max_cost_usd == null || state.allow_unmetered === true) return false;
+  if (!strictCostAccountingFor(state.max_cost_usd, state.allow_unmetered)) return false;
   if (!hasUnfinishedWork(state)) return false;
   // The stopping generation's own typed answer, when it wrote one: it also says
   // NO for a run whose ledger is a lower bound but which stopped at its ceiling
