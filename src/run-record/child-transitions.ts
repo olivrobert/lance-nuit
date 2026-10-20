@@ -53,7 +53,8 @@ import type {
   PersistedPipelineOrchestrationState,
   PipelineLineageEntry,
 } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { ChildRefView, OrchestrationView, RunStepView, RunView } from "../model/run.js";
+import { writable } from "./run.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
 import { isSettledStatus } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
@@ -70,11 +71,13 @@ import { isCompleted } from "./run-status.js";
  * ancestry from it.
  */
 export function openOrchestration(
-  parent: Run,
-  step: RunStep,
+  parentView: RunView,
+  stepView: RunStepView,
   kind: PersistedPipelineOrchestrationState["kind"],
   lineage: readonly PipelineLineageEntry[],
-): PersistedPipelineOrchestrationState {
+): OrchestrationView {
+  const parent = writable(parentView);
+  const step = writable(stepView);
   if (!parent.pipelineLineage?.length) parent.pipelineLineage = [...lineage];
   const state = step.orchestration ?? { kind, children: [] };
   if (state.kind !== kind) throw new Error(`Step "${step.id}": orchestration type changed during resume`);
@@ -89,10 +92,12 @@ export function openOrchestration(
  * index, even when the template that produced it would now answer differently.
  */
 export function freezeOrchestrationItems(
-  parent: Run,
-  state: PersistedPipelineOrchestrationState,
+  parentView: RunView,
+  stateView: OrchestrationView,
   items: readonly string[],
-): string[] {
+): readonly string[] {
+  const parent = writable(parentView);
+  const state = writable(stateView);
   const frozen = [...items];
   state.items = frozen;
   saveRun(parent);
@@ -114,11 +119,9 @@ export interface ChildCall {
  * definition that changed under a resumed run: refused, the node cannot know
  * which child it is continuing.
  */
-export function declareChild(
-  parent: Run,
-  state: PersistedPipelineOrchestrationState,
-  call: ChildCall,
-): PersistedPipelineChildRef {
+export function declareChild(parentView: RunView, stateView: OrchestrationView, call: ChildCall): ChildRefView {
+  const parent = writable(parentView);
+  const state = writable(stateView);
   const existing = state.children.find((candidate) => candidate.key === call.key);
   if (existing) {
     if (
@@ -145,7 +148,7 @@ export function declareChild(
 }
 
 /** A reference the next generation must not touch again. */
-export function isChildSettled(ref: PersistedPipelineChildRef): boolean {
+export function isChildSettled(ref: ChildRefView): boolean {
   return isSettledStatus(ref.status);
 }
 
@@ -154,7 +157,9 @@ export function isChildSettled(ref: PersistedPipelineChildRef): boolean {
  * interruption after this point resumes the `running` child instead of
  * re-evaluating a predicate that may have since become false.
  */
-export function commitChildCall(parent: Run, ref: PersistedPipelineChildRef): void {
+export function commitChildCall(parentView: RunView, refView: ChildRefView): void {
+  const parent = writable(parentView);
+  const ref = writable(refView);
   refuseSettled(ref, "commit");
   ref.status = "running";
   saveRun(parent);
@@ -166,7 +171,9 @@ export function commitChildCall(parent: Run, ref: PersistedPipelineChildRef): vo
  * event, which the next generation retries under the same id. A reference
  * already bound keeps its id: the caller derived `runId` from it.
  */
-export function bindChildRun(parent: Run, ref: PersistedPipelineChildRef, runId: string): void {
+export function bindChildRun(parentView: RunView, refView: ChildRefView, runId: string): void {
+  const parent = writable(parentView);
+  const ref = writable(refView);
   refuseSettled(ref, "bind");
   if (ref.runId !== undefined && ref.runId !== runId) {
     throw new Error(`Pipeline composition: child "${ref.key}" is bound to run ${ref.runId}, not ${runId}`);
@@ -182,7 +189,7 @@ export function bindChildRun(parent: Run, ref: PersistedPipelineChildRef, runId:
  * forbids it. An unreadable journal throws rather than reading as "never
  * started": the read is strict for exactly this question.
  */
-export function hasJournaledChildStart(parent: Run, ref: PersistedPipelineChildRef): boolean {
+export function hasJournaledChildStart(parent: RunView, ref: ChildRefView): boolean {
   if (ref.runId === undefined) return false;
   const runId = ref.runId;
   return readRunEvents(parent).some((event) => event.type === "pipeline.child.started" && event.childRunId === runId);
@@ -190,7 +197,7 @@ export function hasJournaledChildStart(parent: Run, ref: PersistedPipelineChildR
 
 /** Journal that the child run booted under its identity. Event only: the
  *  reference already carries the id, and the snapshot follows at settlement. */
-export function recordChildStarted(parent: Run, step: RunStep, child: Run): void {
+export function recordChildStarted(parent: RunView, step: RunStepView, child: RunView): void {
   appendRunEvent(parent, "pipeline.child.started", {
     parentNodeId: step.id,
     childRunId: child.runId ?? null,
@@ -203,7 +210,9 @@ export function recordChildStarted(parent: Run, step: RunStep, child: Run): void
 }
 
 /** A call the node decided NOT to make, durably: resume must not reinterpret it. */
-export function skipChild(parent: Run, ref: PersistedPipelineChildRef, phase: string, reason: string): void {
+export function skipChild(parentView: RunView, refView: ChildRefView, phase: string, reason: string): void {
+  const parent = writable(parentView);
+  const ref = writable(refView);
   refuseSettled(ref, "skip");
   ref.status = "skipped";
   ref.outcome = { phase, reason, logPath: null, resumable: false };
@@ -215,7 +224,9 @@ export function skipChild(parent: Run, ref: PersistedPipelineChildRef, phase: st
  * be booted. Resumable, since nothing of the child was consumed; a bound `runId`
  * is kept so the retry keeps the same identity.
  */
-export function failChildLaunch(parent: Run, ref: PersistedPipelineChildRef, phase: string, reason: string): void {
+export function failChildLaunch(parentView: RunView, refView: ChildRefView, phase: string, reason: string): void {
+  const parent = writable(parentView);
+  const ref = writable(refView);
   refuseSettled(ref, "fail");
   ref.status = "failed";
   ref.outcome = { phase, reason, logPath: null, resumable: true };
@@ -223,7 +234,7 @@ export function failChildLaunch(parent: Run, ref: PersistedPipelineChildRef, pha
 }
 
 /** What `done` means for a child run: a PASS the interruption did not settle. */
-export function completedSuccessfully(child: Run): boolean {
+export function completedSuccessfully(child: RunView): boolean {
   return isCompleted(child.status) && !child.aborted;
 }
 
@@ -240,12 +251,14 @@ export function completedSuccessfully(child: Run): boolean {
  * Returns whether the child completed successfully.
  */
 export function settleChild(
-  parent: Run,
-  ref: PersistedPipelineChildRef,
-  step: RunStep,
-  child: Run,
+  parentView: RunView,
+  refView: ChildRefView,
+  step: RunStepView,
+  child: RunView,
   delta: number,
 ): boolean {
+  const parent = writable(parentView);
+  const ref = writable(refView);
   refuseSettled(ref, "settle");
   const success = completedSuccessfully(child);
   ref.status = success ? "done" : "failed";

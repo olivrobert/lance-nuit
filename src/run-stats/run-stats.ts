@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { basename, isAbsolute, relative } from "node:path";
 import { resolveTicketDir } from "../env/tickets.js";
 import type { PipelineContext } from "../model/context.js";
-import type { Run } from "../model/run.js";
+import type { RunView } from "../model/run.js";
 import { runRefFromRun } from "../model/storage-ports.js";
 import { FileRunEventStore, FileRunLogStore, findStepLog, logicalAttemptLogPath } from "../run-record/index.js";
 import { projectRunStatsEntry, type RunStatsEntry } from "./run-stats-projector.js";
@@ -26,7 +26,7 @@ export { FileRunStatsSink } from "./run-stats-sink.js";
  * Keep the call signature stable: file adapters are injected here when the caller has
  * not attached stores to Run. The projector remains pure.
  */
-export function buildRunStatsEntry(run: Run, context?: PipelineContext): RunStatsEntry {
+export function buildRunStatsEntry(run: RunView, context?: PipelineContext): RunStatsEntry {
   const eventStore = run.eventStore ?? new FileRunEventStore({ runDir: run.run_dir });
   const logStore = run.logStore ?? new FileRunLogStore({ runDir: run.run_dir });
   const projectedRun =
@@ -115,7 +115,7 @@ export interface EmitRunStatsOptions {
 
 /** Emit the projection into central history. The returned path is always the
  * central source path for the default file sink. */
-export function emitRunStats(run: Run, opts: EmitRunStatsOptions = {}): string | null {
+export function emitRunStats(run: RunView, opts: EmitRunStatsOptions = {}): string | null {
   const projRoot = opts.projRoot ?? opts.context?.cwd ?? process.cwd();
   try {
     const entry = buildRunStatsEntry(run, opts.context);

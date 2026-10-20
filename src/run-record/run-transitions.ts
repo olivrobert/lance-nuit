@@ -40,7 +40,9 @@
 
 import type { StepControl, StepFailCause, StepFailKind } from "../contracts/backends.js";
 import type { RunOutcomeStopKind, RunStopState } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
+import type { RunStep } from "./run.js";
+import { writable } from "./run.js";
 import { closeAttempt } from "./attempt-closure.js";
 import { aggregateControl, aggregateUsage } from "./cost-accounting.js";
 import { appendRunEvent, relativeRunPath } from "./run-journal.js";
@@ -50,7 +52,9 @@ import { latestAttemptLog } from "./run-timeline.js";
 import { isResumableStatus } from "./run-status.js";
 import { deriveRunStatus } from "./run-verdict.js";
 
-export function updateStep(run: Run, step: RunStep, status: RunStep["status"], errors?: string): void {
+export function updateStep(runView: RunView, stepView: RunStepView, status: RunStep["status"], errors?: string): void {
+  const run = writable(runView);
+  const step = writable(stepView);
   if (run.aborted) return;
   step.status = status;
   // `running` in the snapshot does not say which step this process executes: a
@@ -137,7 +141,9 @@ export interface StepVerdict {
  * the snapshot. A run settled by an interruption ignores the verdict: the late
  * result of a killed attempt is not what the resumed step will answer.
  */
-export function recordStepVerdict(run: Run, step: RunStep, verdict: StepVerdict): void {
+export function recordStepVerdict(runView: RunView, stepView: RunStepView, verdict: StepVerdict): void {
+  const run = writable(runView);
+  const step = writable(stepView);
   if (run.aborted) return;
   if (verdict.ok || !verdict.failKind) delete step.fail_kind;
   else step.fail_kind = verdict.failKind;
@@ -151,7 +157,9 @@ export function recordStepVerdict(run: Run, step: RunStep, verdict: StepVerdict)
  * stats. `reason` is the caller's decision — typically the failure reason, or
  * the one the fix loop already wrote on the step.
  */
-export function absorbStepFailure(run: Run, step: RunStep, reason: string): void {
+export function absorbStepFailure(runView: RunView, stepView: RunStepView, reason: string): void {
+  const run = writable(runView);
+  const step = writable(stepView);
   if (run.aborted) return;
   step.errors = reason;
   updateStep(run, step, "done");
@@ -163,7 +171,13 @@ export function absorbStepFailure(run: Run, step: RunStep, reason: string): void
  * absorbed — its own fix included — is not paid again for outputs it never
  * wrote. Only a `done` step carries the record; `updateStep(running)` drops it.
  */
-export function recordAbsorbedInputs(run: Run, step: RunStep, fingerprints: Record<string, string | null>): void {
+export function recordAbsorbedInputs(
+  runView: RunView,
+  stepView: RunStepView,
+  fingerprints: Record<string, string | null>,
+): void {
+  const run = writable(runView);
+  const step = writable(stepView);
   if (run.aborted || step.status !== "done") return;
   step.absorbed_inputs = { ...fingerprints };
   saveRun(run);
@@ -174,10 +188,11 @@ export function recordAbsorbedInputs(run: Run, step: RunStep, fingerprints: Reco
  *  it the budget ledger loses everything the interrupted agent consumed. `model`
  *  is the model that attempt reported, for a step that recorded none before. */
 export function abortRun(
-  run: Run,
+  runView: RunView,
   signal: "SIGINT" | "SIGTERM",
   options: { estimatedCostUsd?: number; model?: string } = {},
 ): void {
+  const run = writable(runView);
   const reason = `${signal}: run interrupted manually`;
   const now = new Date().toISOString();
   const activeStep = run.steps.find((step) => step.id === run.executingStepId && step.status === "running");
@@ -253,7 +268,9 @@ export function abortRun(
  * admission that declares nothing still stops the run, and a snapshot written
  * before this field existed remains valid.
  */
-export function stopRun(run: Run, step: RunStep, reason: string, stop?: RunStopState): void {
+export function stopRun(runView: RunView, stepView: RunStepView, reason: string, stop?: RunStopState): void {
+  const run = writable(runView);
+  const step = writable(stepView);
   if (run.aborted) return;
   run.stopped_reason = reason;
   run.status = "STOPPED";
@@ -334,7 +351,8 @@ function stopKindOf(outcome: RunFinalizationSignals | undefined): RunOutcomeStop
  * the verdict keeps `ABORTED`, and the outcome, the totals and the snapshot are
  * completed with what the loop learned before the interruption.
  */
-export function finalizeRun(run: Run, outcome?: RunFinalizationSignals): void {
+export function finalizeRun(runView: RunView, outcome?: RunFinalizationSignals): void {
+  const run = writable(runView);
   run.total_control = aggregateControl(run.steps);
   run.total_usage = aggregateUsage(run.steps);
   // A failed step the selection set aside did not end this invocation: naming

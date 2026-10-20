@@ -258,7 +258,7 @@ attempt number allocated per step (`last_attempt`), and the run-level verdict,
 totals, and cost decisions. It does **not** carry the attempts or the last
 rendered command: the attempts are projected from the journal on resume, and the
 command is the whole agent prompt, kept in memory (`run-record/run-repository.ts`
-is the one writer of the snapshot, and `model/run.ts` marks both fields as
+is the one writer of the snapshot, and `run-record/run.ts` marks both fields as
 runtime-only). Each attempt also copies the command it was given to
 `command.txt` beside its log, once, when it starts; that copy is diagnostic,
 read only by the dashboard, and an attempt whose copy cannot be written still
@@ -274,17 +274,18 @@ projected steps, or creates a new run; every snapshot write and journal event of
 the opening is its own, and it tells its caller whether it resumed. Boot
 (`boot/resume.ts`) supplies the policy: it loads the definition — again, for a
 resume, under the snapshot's spec path and lot — validates `--start-at`, and
-applies the `--steps`/`--skip`/`--start-at` selectors to the projected steps,
-which `openRun` hands it before hydration. The selectors come after the projection so they judge what the journal
+decides what the `--steps`/`--skip`/`--start-at` selectors do to the projected
+steps, which `openRun` hands it read-only before hydration and then applies:
+the steps excluded, the exclusions dropped, the steps requeued. The selectors come after the projection so they judge what the journal
 knows: a step the snapshot still calls `running` but the journal finished stays
 `done` instead of becoming an exclusion. `--start-at X` requeues `X` and every
 later step, so the run is hydrated live with totals derived from the steps even
 when the snapshot had passed; attempts, retries and spend are kept.
 
 In [reconcile mode](dsl.md#reconcile-mode) the selectors last one invocation, so
-the snapshot never holds an exclusion: boot applies none of them (it still
-requeues for `--start-at`) and drops an `excluded` mark a default-mode
-invocation left. The step loop applies them instead (`step/step-loop.ts`): a
+the snapshot never holds an exclusion: boot excludes nothing (it still
+requeues for `--start-at`) and has the `excluded` mark a default-mode
+invocation left dropped. The step loop applies them instead (`step/step-loop.ts`): a
 step they leave out is journaled as `step.skipped` with the reason
 `operator selection`, and the run outcome carries the ids, which the final
 report counts. A `done` step stays `done` and a pending one becomes `skipped`,

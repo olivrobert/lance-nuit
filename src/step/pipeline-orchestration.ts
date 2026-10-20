@@ -8,8 +8,7 @@ import { errorMessage } from "../lib/errors.js";
 import type { PipelineLot } from "../model/context.js";
 import type { PipelineInvocationDefinition, PipelineOrchestrationDefinition } from "../model/definition.js";
 import { resolveTemplateAsync } from "../model/definition.js";
-import type { PersistedPipelineChildRef, PersistedPipelineOrchestrationState } from "../model/persisted.js";
-import type { RunStep } from "../model/run.js";
+import type { ChildRefView, OrchestrationView, RunStepView } from "../model/run.js";
 import {
   commitChildCall,
   declareChild,
@@ -55,17 +54,17 @@ function invocationForMain(def: PipelineOrchestrationDefinition, ticket?: string
     : { pipeline: def.pipeline, ticket };
 }
 
-function refTicket(ref: PersistedPipelineChildRef, fallback?: string): string | undefined {
+function refTicket(ref: ChildRefView, fallback?: string): string | undefined {
   return ref.ticket ?? fallback;
 }
 
 async function executeCallback(
   input: PipelineOrchestrationInput,
-  state: PersistedPipelineOrchestrationState,
-  step: RunStep,
+  state: OrchestrationView,
+  step: RunStepView,
   callback: PipelineInvocationDefinition,
   key: string,
-  kind: PersistedPipelineChildRef["kind"],
+  kind: ChildRefView["kind"],
   defaultTicket: string | undefined,
   defaultLot: PipelineLot | undefined,
 ): Promise<ChildExecutionResult> {
@@ -105,7 +104,7 @@ async function executeCallback(
 async function executeRunPipeline(
   input: PipelineOrchestrationInput,
   def: Extract<PipelineOrchestrationDefinition, { kind: "runPipeline" }>,
-  state: PersistedPipelineOrchestrationState,
+  state: OrchestrationView,
 ): Promise<PipelineOrchestrationResult> {
   const existing = state.children.find((candidate) => candidate.key === "main");
   const ticket = existing?.ticket ?? (await resolveTicket(def.ticket, input.baseCtx, input.baseCtx.ticket));
@@ -120,7 +119,7 @@ async function executeRunPipeline(
 async function executeForEachPipeline(
   input: PipelineOrchestrationInput,
   def: Extract<PipelineOrchestrationDefinition, { kind: "forEachPipeline" }>,
-  state: PersistedPipelineOrchestrationState,
+  state: OrchestrationView,
 ): Promise<PipelineOrchestrationResult> {
   let items = state.items;
   if (!items) {

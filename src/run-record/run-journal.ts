@@ -20,7 +20,7 @@ import type {
   RunJournalEventType,
   RunJournalKnownEvent,
 } from "../model/journal.js";
-import type { Run } from "../model/run.js";
+import type { Run } from "./run.js";
 import { FileRunEventStore } from "./stores/file-run-event-store.js";
 
 export type { JournalEntry, RunJournalCounts, RunJournalEvent } from "../model/journal.js";

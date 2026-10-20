@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_MODEL } from "../engine/backends/codex/types.js";
-import type { Run } from "../model/run.js";
+import type { Run } from "../run-record/run.js";
 import { createLogRef, type RunLogStore } from "../model/storage-ports.js";
 import { makeRunStep } from "../run-record/run-step.js";
 import { appendRunEvent } from "../run-record/run-journal.js";

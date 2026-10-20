@@ -10,7 +10,7 @@ import { extractErrors } from "../exec/report-extraction.js";
 import { executeStep, type StepResult } from "../exec/runners.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../model/context.js";
 import { reconcilable, rerunsOnResume } from "../model/definition.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { type AbortScope, createAbortScope } from "../runtime/abort.js";
@@ -48,7 +48,7 @@ import { resolveOutcome } from "./step-outcome.js";
 export type { StepAdmission };
 export { admitStep, checkInputs, resolveOutcome };
 
-function emitPipelineStep(run: Run, step: RunStep, index: number, total: number): void {
+function emitPipelineStep(run: RunView, step: RunStepView, index: number, total: number): void {
   // Keep the existing pipeline-step event on the runtime bus. Other progress
   // events use the injected output fan-out below.
   emitRunnerEvent({
@@ -97,8 +97,8 @@ export type { RunOutcome } from "../run-record/index.js";
  * does for retries and fixes.
  */
 async function runInitialAttempt(input: {
-  run: Run;
-  step: RunStep;
+  run: RunView;
+  step: RunStepView;
   command: string;
   context: PipelineContext;
   stepLogDir: string;
@@ -161,7 +161,7 @@ export interface ExecuteRunStepsOptions {
  * selection does. `--start-at` keeps its scope: before the target, only work
  * still owed is left out, and a `done` step is re-admitted as usual.
  */
-function leftOutBySelection(run: Run, step: RunStep, opts: ExecuteRunStepsOptions): boolean {
+function leftOutBySelection(run: RunView, step: RunStepView, opts: ExecuteRunStepsOptions): boolean {
   if (opts.stepFilter && !opts.stepFilter.some((selector) => matchesStepSelector(step.id, selector))) return true;
   if (opts.skipFilter?.some((selector) => matchesStepSelector(step.id, selector))) return true;
   if (opts.startAt === undefined) return false;
@@ -171,7 +171,7 @@ function leftOutBySelection(run: Run, step: RunStep, opts: ExecuteRunStepsOption
 
 /** The step `--until` names. Boot already refused an unknown id with the list of
  *  steps; reaching here without one is a caller bug, not an operator typo. */
-function untilStepOf(run: Run, until: string | undefined): RunStep | undefined {
+function untilStepOf(run: RunView, until: string | undefined): RunStepView | undefined {
   if (until === undefined) return undefined;
   const step = run.steps.find((candidate) => candidate.id === until);
   if (!step) throw new Error(`--until: step "${until}" is not a step of pipeline "${run.name}"`);
@@ -184,7 +184,7 @@ function untilStepOf(run: Run, until: string | undefined): RunStep | undefined {
  * invocation did not fund, not work anyone decided to skip, and only `pending`
  * keeps the run resumable.
  */
-function stopAtBound(run: Run, bound: RunStep, output: RunOutput): void {
+function stopAtBound(run: RunView, bound: RunStepView, output: RunOutput): void {
   const detail = `stop requested by --until after ${bound.def.name}: rerun to continue`;
   stopRun(run, bound, detail, { kind: "until", detail });
   output.emit({ type: "runner.message", level: "info", message: `⏹ ${bound.def.name} — ${detail}` });
@@ -195,7 +195,7 @@ function stopAtBound(run: Run, bound: RunStep, output: RunOutput): void {
  * The step owes the decision the next invocation's admission will ask for
  * (replay authorization, or a new pass), so the run stays resumable.
  */
-function stopOnUnfinishedSelection(run: Run, step: RunStep, output: RunOutput): void {
+function stopOnUnfinishedSelection(run: RunView, step: RunStepView, output: RunOutput): void {
   const replay = lastPassInterrupted(step)
     ? "; the runner died in its last attempt, so that rerun will ask for --replay-interrupted"
     : "";
@@ -207,7 +207,7 @@ function stopOnUnfinishedSelection(run: Run, step: RunStep, output: RunOutput): 
 }
 
 export async function executeRunSteps(
-  run: Run,
+  run: RunView,
   ticket: string | undefined,
   baseBranch: string | undefined,
   opts: ExecuteRunStepsOptions,
@@ -236,7 +236,7 @@ export async function executeRunSteps(
     let costUnaccountedStop = false;
     let boundReached = false;
     const setAside: string[] = [];
-    let leftUnfinished: RunStep | undefined;
+    let leftUnfinished: RunStepView | undefined;
     const bound = untilStepOf(run, opts.until);
     const baseCtx = context ?? buildContext(ticket, baseBranch);
     const isAborted = () => abort.isRunAborted(run);

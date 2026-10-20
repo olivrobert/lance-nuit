@@ -15,7 +15,9 @@
 
 import type { AgentSession, AttemptStats, StepFailCause, StepFailKind } from "../contracts/backends.js";
 import type { PersistedAttempt } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunAttemptView, RunStepView, RunView } from "../model/run.js";
+import type { Run, RunStep } from "./run.js";
+import { writable } from "./run.js";
 import { closeAttempt } from "./attempt-closure.js";
 import type { RunBudget } from "./budget.js";
 import { chargeAttemptToLedger, isUnpricedSpend } from "./cost-accounting.js";
@@ -28,7 +30,7 @@ import { recordStepVerdict } from "./run-transitions.js";
 /** An attempt registered on its step, with the local path its log is written to. */
 export interface OpenedAttempt {
   /** The running attempt: every closer identifies the attempt by this object. */
-  attempt: PersistedAttempt;
+  attempt: RunAttemptView;
   /** Where the spawned process writes its output, on this machine. */
   logPath: string;
 }
@@ -69,7 +71,9 @@ export interface AttemptOpening {
  * journal `step.attempt.started`, and persist the snapshot BEFORE spawn — a kill
  * may come before the runner can persist anything else.
  */
-export function openAttempt(run: Run, step: RunStep, opening: AttemptOpening): OpenedAttempt {
+export function openAttempt(runView: RunView, stepView: RunStepView, opening: AttemptOpening): OpenedAttempt {
+  const run = writable(runView);
+  const step = writable(stepView);
   const opened = allocateAttempt(run, step, opening.kind);
   if (opening.command) {
     try {
@@ -125,13 +129,15 @@ export interface CostWarning {
  * closer wrote stands.
  */
 export function settleAttempt(
-  run: Run,
-  step: RunStep,
+  runView: RunView,
+  stepView: RunStepView,
   opened: OpenedAttempt,
   result: AttemptResult,
   budget: RunBudget,
 ): { costWarning?: CostWarning } {
-  const { attempt } = opened;
+  const run = writable(runView);
+  const step = writable(stepView);
+  const attempt = writable(opened.attempt);
   const logPath = run.logStore
     ? logicalAttemptLogPath(step.id, attempt.attempt)
     : (relativeRunPath(run.run_dir, opened.logPath) ?? attempt.log_path);

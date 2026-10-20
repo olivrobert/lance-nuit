@@ -9,6 +9,7 @@ import { buildPipelineContext } from "../../pipeline/context.js";
 import { loadOrCreateRun } from "../../boot/resume.js";
 import { isPersistedRunComplete, isPersistedRunResumable } from "../run-predicates.js";
 import { commandRegistries } from "../../commands/registries.js";
+import { writable } from "../run.js";
 
 interface SaveAtCall {
   snapshot: PersistedRun;
@@ -136,7 +137,7 @@ test("run-state-store: validates the integration contract", async () => {
     runnerDir: root,
   });
 
-  const { run } = await loadOrCreateRun({ pipelinePath, runDir, fresh: true, context, stateStore: store });
+  const run = writable((await loadOrCreateRun({ pipelinePath, runDir, fresh: true, context, stateStore: store })).run);
 
   expect(run.run_dir).toBe(runDir);
   expect(run.stateStore).toBe(store);

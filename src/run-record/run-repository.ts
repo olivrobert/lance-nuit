@@ -6,7 +6,7 @@
 
 import { basename, isAbsolute, relative } from "node:path";
 import type { PersistedRun, PersistedStepState } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { Run, RunStep } from "./run.js";
 import { FileRunStateStore } from "./stores/file-run-state-store.js";
 
 /** Extract persistable step state without its definition.

@@ -12,8 +12,7 @@
 // step-attempt.ts.
 
 import type { AgentSession, AttemptStats, StepFailCause, StepFailKind } from "../contracts/backends.js";
-import type { PersistedAttempt } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunAttemptView, RunStepView, RunView } from "../model/run.js";
 import type { RunBudget } from "../run-record/index.js";
 
 /** `step` replays the step command (initial, rerun, or retry after a fix);
@@ -46,11 +45,11 @@ export interface AttemptRecord {
 export type AttemptBudget = RunBudget;
 
 export interface AttemptContext {
-  readonly run: Run;
-  readonly step: RunStep;
+  readonly run: RunView;
+  readonly step: RunStepView;
   /** The running attempt this chain wraps. Middleware reads its `status` to know
    * whether another path (signal handler) already closed it. */
-  readonly attempt: PersistedAttempt;
+  readonly attempt: RunAttemptView;
   readonly kind: AttemptKind;
   /** Resolved step command or fix prompt. */
   readonly command: string;

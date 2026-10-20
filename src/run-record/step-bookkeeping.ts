@@ -15,7 +15,8 @@
 // unfinished outputs (journal only: the skip's status goes through `updateStep`).
 
 import type { AgentSession } from "../contracts/backends.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
+import { writable } from "./run.js";
 import { appendRunEvent } from "./run-journal.js";
 import { saveRun } from "./run-repository.js";
 
@@ -28,7 +29,9 @@ export type RetryQuota = "retries" | "timeout_retries";
  * runs, so a resume finds the quota spent by an attempt that had its chance.
  * Returns the attempts the quota has now consumed.
  */
-export function consumeRetry(run: Run, step: RunStep, quota: RetryQuota): number {
+export function consumeRetry(runView: RunView, stepView: RunStepView, quota: RetryQuota): number {
+  const run = writable(runView);
+  const step = writable(stepView);
   const consumed = (step[quota] ?? 0) + 1;
   step[quota] = consumed;
   saveRun(run);
@@ -47,7 +50,9 @@ export interface CostCut {
  * resume must still be able to run this one instead of reporting the quota as
  * consumed. Returns whether the quota was refunded.
  */
-export function refundRetry(run: Run, step: RunStep, quota: RetryQuota, attempt: CostCut): boolean {
+export function refundRetry(runView: RunView, stepView: RunStepView, quota: RetryQuota, attempt: CostCut): boolean {
+  const run = writable(runView);
+  const step = writable(stepView);
   if (!attempt.budgetExceeded && !attempt.costUnaccounted) return false;
   step[quota] = (step[quota] ?? 0) - 1;
   saveRun(run);
@@ -60,22 +65,25 @@ export function refundRetry(run: Run, step: RunStep, quota: RetryQuota, attempt:
  * the step it resumed. A later gate or repair resumes the session the snapshot
  * names, so it is persisted at once.
  */
-export function bindSession(run: Run, step: RunStep, session: AgentSession): void {
+export function bindSession(runView: RunView, stepView: RunStepView, session: AgentSession): void {
+  const run = writable(runView);
+  const step = writable(stepView);
   step.session = session;
   saveRun(run);
 }
 
 /** The command a step was last given, resolved. Memory only: the snapshot
  *  leaves it out, since it is the full agent prompt. */
-export function recordLastCommand(step: RunStep, command: string): void {
+export function recordLastCommand(stepView: RunStepView, command: string): void {
+  const step = writable(stepView);
   step.last_command = command;
 }
 
 /** A source the step declares and could not read: its freshness is unknown and
  *  the step runs, and the journal is where a diagnosis learns why. */
 export function recordUnavailableSource(
-  run: Run,
-  step: RunStep,
+  run: RunView,
+  step: RunStepView,
   unavailable: { source: string; reason: string },
 ): void {
   appendRunEvent(run, "step.source.unavailable", {
@@ -88,13 +96,13 @@ export function recordUnavailableSource(
 /** Why admission skipped a step. Journaled before the status it settles the
  *  step on (`updateStep`), or alone when the step keeps its status: the console
  *  line is transient, and a later diagnosis reads the journal. */
-export function recordSkip(run: Run, step: RunStep, skip: { reason: string; freshness?: string }): void {
+export function recordSkip(run: RunView, step: RunStepView, skip: { reason: string; freshness?: string }): void {
   appendRunEvent(run, "step.skipped", { stepId: step.id, reason: skip.reason, freshness: skip.freshness });
 }
 
 /** Outputs an attempt that never succeeded left behind, which make the step run
  *  whatever the run remembers of that attempt: the journal says which. */
-export function recordUnfinishedOutputs(run: Run, step: RunStep, outputs: readonly string[]): void {
+export function recordUnfinishedOutputs(run: RunView, step: RunStepView, outputs: readonly string[]): void {
   appendRunEvent(run, "step.outputs.unfinished", { stepId: step.id, outputs: [...outputs] });
 }
 
@@ -109,7 +117,8 @@ export interface RecordedDecision {
 
 /** Journal the decision the invocation recorded, then persist the run. A
  *  decision that is not a rejection is journaled as an approval. */
-export function recordDecision(run: Run, recorded: RecordedDecision): void {
+export function recordDecision(runView: RunView, recorded: RecordedDecision): void {
+  const run = writable(runView);
   appendRunEvent(run, "decision.recorded", {
     subject: recorded.subject,
     decision: recorded.decision === "rejected" ? "rejected" : "approved",

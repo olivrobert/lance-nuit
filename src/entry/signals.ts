@@ -6,7 +6,7 @@
 
 import { forceKillAllChildren, killAllChildren, shutdownAllChildren } from "../exec/process-supervision.js";
 import { errorMessage } from "../lib/errors.js";
-import type { Run } from "../model/run.js";
+import type { RunView } from "../model/run.js";
 import type { AbortScope } from "../runtime/abort.js";
 import { liveAttemptCost, liveAttemptModel } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
@@ -35,7 +35,7 @@ import { NO_STACK_STOP, type StackStop } from "./stack-stop.js";
  */
 export function installChildKillHandlers(
   abort: AbortScope,
-  getActiveRun: () => Run | undefined,
+  getActiveRun: () => RunView | undefined,
   getStackStop: () => StackStop = () => NO_STACK_STOP,
 ): void {
   // `exit` cannot await a promise; this synchronous fallback immediately kills

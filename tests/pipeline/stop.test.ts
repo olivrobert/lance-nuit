@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bashStep, llmStep, pipeline } from "../../src/dsl.js";
-import type { Run, RunStep } from "../../src/model/run.js";
+import type { Run, RunStep } from "../../src/run-record/run.js";
 import { isPersistedRunResumable, pendingSteps } from "../../src/run-record/run-predicates.js";
 import { readRunSnapshot } from "../../src/run-record/run-snapshot.js";
 import { deriveRunStatus } from "../../src/run-record/run-verdict.js";

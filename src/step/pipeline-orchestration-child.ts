@@ -14,8 +14,7 @@ import { loadOrCreateRun } from "../boot/resume.js";
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineContext, PipelineLot } from "../model/context.js";
 import type { PipelineInvocationDefinition } from "../model/definition.js";
-import type { PersistedPipelineChildRef } from "../model/persisted.js";
-import type { Run } from "../model/run.js";
+import type { ChildRefView, RunView } from "../model/run.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import {
   bindChildRun,
@@ -84,7 +83,7 @@ function allocateChildRunId(pipeline: string, ticket: string | undefined, ctx: P
  * items stay `pending` and the fan-out resumes where it stopped.
  */
 export function childLaunchGate(
-  parent: Run,
+  parent: RunView,
   budget: RunBudget,
   key: string,
   stepId: string | null = null,
@@ -118,7 +117,7 @@ interface ChildLoopOutcome {
 /** Execute or resume one persisted child reference and reconcile its usage. */
 export async function executeChild(
   input: PipelineOrchestrationInput,
-  ref: PersistedPipelineChildRef,
+  ref: ChildRefView,
   invocation: PipelineInvocationDefinition,
   defaultTicket: string | undefined,
   defaultLot: PipelineLot | undefined,
@@ -165,7 +164,7 @@ export async function executeChild(
   //    snapshot: a missing or damaged one is refused instead of becoming a second
   //    child under the same id. A boot failure leaves the reference resumable.
   const stateStore = new FileRunStateStore({ context: childCtx, pipeline: childDefinition.name, ticket });
-  let childRun: Run;
+  let childRun: RunView;
   let childResumed: boolean;
   try {
     ({ run: childRun, resumed: childResumed } = await loadOrCreateRun({

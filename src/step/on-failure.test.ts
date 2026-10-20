@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StepResult } from "../exec/runners.ts";
 import type { PipelineStep, StepFailure } from "../model/definition.ts";
-import type { Run, RunStep } from "../model/run.ts";
+import type { Run, RunStep } from "../run-record/run.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { createDefaultAgentBackendRegistry } from "../engine/default-registry.ts";
 import { stepLogPath } from "../run-record/run-timeline.ts";

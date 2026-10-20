@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { textArtifact } from "../dsl/artifact.ts";
 import type { RunnerArgs } from "../model/cli-options.ts";
 import type { PipelineStep } from "../model/definition.ts";
-import type { Run, RunStep } from "../model/run.ts";
+import type { Run, RunStep } from "../run-record/run.ts";
 import { makeRunStep, type StepStateInput } from "../run-record/run-step.ts";
 import { announceRun } from "./execution.ts";
 

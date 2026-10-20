@@ -4,7 +4,7 @@
 // live in internal modules; this file keeps the API.
 
 import type { PipelineContext } from "../model/context.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import type { RunBudget } from "../run-record/index.js";
 import { type FixLoopOpts, prepareFixRun } from "./fix-loop-runtime.js";
 import { runFixRetryLoop } from "./fix-loop-strategies.js";
@@ -18,8 +18,8 @@ export { buildFixContext } from "./fix-loop-runtime.js";
  * step instead of a fresh one, and writes the forked session back to that step.
  */
 export async function runFixLoop(
-  run: Run,
-  step: RunStep,
+  run: RunView,
+  step: RunStepView,
   command: string,
   output: string,
   baseCtx: PipelineContext,

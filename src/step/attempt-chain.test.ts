@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Run } from "../model/run.ts";
+import type { Run } from "../run-record/run.ts";
 import { type AttemptContext, type AttemptMiddleware, type AttemptRecord, compose } from "./attempt-chain.ts";
 import { makeRunStep } from "../run-record/run-step.ts";
 

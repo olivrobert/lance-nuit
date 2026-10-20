@@ -1,6 +1,6 @@
 import { relative, resolve } from "node:path";
 import type { AgentBackendRegistry, StepControl, StepUsage } from "../contracts/backends.js";
-import type { RunStep, RunView } from "../model/run.js";
+import type { DeepReadonly, RunStepView, RunView } from "../model/run.js";
 import { log, writeStderr } from "../runtime/logging.js";
 import { bold, cyan, dim, gray, green, red, type Style, yellow } from "./color.js";
 import { formatContextShare, formatDuration } from "./format.js";
@@ -67,7 +67,7 @@ export function fmtContextShare(control?: StepControl): string | undefined {
   return formatContextShare(tokens / window);
 }
 
-function metrics(control?: StepControl, usage?: StepUsage): string[] {
+function metrics(control?: StepControl, usage?: DeepReadonly<StepUsage>): string[] {
   const parts: string[] = [];
   const duration = formatDuration(control?.duration_ms);
   if (duration) parts.push(duration);
@@ -110,7 +110,7 @@ function withContext(parts: string[], control?: StepControl): string[] {
   return context ? [...parts, context] : parts;
 }
 
-export function fmtInlineStats(control?: StepControl, usage?: StepUsage): string {
+export function fmtInlineStats(control?: StepControl, usage?: DeepReadonly<StepUsage>): string {
   const painted = paintMetrics(withContext(metrics(control, usage), control), contextHighlight(control));
   return painted ? ` ${dim("·")} ${painted}` : "";
 }
@@ -278,7 +278,7 @@ export function consoleReport(
   new ConsoleRunReporter().report(buildRunReport(run, outcome, options));
 }
 
-export function logStepStarted(step: RunStep, index: number, total: number): void {
+export function logStepStarted(step: RunStepView, index: number, total: number): void {
   log(`\n${dim("┌─")} ${bold(step.def.name)}${dim(` · ${index}/${total}`)}`);
 }
 
@@ -290,13 +290,13 @@ export function logStepLogs(path: string, live: boolean): void {
   log(dim(`│  logs     ${path}${live ? " · live: tail -F" : ""}`));
 }
 
-export function logStepDone(step: RunStep, suffix = ""): void {
+export function logStepDone(step: RunStepView, suffix = ""): void {
   log(`${dim("└─")} ${green("✓ Completed")}${suffix}${fmtInlineStats(step.control, step.usage)}`);
   const hint = stepResumeHint(step);
   if (hint) log(`   ${cyan("↻")} ${hint}`);
 }
 
-export function logStepFailed(step: RunStep, suffix = ""): void {
+export function logStepFailed(step: RunStepView, suffix = ""): void {
   // A block outranks the kind in the label: printing "Error" or "Failed" sends an
   // operator to the logs of a step that ran fine, when the environment is what
   // has to change.

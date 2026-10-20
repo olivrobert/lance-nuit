@@ -26,6 +26,7 @@ import { selectExplicitRun } from "../run-record/run-selection.js";
 import { commandRegistries } from "../commands/registries.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { executeRunSteps, type StepLoopDeps } from "../step/step-loop.js";
+import { writable } from "../run-record/run.js";
 
 function pipelineFile(root: string): string {
   const path = join(root, "p.ts");
@@ -111,7 +112,9 @@ test("resume: a guard stop is kept until --budget approves more spend", async ()
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-3" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-3", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-3", runDir: dir, fresh: false, context: ctx });
+  const run = writable(
+    (await loadOrCreateRun({ pipelinePath: path, ticket: "T-3", runDir: dir, fresh: false, context: ctx })).run,
+  );
   run.budget_exceeded = true;
   updateStep(run, run.steps[0]!, "failed", "process killed: budget exceeded");
   expect(readRunSnapshot(join(dir, "state.json"))?.budget_exceeded).toBe(true);
@@ -177,13 +180,17 @@ for (const ending of ["STOPPED", "FAIL"] as const) {
     const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-5" });
     const path = pipelineFile(root);
     const dir = resolveRunDir("p", "T-5", undefined, true, ctx);
-    const { run } = await loadOrCreateRun({
-      pipelinePath: path,
-      ticket: "T-5",
-      runDir: dir,
-      fresh: false,
-      context: ctx,
-    });
+    const run = writable(
+      (
+        await loadOrCreateRun({
+          pipelinePath: path,
+          ticket: "T-5",
+          runDir: dir,
+          fresh: false,
+          context: ctx,
+        })
+      ).run,
+    );
     updateStep(run, run.steps[0]!, "done");
     updateStep(run, run.steps[1]!, "done");
     if (ending === "STOPPED") {
@@ -360,7 +367,9 @@ test("resume: the snapshot total wins when it already covers the journaled attem
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-5" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-5", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-5", runDir: dir, fresh: false, context: ctx });
+  const run = writable(
+    (await loadOrCreateRun({ pipelinePath: path, ticket: "T-5", runDir: dir, fresh: false, context: ctx })).run,
+  );
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
   appendRunEvent(run, "step.attempt.finished", {
     stepId: "a",
@@ -388,7 +397,9 @@ test("resume: a fix pass left running by a crash is closed as failed and unprice
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-6", runDir: dir, fresh: false, context: ctx });
+  const run = writable(
+    (await loadOrCreateRun({ pipelinePath: path, ticket: "T-6", runDir: dir, fresh: false, context: ctx })).run,
+  );
   updateStep(run, run.steps[0]!, "running");
   // A priced step attempt, then a fix pass that never reported: the runner died.
   run.steps[0]!.control = { duration_ms: 5, total_cost_usd: 1, model: "m" };
@@ -451,13 +462,17 @@ test("resume: an attempt left running by a crash is projected as interrupted on 
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6b" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6b", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-6b",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-  });
+  const run = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-6b",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+      })
+    ).run,
+  );
   updateStep(run, run.steps[0]!, "running");
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
   saveRun(run);
@@ -553,7 +568,8 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
 
 /** Leave step `id` as a runner death leaves it: `running`, its attempt started
  *  and never finished. */
-function crashDuring(run: Awaited<ReturnType<typeof loadOrCreateRun>>["run"], id: string): void {
+function crashDuring(opened: Awaited<ReturnType<typeof loadOrCreateRun>>["run"], id: string): void {
+  const run = writable(opened);
   const step = run.steps.find((candidate) => candidate.id === id)!;
   updateStep(run, step, "running");
   const attempt = step.attempts.length + 1;
@@ -662,13 +678,17 @@ test("resume: a --start-at replay interrupted by a second crash stops the next r
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6e" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6e", undefined, true, ctx);
-  const { run: initial } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-6e",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-  });
+  const initial = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-6e",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+      })
+    ).run,
+  );
   for (const step of initial.steps) updateStep(initial, step, "done");
   saveRun(initial);
 
@@ -1053,13 +1073,17 @@ test("--start-at leaves a done step before it to the resume re-check instead of 
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-start" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-start", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-start",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-  });
+  const run = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-start",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+      })
+    ).run,
+  );
   updateStep(run, run.steps[0]!, "done");
   saveRun(run);
 
@@ -1118,13 +1142,17 @@ test("resume: materialized totals are trusted on a terminal snapshot and derived
 
   // A PASS run: nothing left to execute, so the finalized totals are the record.
   const passDir = resolveRunDir("p", "T-totals", undefined, true, ctx);
-  const { run: passed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-totals",
-    runDir: passDir,
-    fresh: false,
-    context: ctx,
-  });
+  const passed = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-totals",
+        runDir: passDir,
+        fresh: false,
+        context: ctx,
+      })
+    ).run,
+  );
   for (const step of passed.steps) {
     step.control = { duration_ms: 1, total_cost_usd: 1 };
     updateStep(passed, step, "done");
@@ -1144,13 +1172,17 @@ test("resume: materialized totals are trusted on a terminal snapshot and derived
   // A run with work left: a total written by an earlier generation is dropped, and
   // the ledger seed reads the steps, which know of the spend that came after it.
   const liveDir = resolveRunDir("p", "T-totals", undefined, true, ctx);
-  const { run: live } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-totals",
-    runDir: liveDir,
-    fresh: false,
-    context: ctx,
-  });
+  const live = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-totals",
+        runDir: liveDir,
+        fresh: false,
+        context: ctx,
+      })
+    ).run,
+  );
   live.steps[0]!.control = { duration_ms: 1, total_cost_usd: 1 };
   updateStep(live, live.steps[0]!, "done");
   live.total_control = { duration_ms: 1, total_cost_usd: 0.25 };
@@ -1186,14 +1218,18 @@ test("resume: a failed journal append keeps the attempt numbering through the sn
     },
     read: () => journal as never[],
   };
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-append",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    eventStore,
-  });
+  const run = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-append",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+        eventStore,
+      })
+    ).run,
+  );
   updateStep(run, run.steps[0]!, "running");
   const first = allocateAttempt(run, run.steps[0]!, "step").logPath;
   expect(first).toContain("attempt-001");
@@ -1202,14 +1238,18 @@ test("resume: a failed journal append keeps the attempt numbering through the sn
   updateStep(run, run.steps[0]!, "failed", "boom");
   expect(readRunSnapshot(join(dir, "state.json"))?.steps[0]?.last_attempt).toBe(1);
 
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-append",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    eventStore,
-  });
+  const resumed = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-append",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+        eventStore,
+      })
+    ).run,
+  );
   const step = resumed.steps[0]!;
   // The attempt itself is gone with the journal; its number and its spend are not.
   expect(step.attempts).toEqual([]);
@@ -1259,7 +1299,7 @@ test("resume: loading the same run twice neither adds spend nor reuses an attemp
     fresh: false,
     context: ctx,
   });
-  for (const resumed of [once, twice]) {
+  for (const resumed of [once, twice].map((opened) => writable(opened))) {
     expect(resumed.steps[0]!.attempts.map((attempt) => attempt.attempt)).toEqual([1]);
     expect(resumed.steps[0]!.control?.total_cost_usd).toBe(1);
     expect(resumed.steps[0]!.usage?.input_tokens).toBe(10);
@@ -1276,13 +1316,17 @@ test("resume: --start-at requeues the target and every later step, keeping their
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-start" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-start", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-start",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-  });
+  const run = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-start",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+      })
+    ).run,
+  );
   updateStep(run, run.steps[0]!, "done");
   run.steps[1]!.retries = 1;
   run.steps[1]!.last_attempt = 2;
@@ -1402,13 +1446,17 @@ test("resume: --start-at on an explicitly selected PASS run replays from the tar
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-pass" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-pass", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-pass",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-  });
+  const run = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-pass",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+      })
+    ).run,
+  );
   for (const step of run.steps) {
     step.control = { duration_ms: 1, total_cost_usd: 1 };
     updateStep(run, step, "done");
@@ -1444,13 +1492,17 @@ test("resume: --start-at refuses to replay a composed step whose children alread
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-comp" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-comp", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-comp",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-  });
+  const run = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-comp",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+      })
+    ).run,
+  );
   run.steps[1]!.orchestration = {
     kind: "runPipeline",
     children: [{ key: "main", kind: "main", pipeline: "child", status: "done", accountedCostUsd: 0 }],
@@ -1539,27 +1591,35 @@ test("reconcile: a resume applies no selector at boot and drops an exclusion a l
     const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-inh" });
     const legacy = reconcilePipelineFile(root, "legacy.ts", "legacy");
     const dir = resolveRunDir("p", "T-inh", undefined, true, ctx);
-    const { run } = await loadOrCreateRun({
-      pipelinePath: legacy,
-      ticket: "T-inh",
-      skipFilter: ["b"],
-      runDir: dir,
-      fresh: false,
-      context: ctx,
-    });
+    const run = writable(
+      (
+        await loadOrCreateRun({
+          pipelinePath: legacy,
+          ticket: "T-inh",
+          skipFilter: ["b"],
+          runDir: dir,
+          fresh: false,
+          context: ctx,
+        })
+      ).run,
+    );
     expect(run.steps[1]).toMatchObject({ status: "skipped", excluded: true });
     expect(run.reconcile).toBe(false);
     saveRun(run);
 
     const reconciled = reconcilePipelineFile(root, "reconciled.ts", "reconcile");
-    const { run: resumed } = await loadOrCreateRun({
-      pipelinePath: reconciled,
-      ticket: "T-inh",
-      skipFilter: ["c"],
-      runDir: dir,
-      fresh: false,
-      context: ctx,
-    });
+    const resumed = writable(
+      (
+        await loadOrCreateRun({
+          pipelinePath: reconciled,
+          ticket: "T-inh",
+          skipFilter: ["c"],
+          runDir: dir,
+          fresh: false,
+          context: ctx,
+        })
+      ).run,
+    );
 
     // b stays skipped, which the loop re-admits; c owes work the loop sets aside.
     expect(resumed.steps.map((step) => step.status)).toEqual(["pending", "skipped", "pending"]);

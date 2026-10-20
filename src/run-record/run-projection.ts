@@ -11,7 +11,7 @@
 
 import type { RunJournalEvent } from "../model/journal.js";
 import type { PersistedAttempt, PersistedRun, PersistedStepState } from "../model/persisted.js";
-import type { Run } from "../model/run.js";
+import type { Run } from "./run.js";
 import { closeAttempt } from "./attempt-closure.js";
 import { projectStepAttempts } from "./attempt-projection.js";
 import { projectStepSpend } from "./cost-accounting.js";

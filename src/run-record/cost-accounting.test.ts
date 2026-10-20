@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StepControl, StepUsage } from "../contracts/backends.js";
 import type { PersistedAttempt, PersistedPipelineChildRef } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { Run, RunStep } from "./run.js";
 import type { RunBudget } from "./budget.js";
 import {
   aggregateControl,

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "../model/run.js";
+import type { Run } from "./run.js";
 import { ConsoleRunReporter } from "../output/console-reporter.js";
 import { buildRunReport } from "../output/run-report.js";
 import { readRunEvents } from "./run-journal.js";

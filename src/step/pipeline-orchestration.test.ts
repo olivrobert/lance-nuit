@@ -16,6 +16,7 @@ import { pipelineRunsDir } from "../run-record/stores/run-storage.js";
 import { createAbortScope } from "../runtime/abort.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { executeRunSteps, stepLoopDeps } from "./step-loop.js";
+import { writable } from "../run-record/run.js";
 
 const REGISTRY = createDefaultAgentBackendRegistry();
 const COST_BACKEND = `pipeline-compose-cost-${process.pid}`;
@@ -151,13 +152,17 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
 `,
   );
   const parentRunDir = join(root, "parent-run");
-  const { run: parent } = await loadOrCreateRun({
-    pipelinePath: parentPath,
-    ticket: "P",
-    runDir: parentRunDir,
-    fresh: true,
-    context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
-  });
+  const parent = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: parentPath,
+        ticket: "P",
+        runDir: parentRunDir,
+        fresh: true,
+        context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+      })
+    ).run,
+  );
   const parentStep = parent.steps[0]!;
   const childRunId = "verdict-child";
   const childCtx = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
@@ -233,13 +238,17 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
 `,
   );
   const parentRunDir = join(root, "parent-run");
-  const { run: parent } = await loadOrCreateRun({
-    pipelinePath: parentPath,
-    ticket: "P",
-    runDir: parentRunDir,
-    fresh: true,
-    context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
-  });
+  const parent = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: parentPath,
+        ticket: "P",
+        runDir: parentRunDir,
+        fresh: true,
+        context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+      })
+    ).run,
+  );
   const parentStep = parent.steps[0]!;
   const childRunId = "blocked-child";
   const childCtx = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
@@ -400,13 +409,17 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
 `,
   );
   const parentRunDir = join(root, "parent-run");
-  const { run: parent } = await loadOrCreateRun({
-    pipelinePath: parentPath,
-    ticket: "P",
-    runDir: parentRunDir,
-    fresh: true,
-    context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
-  });
+  const parent = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: parentPath,
+        ticket: "P",
+        runDir: parentRunDir,
+        fresh: true,
+        context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+      })
+    ).run,
+  );
   const parentStep = parent.steps[0]!;
   const childRunId = "stopped-child";
   const childContext = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
@@ -770,13 +783,17 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
       },
     },
   });
-  const { run: parent } = await loadOrCreateRun({
-    pipelinePath: parentPath,
-    ticket: "P",
-    runDir: join(root, "parent-run"),
-    fresh: true,
-    context,
-  });
+  const parent = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: parentPath,
+        ticket: "P",
+        runDir: join(root, "parent-run"),
+        fresh: true,
+        context,
+      })
+    ).run,
+  );
   const parentStep = parent.steps[0]!;
   const childContext = buildPipelineContext({
     cwd: root,
@@ -1206,13 +1223,17 @@ test("pipeline-orchestration: re-reconciling a child that costs nothing new keep
 
   // First pass: the child spends tokens at an unknown price, so the parent stops
   // before the child's second step and the node is reconciled once.
-  const { run: parent } = await loadOrCreateRun({
-    pipelinePath: parentPath,
-    ticket: "P",
-    runDir,
-    fresh: true,
-    context,
-  });
+  const parent = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: parentPath,
+        ticket: "P",
+        runDir,
+        fresh: true,
+        context,
+      })
+    ).run,
+  );
   const outcome = await executeRunSteps(
     parent,
     "P",
@@ -1389,13 +1410,17 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
   );
   const parentRunDir = join(root, "parent-run");
   const context = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
-  const { run: parent } = await loadOrCreateRun({
-    pipelinePath: parentPath,
-    ticket: "P",
-    runDir: parentRunDir,
-    fresh: true,
-    context,
-  });
+  const parent = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: parentPath,
+        ticket: "P",
+        runDir: parentRunDir,
+        fresh: true,
+        context,
+      })
+    ).run,
+  );
   const parentStep = parent.steps[0]!;
   const childRunId = "named-child";
   parentStep.status = "running";
@@ -1527,7 +1552,7 @@ test("pipeline-orchestration: a child already finished is settled without runnin
 
   const first = await executeParent(parentPath, root, "P", runDir, true, context);
   expect(first.run.status).toBe("PASS");
-  const firstStep = first.run.steps[0]!;
+  const firstStep = writable(first.run.steps[0]!);
   const firstDuration = firstStep.control?.duration_ms ?? 0;
   expect(firstStep.control?.total_cost_usd).toBeCloseTo(1, 10);
   expect(firstDuration).toBeGreaterThan(0);
@@ -1544,7 +1569,7 @@ test("pipeline-orchestration: a child already finished is settled without runnin
   delete firstStep.control;
   delete firstStep.usage;
   updateStep(first.run, firstStep, "failed", "crash before settlement");
-  saveRun(first.run);
+  saveRun(writable(first.run));
 
   // A second launch of the child would hit this trap and fail the run.
   costCalls.push({ ok: false, cost: 5 });
@@ -1600,13 +1625,17 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   );
   const parentRunDir = join(root, "parent-run");
   const context = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
-  const { run: parent } = await loadOrCreateRun({
-    pipelinePath: parentPath,
-    ticket: "P",
-    runDir: parentRunDir,
-    fresh: true,
-    context,
-  });
+  const parent = writable(
+    (
+      await loadOrCreateRun({
+        pipelinePath: parentPath,
+        ticket: "P",
+        runDir: parentRunDir,
+        fresh: true,
+        context,
+      })
+    ).run,
+  );
   const parentStep = parent.steps[0]!;
   const childRunId = "interrupted-child";
   const childContext = buildPipelineContext({ cwd: root, ticket: "C-1", agentBackendRegistry: REGISTRY });

@@ -26,7 +26,7 @@ import { announceRun, prepareRun, reportRun, wireRunOutputs } from "./entry/exec
 import { installChildKillHandlers } from "./entry/signals.js";
 import { createStackStop, NO_STACK_STOP, type StackStop, stopsStack } from "./entry/stack-stop.js";
 import { startup } from "./entry/startup.js";
-import type { Run } from "./model/run.js";
+import type { RunView } from "./model/run.js";
 import { createAbortScope } from "./runtime/abort.js";
 import { log } from "./runtime/logging.js";
 import { executeRunSteps, stepLoopDeps } from "./step/step-loop.js";
@@ -36,7 +36,7 @@ import { executeRunSteps, stepLoopDeps } from "./step/step-loop.js";
 let stackStop: StackStop = NO_STACK_STOP;
 
 async function main() {
-  let activeRun: Run | undefined;
+  let activeRun: RunView | undefined;
   // One abort scope per process: the signal handler requests on it, the step loop
   // and every in-process child run read it. Child pipeline runs never receive
   // `run.aborted`; the shared scope is what stops their loops.

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { ArtifactRef, WorkItemArtifactStore } from "./artifact-ports.ts";
 import { createArtifactRef, isArtifactRef } from "./artifact-ports.ts";
 import type { PersistedRun } from "./persisted.ts";
-import type { Run } from "./run.ts";
+import type { Run } from "../run-record/run.ts";
 import type { LogRef, RunEventStore, RunLogStore, RunStateStore } from "./storage-ports.ts";
 import { createLogRef, createRunRef, isLogRef, isRunRef, runRefFromRun } from "./storage-ports.ts";
 

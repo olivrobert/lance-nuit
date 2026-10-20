@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Run } from "../model/run.js";
+import type { Run } from "../run-record/run.js";
 import { createAbortScope } from "./abort.js";
 
 function run(name: string): Run {

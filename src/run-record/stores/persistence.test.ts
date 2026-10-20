@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "../../model/run.ts";
+import type { Run } from "../run.ts";
 import { buildPipelineContext } from "../../pipeline/context.ts";
 import { makeRunStep } from "../run-step.ts";
 import { readRunEvents } from "../run-journal.ts";

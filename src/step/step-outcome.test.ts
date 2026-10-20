@@ -17,7 +17,7 @@ import { artifact } from "../dsl/artifact.ts";
 import type { StepResult } from "../exec/runners.ts";
 import type { ArtifactRef, WorkItemArtifactStore } from "../model/artifact-ports.ts";
 import type { PipelineStep } from "../model/definition.ts";
-import type { Run, RunStep } from "../model/run.ts";
+import type { Run, RunStep } from "../run-record/run.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { createAbortScope } from "../runtime/abort.ts";
 import type { RunnerEvent } from "../runtime/events.ts";

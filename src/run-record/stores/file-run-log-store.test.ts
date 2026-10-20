@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "../../model/run.js";
+import type { Run } from "../run.js";
 import { createLogRef, createRunRef, type RunLogStore } from "../../model/storage-ports.js";
 import { makeRunStep } from "../run-step.js";
 import { attemptLogPath, findStepLog, latestAttemptLog } from "../run-timeline.js";

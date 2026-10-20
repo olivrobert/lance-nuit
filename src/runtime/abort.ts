@@ -14,7 +14,7 @@
 // an interruption in-process without poisoning the next test (Bun shares module
 // state across test files).
 
-import type { Run } from "../model/run.js";
+import type { RunView } from "../model/run.js";
 
 /** Named apart from the platform `AbortSignal`, which is unrelated. */
 export type AbortRequestSignal = "SIGINT" | "SIGTERM";
@@ -29,17 +29,17 @@ export interface AbortScope {
    *  abort request (covers in-process child pipeline runs). */
   isRunAborted(run: { aborted?: boolean }): boolean;
   /** Register a run executing steps in this scope; returns its unregister. */
-  registerActiveRun(run: Run): () => void;
+  registerActiveRun(run: RunView): () => void;
   /** Runs currently executing steps, innermost first: nested pipelines are
    *  registered last and must be persisted first on shutdown. */
-  activeRuns(): Run[];
+  activeRuns(): RunView[];
 }
 
 /** A fresh scope: nothing requested, no active run. */
 export function createAbortScope(): AbortScope {
   let requested = false;
   let signal: AbortRequestSignal | undefined;
-  const runs = new Set<Run>();
+  const runs = new Set<RunView>();
   return {
     requestAbort(received) {
       requested = true;

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PipelineContext } from "../src/model/context.js";
 import type { Pipeline } from "../src/model/definition.js";
-import type { Run } from "../src/model/run.js";
+import type { Run } from "../src/run-record/run.js";
 import { commandRegistries } from "../src/commands/registries.js";
 import { buildPipelineContext } from "../src/pipeline/context.js";
 import { createProjectDsl } from "../src/pipeline/loader.js";

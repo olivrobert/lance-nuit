@@ -1,14 +1,16 @@
 // runner/boot/resume.ts
 //
-// Build or resume a run: load the definition, validate `--start-at`, and apply
+// Build or resume a run: load the definition, validate `--start-at`, and decide
 // this invocation's selection. Opening the run itself — selecting its directory,
-// restoring or creating it, and every write that does — is `run-record`'s
-// (`openRun`); boot hands it the definition and the selection as a policy.
+// restoring or creating it, applying the selection, and every write that does —
+// is `run-record`'s (`openRun`); boot hands it the definition and the selection
+// as a policy, and only reads the steps it decides on.
 
 import { DEFAULT_SPEC_PATH } from "../env/tickets.js";
 import { agentBackendRegistryOf, type PipelineContext, workItemRegistryOf } from "../model/context.js";
 import type { PipelineStep } from "../model/definition.js";
 import type { PersistedStepState } from "../model/persisted.js";
+import type { DeepReadonly } from "../model/run.js";
 import type { RunEventStore, RunLogStore, RunStateStore } from "../model/storage-ports.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
@@ -46,63 +48,37 @@ export interface LoadOrCreateRunOptions extends RunScope {
   strictSnapshot?: StrictSnapshotRead;
 }
 
-/** Apply resume selectors in one pass; both selectors operate only on steps that
- * still have executable work, preserving terminal history on a resumed run.
- * Returns whether they took any of that work out.
+type StepState = DeepReadonly<PersistedStepState>;
+
+/** The steps the resume selectors leave out. Both selectors operate only on steps
+ * that still have executable work, preserving terminal history on a resumed run.
  *
  * The steps must already be reconciled with the journal: a step the snapshot
  * still calls `running` may be one the journal knows finished, and a selector
  * applied to the snapshot would turn that finished work into an exclusion. */
-function applyStepFilters(
-  steps: readonly PersistedStepState[],
+function excludedSteps(
+  steps: readonly StepState[],
   stepFilter: string[] | undefined,
   skipFilter: string[] | undefined,
-): boolean {
-  let tookWork = false;
-  for (const state of steps) {
-    if (!owesWork(state.status)) continue;
-    const outsideSelection =
-      stepFilter !== undefined && !stepFilter.some((selector) => matchesStepSelector(state.id, selector));
-    const explicitlySkipped = skipFilter?.some((selector) => matchesStepSelector(state.id, selector)) ?? false;
-    if (outsideSelection || explicitlySkipped) {
-      state.status = "skipped";
-      state.excluded = true;
-      tookWork = true;
-    }
-  }
-  return tookWork;
-}
-
-/** Reconcile mode persists no exclusion: the loop applies this invocation's
- * selectors (`step/step-loop.ts`), so one an earlier legacy invocation left in
- * the snapshot is dropped instead of binding every later invocation. */
-function dropPersistedExclusions(steps: readonly PersistedStepState[]): void {
-  for (const state of steps) delete state.excluded;
+): string[] {
+  return steps
+    .filter((state) => {
+      if (!owesWork(state.status)) return false;
+      const outsideSelection =
+        stepFilter !== undefined && !stepFilter.some((selector) => matchesStepSelector(state.id, selector));
+      const explicitlySkipped = skipFilter?.some((selector) => matchesStepSelector(state.id, selector)) ?? false;
+      return outsideSelection || explicitlySkipped;
+    })
+    .map((state) => state.id);
 }
 
 /** Composed steps in the replay range that cannot run again in place: a child
  * already settled returns at once on the next pass, so the node would turn
  * `done` without running anything. */
-function unreplayableSteps(steps: readonly PersistedStepState[], replayIds: ReadonlySet<string>): string[] {
+function unreplayableSteps(steps: readonly StepState[], replayIds: ReadonlySet<string>): string[] {
   return steps
     .filter((state) => replayIds.has(state.id) && (state.orchestration?.children.some(isChildSettled) ?? false))
     .map((state) => state.id);
-}
-
-/** Requeue the steps `--start-at` names for replay, whatever their status.
- *
- * Naming the target is the operator's newest decision, so it also lifts an
- * exclusion an earlier selection left inside the range. Attempts, retries and
- * spend are kept: the budget ledger seeds from them, and the replay is more work
- * on the same run, not a new one. `replay` is what keeps the requeue durable
- * over the `done` events the journal holds for the earlier pass. */
-function requeueForReplay(steps: readonly PersistedStepState[], replayIds: ReadonlySet<string>): void {
-  for (const state of steps) {
-    if (!replayIds.has(state.id)) continue;
-    state.status = "pending";
-    state.replay = true;
-    delete state.excluded;
-  }
 }
 
 /** Whether a step is left out of a new run by `--steps` or `--skip`. */
@@ -189,8 +165,6 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
       // snapshot does not know yet. They and the requeue read the journal-reconciled
       // states, which are the ones hydration consumes.
       selectResumed: (states, reconcile) => {
-        const selectionTookWork = !reconcile && applyStepFilters(states, stepFilter, skipFilter);
-        if (reconcile) dropPersistedExclusions(states);
         const unreplayable = unreplayableSteps(states, replayIds);
         if (unreplayable.length > 0) {
           throw new Error(
@@ -198,8 +172,21 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
               `replayed in place. Use --fresh to start a new run.`,
           );
         }
-        requeueForReplay(states, replayIds);
-        return selectionTookWork;
+        return {
+          exclude: reconcile ? [] : excludedSteps(states, stepFilter, skipFilter),
+          // Reconcile mode persists no exclusion: the loop applies this
+          // invocation's selectors (`step/step-loop.ts`), so one an earlier legacy
+          // invocation left in the snapshot is dropped instead of binding every
+          // later invocation.
+          dropExclusions: reconcile,
+          // `--start-at` is the operator's newest decision, so the requeue also
+          // lifts an exclusion an earlier selection left inside the range.
+          // Attempts, retries and spend are kept: the budget ledger seeds from
+          // them, and the replay is more work on the same run, not a new one.
+          // `replay` is what keeps the requeue durable over the `done` events the
+          // journal holds for the earlier pass.
+          replay: [...replayIds],
+        };
       },
       // Reconcile mode leaves the selection to the loop: it lasts this invocation only.
       selectNew: (def, reconcile) => {

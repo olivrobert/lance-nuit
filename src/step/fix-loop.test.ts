@@ -7,7 +7,7 @@ import { AgentBackendRegistry } from "../engine/registry.ts";
 import type { StepResult } from "../exec/runners.ts";
 import type { PipelineContext } from "../model/context.ts";
 import type { PipelineStep, StepFailure } from "../model/definition.ts";
-import type { Run, RunStep } from "../model/run.ts";
+import type { Run, RunStep } from "../run-record/run.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { buildFixContext, type FixLoopDeps, runFixLoop } from "./fix-loop.ts";
 import { chooseFixBackend } from "./fix-loop-runtime.ts";

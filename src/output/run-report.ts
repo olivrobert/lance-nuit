@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { AgentBackendRegistry, AgentSession, BackendSpec, StepControl, StepUsage } from "../contracts/backends.js";
 import { backendSpecForStep } from "../contracts/backends.js";
 import type { StepStatus } from "../model/persisted.js";
-import type { RunStepView, RunView } from "../model/run.js";
+import type { DeepReadonly, RunStepView, RunView } from "../model/run.js";
 import {
   aggregateControl,
   aggregateUsage,
@@ -44,7 +44,7 @@ export interface RunReportStep {
   durationMs?: number;
   retries: number;
   control?: StepControl;
-  usage?: StepUsage;
+  usage?: DeepReadonly<StepUsage>;
   detail?: string;
   /** The runner died during an earlier attempt and the step ran again: its side
    *  effects may have happened twice. */
@@ -93,7 +93,7 @@ export interface RunReport {
   steps: RunReportStep[];
   statusCounts: Record<StepStatus, number>;
   totalControl: StepControl;
-  totalUsage?: StepUsage;
+  totalUsage?: DeepReadonly<StepUsage>;
   /** `costUnknown`: an attempt spent tokens no pricing table could price, so
    * `spent` is a lower bound and the limit was not strictly enforceable. */
   budget?: { spent: number; limit: number; costUnknown?: boolean };
