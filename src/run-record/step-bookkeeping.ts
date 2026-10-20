@@ -3,15 +3,14 @@
 // The named writes of an execution that are neither a transition
 // (`run-transitions.ts`), the end of an attempt (`attempt-lifecycle.ts`) nor a
 // child reference (`child-transitions.ts`): the retry quotas of a step, the
-// session it continues, the command it was last given, a source it could not
-// read, a step admission skipped or found unfinished outputs for, and a human
-// decision the run journals. The step layer and the entry
-// point call them instead of writing a field and saving the run by hand.
+// session it continues, a source it could not read, a step admission skipped or
+// found unfinished outputs for, and a human decision the run journals. The step
+// layer and the entry point call them instead of writing a field and saving the
+// run by hand.
 //
 // Each operation writes its field, the journal event that already recorded the
-// fact if there is one, then the snapshot. Four write no snapshot, because the
-// snapshot carries nothing they change: the last command (left out of the
-// snapshot, see `run-repository.ts`), and an unavailable source, a skip and
+// fact if there is one, then the snapshot. Three write no snapshot, because the
+// snapshot carries nothing they change: an unavailable source, a skip and
 // unfinished outputs (journal only: the skip's status goes through `updateStep`).
 
 import type { AgentSession } from "../contracts/backends.js";
@@ -70,13 +69,6 @@ export function bindSession(runView: RunView, stepView: RunStepView, session: Ag
   const step = writable(stepView);
   step.session = session;
   saveRun(run);
-}
-
-/** The command a step was last given, resolved. Memory only: the snapshot
- *  leaves it out, since it is the full agent prompt. */
-export function recordLastCommand(stepView: RunStepView, command: string): void {
-  const step = writable(stepView);
-  step.last_command = command;
 }
 
 /** A source the step declares and could not read: its freshness is unknown and

@@ -11,9 +11,10 @@ import { FileRunStateStore } from "./stores/file-run-state-store.js";
 
 /** Extract persistable step state without its definition.
  *
- * `attempts` and `last_command` are deliberately absent: the journal already holds
- * every attempt, and `last_command` is the full agent prompt. Both were rewritten
- * in full on every transition and made up the majority of the snapshot. */
+ * `attempts` are deliberately absent: the journal already holds every attempt,
+ * and each attempt's `command.txt` the full prompt it was given. Older releases
+ * also wrote the last prompt here (`last_command`), rewritten in full on every
+ * transition; such a snapshot still reads, and the next save drops it. */
 function persistedStep(step: RunStep): PersistedStepState {
   return {
     id: step.id,

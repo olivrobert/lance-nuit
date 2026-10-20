@@ -8,8 +8,9 @@ import type { StepDefinition } from "../model/run.js";
 import type { RunStep } from "./run.js";
 
 /** Initial step state supplied by a new run, a snapshot, or the journal. It covers
- *  `RunStep` rather than `PersistedStepState`: `attempts` and `last_command` live
- *  in memory only, but hydration still has to seed them. */
+ *  `RunStep` rather than `PersistedStepState`: `attempts` live in memory only, but
+ *  hydration still has to seed them. A field the snapshot carries and `RunStep`
+ *  no longer declares (`last_command`, written by older releases) is not copied. */
 export type StepStateInput = Partial<Omit<RunStep, "id" | "def">>;
 
 /** Freeze the step definition to protect the DSL/runtime boundary from untyped JS. */
@@ -32,7 +33,6 @@ export function makeRunStep(def: PipelineStep, state: StepStateInput = {}): RunS
     profile: state.profile ?? def.profile,
     control: state.control,
     usage: state.usage,
-    last_command: state.last_command,
     errors: state.errors,
     fail_kind: state.fail_kind,
     fail_cause: state.fail_cause,

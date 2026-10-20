@@ -50,9 +50,8 @@ test("saveRun: validates the contract", () => {
   expect(saved.steps[0]).toEqual({ id: "a", status: "done", retries: 2 });
   expect(saved.steps[0].def).toBeUndefined();
   expect(saved.steps[0].command).toBeUndefined();
-  // Attempts and the rendered command belong to the journal, never the snapshot.
+  // Attempts belong to the journal, never the snapshot.
   expect(saved.steps[0].attempts).toBeUndefined();
-  expect(saved.steps[0].last_command).toBeUndefined();
 });
 
 test("saveRun: preserves the timeout retry quota across a snapshot round trip", () => {

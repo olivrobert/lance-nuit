@@ -102,7 +102,6 @@ export {
   consumeRetry,
   type RetryQuota,
   recordDecision,
-  recordLastCommand,
   recordSkip,
   recordUnavailableSource,
   recordUnfinishedOutputs,

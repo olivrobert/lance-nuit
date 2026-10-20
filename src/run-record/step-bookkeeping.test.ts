@@ -11,7 +11,6 @@ import {
   bindSession,
   consumeRetry,
   recordDecision,
-  recordLastCommand,
   recordSkip,
   recordUnavailableSource,
   recordUnfinishedOutputs,
@@ -69,16 +68,6 @@ test("session: the session a step continues is persisted at once", () => {
 
   expect(step.session).toEqual(session);
   expect(savedStep(run)?.session).toEqual(session);
-});
-
-test("last command: kept in memory, the snapshot never carries it", () => {
-  const step = runningStep();
-  const run = makeRun(step);
-
-  recordLastCommand(step, "make test");
-
-  expect(step.last_command).toBe("make test");
-  expect(existsSync(join(run.run_dir, "state.json"))).toBe(false);
 });
 
 test("unavailable source: journaled for the step, the snapshot untouched", () => {

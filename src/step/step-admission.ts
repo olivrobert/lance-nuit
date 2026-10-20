@@ -19,7 +19,6 @@ import {
   lastPassInterrupted,
   owesWork,
   type RunBudget,
-  recordLastCommand,
   recordSkip,
   recordUnavailableSource,
   recordUnfinishedOutputs,
@@ -416,7 +415,6 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
   }
 
   const command = (await resolveTemplateAsync(step.def.command, baseCtx))!;
-  recordLastCommand(step, command);
 
   // Environment guard runs before spawn at zero token cost. An unreachable app
   // fails here instead of paying an agent to discover infrastructure failure and

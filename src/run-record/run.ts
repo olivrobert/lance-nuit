@@ -33,10 +33,6 @@ export interface RunStep extends PersistedStepState {
   /** Attempts of this step, projected from the journal on resume. Runtime-only:
    *  the snapshot no longer carries them. */
   attempts: PersistedAttempt[];
-  /** Last rendered command (for debugging only). Runtime-only: it is the whole
-   *  agent prompt, and re-serializing it in every snapshot cost more than the
-   *  rest of the run state put together. */
-  last_command?: string;
 }
 
 /** In-memory run: merged definition and state.

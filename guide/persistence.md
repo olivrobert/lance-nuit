@@ -255,11 +255,12 @@ an installed package: a snapshot alone does not contain the attempt history.
 `state.json` is written as schema version 1 and contains the durable run state: step status,
 retries, sessions, profile attribution, usage/cost control data, the highest
 attempt number allocated per step (`last_attempt`), and the run-level verdict,
-totals, and cost decisions. It does **not** carry the attempts or the last
-rendered command: the attempts are projected from the journal on resume, and the
-command is the whole agent prompt, kept in memory (`run-record/run-repository.ts`
-is the one writer of the snapshot, and `run-record/run.ts` marks both fields as
-runtime-only). Each attempt also copies the command it was given to
+totals, and cost decisions. It does **not** carry the attempts: they are
+projected from the journal on resume (`run-record/run-repository.ts` is the one
+writer of the snapshot, and `run-record/run.ts` marks them as runtime-only).
+A snapshot written by an older release may still carry `last_command`, the last
+rendered prompt of a step: it reads as before, the field is ignored, and the
+next save drops it. Each attempt copies the command it was given to
 `command.txt` beside its log, once, when it starts; that copy is diagnostic,
 read only by the dashboard, and an attempt whose copy cannot be written still
 runs. The pipeline definition and configuration are reloaded when a run
