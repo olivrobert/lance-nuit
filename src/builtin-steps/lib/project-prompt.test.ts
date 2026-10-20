@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { buildPipelineContext } from "../../pipeline/context.js";
 import { createProjectDsl, loadPipelineDefinition } from "../../pipeline/loader.js";
 import { createPromptFile } from "./project-prompt.js";
-import { commandRegistries } from "../../commands/registries.js";
+import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 
 function folder(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -47,12 +47,12 @@ test("promptFile: loader binds base to pipeline file", async () => {
 
   const definition = await loadPipelineDefinition(
     pipelinePath,
-    buildPipelineContext({ ...commandRegistries(), cwd: root }),
+    buildPipelineContext({ ...builtinRegistries(), cwd: root }),
   );
   const command = definition.steps[0]!.command;
   expect(
     typeof command === "function"
-      ? command({ ...buildPipelineContext({ ...commandRegistries(), cwd: root }), ticket: "PROJ-2" })
+      ? command({ ...buildPipelineContext({ ...builtinRegistries(), cwd: root }), ticket: "PROJ-2" })
       : command,
   ).toBe("Ticket PROJ-2");
 });
@@ -62,7 +62,7 @@ test("llmStep.prompt: path relative to loaded pipeline", () => {
   mkdirSync(join(root, "prompts"), { recursive: true });
   writeFileSync(join(root, "prompts", "implement.md"), "Implement the ticket.");
 
-  const dsl = createProjectDsl(buildPipelineContext({ ...commandRegistries(), cwd: root }), root);
+  const dsl = createProjectDsl(buildPipelineContext({ ...builtinRegistries(), cwd: root }), root);
   const command = dsl
     .llmStep({
       id: "implement",
@@ -76,8 +76,8 @@ test("llmStep.prompt: path relative to loaded pipeline", () => {
 });
 
 test("project DSL: ordinary steps keep their own context", () => {
-  const first = buildPipelineContext(commandRegistries());
-  const second = buildPipelineContext(commandRegistries());
+  const first = buildPipelineContext(builtinRegistries());
+  const second = buildPipelineContext(builtinRegistries());
 
   const firstDsl = createProjectDsl(first, "/tmp/project-one/.lance-nuit/pipelines");
   const secondDsl = createProjectDsl(second, "/tmp/project-two/.lance-nuit/pipelines");

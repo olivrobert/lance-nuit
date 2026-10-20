@@ -10,7 +10,7 @@ import { deriveRunStatus } from "../../src/run-record/run-verdict.js";
 import { stopRun } from "../../src/run-record/run-transitions.js";
 import { validatePipeline } from "../../src/pipeline/loader.js";
 import { makeRunStep } from "../../src/run-record/run-step.js";
-import { commandRegistries } from "../../src/commands/registries.js";
+import { builtinRegistries } from "../builtin-registries.ts";
 import { buildPipelineContext } from "../../src/pipeline/context.js";
 import { createDefaultAgentBackendRegistry } from "../../src/engine/default-registry.js";
 
@@ -88,7 +88,7 @@ test("validatePipeline accepts a stop admission", () => {
     .build();
   // Validation runs against the backends the run will use: the caller supplies
   // the context that carries the registry.
-  const context = buildPipelineContext({ ...commandRegistries(), cwd: process.cwd() });
+  const context = buildPipelineContext({ ...builtinRegistries(), cwd: process.cwd() });
   expect(() => validatePipeline(p, "test", { context })).not.toThrow();
 });
 

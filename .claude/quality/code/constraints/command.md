@@ -8,7 +8,6 @@ exclude:
   - "src/commands/lint-config-check.ts"
   - "src/commands/pipeline-reference.ts"
   - "src/commands/pipeline-templates.ts"
-  - "src/commands/registries.ts"
   - "src/commands/runner-command.ts"
   - "src/commands/shared.ts"
 ---

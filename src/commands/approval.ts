@@ -8,9 +8,9 @@
 // (`.approval()`), so these paths must load the pipeline to identify the file to
 // hash. A broken pipeline consequently blocks the decision and must report the cause.
 
+import type { ComposeRegistries } from "../boot/extensions.js";
 import { isPipelineName, resolveBuiltinPipeline } from "../env/builtin-pipeline.js";
 import type { Pipeline } from "../model/definition.js";
-import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import { log } from "../runtime/logging.js";
 import type { PipelineContext } from "../model/context.js";
@@ -23,8 +23,7 @@ import {
 } from "./approval-subject.js";
 import type { RunnerCommand } from "./runner-command.js";
 import { pipelineNotFoundError } from "./pipeline-reference.js";
-import { commandRegistries } from "./registries.js";
-import { errorMessage, isValidTicket } from "./shared.js";
+import { contextWithProjectProviders, errorMessage, isValidTicket } from "./shared.js";
 
 /** Resolve a kit-chain name; pass an explicit path through unchanged. */
 function resolvePipelinePath(reference: string, cwd: string): string {
@@ -40,9 +39,11 @@ async function loadDecidingPipeline(
   ticket: string,
   pipelinePath: string,
   verb: "approval" | "rejection",
+  composeRegistries: ComposeRegistries,
 ): Promise<{ context: PipelineContext; pipelineDef: Pipeline } | undefined> {
-  const context = buildPipelineContext({ cwd: process.cwd(), ticket, ...commandRegistries() });
   try {
+    // Inside the try: a manifest that cannot load breaks the pipeline the same way.
+    const context = await contextWithProjectProviders(composeRegistries, { cwd: process.cwd(), ticket });
     return {
       context,
       pipelineDef: await loadPipelineDefinition(resolvePipelinePath(pipelinePath, context.cwd), context),
@@ -60,7 +61,7 @@ export const approvalCommand: RunnerCommand = {
   flag: "--approve-only",
   key: "approveOnly",
   desc: "Write a decision and exit without running a pipeline.",
-  async run(args): Promise<number> {
+  async run(args, environment): Promise<number> {
     if (!isValidTicket(args.ticket)) {
       log("--approve-only requires a valid ticket.");
       return 1;
@@ -73,7 +74,12 @@ export const approvalCommand: RunnerCommand = {
       log("--approve-only requires --pipeline <name>: the approval subject is declared by the pipeline.");
       return 1;
     }
-    const loaded = await loadDecidingPipeline(args.ticket, args.pipelinePath, "approval");
+    const loaded = await loadDecidingPipeline(
+      args.ticket,
+      args.pipelinePath,
+      "approval",
+      environment.composeRegistries,
+    );
     if (!loaded) return 1;
     const { context, pipelineDef } = loaded;
     try {
@@ -92,7 +98,7 @@ export const rejectionCommand: RunnerCommand = {
   flag: "--reject-only",
   key: "rejectOnly",
   desc: "Write a rejection with its reason and exit without running a pipeline.",
-  async run(args): Promise<number> {
+  async run(args, environment): Promise<number> {
     if (!isValidTicket(args.ticket)) {
       log("--reject-only requires a valid ticket.");
       return 1;
@@ -109,7 +115,12 @@ export const rejectionCommand: RunnerCommand = {
       log("--reject-only requires --pipeline <name>: the rejected subject is declared by the pipeline.");
       return 1;
     }
-    const loaded = await loadDecidingPipeline(args.ticket, args.pipelinePath, "rejection");
+    const loaded = await loadDecidingPipeline(
+      args.ticket,
+      args.pipelinePath,
+      "rejection",
+      environment.composeRegistries,
+    );
     if (!loaded) return 1;
     const { context, pipelineDef } = loaded;
     try {

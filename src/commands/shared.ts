@@ -1,4 +1,8 @@
+import type { ComposeRegistries } from "../boot/extensions.js";
+import { loadPipelineConfig } from "../env/config.js";
 import { FLAGS } from "../model/cli-options.js";
+import type { PipelineContext } from "../model/context.js";
+import { type BuildPipelineContextOptions, buildPipelineContext } from "../pipeline/context.js";
 
 /**
  * Convert command failures to the same user-facing text everywhere.
@@ -7,6 +11,25 @@ import { FLAGS } from "../model/cli-options.js";
  * re-exported here so the commands that already import it are unchanged.
  */
 export { errorMessage } from "../lib/errors.js";
+
+/**
+ * A context carrying the providers a run in the same project works with. The
+ * registries are composed from the configuration the context freezes, so the
+ * manifest a command loads is the one its context reports.
+ */
+export async function contextWithProjectProviders(
+  composeRegistries: ComposeRegistries,
+  options: BuildPipelineContextOptions & { cwd: string },
+): Promise<PipelineContext> {
+  const config = options.config ?? loadPipelineConfig(options.cwd);
+  const registries = await composeRegistries(config, options.cwd);
+  return buildPipelineContext({
+    ...options,
+    config,
+    workItemRegistry: registries.workItems,
+    agentBackendRegistry: registries.backends,
+  });
+}
 
 /** CLI ticket/work-item identifiers accepted by commands that address a run. */
 export function isValidTicket(ticket: string | undefined): ticket is string {

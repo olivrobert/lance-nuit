@@ -23,7 +23,7 @@ import { controlForRun } from "../run-record/cost-accounting.js";
 import { resolveRunDir } from "../run-record/stores/run-storage.js";
 import { FileRunStateStore } from "../run-record/stores/file-run-state-store.js";
 import { selectExplicitRun } from "../run-record/run-selection.js";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { executeRunSteps, type StepLoopDeps } from "../step/step-loop.js";
 import { writable } from "../run-record/run.js";
@@ -43,7 +43,7 @@ function pipelineFile(root: string): string {
 
 test("resume: a selected snapshot disappearing before the final read does not initialize a replacement", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-selection-race-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-race" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-race" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-race", undefined, true, ctx);
   const { run: initial } = await loadOrCreateRun({
@@ -78,7 +78,7 @@ test("resume: a selected snapshot disappearing before the final read does not in
 
 test("resume: an explicit selection whose directory disappears does not recreate it or repoint latest", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-explicit-selection-race-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-explicit" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-explicit" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-explicit", undefined, true, ctx);
   const { run: initial } = await loadOrCreateRun({
@@ -112,7 +112,7 @@ test("resume: an explicit selection whose directory disappears does not recreate
 
 test("resume: a guard stop is kept until --budget approves more spend", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-budget-stop-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-3" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-3" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-3", undefined, true, ctx);
   const run = writable(
@@ -158,7 +158,7 @@ test("resume: a guard stop is kept until --budget approves more spend", async ()
 
 test("resume: SIGINT after the last step but before finalizeRun keeps the same run", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-abort-settled-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-1" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-1" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-1", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -199,7 +199,7 @@ test("resume: SIGINT after the last step but before finalizeRun keeps the same r
 for (const ending of ["STOPPED", "FAIL"] as const) {
   test(`resume: --skip of the step a ${ending} run ended on settles it with a new verdict`, async () => {
     const root = mkdtempSync(join(tmpdir(), "resume-skip-last-"));
-    const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-5" });
+    const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-5" });
     const path = pipelineFile(root);
     const dir = resolveRunDir("p", "T-5", undefined, true, ctx);
     const run = writable(
@@ -250,7 +250,7 @@ for (const ending of ["STOPPED", "FAIL"] as const) {
 
 test("a run records where it executes, so a reader finds its artifacts", async () => {
   const root = mkdtempSync(join(tmpdir(), "run-location-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-4" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-4" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-4", undefined, true, ctx);
 
@@ -269,7 +269,7 @@ test("a run records where it executes, so a reader finds its artifacts", async (
   // A worktree run reads and writes in the copy it was moved into, not in the
   // main clone: without both facts a reader looks for decisions in the wrong tree.
   const worktree = mkdtempSync(join(tmpdir(), "run-location-wt-"));
-  const worktreeCtx = buildPipelineContext({ ...commandRegistries(), cwd: worktree, ticket: "T-4" });
+  const worktreeCtx = buildPipelineContext({ ...builtinRegistries(), cwd: worktree, ticket: "T-4" });
   await loadOrCreateRun({
     pipelinePath: path,
     ticket: "T-4",
@@ -295,7 +295,7 @@ test("a caller must say whether the run it opens is in a worktree", () => {
 
 test("resume selectors apply to an aborted step, not only to pending ones", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-selectors-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-2" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-2" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-2", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -338,7 +338,7 @@ test("resume selectors apply to an aborted step, not only to pending ones", asyn
 
 test("resume selectors leave a step the journal finished as done, even when the snapshot still calls it running", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-selectors-journal-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-journal" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-journal" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-journal", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -376,7 +376,7 @@ test("resume selectors leave a step the journal finished as done, even when the 
 
 test("resume: an attempt priced in the journal but missing from the snapshot still counts", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-journal-cost-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-4" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-4" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-4", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -417,7 +417,7 @@ test("resume: an attempt priced in the journal but missing from the snapshot sti
 
 test("resume: the snapshot total wins when it already covers the journaled attempts", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-snapshot-cost-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-5" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-5" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-5", undefined, true, ctx);
   const run = writable(
@@ -457,7 +457,7 @@ test("resume: the snapshot total wins when it already covers the journaled attem
 
 test("resume: a fix pass left running by a crash is closed as failed and unpriced, down to the step total", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-crashed-attempt-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6", undefined, true, ctx);
   const run = writable(
@@ -533,7 +533,7 @@ test("resume: a fix pass left running by a crash is closed as failed and unprice
 
 test("resume: an attempt left running by a crash is projected as interrupted on every later resume", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-interrupted-attempt-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6b" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6b" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6b", undefined, true, ctx);
   const run = writable(
@@ -581,7 +581,7 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
   // The state the other crash tests fabricate, produced here by the loop itself:
   // what `openAttempt` persisted before spawn is all a killed runner leaves.
   const root = mkdtempSync(join(tmpdir(), "resume-crash-in-spawn-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6f" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6f" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6f", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -663,7 +663,7 @@ function crashDuring(opened: Awaited<ReturnType<typeof loadOrCreateRun>>["run"],
 
 test("resume: a step interrupted by a crash stops the run instead of replaying, until --replay-interrupted authorizes it", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-interrupted-stop-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6c" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6c" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6c", undefined, true, ctx);
   crashDuring(
@@ -735,7 +735,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
 for (const option of ["replayInterrupted", "rerunOnResume"]) {
   test(`resume: a step declaring ${option} is replayed after a crash without asking`, async () => {
     const root = mkdtempSync(join(tmpdir(), "resume-interrupted-declared-"));
-    const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6d" });
+    const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6d" });
     const path = join(root, "declared.ts");
     writeFileSync(
       path,
@@ -776,7 +776,7 @@ for (const option of ["replayInterrupted", "rerunOnResume"]) {
 
 test("resume: a --start-at replay interrupted by a second crash stops the next resume that does not name it", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-interrupted-start-at-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-6e" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6e" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6e", undefined, true, ctx);
   const initial = writable(
@@ -868,7 +868,7 @@ function countingDeps(results: Array<Partial<Awaited<ReturnType<StepLoopDeps["ex
 
 test("resume: a mid-step .maxCost() kill stops the run, and its cost is read back on the next invocation", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-maxcost-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-8" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-8" });
   const path = budgetedPipelineFile(root, 1);
   const dir = resolveRunDir("p", "T-8", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -928,7 +928,7 @@ test("resume: a mid-step .maxCost() kill stops the run, and its cost is read bac
 
 test("resume: an accounting stop resists a plain resume and --budget, and only --allow-unmetered lifts it", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-unmetered-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-9" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-9" });
   const path = budgetedPipelineFile(root, 5);
   const dir = resolveRunDir("p", "T-9", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -1028,7 +1028,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
 
 test("resume: --budget on a run that was uncapped when it spent unpriced tokens stops it", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-unmetered-late-cap-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-12" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-12" });
   const path = budgetedPipelineFile(root);
   const dir = resolveRunDir("p", "T-12", undefined, true, ctx);
 
@@ -1092,7 +1092,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
 
 test("resume: a fresh run inherits neither the authorization nor the accounting stop", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-unmetered-fresh-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-10" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-10" });
   const path = budgetedPipelineFile(root, 5);
   const dir = resolveRunDir("p", "T-10", undefined, true, ctx);
   const { run: authorized } = await loadOrCreateRun({
@@ -1125,7 +1125,7 @@ test("resume: a fresh run inherits neither the authorization nor the accounting 
 
 test("resume: an authorized run still stops when the spend it could price reaches the ceiling", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-unmetered-ceiling-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-11" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-11" });
   const path = budgetedPipelineFile(root, 1);
   const dir = resolveRunDir("p", "T-11", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -1153,7 +1153,7 @@ test("resume: an authorized run still stops when the spend it could price reache
 
 test("resume selectors apply to a step added to the definition after the snapshot", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-new-step-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-new" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-new" });
   const step = (id: string) => `  .add(actionStep({ id: "${id}", name: "${id}", run: () => {}, describe: "${id}" }))`;
   // A distinct file per revision: the loader imports the module, and an import is
   // cached for the process.
@@ -1220,7 +1220,7 @@ test("resume selectors apply to a step added to the definition after the snapsho
 
 test("--start-at leaves a done step before it to the resume re-check instead of excluding it", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-start-at-done-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-start" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-start" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-start", undefined, true, ctx);
   const run = writable(
@@ -1260,7 +1260,7 @@ test("--start-at leaves a done step before it to the resume re-check instead of 
 // fail, not come back with zero attempts and a budget that forgot their price.
 test("invariant: a resume over an unreadable journal fails instead of forgetting the attempts", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-invariant-unreadable-journal-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-9" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-9" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-9", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -1296,7 +1296,7 @@ test("invariant: a resume over an unreadable journal fails instead of forgetting
 // them back, a live resume derives them from the steps.
 test("resume: materialized totals are trusted on a terminal snapshot and derived on a live one", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-run-totals-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-totals" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-totals" });
   const path = pipelineFile(root);
 
   // A PASS run: nothing left to execute, so the finalized totals are the record.
@@ -1370,7 +1370,7 @@ test("resume: materialized totals are trusted on a terminal snapshot and derived
 // rewritten without its head, must not let a resume reuse an existing number.
 test("resume: a failed journal append keeps the attempt numbering through the snapshot", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-append-failure-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-append" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-append" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-append", undefined, true, ctx);
   // A store that can be read but never written: every fact of this generation is lost.
@@ -1427,7 +1427,7 @@ test("resume: a failed journal append keeps the attempt numbering through the sn
 // allocates the same next attempt, and the journal grows by the resume marker only.
 test("resume: loading the same run twice neither adds spend nor reuses an attempt number", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-repeated-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-twice" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-twice" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-twice", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -1481,7 +1481,7 @@ test("resume: loading the same run twice neither adds spend nor reuses an attemp
 
 test("resume: --start-at requeues the target and every later step, keeping their attempts and spend", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-start-at-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-start" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-start" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-start", undefined, true, ctx);
   const run = writable(
@@ -1534,7 +1534,7 @@ test("resume: --start-at requeues the target and every later step, keeping their
 
 test("resume: a step requeued by --start-at stays pending when the next invocation omits it", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-start-at-durable-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-durable" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-durable" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-durable", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -1575,7 +1575,7 @@ test("resume: a step requeued by --start-at stays pending when the next invocati
 
 test("resume: --start-at replays a target an earlier --start-at excluded", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-start-at-excluded-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-excl" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-excl" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-excl", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -1619,7 +1619,7 @@ test("resume: --start-at replays a target an earlier --start-at excluded", async
 
 test("resume: --start-at on an explicitly selected PASS run replays from the target", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-start-at-pass-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-pass" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-pass" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-pass", undefined, true, ctx);
   const run = writable(
@@ -1667,7 +1667,7 @@ test("resume: --start-at on an explicitly selected PASS run replays from the tar
 
 test("resume: --start-at refuses to replay a composed step whose children already settled", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-start-at-composed-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-comp" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-comp" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-comp", undefined, true, ctx);
   const run = writable(
@@ -1707,7 +1707,7 @@ test("resume: --start-at refuses to replay a composed step whose children alread
 
 test("a new run started with --start-at marks the target and later steps as replays", async () => {
   const root = mkdtempSync(join(tmpdir(), "new-run-start-at-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-new-start" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-new-start" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-new-start", undefined, true, ctx);
   const { run } = await loadOrCreateRun({
@@ -1745,7 +1745,7 @@ ${["a", "b", "c"].map(step).join("\n")}
 test("reconcile: a new run started with selectors persists no exclusion and leaves every step to the loop", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-reconcile-new-"));
   try {
-    const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-rec" });
+    const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-rec" });
     const path = reconcilePipelineFile(root, "p.ts", "reconcile");
     for (const [stepFilter, skipFilter, startAt] of [
       [["c"], undefined, undefined],
@@ -1776,7 +1776,7 @@ test("reconcile: a new run started with selectors persists no exclusion and leav
 test("reconcile: a resume applies no selector at boot and drops an exclusion a legacy invocation persisted", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-reconcile-inherited-"));
   try {
-    const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-inh" });
+    const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-inh" });
     const legacy = reconcilePipelineFile(root, "legacy.ts", "legacy");
     const dir = resolveRunDir("p", "T-inh", undefined, true, ctx);
     const run = writable(

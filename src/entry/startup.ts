@@ -33,7 +33,7 @@ import { setRunnerLiveFeed } from "../runtime/live-feed.js";
 import { log } from "../runtime/logging.js";
 import { type ApprovalDecision, type RecordedApproval, recordApproval } from "../work-item-store/index.js";
 import { FileRunStateStore, resolveLatestRunSnapshot, runLockHolder } from "../run-record/index.js";
-import { createDefaultRunnerRegistries } from "./registries.js";
+import { composeRunnerRegistries } from "./registries.js";
 
 /** A ticket reaches the filesystem (context paths, worktree directory) before any
  *  guard downstream, so its shape is validated before boot, never after. */
@@ -70,7 +70,7 @@ export function parseArgs(argv: string[]): ParseOutcome {
 /** Run the first matching no-pipeline command, if any. Returns its exit code. */
 export async function runEarlyCommand(args: RunnerArgs): Promise<number | undefined> {
   for (const command of COMMANDS) {
-    if (args[command.key] === true) return await command.run(args);
+    if (args[command.key] === true) return await command.run(args, { composeRegistries: composeRunnerRegistries });
   }
   return undefined;
 }
@@ -250,7 +250,7 @@ export async function startup(argv: string[]): Promise<StartupOutcome> {
     cwd: process.cwd(),
     pipelinePath: args.pipelinePath,
     worktreeMode: false,
-    baseRegistries: createDefaultRunnerRegistries(),
+    composeRegistries: composeRunnerRegistries,
   });
   const { pipelinePath, worktreeMode, context } = boot;
 

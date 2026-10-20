@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { buildPipelineContext } from "../../src/pipeline/context.js";
 import { loadPipelineDefinition } from "../../src/pipeline/loader.js";
 import { installProjectTypes, projectTypesDirectory, typecheckProjectPipelines } from "../../src/project/dsl-types.js";
-import { commandRegistries } from "../../src/commands/registries.js";
+import { builtinRegistries } from "../builtin-registries.ts";
 
 const RUNNER_DIR = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
@@ -438,7 +438,7 @@ test("DSL documentation: README example typechecks and loads", async () => {
 
   const definition = await loadPipelineDefinition(
     join(root, ".lance-nuit", "pipelines", "demo.ts"),
-    buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "PROJ-42" }),
+    buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "PROJ-42" }),
   );
   expect(definition.name).toBe("nightly");
   expect(definition.steps.map((step) => step.id)).toEqual(["implement", "test", "review"]);
@@ -456,7 +456,7 @@ test("DSL documentation: nightly ticket loop example typechecks and loads", asyn
 
   const definition = await loadPipelineDefinition(
     join(root, ".lance-nuit", "pipelines", "demo.ts"),
-    buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "PROJ-42" }),
+    buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "PROJ-42" }),
   );
   expect(definition.name).toBe("nightly");
   expect(definition.steps.map((step) => step.id)).toEqual([
