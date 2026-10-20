@@ -38,9 +38,9 @@ test("file-work-item-artifact-store: validates the integration contract", async 
   expect(await parent.readText(parentRef)).toBe("parent");
   expect(await other.readText(otherRef)).toBe("other");
   expect(await subUs.readText(subUsRef)).toBe("sub-US");
-  expect(parent.readText(otherRef)).rejects.toThrow(/outside the current work item/);
-  expect(parent.readText(subUsRef)).rejects.toThrow(/outside the current work item/);
-  expect(subUs.readText(parentRef)).rejects.toThrow(/outside the current work item/);
+  await expect(parent.readText(otherRef)).rejects.toThrow(/outside the current work item/);
+  await expect(parent.readText(subUsRef)).rejects.toThrow(/outside the current work item/);
+  await expect(subUs.readText(parentRef)).rejects.toThrow(/outside the current work item/);
 });
 
 test("file-work-item-artifact-store: validates the integration contract", async () => {

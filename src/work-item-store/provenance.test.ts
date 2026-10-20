@@ -78,7 +78,7 @@ test("fingerprintInputs: hashes present inputs and reports absent ones", async (
 
 test("fingerprintInputs: a declared input without a ticket is an authoring error", async () => {
   const ctx = buildPipelineContext({ cwd: ".", artifacts: new FakeArtifactStore() });
-  expect(fingerprintInputs(ctx, [ticket])).rejects.toThrow(/requires a ticket/);
+  await expect(fingerprintInputs(ctx, [ticket])).rejects.toThrow(/requires a ticket/);
 });
 
 test("writeProvenance: the record is stored under the reserved prefix", async () => {
