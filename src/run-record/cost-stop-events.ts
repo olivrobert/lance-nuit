@@ -34,13 +34,13 @@
 //   ceiling was crossed, on an estimate the ledger may never confirm. Written
 //   here (`live-guard` origin, and inherited from a stopped child); restored by
 //   `openRunLedger` from the snapshot and wiped by a `--budget` resume in
-//   `boot/resume.ts`.
+//   `run-record/run-opening.ts`.
 // - `budget.unaccountedStop` — work was actually WITHHELD over the uncertainty.
 //   Written here only; read by the step loop to name the stop reason.
 // - `exceededJournaled` / `unaccountedJournaled` — the one-fact-per-generation
 //   latches of the two journal events. Written here only.
 // - `budget.allowUnmetered` / `run.allow_unmetered` — the human authorization
-//   that lifts the `unaccounted` stop. Owned by `boot/resume.ts` and the CLI;
+//   that lifts the `unaccounted` stop. Owned by `run-record/run-opening.ts` and the CLI;
 //   this module never touches it.
 
 import type { Run } from "../model/run.js";

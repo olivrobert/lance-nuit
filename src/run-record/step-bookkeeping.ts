@@ -4,13 +4,15 @@
 // (`run-transitions.ts`), the end of an attempt (`attempt-lifecycle.ts`) nor a
 // child reference (`child-transitions.ts`): the retry quotas of a step, the
 // session it continues, the command it was last given, a source it could not
-// read, and a human decision the run journals. The step layer and the entry
+// read, a step admission skipped or found unfinished outputs for, and a human
+// decision the run journals. The step layer and the entry
 // point call them instead of writing a field and saving the run by hand.
 //
 // Each operation writes its field, the journal event that already recorded the
-// fact if there is one, then the snapshot. Two write no snapshot, because the
+// fact if there is one, then the snapshot. Four write no snapshot, because the
 // snapshot carries nothing they change: the last command (left out of the
-// snapshot, see `run-repository.ts`) and an unavailable source (journal only).
+// snapshot, see `run-repository.ts`), and an unavailable source, a skip and
+// unfinished outputs (journal only: the skip's status goes through `updateStep`).
 
 import type { AgentSession } from "../contracts/backends.js";
 import type { Run, RunStep } from "../model/run.js";
@@ -81,6 +83,19 @@ export function recordUnavailableSource(
     source: unavailable.source,
     reason: unavailable.reason,
   });
+}
+
+/** Why admission skipped a step. Journaled before the status it settles the
+ *  step on (`updateStep`), or alone when the step keeps its status: the console
+ *  line is transient, and a later diagnosis reads the journal. */
+export function recordSkip(run: Run, step: RunStep, skip: { reason: string; freshness?: string }): void {
+  appendRunEvent(run, "step.skipped", { stepId: step.id, reason: skip.reason, freshness: skip.freshness });
+}
+
+/** Outputs an attempt that never succeeded left behind, which make the step run
+ *  whatever the run remembers of that attempt: the journal says which. */
+export function recordUnfinishedOutputs(run: Run, step: RunStep, outputs: readonly string[]): void {
+  appendRunEvent(run, "step.outputs.unfinished", { stepId: step.id, outputs: [...outputs] });
 }
 
 /** A human decision `--approve` or `--reject` recorded before the run started. */

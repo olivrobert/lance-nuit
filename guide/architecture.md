@@ -333,7 +333,8 @@ parseRunnerArgs()
   +--> loadPipelineDefinition() once
   +--> selectDispatch()
   +--> clean-tree guard for a fresh top-level run
-  +--> loadOrCreateRun()
+  +--> loadOrCreateRun()  definition and selection; run-record's openRun()
+                           restores or creates the run
   +--> live feed and step loop
 ```
 
@@ -525,8 +526,8 @@ attempts and events only the journal records. The journal is parsed only for an
 interrupted run that still has a step pending or running: a live runner's
 snapshot is at most one write behind, and a verdict is written after every event
 of its pass. The dashboard, `--inspect`, `--logs`, `clean`, `close`, the dispatch
-loop and `--run` read through it; outside the module, only boot still opens a
-run with the stores and the projection directly
+loop and `--run` read through it, and a run is opened for execution by
+`openRun` (below); outside the module, only a few ports still name a store
 (`tests/runner/run-read-readers.test.ts` lists each exception). After an interruption only `finalizeRun`
 still moves the run: it keeps `ABORTED` and completes the outcome, the totals
 and the snapshot, while the other transitions change neither memory nor
@@ -557,9 +558,20 @@ settled from the child's own verdict with the `pipeline.child.started` and
 execution, reconciliation, settlement — and calls those operations, cost
 accounting for the child's spend and `finalizeRun` for its verdict, without
 restating their rules. Restoration
-on resume (`boot/resume.ts`, `run-record/run-projection.ts`) rebuilds state and is
-not a transition. Which of the snapshot and the journal is believed for each
-concept, and what each crash window leaves behind, is tabled in
+on resume rebuilds state and is not a transition. Opening a run is one
+operation of the entry, `openRun` (`run-record/run-opening.ts`): it selects the
+run directory, reads the snapshot, projects it with the journal
+(`run-record/run-projection.ts`), merges it with the definition, settles the
+attempts a crash left open, records this invocation's location and a new
+unmetered authorization, and journals `run.resumed`, or creates the run and
+journals `run.started`; it returns whether it resumed, which the step loop
+reads instead of deriving it again. Boot (`boot/resume.ts`) keeps the policy:
+the definition a snapshot runs against and the selection, which `openRun`
+calls at the point where each applies. Admission journals its skips and the
+unfinished outputs it found through `recordSkip` and `recordUnfinishedOutputs`
+(`run-record/step-bookkeeping.ts`), so nothing outside the module saves the run
+or appends to its journal: neither `saveRun` nor `appendRunEvent` is exported. Which of the snapshot and
+the journal is believed for each concept, and what each crash window leaves behind, is tabled in
 [persistence](persistence.md#which-record-is-authoritative). Presentation and
 statistics read a `RunView` (`model/run.ts`), a read-only view of the run, and
 never move it forward.

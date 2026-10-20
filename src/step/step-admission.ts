@@ -15,13 +15,14 @@ import type { RunStopState } from "../model/persisted.js";
 import type { Run, RunStep, StepDefinition } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import {
-  appendRunEvent,
   costGate,
   lastPassInterrupted,
   owesWork,
   type RunBudget,
   recordLastCommand,
+  recordSkip,
   recordUnavailableSource,
+  recordUnfinishedOutputs,
   stopRun,
   updateStep,
 } from "../run-record/index.js";
@@ -107,8 +108,7 @@ function applyInputDecision(
   if (action === "skip") {
     // Not `control`: a failed or interrupted pass carries its spend there too, yet never completed.
     const alreadyCompleted = step.status === "done";
-    // The console line is transient; the journal is what a later diagnosis reads.
-    appendRunEvent(run, "step.skipped", { stepId: step.id, reason, freshness });
+    recordSkip(run, step, { reason, freshness });
     updateStep(run, step, alreadyCompleted ? "done" : "skipped");
     output.emit({
       type: "runner.message",
@@ -150,7 +150,7 @@ export type OperatorSelectionSkip = "settled" | "unfinished";
  */
 export function skipForOperatorSelection(run: Run, step: RunStep, output: RunOutput): OperatorSelectionSkip {
   if (passLeftUnfinished(step) || lastPassInterrupted(step)) {
-    appendRunEvent(run, "step.skipped", { stepId: step.id, reason: SKIP_OPERATOR_SELECTION });
+    recordSkip(run, step, { reason: SKIP_OPERATOR_SELECTION });
     output.emit({
       type: "runner.message",
       level: "info",
@@ -207,7 +207,7 @@ function reportUnavailableSources(input: AdmitStepInput, unavailable: readonly U
 function reportUnfinishedOutputs(input: AdmitStepInput, outputs: readonly string[]): void {
   if (outputs.length === 0) return;
   const { run, step } = input;
-  appendRunEvent(run, "step.outputs.unfinished", { stepId: step.id, outputs: [...outputs] });
+  recordUnfinishedOutputs(run, step, outputs);
   input.output.emit({
     type: "runner.message",
     level: "info",

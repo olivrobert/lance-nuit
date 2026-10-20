@@ -23,8 +23,8 @@
 //                         loop has returned, the `run.finished` event and the
 //                         last snapshot.
 //
-// Restoration is not a transition and is not here: `boot/resume.ts` and
-// `run-record/run-projection.ts` rebuild statuses from the snapshot and the journal.
+// Restoration is not a transition and is not here: `run-record/run-opening.ts`
+// and `run-record/run-projection.ts` rebuild statuses from the snapshot and the journal.
 // The persisted child references of a composed run have their own owner
 // (`run-record/child-transitions.ts`). Attempt closure has its own owner
 // (`run-record/attempt-closure.ts`); the figures belong to `run-record/cost-accounting.ts`.
