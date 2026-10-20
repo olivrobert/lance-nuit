@@ -15,6 +15,7 @@ import { chargeAttemptToLedger } from "../run-record/cost-accounting.ts";
 import { sha256Text } from "../work-item-store/hash.ts";
 import { outputFreshness, PROVENANCE_PREFIX, readProvenance, writeProvenance } from "../work-item-store/provenance.ts";
 import { readRunEvents } from "../run-record/run-journal.ts";
+import { readRunSnapshot } from "../run-record/run-snapshot.ts";
 import { attemptLogPath } from "../run-record/run-timeline.ts";
 import { allocateAttempt } from "../run-record/attempt-lifecycle.ts";
 import { abortRun } from "../run-record/run-transitions.ts";
@@ -92,11 +93,14 @@ function makeStep(def: Partial<PipelineStep> = {}, state: StepStateInput = {}): 
 
 test("applyStepSession: validates the contract", () => {
   const step = makeStep({ runner: "agent", backend: { id: "claude" } }, { session: CLAUDE_SESSION("sess-old") });
-  applyStepSession(step, { ok: false });
+  const run = makeRun(step);
+  applyStepSession(run, step, { ok: false });
   // An attempt that reports no session leaves the step session alone.
   expect(step.session).toEqual(CLAUDE_SESSION("sess-old"));
-  applyStepSession(step, { ok: false, session: CLAUDE_SESSION("sess-x") });
+  applyStepSession(run, step, { ok: false, session: CLAUDE_SESSION("sess-x") });
   expect(step.session).toEqual(CLAUDE_SESSION("sess-x"));
+  // Persisted at once: a later gate resumes the session the snapshot names.
+  expect(readRunSnapshot(join(run.run_dir, "state.json"))?.steps[0]?.session).toEqual(CLAUDE_SESSION("sess-x"));
 });
 
 test("settleAttemptStats + the ledger charge: validates the ledger contract", () => {

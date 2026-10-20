@@ -23,12 +23,11 @@ import type { AbortScope } from "../runtime/abort.js";
 import { subscribe } from "../runtime/events.js";
 import { log } from "../runtime/logging.js";
 import {
-  appendRunEvent,
   discardedResumeNotice,
   type ExplicitRunSelection,
   finalizeRun,
+  recordDecision,
   runEnding,
-  saveRun,
   selectExplicitRun,
   wouldResumeLatest,
 } from "../run-record/index.js";
@@ -130,16 +129,7 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: Run) => vo
   }
   target.explicit?.commit();
   onRunCreated(run);
-  const recorded = ready.recordedDecision;
-  if (recorded) {
-    appendRunEvent(run, "decision.recorded", {
-      subject: recorded.subject,
-      decision: recorded.decision === "rejected" ? "rejected" : "approved",
-      ...(recorded.reason !== undefined ? { reason: recorded.reason } : {}),
-      ...(recorded.round !== undefined ? { round: recorded.round } : {}),
-    });
-    saveRun(run);
-  }
+  if (ready.recordedDecision) recordDecision(run, ready.recordedDecision);
   if (run.specPath !== context.config.specPath) {
     context = buildPipelineContext({
       cwd: context.cwd,

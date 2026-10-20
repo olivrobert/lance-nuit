@@ -15,6 +15,7 @@ Tooling checked: `biome.json`, `eslint.config.mjs`, `tsconfig.json`, `package.js
 
 ```rules
 STP-004 | absent | step\.status\s*=[^=] | MUST NOT A step module does not directly assign `step.status`
+STP-005 | absent | \bsaveRun\( | MUST NOT A step module does not persist the run itself: the `run-record` operation that writes a field saves the snapshot
 ```
 
 ## Semantic Rules

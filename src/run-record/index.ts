@@ -92,15 +92,30 @@ export {
   updateStep,
 } from "./run-transitions.js";
 
-// Composed child calls: the transitions of a child run's reference.
+// The named writes of a step's bookkeeping during execution, and of the human
+// decision an invocation journals: each writes its field and saves the run.
+export {
+  bindSession,
+  consumeRetry,
+  type RetryQuota,
+  recordDecision,
+  recordLastCommand,
+  recordUnavailableSource,
+  refundRetry,
+} from "./step-bookkeeping.js";
+
+// Composed child calls: the state of an orchestration node and the transitions
+// of a child run's reference.
 export {
   bindChildRun,
   commitChildCall,
   completedSuccessfully,
   declareChild,
   failChildLaunch,
+  freezeOrchestrationItems,
   hasJournaledChildStart,
   isChildSettled,
+  openOrchestration,
   recordChildStarted,
   settleChild,
   skipChild,

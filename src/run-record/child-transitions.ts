@@ -41,6 +41,10 @@
 // transition when there is one (`pipeline.child.started`,
 // `pipeline.child.finished`), then the parent snapshot — event first, snapshot
 // second, like the run transitions (`run-record/run-transitions.ts`).
+//
+// The node's own state, which holds those references, has two writes of its
+// own: `openOrchestration` finds or creates it on the step, and
+// `freezeOrchestrationItems` fixes the items a `forEachPipeline` iterates.
 
 import type { PipelineLot } from "../model/context.js";
 import type { PersistedPipelineChildRef, PersistedPipelineOrchestrationState } from "../model/persisted.js";
@@ -49,6 +53,39 @@ import { appendRunEvent, readRunEvents } from "./run-journal.js";
 import { isSettledStatus } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
 import { isCompleted } from "./run-status.js";
+
+/**
+ * The state of an orchestration node, found on its step or created empty, and
+ * persisted. A resumed node whose kind changed is refused: its children were
+ * declared for another kind of call.
+ */
+export function openOrchestration(
+  parent: Run,
+  step: RunStep,
+  kind: PersistedPipelineOrchestrationState["kind"],
+): PersistedPipelineOrchestrationState {
+  const state = step.orchestration ?? { kind, children: [] };
+  if (state.kind !== kind) throw new Error(`Step "${step.id}": orchestration type changed during resume`);
+  step.orchestration = state;
+  saveRun(parent);
+  return state;
+}
+
+/**
+ * Fix the items a `forEachPipeline` node iterates, and return the frozen list.
+ * Persisted before the first child is declared: a resume walks the same list by
+ * index, even when the template that produced it would now answer differently.
+ */
+export function freezeOrchestrationItems(
+  parent: Run,
+  state: PersistedPipelineOrchestrationState,
+  items: readonly string[],
+): string[] {
+  const frozen = [...items];
+  state.items = frozen;
+  saveRun(parent);
+  return frozen;
+}
 
 /** The call a node wants to make, as the definition currently describes it. */
 export interface ChildCall {

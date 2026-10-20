@@ -12,7 +12,14 @@ import type { StepFailure } from "../model/definition.js";
 import type { Run, RunStep } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import type { AbortScope } from "../runtime/abort.js";
-import { costGate, type RunBudget, saveRun, updateStep } from "../run-record/index.js";
+import {
+  consumeRetry,
+  costGate,
+  type RetryQuota,
+  type RunBudget,
+  refundRetry,
+  updateStep,
+} from "../run-record/index.js";
 import { type EscalationLadder, EscalationLatch, escalationLadderFor } from "./escalation.js";
 import type { runFixLoop } from "./fix-loop.js";
 import { settleStepFailure } from "./non-blocking.js";
@@ -58,7 +65,7 @@ export type OnFailureHandler = (ctx: OnFailureContext) => Promise<OnFailureOutco
  * drain loops differ only in these fields. */
 interface RetryLoopSpec {
   /** Consumed quota, separate per loop so timeout drain cannot consume fix quota. */
-  counter: "retries" | "timeout_retries";
+  counter: RetryQuota;
   /** Log line label. */
   label: string;
   /** Step-log separator. */
@@ -136,10 +143,8 @@ async function retryStepCommand(ctx: OnFailureContext, spec: RetryLoopSpec): Pro
       });
     }
 
-    step[spec.counter] = consumed() + 1;
-    const freshSession = startFreshSession(step, backend);
-    saveRun(run);
-    state.attempts = consumed();
+    state.attempts = consumeRetry(run, step, spec.counter);
+    const freshSession = startFreshSession(run, step, backend);
 
     // A step without a backend (bash, noop) has no escalation axes; only its
     // counter changes.
@@ -176,11 +181,7 @@ async function retryStepCommand(ctx: OnFailureContext, spec: RetryLoopSpec): Pro
       state.ok = true;
       break;
     }
-    // A rerun the cost guard cut short gives its quota back, as a cut-short repair
-    // does in the fix loop: a `--budget` resume must still be able to run it.
-    if (retry.budgetExceeded || retry.costUnaccounted) {
-      step[spec.counter] = consumed() - 1;
-      saveRun(run);
+    if (refundRetry(run, step, spec.counter, retry)) {
       state.attempts = consumed();
       state.costStopped = true;
       break;

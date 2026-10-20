@@ -1,4 +1,4 @@
-import { costGate, saveRun, updateStep } from "../run-record/index.js";
+import { consumeRetry, costGate, refundRetry, updateStep } from "../run-record/index.js";
 import { EscalationLatch, escalationLadderFor } from "./escalation.js";
 import { performFixAttempt, runStepCommandFresh } from "./fix-loop-pass.js";
 import type { FixRun } from "./fix-loop-runtime.js";
@@ -68,8 +68,7 @@ export async function runFixRetryLoop(
     // A fix never times out on its own, so only the threshold can move the rung.
     const escalated = latch.advance({ timedOut: false, retries: step.retries });
 
-    step.retries++;
-    saveRun(run);
+    consumeRetry(run, step, "retries");
 
     // Increase effort before model: a failed fix may need more thinking rather than
     // a higher tier.
@@ -90,12 +89,7 @@ export async function runFixRetryLoop(
     });
     if (!pass) return { failed: false };
 
-    // A repair the cost guard cut short gives its quota back: the counter counts
-    // repairs that had their chance, and a `--budget` resume must still be able to
-    // run this one instead of reporting the quota as consumed.
-    if (pass.fix.budgetExceeded || pass.fix.costUnaccounted) {
-      step.retries--;
-      saveRun(run);
+    if (refundRetry(run, step, "retries", pass.fix)) {
       costStopped = true;
       fx.output.emit({ type: "runner.message", level: "warn", message: `  Fix stopped by the cost guard` });
       break;
