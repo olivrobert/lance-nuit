@@ -4,7 +4,7 @@ import type { ComposeService } from "../env/docker-stack.ts";
 import type { RunnerArgs } from "../model/cli-options.ts";
 import { ensureStackReady, stackStep } from "./stack.ts";
 import type { BootState } from "./boot-state.ts";
-import { createDefaultRunnerRegistries } from "../entry/registries.js";
+import { composeRunnerRegistries } from "../entry/registries.js";
 
 const PREFLIGHT: StackPreflightConfig = {
   services: ["php", "db"],
@@ -109,7 +109,7 @@ function state(config: Partial<PipelineConfig>): BootState {
     args: {} as RunnerArgs,
     cwd: "/repo",
     worktreeMode: false,
-    baseRegistries: createDefaultRunnerRegistries(),
+    composeRegistries: composeRunnerRegistries,
     config: config as PipelineConfig,
   };
 }
@@ -121,7 +121,7 @@ test("applies: without stackPreflight in config, no probe", () => {
       args: {} as RunnerArgs,
       cwd: "/repo",
       worktreeMode: false,
-      baseRegistries: createDefaultRunnerRegistries(),
+      composeRegistries: composeRunnerRegistries,
     }),
   ).toBe(false);
 });

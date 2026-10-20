@@ -3,13 +3,13 @@ import { bashStep, llmStep, pipeline } from "../dsl.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { formatPipelineLintReport, lintPipeline, lintPipelineDefinition } from "./lint-pipeline.ts";
 import { createDefaultAgentBackendRegistry } from "../engine/default-registry.ts";
-import { commandRegistries } from "./registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 
 /** Explicit registry: the DSL no longer falls back to the built-in composition. */
 const REGISTRY = createDefaultAgentBackendRegistry();
 
 const context = () =>
-  buildPipelineContext({ ...commandRegistries(), cwd: process.cwd(), runnerDir: process.cwd(), ticket: "LINT-0" });
+  buildPipelineContext({ ...builtinRegistries(), cwd: process.cwd(), runnerDir: process.cwd(), ticket: "LINT-0" });
 
 test("lancenuit lint: generic builtin without execution", async () => {
   const report = await lintPipeline("default", { context: context() });

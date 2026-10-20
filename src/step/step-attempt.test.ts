@@ -24,7 +24,7 @@ import { applyStepSession, runAttempt, runFixAttempt } from "./step-attempt.ts";
 
 const CLAUDE_SESSION = (id: string): AgentSession => ({ provider: "claude", id, resumable: true });
 import { createDefaultAgentBackendRegistry } from "../engine/default-registry.ts";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 
 /** Explicit registry: a fix spawn no longer resolves one from a singleton. */
 const REGISTRY = createDefaultAgentBackendRegistry();
@@ -35,7 +35,7 @@ type FixWithAgent = typeof runWithAgent;
 /** Fake backend: the fix gate requires one, but its identity is irrelevant here. */
 const FIX_SPEC = { id: "claude" } as const;
 
-const baseCtx = buildPipelineContext({ ...commandRegistries(), cwd: ".", runnerBin: "", runnerDir: "" });
+const baseCtx = buildPipelineContext({ ...builtinRegistries(), cwd: ".", runnerBin: "", runnerDir: "" });
 
 /** One-artifact store. Provenance records are dropped: they would overwrite the
  *  single value, and the tests using it are about the artifact alone. */
@@ -55,7 +55,7 @@ function artifactFixture(initial?: unknown) {
     },
   };
   return {
-    ctx: buildPipelineContext({ ...commandRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
+    ctx: buildPipelineContext({ ...builtinRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
     write: (next: unknown) => {
       value = JSON.stringify(next);
     },
@@ -980,7 +980,7 @@ function multiArtifactFixture(initial: Record<string, string> = {}) {
   };
   return {
     values,
-    ctx: buildPipelineContext({ ...commandRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
+    ctx: buildPipelineContext({ ...builtinRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
   };
 }
 
@@ -1367,7 +1367,7 @@ test("capture: a write error is not a refusal — the agent's object was accepte
     },
     remove: async () => {},
   };
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store });
   const step = captureStep([textCapture]);
   const attempt = await runAttempt(makeRun(step), step, {
     command: "write",

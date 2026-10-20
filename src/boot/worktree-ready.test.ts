@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { RunnerArgs } from "../model/cli-options.ts";
-import { createDefaultRunnerRegistries } from "../entry/registries.js";
+import { composeRunnerRegistries } from "../entry/registries.js";
 import type { BootState } from "./boot-state.ts";
 import { BOOT } from "./step.ts";
 import { worktreeReadyStep } from "./worktree-ready.ts";
@@ -10,7 +10,7 @@ function state(extra: Partial<BootState>): BootState {
     args: {} as RunnerArgs,
     cwd: "/wt",
     worktreeMode: true,
-    baseRegistries: createDefaultRunnerRegistries(),
+    composeRegistries: composeRunnerRegistries,
     ...extra,
   };
 }

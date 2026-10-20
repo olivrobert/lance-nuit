@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { loadOrCreateRun } from "../boot/resume.js";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { executeRunSteps, type StepLoopDeps } from "../step/step-loop.js";
 import { assumptionsArtifact, lotsArtifact } from "../builtin-steps/lib/artifacts.js";
@@ -605,7 +605,7 @@ test("persisted format: validates the contract", () => {
 
 test("persisted format: a snapshot written before cost_unaccounted existed still stops a capped run", async () => {
   const root = mkdtempSync(join("/tmp", "pipeline-state-minimal-unaccounted-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "PROJ-9" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "PROJ-9" });
   const pipelinePath = join(root, "p.ts");
   writeFileSync(
     pipelinePath,
@@ -678,7 +678,7 @@ test("persisted format: a snapshot written before cost_unaccounted existed still
 
 test("persisted format: a snapshot that still carries a step's last_command opens, and the next save drops it", async () => {
   const root = mkdtempSync(join("/tmp", "pipeline-state-last-command-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "PROJ-11" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "PROJ-11" });
   const pipelinePath = join(root, "p.ts");
   writeFileSync(
     pipelinePath,
@@ -734,7 +734,7 @@ test("persisted format: a snapshot that still carries a step's last_command open
 
 test("persisted format: a minimal step flagged cost_unknown with nothing measured does not stop the run", async () => {
   const root = mkdtempSync(join("/tmp", "pipeline-state-minimal-unmeasured-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "PROJ-10" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "PROJ-10" });
   const pipelinePath = join(root, "p.ts");
   writeFileSync(
     pipelinePath,

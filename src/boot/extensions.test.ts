@@ -8,7 +8,7 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { createProjectDsl, validatePipeline } from "../pipeline/loader.js";
 import { parseRunnerArgs } from "../cli/parse.js";
 import { makeRunStep } from "../run-record/run-step.js";
-import { createDefaultRunnerRegistries } from "../entry/registries.js";
+import { composeRunnerRegistries, createDefaultRunnerRegistries } from "../entry/registries.js";
 import { configStep } from "./config.js";
 import { loadRunnerRegistries } from "./extensions.js";
 
@@ -170,7 +170,7 @@ describe("explicit runner extensions", () => {
       cwd: root,
       args: parseRunnerArgs([]),
       worktreeMode: false,
-      baseRegistries: createDefaultRunnerRegistries(),
+      composeRegistries: composeRunnerRegistries,
     });
     expect(state.registries?.workItems.known()).toContain("redmine");
     expect(state.context?.workItem.provider).toBe("redmine");
@@ -199,7 +199,7 @@ describe("explicit runner extensions", () => {
       cwd: root,
       args: parseRunnerArgs([]),
       worktreeMode: false,
-      baseRegistries: createDefaultRunnerRegistries(),
+      composeRegistries: composeRunnerRegistries,
     });
     expect(state.registries?.workItems.known()).toContain("redmine");
     const manifestPath = join(kit, "node_modules", "lance-nuit", "package.json");
@@ -212,7 +212,7 @@ describe("explicit runner extensions", () => {
       cwd: root,
       args: parseRunnerArgs([]),
       worktreeMode: false,
-      baseRegistries: createDefaultRunnerRegistries(),
+      composeRegistries: composeRunnerRegistries,
     });
     expect(JSON.parse(readFileSync(manifestPath, "utf8")).lanceNuitContracts.sourceHash).toBe(
       manifest.lanceNuitContracts.sourceHash,
@@ -236,7 +236,7 @@ describe("explicit runner extensions", () => {
       cwd: root,
       args: parseRunnerArgs([]),
       worktreeMode: false,
-      baseRegistries: createDefaultRunnerRegistries(),
+      composeRegistries: composeRunnerRegistries,
     });
     expect(existsSync(join(root, ".lance-nuit", "node_modules"))).toBe(false);
   });

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunJournalEvent } from "../model/journal.js";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { projectStepAttempts } from "./attempt-projection.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
@@ -150,7 +150,7 @@ test("attempt projection: validates the integration contract", async () => {
 
   // Loading a definition builds the DSL against the run's registry: the caller
   // supplies the context, nothing falls back to the built-in composition.
-  const context = buildPipelineContext({ ...commandRegistries(), cwd: dir });
+  const context = buildPipelineContext({ ...builtinRegistries(), cwd: dir });
   const run = writable((await loadOrCreateRun({ pipelinePath, runDir, fresh: true, context, worktree: false })).run);
   const step = run.steps[0]!;
 

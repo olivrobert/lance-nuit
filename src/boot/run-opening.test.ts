@@ -8,7 +8,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import type { PipelineContext } from "../model/context.js";
 import type { PersistedRun } from "../model/persisted.js";
 import type { RunJournalEvent } from "../model/journal.js";
@@ -78,7 +78,7 @@ interface Fixture {
 
 function fixture(prefix: string, ticket: string): Fixture {
   const root = mkdtempSync(join(tmpdir(), prefix));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", ticket, undefined, true, ctx);
   return { root, ctx, path, dir };
@@ -205,7 +205,7 @@ test("reopening a terminal run from another place records the new place without 
   for (const step of run.steps) updateStep(run, step, "done");
   finalizeRun(run, {});
   const elsewhere = mkdtempSync(join(tmpdir(), "open-terminal-moved-wt-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: elsewhere, ticket: "T-moved" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: elsewhere, ticket: "T-moved" });
 
   const { writes } = await open(f, "T-moved", { ctx });
 
@@ -229,7 +229,7 @@ test("resuming with a new authorization journals it before the resume, with one 
 
 test("a composed child resumed on its own with --run keeps its lineage and refuses an authorization its scope withheld", async () => {
   const root = mkdtempSync(join(tmpdir(), "open-child-run-"));
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "C-1" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "C-1" });
   const childPath = pipelineFile(root, "child");
   const dir = resolveRunDir("child", "C-1", undefined, true, ctx);
   const { run: child } = await loadOrCreateRun({
@@ -291,7 +291,7 @@ test("a composed child records the worktree its parent runs in", async () => {
   .add(runPipeline({ id: "call", name: "Call", pipeline: "./child.ts" }))
   .build();`,
   );
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "W-1" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "W-1" });
   const previous = process.env.RUNNER_IN_WORKTREE;
   // The worktree boot step sets the flag after its `chdir`, and the entry point
   // passes the same answer to the parent's boot.

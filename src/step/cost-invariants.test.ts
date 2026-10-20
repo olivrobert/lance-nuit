@@ -9,7 +9,7 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { commandRegistries } from "../commands/registries.ts";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import type { AgentBackend, AgentBackendFactory, AgentSession } from "../contracts/backends.ts";
 import { AgentBackendRegistry } from "../engine/registry.ts";
 import type { StepResult } from "../exec/runners.ts";
@@ -539,7 +539,7 @@ function fixDeps(onFix: () => void): FixLoopDeps {
   };
 }
 
-const context = (): PipelineContext => buildPipelineContext({ ...commandRegistries(), cwd: process.cwd() });
+const context = (): PipelineContext => buildPipelineContext({ ...builtinRegistries(), cwd: process.cwd() });
 
 const GATES: Record<string, (state: BudgetState) => Promise<{ run: Run; budget: RunBudget }>> = {
   "step admission": async (state) => {

@@ -14,7 +14,7 @@ import { saveRun } from "../run-repository.ts";
 import { stepLogPath } from "../run-timeline.ts";
 import { abortRun, updateStep } from "../run-transitions.ts";
 import { isResumable, isRunComplete } from "./run-storage.ts";
-import { commandRegistries } from "../../commands/registries.js";
+import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 
 function writeRun(obj: any): string {
   const dir = mkdtempSync(join(tmpdir(), "resume-"));
@@ -187,7 +187,7 @@ test("loadOrCreateRun rejects an existing corrupt snapshot instead of initializi
     runDir,
     fresh: false,
     startAt: "b",
-    context: buildPipelineContext(commandRegistries()),
+    context: buildPipelineContext(builtinRegistries()),
     worktree: false,
   });
   const byId = Object.fromEntries(run.steps.map((s) => [s.id, s.status]));
@@ -206,7 +206,7 @@ test("loadOrCreateRun: validates the contract", async () => {
       runDir,
       fresh: false,
       startAt: "nope",
-      context: buildPipelineContext(commandRegistries()),
+      context: buildPipelineContext(builtinRegistries()),
       worktree: false,
     }),
   ).rejects.toThrow(/not found/);
@@ -227,7 +227,7 @@ test("loadOrCreateRun: validates the contract", async () => {
     stepFilter: ["quality"],
     runDir: join(dir, "run"),
     fresh: true,
-    context: buildPipelineContext(commandRegistries()),
+    context: buildPipelineContext(builtinRegistries()),
     worktree: false,
   });
   expect(run.steps.filter((step) => step.status === "pending").map((step) => step.id)).toEqual([
@@ -242,8 +242,8 @@ test("loadOrCreateRun: validates the contract", async () => {
 test("maxCostPerWorkItemUsd: validates the contract", async () => {
   const dir = mkdtempSync(join(tmpdir(), "work-item-budget-runs-"));
   const pipelinePath = writeWorkItemBudgetFixture(dir);
-  const firstContext = buildPipelineContext({ ...commandRegistries(), cwd: dir, ticket: "PROJ-1" });
-  const secondContext = buildPipelineContext({ ...commandRegistries(), cwd: dir, ticket: "PROJ-2" });
+  const firstContext = buildPipelineContext({ ...builtinRegistries(), cwd: dir, ticket: "PROJ-1" });
+  const secondContext = buildPipelineContext({ ...builtinRegistries(), cwd: dir, ticket: "PROJ-2" });
 
   const { run: first } = await loadOrCreateRun({
     pipelinePath,
@@ -273,7 +273,7 @@ test("loadOrCreateRun: validates the contract", async () => {
   writeFileSync(join(runDir, "state.json"), '{"steps": [{"id"');
 
   await expect(
-    loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()), worktree: false }),
+    loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(builtinRegistries()), worktree: false }),
   ).rejects.toThrow(/invalid JSON/);
   expect(readFileSync(join(runDir, "state.json"), "utf-8")).toBe('{"steps": [{"id"');
 });
@@ -282,7 +282,7 @@ test("loadOrCreateRun: validates the contract", async () => {
   const dir = mkdtempSync(join(tmpdir(), "latest-resume-"));
   const pipelinePath = writePipelineFixture(dir);
   const ticket = "PROJ-42";
-  const context = buildPipelineContext({ ...commandRegistries(), cwd: dir, ticket });
+  const context = buildPipelineContext({ ...builtinRegistries(), cwd: dir, ticket });
 
   const { run: first } = await loadOrCreateRun({ pipelinePath, ticket, fresh: false, context, worktree: false });
   expect(first.steps[0]?.status).toBe("pending");
@@ -329,7 +329,7 @@ test("AUDIT #1: validates the contract", async () => {
   const { run } = await loadOrCreateRun({
     pipelinePath,
     runDir,
-    context: buildPipelineContext(commandRegistries()),
+    context: buildPipelineContext(builtinRegistries()),
     worktree: false,
   });
   expect(run.steps[0]!.errors).toBe("boom: assertion failed");
@@ -371,7 +371,7 @@ test("hydrate: an ABORTED run whose steps are all settled loads as live so it ca
   const { run } = await loadOrCreateRun({
     pipelinePath,
     runDir,
-    context: buildPipelineContext(commandRegistries()),
+    context: buildPipelineContext(builtinRegistries()),
     worktree: false,
   });
 
@@ -407,7 +407,7 @@ test("hydrate: an ABORTED settled run that opted out of resuming stays terminal"
   const { run } = await loadOrCreateRun({
     pipelinePath,
     runDir,
-    context: buildPipelineContext(commandRegistries()),
+    context: buildPipelineContext(builtinRegistries()),
     worktree: false,
   });
 
@@ -445,7 +445,7 @@ test("hydrate derives live totals from steps instead of a stale finalized aggreg
   const { run } = await loadOrCreateRun({
     pipelinePath,
     runDir,
-    context: buildPipelineContext(commandRegistries()),
+    context: buildPipelineContext(builtinRegistries()),
     worktree: false,
   });
   expect(run.steps[0]).toMatchObject({
@@ -482,7 +482,7 @@ test("loadOrCreateRun refuses to erase a persisted step removed from the definit
   );
 
   await expect(
-    loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()), worktree: false }),
+    loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(builtinRegistries()), worktree: false }),
   ).rejects.toThrow("removed or renamed persisted step(s): removed-paid-step");
   const unchanged = JSON.parse(readFileSync(join(runDir, "state.json"), "utf8"));
   expect(unchanged.steps).toHaveLength(2);

@@ -11,7 +11,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AgentBackendRegistry } from "../contracts/backends.js";
 import { EXTENSION_MANIFEST_KEYS, type ExtensionManifest } from "../contracts/extensions.js";
 import type { WorkItemGatewayRegistry } from "../contracts/registry.js";
+import type { PipelineConfig } from "../env/config.js";
 import { errorMessage } from "../lib/errors.js";
+import { ensureContractsForExtension } from "../project/dsl-types/contracts-package.js";
 
 /** Registries a manifest extends. The public shape of the manifest itself is
  *  `ExtensionManifest` in `lance-nuit/contracts`; this module owns its loading. */
@@ -19,6 +21,14 @@ export interface RunnerRegistries {
   readonly workItems: WorkItemGatewayRegistry;
   readonly backends: AgentBackendRegistry;
 }
+
+/**
+ * The providers a project works with: the built-ins, extended with the manifest
+ * its configuration names. The entry point supplies the one implementation, so
+ * boot and the commands outside a run receive the same composition and never
+ * name a built-in provider themselves.
+ */
+export type ComposeRegistries = (config: PipelineConfig, cwd: string) => Promise<RunnerRegistries>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -103,12 +113,24 @@ function extensionSpecifier(specifier: string, cwd: string): string {
 /**
  * Absolute path of the file an extension specifier resolves to, or `undefined`
  * for a module the loader cannot map to a local file. Same resolution as the
- * import itself, so a caller preparing that file's surroundings targets the
- * module that will actually load.
+ * import itself, so preparing that file's surroundings targets the module that
+ * will actually load.
  */
-export function resolveExtensionFile(specifier: string, cwd: string): string | undefined {
+function resolveExtensionFile(specifier: string, cwd: string): string | undefined {
   const url = extensionSpecifier(specifier, cwd);
   return url.startsWith("file:") ? fileURLToPath(url) : undefined;
+}
+
+/**
+ * An extension inside a kit imports `lance-nuit/contracts` from the package
+ * vendored in that kit. It has to be the running CLI's copy — missing after a
+ * clone, stale after a CLI update — so it is checked before the import that
+ * would otherwise load an older contract or fail to resolve.
+ */
+function prepareExtensionContracts(specifier: string, cwd: string): void {
+  const file = resolveExtensionFile(specifier, cwd);
+  if (!file) return;
+  ensureContractsForExtension(file, cwd);
 }
 
 async function importManifest(specifier: string, cwd: string): Promise<unknown> {
@@ -150,8 +172,8 @@ function validateManifest(value: unknown, source: string): ExtensionManifest {
 /**
  * Extend an already-composed pair of registries with an explicit manifest.
  *
- * The base comes from the caller (`entry/registries.ts` for a run): boot prepares,
- * it does not compose, so it never names the built-in providers itself.
+ * The base comes from the caller (`entry/registries.ts`): this module loads, it
+ * does not compose, so it never names the built-in providers itself.
  */
 export async function loadRunnerRegistries(
   moduleSpecifier: string | undefined,
@@ -159,6 +181,7 @@ export async function loadRunnerRegistries(
   cwd: string = process.cwd(),
 ): Promise<RunnerRegistries> {
   if (!moduleSpecifier) return registries;
+  prepareExtensionContracts(moduleSpecifier, cwd);
   const manifest = validateManifest(await importManifest(moduleSpecifier, cwd), moduleSpecifier);
   for (const registration of manifest.workItems ?? []) registries.workItems.register(registration);
   for (const factory of manifest.backends ?? []) registries.backends.register(factory);

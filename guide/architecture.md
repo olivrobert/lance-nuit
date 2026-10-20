@@ -130,21 +130,27 @@ module, without any further rule.
 
 ### The composition root
 
-`src/entry/` composes the registries for normal runs. `src/commands/registries.ts`
-is a second composition root for commands that run outside a pipeline, such as
-approval-only, lint, and diagnostic commands. Both paths call the default
-registry factories and pass the resulting registries down. Nothing in the
-execution or state layers reaches back for a default registry or chooses a
-built-in backend. Boot then extends the caller-provided registries with
-manifest-declared providers before a run uses them:
+`src/entry/` is the only composition root. `entry/registries.ts` holds the one
+function that composes the provider registries, `composeRunnerRegistries`: the
+built-in providers extended with the extension manifest the project
+configuration names. The entry point hands that function to boot and to every
+command that runs outside a pipeline, such as approval-only and lint; neither
+names a built-in provider. Nothing in the execution or state layers reaches back
+for a default registry or chooses a built-in backend:
 
-- **registries** — `entry/registries.ts` composes providers for runs and
-  `commands/registries.ts` does the same for out-of-run commands. The built-in
-  provider lists live in `engine/default-registry.ts` and
-  `modules/work-item/registry.ts`; boot extends the selected registries with an
-  explicit manifest, and everything downstream reads them from the pipeline
-  context (`agentBackendRegistryOf`, `workItemRegistryOf`). A context without a
-  registry fails loudly at the first agent step rather than falling back.
+- **registries** — `composeRunnerRegistries` (typed `ComposeRegistries` in
+  `boot/extensions.ts`, which owns loading the manifest) is the single
+  composition. The built-in provider lists live in `engine/default-registry.ts`
+  and `modules/work-item/registry.ts`. Boot calls it once cwd is final, with the
+  configuration it froze; a command that loads a pipeline calls it with its own
+  project's configuration, so `--lint-pipeline`, `--lint-config` and
+  `--approve-only` resolve exactly the backends and providers a run would. The
+  commands that only read run files (`--inspect`, `--logs`, `--clean`, `--close`,
+  `--reopen`) compose nothing: they never import the manifest, so a manifest that
+  cannot load does not keep them from explaining or closing the run it broke.
+  Everything downstream reads the registries from the pipeline context
+  (`agentBackendRegistryOf`, `workItemRegistryOf`). A context without a registry
+  fails loudly at the first agent step rather than falling back.
 - **`RunOutput`** — the interface and the composite live in `src/runtime/`, the
   console and live-feed implementations in `src/output/`. The step loop takes one
   as a required argument; it never picks a default. Step progress travels on it,

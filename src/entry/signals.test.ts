@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { loadOrCreateRun } from "../boot/resume.ts";
-import { commandRegistries } from "../commands/registries.ts";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.ts";
 import { readRunEvents } from "../run-record/run-journal.ts";
@@ -46,7 +46,7 @@ function childSource(root: string, runDir: string, pipelinePath: string, stopSou
   const module = (path: string) => JSON.stringify(join(REPO_ROOT, path));
   return [
     `import { loadOrCreateRun } from ${module("src/boot/resume.ts")};`,
-    `import { commandRegistries } from ${module("src/commands/registries.ts")};`,
+    `import { builtinRegistries } from ${module("tests/builtin-registries.ts")};`,
     `import { buildPipelineContext } from ${module("src/pipeline/context.ts")};`,
     `import { appendRunEvent } from ${module("src/run-record/run-journal.ts")};`,
     `import { saveRun } from ${module("src/run-record/run-repository.ts")};`,
@@ -54,7 +54,7 @@ function childSource(root: string, runDir: string, pipelinePath: string, stopSou
     `import { updateStep } from ${module("src/run-record/run-transitions.ts")};`,
     `import { installChildKillHandlers } from ${module("src/entry/signals.ts")};`,
     `import { createAbortScope } from ${module("src/runtime/abort.ts")};`,
-    `const ctx = buildPipelineContext({ ...commandRegistries(), cwd: ${JSON.stringify(root)}, ticket: "T-9" });`,
+    `const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: ${JSON.stringify(root)}, ticket: "T-9" });`,
     `const { run } = await loadOrCreateRun({ pipelinePath: ${JSON.stringify(pipelinePath)}, ticket: "T-9", runDir: ${JSON.stringify(
       runDir,
     )}, fresh: false, context: ctx });`,
@@ -158,7 +158,7 @@ test("a real SIGTERM during a step persists the abort and leaves a resumable run
 
   // The relaunch: the same directory, loaded by the same boot path, executed by
   // the real loop. The completed step must not be spawned again.
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-9" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-9" });
   const { run: resumed } = await loadOrCreateRun({
     pipelinePath,
     ticket: "T-9",

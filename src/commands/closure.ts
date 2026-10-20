@@ -20,7 +20,6 @@ import {
   writeClosureAt,
 } from "../run-record/index.js";
 import { decisionActor } from "../work-item-store/index.js";
-import { commandRegistries } from "./registries.js";
 import type { RunnerCommand } from "./runner-command.js";
 import { errorMessage, isValidTicket } from "./shared.js";
 
@@ -29,8 +28,10 @@ type ClosureArgs = Pick<RunnerArgs, "ticket" | "pipelinePath">;
 
 export type ClosureResult = { ok: true; message: string } | { ok: false; message: string };
 
+/** No provider registry: closing reads and writes run files only, so a manifest
+ *  that cannot load must not keep a finished ticket's run open. */
 function contextFor(cwd: string, ticket: string): PipelineContext {
-  return buildPipelineContext({ cwd, ticket, ...commandRegistries() });
+  return buildPipelineContext({ cwd, ticket });
 }
 
 /**

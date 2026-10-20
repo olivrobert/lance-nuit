@@ -6,7 +6,7 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import { installProjectTypes, typecheckProjectPipelines } from "../project/dsl-types.js";
 import { PIPELINE_TEMPLATES, pipelineTemplate, renderPipelineTemplate, templateIds } from "./pipeline-templates.js";
-import { commandRegistries } from "./registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 
 // Installing declarations and typechecking every template runs several
 // TypeScript programs; the 5-second default is not a meaningful budget here.
@@ -49,7 +49,7 @@ test("templates: every one loads into a pipeline with steps", async () => {
     writeFileSync(target, renderPipelineTemplate(template.id, COMMAND, template.id));
     const definition = await loadPipelineDefinition(
       target,
-      buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "PROJ-42" }),
+      buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "PROJ-42" }),
     );
     expect(definition.name).toBe(template.id);
     expect(definition.steps.length).toBeGreaterThan(0);

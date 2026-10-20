@@ -5,7 +5,11 @@ import { dirname, join } from "node:path";
 import { runnerLockPath } from "../env/runlock.js";
 import type { RunnerArgs } from "../model/cli-options.js";
 import { buildPipelineContext } from "../pipeline/context.js";
+import { composeRunnerRegistries } from "../entry/registries.js";
 import { approvalCommand, rejectionCommand } from "./approval.js";
+
+/** The runner's own composition, as the entry point hands it to a command. */
+const ENVIRONMENT = { composeRegistries: composeRunnerRegistries };
 
 /** `lancenuit approve` goes through --approve-only, not through a run: the guard
  *  must hold on this path too. */
@@ -40,12 +44,15 @@ async function approveOnly(verdict: "decision" | "split"): Promise<{ code: numbe
   const previous = process.cwd();
   process.chdir(cwd);
   try {
-    const code = await approvalCommand.run({
-      ticket: "PROJ-9",
-      approve: "triage-decision",
-      approveOnly: true,
-      pipelinePath: file,
-    } as RunnerArgs);
+    const code = await approvalCommand.run(
+      {
+        ticket: "PROJ-9",
+        approve: "triage-decision",
+        approveOnly: true,
+        pipelinePath: file,
+      } as RunnerArgs,
+      ENVIRONMENT,
+    );
     return { code, decision: join(context.paths.decisionsDir!, "triage-decision.json") };
   } finally {
     process.chdir(previous);
@@ -100,7 +107,7 @@ async function rejectOnly(cwd: string, args: Partial<RunnerArgs>): Promise<numbe
   const previous = process.cwd();
   process.chdir(cwd);
   try {
-    return await rejectionCommand.run({ ticket: "PROJ-9", rejectOnly: true, ...args } as RunnerArgs);
+    return await rejectionCommand.run({ ticket: "PROJ-9", rejectOnly: true, ...args } as RunnerArgs, ENVIRONMENT);
   } finally {
     process.chdir(previous);
   }

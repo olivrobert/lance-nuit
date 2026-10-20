@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { RunnerArgs } from "../model/cli-options.ts";
 import { pipelinePathStep } from "./pipeline-path.ts";
 import type { BootState } from "./boot-state.ts";
-import { createDefaultRunnerRegistries } from "../entry/registries.js";
+import { composeRunnerRegistries } from "../entry/registries.js";
 
 const originalHome = process.env.PIPELINE_HOME;
 const originalExit = process.exit;
@@ -32,7 +32,7 @@ function state(cwd: string, pipelinePath?: string): BootState {
     args: {} as RunnerArgs,
     cwd,
     worktreeMode: false,
-    baseRegistries: createDefaultRunnerRegistries(),
+    composeRegistries: composeRunnerRegistries,
     ...(pipelinePath === undefined ? {} : { pipelinePath }),
   };
 }

@@ -6,7 +6,6 @@ import { log } from "../runtime/logging.js";
 import { cleanLogs, inspectTicket, logsForTicket } from "./diagnostics-readers.js";
 import { FileRunLogStore, FileRunStateStore } from "../run-record/index.js";
 import type { RunnerCommand } from "./runner-command.js";
-import { commandRegistries } from "./registries.js";
 import { isValidTicket } from "./shared.js";
 
 /** Options each diagnostic command reads, out of the 35 `RunnerArgs` carries. */
@@ -14,8 +13,10 @@ type InspectArgs = Pick<RunnerArgs, "ticket" | "runId">;
 type LogsArgs = Pick<RunnerArgs, "ticket" | "runId" | "step">;
 type CleanArgs = Pick<RunnerArgs, "ticket" | "logsOnly" | "olderThan" | "keepFailed">;
 
+/** No provider registry: diagnostics read run files only, and must still work
+ *  when the run they explain failed on a manifest that cannot load. */
 function contextFor(ticket?: string) {
-  return buildPipelineContext({ cwd: process.cwd(), ticket, ...commandRegistries() });
+  return buildPipelineContext({ cwd: process.cwd(), ticket });
 }
 
 function storesFor(context: ReturnType<typeof contextFor>, ticket?: string) {

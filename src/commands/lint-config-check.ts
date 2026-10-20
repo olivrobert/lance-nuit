@@ -10,11 +10,12 @@
 
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ComposeRegistries } from "../boot/extensions.js";
 import { backendSpecForStep, declaredBackendAxes, isAgentStep } from "../contracts/backends.js";
 import { listPipelineFiles } from "../env/builtin-pipeline.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../model/context.js";
 import type { Pipeline } from "../model/definition.js";
-import { buildPipelineContext, deriveContext } from "../pipeline/context.js";
+import { deriveContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import {
   checkOverrideKeyShapes,
@@ -25,8 +26,7 @@ import {
   stepCapability,
   stepOverrideFor,
 } from "../validation/step-overrides.js";
-import { commandRegistries } from "./registries.js";
-import { errorMessage } from "./shared.js";
+import { contextWithProjectProviders, errorMessage } from "./shared.js";
 
 /** Nonexistent but well-formed ticket, sufficient to resolve artifact paths. */
 const LINT_TICKET = "LINT-0";
@@ -85,14 +85,22 @@ async function loadAll(context: PipelineContext): Promise<{ pipelines: Pipeline[
   return { pipelines, findings };
 }
 
-export async function lintStepOverrides(context?: PipelineContext): Promise<LintReport> {
-  // `..`: this file lives in env/, while the context expects the runner root.
+/** The context `--lint-config` checks: the project in `cwd`, with the providers a
+ *  run there would see, so a backend its manifest declares is a known one. */
+export function lintConfigContext(
+  composeRegistries: ComposeRegistries,
+  cwd: string = process.cwd(),
+): Promise<PipelineContext> {
+  // `..`: this file lives in commands/, while the context expects the runner root.
   const runnerDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   // Dummy ticket: many commands are built from `paths.artifact()`, which throws
   // without a ticket. Without it, command resolution fails and the step appears to
   // have no capability; lint would report "machine default" for steps that actually
   // delegate to a skill.
-  const ctx = context ?? buildPipelineContext({ runnerDir, ticket: LINT_TICKET, ...commandRegistries() });
+  return contextWithProjectProviders(composeRegistries, { cwd, runnerDir, ticket: LINT_TICKET });
+}
+
+export async function lintStepOverrides(ctx: PipelineContext): Promise<LintReport> {
   const { pipelines, findings } = await loadAll(ctx);
   const overrides = ctx.config.steps;
   const names = new Set(pipelines.map((p) => p.name));

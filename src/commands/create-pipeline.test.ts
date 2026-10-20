@@ -6,7 +6,7 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import { installProjectTypes, typecheckProjectPipelines } from "../project/dsl-types.js";
 import { createProjectPipeline } from "./create-pipeline.js";
-import { commandRegistries } from "./registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 
 // Rendering itself — templates, command serialization, name validation — is
 // covered by pipeline-templates.test.ts. This file covers what creation adds:
@@ -27,7 +27,7 @@ test("creation: missing directories, typecheck, and loading", async () => {
 
   installProjectTypes(root);
   expect(typecheckProjectPipelines(root)).toMatchObject({ ok: true });
-  const definition = await loadPipelineDefinition(target, buildPipelineContext({ ...commandRegistries(), cwd: root }));
+  const definition = await loadPipelineDefinition(target, buildPipelineContext({ ...builtinRegistries(), cwd: root }));
   expect(definition.name).toBe("demo-pipeline");
   expect(definition.steps.map((step) => step.id)).toEqual(["check"]);
   expect(definition.steps[0]?.command).toBe("make test");

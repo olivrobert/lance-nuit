@@ -33,9 +33,9 @@ export interface BuildPipelineContextOptions {
    *  tests and callers that selected their provider elsewhere. When absent, it is
    *  resolved on first access from `config.workItem.provider`. */
   workItem?: WorkItemGateway;
-  /** Provider registry the context carries. Attached by boot, or by the caller
-   *  that composes its own registries (`commands/registries.ts`). Without it,
-   *  `ctx.workItem` fails loudly rather than falling back to the built-ins. */
+  /** Provider registry the context carries. Attached by boot, or by a command
+   *  outside a run, from the composition `entry/registries.ts` hands down. Without
+   *  it, `ctx.workItem` fails loudly rather than falling back to the built-ins. */
   workItemRegistry?: WorkItemGatewayRegistry;
   /** Agent backend registry the context carries, same rule. */
   agentBackendRegistry?: AgentBackendRegistry;

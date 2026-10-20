@@ -6,14 +6,14 @@ import { fileURLToPath } from "node:url";
 import { parseProfileOverrides, parseStepOverrides } from "../env/config.schema.ts";
 import { buildPipelineContext, deriveContext } from "../pipeline/context.ts";
 import { formatLintReport, lintStepOverrides } from "./lint-config-check.ts";
-import { commandRegistries } from "./registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 
 const runnerDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Use `deriveContext`, not a spread: a spread would read the `workItem` getter
  *  and create the tracker bridge for linting that does not use it. */
 function contextWith(steps: Record<string, unknown>, profiles: Record<string, unknown> = {}) {
-  const base = buildPipelineContext({ ...commandRegistries(), cwd: runnerDir, runnerDir, ticket: "LINT-0" });
+  const base = buildPipelineContext({ ...builtinRegistries(), cwd: runnerDir, runnerDir, ticket: "LINT-0" });
   return deriveContext(base, {
     config: { ...base.config, steps: parseStepOverrides(steps), profiles: parseProfileOverrides(profiles) },
   });
@@ -49,9 +49,9 @@ test("lint: no tracker gateway created (context laziness preserved)", async () =
   // An unregistered provider → construction THROWS. A lint that runs without error
   // mechanically proves no `{ ...context }` read the `workItem` getter on this path.
   // This test fails if the spread returns.
-  const base = buildPipelineContext({ ...commandRegistries(), cwd: runnerDir, runnerDir, ticket: "LINT-0" });
+  const base = buildPipelineContext({ ...builtinRegistries(), cwd: runnerDir, runnerDir, ticket: "LINT-0" });
   const ctx = buildPipelineContext({
-    ...commandRegistries(),
+    ...builtinRegistries(),
     cwd: runnerDir,
     runnerDir,
     ticket: "LINT-0",
@@ -96,7 +96,7 @@ test("lint: a legitimate override appears as config source", async () => {
 ).build();\n`,
   );
   try {
-    const base = buildPipelineContext({ ...commandRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
+    const base = buildPipelineContext({ ...builtinRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
     const report = await lintStepOverrides(
       deriveContext(base, {
         config: { ...base.config, steps: parseStepOverrides({ "agent:review": { model: "sonnet" } }) },
@@ -116,7 +116,7 @@ test("lint: a project pipeline is linted like builtins", async () => {
   // the opposite of what an author sees.
   const project = projectWithPipeline("demo", DEMO_PIPELINE);
   try {
-    const base = buildPipelineContext({ ...commandRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
+    const base = buildPipelineContext({ ...builtinRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
     const report = await lintStepOverrides(base);
     expect(report.findings.some((f) => /demo/.test(f.message) && f.level === "error")).toBe(false);
     expect(report.effective.some((row) => row.pipeline === "demo")).toBe(false); // no agent step
@@ -145,7 +145,7 @@ test("lint: a project pipeline shadows a builtin with the same name", async () =
 `,
   );
   try {
-    const base = buildPipelineContext({ ...commandRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
+    const base = buildPipelineContext({ ...builtinRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
     const report = await lintStepOverrides(
       deriveContext(base, {
         config: { ...base.config, steps: parseStepOverrides({ "bugfix:fix-standard": { model: "sonnet" } }) },
@@ -169,7 +169,7 @@ test("lint: a project pipeline profile is visible", async () => {
 ).build();\n`,
   );
   try {
-    const base = buildPipelineContext({ ...commandRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
+    const base = buildPipelineContext({ ...builtinRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
     const report = await lintStepOverrides(
       deriveContext(base, {
         config: {
@@ -201,7 +201,7 @@ test("lint: the three registered backends are linted in one pipeline", async () 
   .build();\n`,
   );
   try {
-    const base = buildPipelineContext({ ...commandRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
+    const base = buildPipelineContext({ ...builtinRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
     const report = await lintStepOverrides(
       deriveContext(base, {
         config: { ...base.config, steps: parseStepOverrides({ "trois-backends:sort": { model: "opencode/other" } }) },

@@ -11,7 +11,7 @@ import { buildPipelineContext } from "../../pipeline/context.js";
 import { loadPipelineDefinition } from "../../pipeline/loader.js";
 import { checkInputs } from "../../step/step-admission.js";
 import { workItemDeliveryStep, workItemEscalateStep } from "./work-item-steps.js";
-import { commandRegistries } from "../../commands/registries.js";
+import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 
 const TICKET = "PROJ-42";
 type Triage = { verdict: "escalate" | "proceed"; reason: string };
@@ -39,7 +39,7 @@ function fixture(
     items: [{ ref: TICKET, queues: ["featureTodo"], state: "todo" }],
   });
   return {
-    ctx: buildPipelineContext({ ...commandRegistries(), ticket: TICKET, artifacts: store, workItem: gateway }),
+    ctx: buildPipelineContext({ ...builtinRegistries(), ticket: TICKET, artifacts: store, workItem: gateway }),
     gateway,
     reads: () => reads,
   };
@@ -100,7 +100,7 @@ test("loader: work-item helpers are injected into a project factory", async () =
   `,
   );
 
-  const definition = await loadPipelineDefinition(file, buildPipelineContext({ ...commandRegistries(), cwd: dir }));
+  const definition = await loadPipelineDefinition(file, buildPipelineContext({ ...builtinRegistries(), cwd: dir }));
   expect(definition.work_item_source).toEqual({ step_id: "ticket", queue: "featureTodo" });
   expect(definition.steps.find((step) => step.id === "escalate-project")?.blocking).toBe(false);
 });
@@ -131,7 +131,7 @@ test("loader: unified humanReview is injected and binds renamed pipeline names",
   `,
   );
 
-  const definition = await loadPipelineDefinition(file, buildPipelineContext({ ...commandRegistries(), cwd: dir }));
+  const definition = await loadPipelineDefinition(file, buildPipelineContext({ ...builtinRegistries(), cwd: dir }));
   expect(definition.approvals?.get("verdict")?.name).toBe("verdict.json");
   expect(definition.name).toBe("renamed-feature");
 });
@@ -142,7 +142,7 @@ test("loader: directly exported Pipeline object is rejected", async () => {
   writeFileSync(file, `export default { name: "direct", steps: [] };`);
 
   await expect(
-    loadPipelineDefinition(file, buildPipelineContext({ ...commandRegistries(), cwd: dir })),
+    loadPipelineDefinition(file, buildPipelineContext({ ...builtinRegistries(), cwd: dir })),
   ).rejects.toThrow(/must be a factory/);
 });
 
@@ -152,7 +152,7 @@ test("loader: named pipeline export does not replace default factory", async () 
   writeFileSync(file, `export const pipeline = { name: "named", steps: [] };`);
 
   await expect(
-    loadPipelineDefinition(file, buildPipelineContext({ ...commandRegistries(), cwd: dir })),
+    loadPipelineDefinition(file, buildPipelineContext({ ...builtinRegistries(), cwd: dir })),
   ).rejects.toThrow(/missing default export/);
 });
 
@@ -162,7 +162,7 @@ test("loader: module without default export is explicitly rejected", async () =>
   writeFileSync(file, `export const meaning = 42;`);
 
   await expect(
-    loadPipelineDefinition(file, buildPipelineContext({ ...commandRegistries(), cwd: dir })),
+    loadPipelineDefinition(file, buildPipelineContext({ ...builtinRegistries(), cwd: dir })),
   ).rejects.toThrow(/missing default export/);
 });
 

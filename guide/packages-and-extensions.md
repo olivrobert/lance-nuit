@@ -104,13 +104,15 @@ Type-only imports work the same way: the kit's `tsconfig.json` resolves
 `lance-nuit/contracts` through the vendored declarations, so `lancenuit
 typecheck` and an editor see the same surface the runtime loads.
 
-The standalone CLI has two composition paths: `entry/registries.ts` for runs
-and `commands/registries.ts` for commands outside a run. The default registry
-factories supply the built-in providers; boot receives the selected registries,
-applies the manifest, and attaches the resulting providers to the pipeline
-context. It does not compose a second default registry, and nothing falls back
-to the built-in registry. A composition that replaces a built-in provider is
-therefore the single source of truth for the whole run.
+The standalone CLI composes its providers in one place, `entry/registries.ts`:
+the default registry factories supply the built-in providers, and the manifest
+extends them. A run and the commands that load a pipeline outside one —
+`lancenuit lint`, `--lint-config`, `lancenuit approve` and `reject` — receive
+that same composition, so a backend or tracker the manifest declares is known to
+them exactly as it is to a run, and the contracts a kit extension imports are
+vendored before any of them imports it. Nothing falls back to the built-in
+registry. A composition that replaces a built-in provider is therefore the
+single source of truth for the whole process.
 
 ## A local Redmine adapter
 
