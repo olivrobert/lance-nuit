@@ -63,7 +63,7 @@ test("storage-ports: validates the integration contract", () => {
   expect(() => runRefFromRun(withoutId)).toThrow();
 });
 
-test("storage-ports: validates the integration contract", () => {
+test("storage-ports: validates the integration contract", async () => {
   const stateStore: RunStateStore = {
     load: (_runId): PersistedRun | null => null,
     loadLatest: (_pipeline, _ticket): PersistedRun | null => null,
@@ -89,7 +89,7 @@ test("storage-ports: validates the integration contract", () => {
   expect(stateStore.load("run-123")).toBeNull();
   expect(eventStore.read("run-123")).toEqual([]);
   expect(logStore.read(createLogRef(createRunRef({ runId: "run-123", pipeline: "feature" }), "quality", 1))).toBeNull();
-  expect(artifactStore.exists(createArtifactRef("PROJ-42", "plan.md"))).resolves.toBe(false);
+  await expect(artifactStore.exists(createArtifactRef("PROJ-42", "plan.md"))).resolves.toBe(false);
 });
 
 test("isLogRef validates logical references and optional locations: validates the contract", () => {

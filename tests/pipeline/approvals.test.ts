@@ -119,10 +119,10 @@ test("a custom subject is approved end to end without knowing split/refactoring"
 test("approval delegates validation to the artifact parser", async () => {
   const context = ticketContext();
   writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: "douze" }));
-  expect(recordApproval(context, "budget", budgetArtifact)).rejects.toThrow("budget.json: amountUsd requis");
+  await expect(recordApproval(context, "budget", budgetArtifact)).rejects.toThrow("budget.json: amountUsd requis");
 
   writeFileSync(context.paths.artifact("budget.json"), "");
-  expect(recordApproval(context, "budget", budgetArtifact)).rejects.toThrow("is empty");
+  await expect(recordApproval(context, "budget", budgetArtifact)).rejects.toThrow("is empty");
 });
 
 test("a text artifact is approved like a JSON artifact", async () => {
@@ -226,12 +226,12 @@ test("a subject the current verdict does not offer is refused and nothing is wri
     .build();
   writeFileSync(context.paths.artifact("triage.json"), JSON.stringify({ verdict: "split" }));
 
-  expect(resolveApprovableArtifact(def, "triage-decision", context)).rejects.toThrow(
+  await expect(resolveApprovableArtifact(def, "triage-decision", context)).rejects.toThrow(
     'Approval subject "triage-decision" is not offered by the current verdict of artifacts/triage.json (this verdict cannot be approved).',
   );
   expect(existsSync(join(context.paths.decisionsDir!, "triage-decision.json"))).toBe(false);
   // Same errors as the static lookup for an undeclared subject.
-  expect(resolveApprovableArtifact(def, "split", context)).rejects.toThrow(
+  await expect(resolveApprovableArtifact(def, "split", context)).rejects.toThrow(
     'Approval subject "split" is not declared by pipeline "triaged" (declared: triage-decision).',
   );
 
@@ -293,7 +293,7 @@ test("rejecting reworked bytes opens the next round, and a round past the bound 
   expect((await recordRejection(context, "budget", budgetArtifact, "still too expensive", 2)).decision.round).toBe(2);
 
   writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 10 }));
-  expect(recordRejection(context, "budget", budgetArtifact, "no", 2)).rejects.toThrow(
+  await expect(recordRejection(context, "budget", budgetArtifact, "no", 2)).rejects.toThrow(
     'Rejection of "budget" refused: 2 rework round(s) already rejected (maxRounds 2). Approve the artifact (--approve budget) or answer on the ticket instead.',
   );
   expect(readDecision(context, "budget")?.round).toBe(2);
@@ -312,12 +312,12 @@ test("an approval replaces a rejection, and the next rejection starts over at ro
 test("an empty or oversized rejection reason is refused and nothing is written", async () => {
   const context = ticketContext();
   writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 12 }));
-  expect(recordRejection(context, "budget", budgetArtifact, "   ", 3)).rejects.toThrow(
+  await expect(recordRejection(context, "budget", budgetArtifact, "   ", 3)).rejects.toThrow(
     'Rejection of "budget" needs a reason',
   );
-  expect(recordRejection(context, "budget", budgetArtifact, "x".repeat(MAX_REJECTION_REASON + 1), 3)).rejects.toThrow(
-    `at most ${MAX_REJECTION_REASON} characters`,
-  );
+  await expect(
+    recordRejection(context, "budget", budgetArtifact, "x".repeat(MAX_REJECTION_REASON + 1), 3),
+  ).rejects.toThrow(`at most ${MAX_REJECTION_REASON} characters`);
   expect(existsSync(join(context.paths.decisionsDir!, "budget.json"))).toBe(false);
 });
 

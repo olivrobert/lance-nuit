@@ -54,12 +54,12 @@ test("artifact links its name and parser to reusable typed reads", async () => {
 test("artifact.read tolerates absence and require reports it explicitly", async () => {
   const { ctx } = fixture();
   expect(await triage.read(ctx)).toBeUndefined();
-  expect(triage.require(ctx)).rejects.toThrow("triage.json not found");
+  await expect(triage.require(ctx)).rejects.toThrow("triage.json not found");
 });
 
 test("artifact preserves parser errors and can remove through the store", async () => {
   const invalid = fixture("not an object");
-  expect(triage.read(invalid.ctx)).rejects.toThrow("triage.json is invalid");
+  await expect(triage.read(invalid.ctx)).rejects.toThrow("triage.json is invalid");
 
   const present = fixture({ verdict: "proceed" });
   await triage.remove(present.ctx);
@@ -80,7 +80,7 @@ test("artifact.write creates a missing artifact without a file path", async () =
 
 test("artifact.write rejects a value that its own read would reject", async () => {
   const { ctx } = fixture({ verdict: "proceed" });
-  expect(triage.write(ctx, "not an object" as never)).rejects.toThrow("triage.json is invalid");
+  await expect(triage.write(ctx, "not an object" as never)).rejects.toThrow("triage.json is invalid");
   // The previous artifact remains intact: validation precedes writing.
   expect(await triage.read(ctx)).toEqual({ verdict: "proceed" });
 });
@@ -110,7 +110,7 @@ test("textArtifact returns bytes as-is and requires only presence", async () => 
 test("textArtifact writes without re-encoding and reports absence like a JSON artifact", async () => {
   const { ctx } = textFixture();
   expect(await proposal.read(ctx)).toBeUndefined();
-  expect(proposal.require(ctx)).rejects.toThrow("refactoring-proposal.md not found");
+  await expect(proposal.require(ctx)).rejects.toThrow("refactoring-proposal.md not found");
 
   await proposal.write(ctx, "## Step 1\n");
   // No JSON.stringify or added newline: read bytes are exactly the bytes written.
@@ -126,6 +126,6 @@ test("textArtifact applies its parser, including on writes", async () => {
     return raw;
   });
   const { ctx } = textFixture("   \n");
-  expect(nonEmpty.read(ctx)).rejects.toThrow("notes.md vide");
-  expect(nonEmpty.write(ctx, "")).rejects.toThrow("notes.md vide");
+  await expect(nonEmpty.read(ctx)).rejects.toThrow("notes.md vide");
+  await expect(nonEmpty.write(ctx, "")).rejects.toThrow("notes.md vide");
 });

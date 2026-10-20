@@ -383,7 +383,7 @@ test("an attempt is numbered past the journal's holes and persisted before it sp
     status: "done",
     log_path: "steps/a/attempt-004/output.log",
   });
-  expect(Bun.file(join(run.run_dir, "steps/a/attempt-004/command.txt")).text()).resolves.toBe("echo a --flag");
+  await expect(Bun.file(join(run.run_dir, "steps/a/attempt-004/command.txt")).text()).resolves.toBe("echo a --flag");
   expect(eventsOf(run, "step.attempt.started")).toEqual([
     expect.objectContaining({
       stepId: "a",
