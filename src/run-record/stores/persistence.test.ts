@@ -451,9 +451,9 @@ test("loadOrCreateRun refuses to erase a persisted step removed from the definit
     }),
   );
 
-  expect(loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()) })).rejects.toThrow(
-    "removed or renamed persisted step(s): removed-paid-step",
-  );
+  await expect(
+    loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()) }),
+  ).rejects.toThrow("removed or renamed persisted step(s): removed-paid-step");
   const unchanged = JSON.parse(readFileSync(join(runDir, "state.json"), "utf8"));
   expect(unchanged.steps).toHaveLength(2);
 });
