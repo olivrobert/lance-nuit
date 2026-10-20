@@ -3,7 +3,7 @@
 // Project a persisted run onto the state a resume starts from: per step, the
 // snapshot state reconciled with the journal and the attempts read from it.
 // Nothing here knows about a pipeline definition or a `RunStep`; assembling the
-// in-memory run from a definition is `boot/resume.ts`.
+// in-memory run from a definition is `run-record/run-opening.ts`.
 //
 // Spend is not recomputed here: `projectStepSpend` (`run-record/cost-accounting.ts`)
 // rebuilds a step total from the attempts, and `closeAttempt` charges a crashed

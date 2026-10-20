@@ -533,7 +533,7 @@ export function restoreAttemptSpend(attempt: SpendFigures, control?: StepControl
  * spend of that attempt behind a total written before it.
  *
  * A projection like the two above: it restores or drops, it charges nothing. The
- * `terminal` decision itself belongs to `boot/resume.ts`, which knows whether the
+ * `terminal` decision itself belongs to `run-record/run-opening.ts`, which knows whether the
  * definition leaves the snapshot executable work.
  */
 export function restoreRunTotals(

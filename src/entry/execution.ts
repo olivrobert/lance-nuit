@@ -85,17 +85,19 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: Run) => vo
   }
 
   // A fresh run requires a clean tree; a resumed run may legitimately sit on
-  // a dirty tree because implementation may be in progress.
+  // a dirty tree because implementation may be in progress. The guard runs
+  // before any run directory exists, so it can only predict the resume.
   //
   // A resumable `latest` held by another runner (a worktree sharing `runs/` with
   // the main clone) does not create a new run: `resolveRunDir` fails with the
   // holder and the options. It still counts as resuming here, so the guard does
   // not replace that diagnosis with a dirty-tree refusal.
-  const resuming = !!target.dir || wouldResumeLatest(pipelineDef.name, args.ticket, args.fresh, context);
+  const resumesExisting = !!target.dir || wouldResumeLatest(pipelineDef.name, args.ticket, args.fresh, context);
   let run: Run;
+  let resuming: boolean;
   try {
     await enforceCleanTree({
-      resuming,
+      resuming: resumesExisting,
       allowDirty: args.allowDirty,
       worktreeMode,
       pipelineAllowsDirty: !!pipelineDef.allow_dirty,
@@ -105,24 +107,23 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: Run) => vo
     process.env.RUNNER_BIN = process.argv[1];
     process.env.RUNNER_DIR = dirname(process.argv[1] ?? "");
 
-    run = await loadOrCreateRun(
+    // The loop is told what the opening did, not what the guard predicted.
+    ({ run, resumed: resuming } = await loadOrCreateRun({
       pipelinePath,
-      args.ticket,
-      args.stepFilter,
-      args.skipFilter,
-      target.dir,
-      args.fresh,
-      args.startAt,
+      ticket: args.ticket,
+      stepFilter: args.stepFilter,
+      skipFilter: args.skipFilter,
+      runDir: target.dir,
+      fresh: args.fresh,
+      startAt: args.startAt,
       context,
-      {
-        stateStore,
-        maxCostUsd: args.budget,
-        budgetApproved: args.budget !== undefined,
-        allowUnmetered: args.allowUnmetered,
-        worktree: worktreeMode,
-        strictSnapshot: target.explicit?.strictSnapshot,
-      },
-    );
+      stateStore,
+      maxCostUsd: args.budget,
+      budgetApproved: args.budget !== undefined,
+      allowUnmetered: args.allowUnmetered,
+      worktree: worktreeMode,
+      strictSnapshot: target.explicit?.strictSnapshot,
+    }));
   } catch (error) {
     target.explicit?.release();
     throw error;

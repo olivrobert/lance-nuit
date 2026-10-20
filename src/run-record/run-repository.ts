@@ -68,7 +68,7 @@ function persistedRun(run: Run): PersistedRun {
     cwd: run.cwd,
     budget_exceeded: run.budget_exceeded,
     budget_approved: run.budget_approved,
-    // Both accounting facts persist here, and are restored by `boot/resume.ts`
+    // Both accounting facts persist here, and are restored by `run-opening.ts`
     // alone: one owner for the write, one for the read, exactly as for
     // `budget_exceeded` / `budget_approved`.
     cost_unaccounted: run.cost_unaccounted,

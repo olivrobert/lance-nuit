@@ -91,14 +91,19 @@ async function open(
 ) {
   const writes: Write[] = [];
   const ctx = extra.ctx ?? f.ctx;
-  const run = await loadOrCreateRun(f.path, ticket, undefined, undefined, f.dir, false, undefined, ctx, {
+  const { run, resumed } = await loadOrCreateRun({
+    pipelinePath: f.path,
+    ticket,
+    runDir: f.dir,
+    fresh: false,
+    context: ctx,
     stateStore: new RecordingStateStore(ctx, ticket, "p", writes),
     eventStore: new RecordingEventStore(f.dir, writes),
     allowUnmetered: extra.allowUnmetered,
     maxCostUsd: extra.maxCostUsd,
     budgetApproved: extra.budgetApproved,
   });
-  return { run, writes };
+  return { run, resumed, writes };
 }
 
 const snapshotAt = (dir: string) => readRunSnapshot(join(dir, "state.json"))!;
@@ -225,7 +230,12 @@ test("a composed child resumed on its own with --run keeps its lineage and refus
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "C-1" });
   const childPath = pipelineFile(root, "child");
   const dir = resolveRunDir("child", "C-1", undefined, true, ctx);
-  const child = await loadOrCreateRun(childPath, "C-1", undefined, undefined, dir, false, undefined, ctx, {
+  const { run: child } = await loadOrCreateRun({
+    pipelinePath: childPath,
+    ticket: "C-1",
+    runDir: dir,
+    fresh: false,
+    context: ctx,
     maxCostUsd: 2,
     parentRunId: "parent-1",
     parentNodeId: "node",
@@ -240,7 +250,12 @@ test("a composed child resumed on its own with --run keeps its lineage and refus
   // What the entry point does for `--run <id>`: a strict selection, then the boot.
   const explicit = selectExplicitRun("child", "C-1", basename(dir), ctx);
   const writes: Write[] = [];
-  const resumed = await loadOrCreateRun(childPath, "C-1", undefined, undefined, explicit.dir, false, undefined, ctx, {
+  const { run: resumed } = await loadOrCreateRun({
+    pipelinePath: childPath,
+    ticket: "C-1",
+    runDir: explicit.dir,
+    fresh: false,
+    context: ctx,
     stateStore: new RecordingStateStore(ctx, "C-1", "child", writes),
     eventStore: new RecordingEventStore(explicit.dir, writes),
     allowUnmetered: true,
@@ -278,19 +293,14 @@ test("a composed child records the worktree its parent runs in", async () => {
   // passes the same answer to the parent's boot.
   process.env.RUNNER_IN_WORKTREE = "1";
   try {
-    const parent = await loadOrCreateRun(
-      parentPath,
-      "W-1",
-      undefined,
-      undefined,
-      join(root, "parent-run"),
-      true,
-      undefined,
-      ctx,
-      {
-        worktree: true,
-      },
-    );
+    const { run: parent } = await loadOrCreateRun({
+      pipelinePath: parentPath,
+      ticket: "W-1",
+      runDir: join(root, "parent-run"),
+      fresh: true,
+      context: ctx,
+      worktree: true,
+    });
     finalizeRun(
       parent,
       await executeRunSteps(parent, "W-1", undefined, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), ctx),
@@ -299,6 +309,36 @@ test("a composed child records the worktree its parent runs in", async () => {
     const ref = parent.steps[0]!.orchestration!.children[0]!;
     const child = readRunSnapshot(join(pipelineRunsDir("child", "W-1", ctx), ref.runId!, "state.json"))!;
     expect(child).toMatchObject({ worktree: true, cwd: root, parentRunId: parent.runId });
+  } finally {
+    if (previous === undefined) delete process.env.RUNNER_IN_WORKTREE;
+    else process.env.RUNNER_IN_WORKTREE = previous;
+  }
+});
+
+test("the opening says whether it resumed: a new run, then the same run reopened, live or terminal", async () => {
+  const f = fixture("open-resumed-", "T-res");
+  const created = await open(f, "T-res");
+  expect(created.resumed).toBe(false);
+
+  const live = await open(f, "T-res");
+  expect(live.resumed).toBe(true);
+  expect(live.run.runId).toBe(created.run.runId);
+
+  for (const step of live.run.steps) updateStep(live.run, step, "done");
+  finalizeRun(live.run, {});
+  const terminal = await open(f, "T-res");
+  expect(terminal).toMatchObject({ resumed: true, run: { status: "PASS" } });
+});
+
+test("the opening records the location its caller gives, never the worktree flag of the environment", async () => {
+  const f = fixture("open-location-", "T-loc");
+  const previous = process.env.RUNNER_IN_WORKTREE;
+  process.env.RUNNER_IN_WORKTREE = "1";
+  try {
+    await loadOrCreateRun({ pipelinePath: f.path, ticket: "T-loc", runDir: f.dir, context: f.ctx });
+    expect(snapshotAt(f.dir).worktree).toBe(false);
+    await loadOrCreateRun({ pipelinePath: f.path, ticket: "T-loc", runDir: f.dir, context: f.ctx, worktree: true });
+    expect(snapshotAt(f.dir).worktree).toBe(true);
   } finally {
     if (previous === undefined) delete process.env.RUNNER_IN_WORKTREE;
     else process.env.RUNNER_IN_WORKTREE = previous;

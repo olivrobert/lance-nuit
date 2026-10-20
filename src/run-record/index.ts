@@ -12,7 +12,6 @@
 // Meaning of a run status: the status a reader shows, what that status says, and
 // the one precedence that picks a run's status, report headline and exit code.
 export {
-  awaitsFinalization,
   awaitsHuman,
   effectiveStatus,
   hasVerdict,
@@ -28,7 +27,6 @@ export { recordedVerdict } from "./run-verdict.js";
 
 // What a run or a step still owes, read from its steps.
 export {
-  allStepsSettled,
   hasUnfinishedWork,
   isPersistedRunComplete,
   isSettledStatus,
@@ -93,14 +91,17 @@ export {
 } from "./run-transitions.js";
 
 // The named writes of a step's bookkeeping during execution, and of the human
-// decision an invocation journals: each writes its field and saves the run.
+// decision an invocation journals: each writes its field or its journal event,
+// and saves the run when the snapshot carries what it changed.
 export {
   bindSession,
   consumeRetry,
   type RetryQuota,
   recordDecision,
   recordLastCommand,
+  recordSkip,
   recordUnavailableSource,
+  recordUnfinishedOutputs,
   refundRetry,
 } from "./step-bookkeeping.js";
 
@@ -121,20 +122,22 @@ export {
   skipChild,
 } from "./child-transitions.js";
 
-// Opening and restoring a run: the stores and the projection boot reads a run
-// with before executing it, and the raw snapshot and journal writes. The stores
-// also serve as ports: the statistics of the run a process just executed read
-// its journal through one, and `--inspect` lists snapshots through the other
-// before reading each with `readListedRun`.
-export { restoreRunTotals } from "./cost-accounting.js";
-export { appendRunEvent, readRunEvents } from "./run-journal.js";
-export { type ProjectedRunState, projectRunState, settleCrashedAttempts } from "./run-projection.js";
+// Opening a run: its directory selected, its snapshot restored with the journal
+// or a new run created, and every write that does, under the definition and
+// selection the caller's policy gives. The stores also serve as ports: the
+// statistics of the run a process just executed read its journal through one,
+// `--inspect` lists snapshots through the other before reading each with
+// `readListedRun`, and a composed child is booted with its own. Whether a
+// directory already holds a snapshot decides how strictly a child is reopened.
+export {
+  type OpenedRun,
+  openRun,
+  type RunScope,
+  type StrictSnapshotRead,
+} from "./run-opening.js";
 export { FileRunEventStore } from "./stores/file-run-event-store.js";
 export { FileRunStateStore } from "./stores/file-run-state-store.js";
-export { saveRun } from "./run-repository.js";
-export { describeRunSnapshotProblem, hasRunSnapshotEntry, readRunSnapshotDiagnostic } from "./run-snapshot.js";
-export { makeRunStep } from "./run-step.js";
-export { type RunDirResolution, releaseRunDir } from "./stores/run-storage.js";
+export { hasRunSnapshotEntry } from "./run-snapshot.js";
 
 // Run reports: the figures a report prints.
 export { aggregateControl, aggregateUsage } from "./cost-accounting.js";

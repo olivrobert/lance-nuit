@@ -166,8 +166,17 @@ export async function executeChild(
   //    child under the same id. A boot failure leaves the reference resumable.
   const stateStore = new FileRunStateStore({ context: childCtx, pipeline: childDefinition.name, ticket });
   let childRun: Run;
+  let childResumed: boolean;
   try {
-    childRun = await loadOrCreateRun(childPath, ticket, undefined, undefined, runDir, false, undefined, childCtx, {
+    ({ run: childRun, resumed: childResumed } = await loadOrCreateRun({
+      pipelinePath: childPath,
+      ticket,
+      runDir,
+      fresh: false,
+      context: childCtx,
+      // The child runs in this process, so where it reads and writes is where its
+      // parent does.
+      worktree: parent.worktree === true,
       stateStore,
       maxCostUsd,
       budgetApproved: parent.budget_approved,
@@ -189,7 +198,7 @@ export async function executeChild(
               expectedIdentity: { runId: childRunId, pipeline: childDefinition.name, ticket },
             }
           : undefined,
-    });
+    }));
   } catch (error) {
     const reason = errorMessage(error).trim();
     failChildLaunch(parent, ref, step.id, reason);
@@ -227,7 +236,7 @@ export async function executeChild(
       ticket,
       input.baseBranch,
       {
-        resuming: hadSnapshot,
+        resuming: childResumed,
         abort,
         replayInterrupted: input.replayInterrupted,
       },

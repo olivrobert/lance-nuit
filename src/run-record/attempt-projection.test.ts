@@ -3,7 +3,6 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunJournalEvent } from "../model/journal.js";
-import type { Run } from "../model/run.js";
 import { commandRegistries } from "../commands/registries.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { projectStepAttempts } from "./attempt-projection.js";
@@ -151,7 +150,7 @@ test("attempt projection: validates the integration contract", async () => {
   // Loading a definition builds the DSL against the run's registry: the caller
   // supplies the context, nothing falls back to the built-in composition.
   const context = buildPipelineContext({ ...commandRegistries(), cwd: dir });
-  const run = await loadOrCreateRun(pipelinePath, undefined, undefined, undefined, runDir, true, undefined, context);
+  const { run } = await loadOrCreateRun({ pipelinePath, runDir, fresh: true, context });
   const step = run.steps[0]!;
 
   // Two attempts recorded the way the runner records them: allocation, then the
@@ -182,16 +181,7 @@ test("attempt projection: validates the integration contract", async () => {
   expect(snapshot.steps[0]?.attempts).toBeUndefined();
   expect(projectStepAttempts(readRunEvents(runDir)).get(step.id)).toHaveLength(2);
 
-  const resumed: Run = await loadOrCreateRun(
-    pipelinePath,
-    undefined,
-    undefined,
-    undefined,
-    runDir,
-    false,
-    undefined,
-    context,
-  );
+  const { run: resumed } = await loadOrCreateRun({ pipelinePath, runDir, fresh: false, context });
   const resumedStep = resumed.steps[0]!;
   expect(resumedStep.attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
   expect(resumedStep.attempts.map((attempt) => attempt.kind)).toEqual(["step", "fix"]);

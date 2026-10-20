@@ -182,16 +182,13 @@ test("loadOrCreateRun rejects an existing corrupt snapshot instead of initializi
   const runDir = join(dir, "run");
   mkdirSync(runDir);
 
-  const run = await loadOrCreateRun(
+  const { run } = await loadOrCreateRun({
     pipelinePath,
-    undefined,
-    undefined,
-    undefined,
     runDir,
-    false,
-    "b",
-    buildPipelineContext(commandRegistries()),
-  );
+    fresh: false,
+    startAt: "b",
+    context: buildPipelineContext(commandRegistries()),
+  });
   const byId = Object.fromEntries(run.steps.map((s) => [s.id, s.status]));
   expect(byId).toEqual({ a: "skipped", b: "pending", c: "pending" });
 });
@@ -203,16 +200,13 @@ test("loadOrCreateRun: validates the contract", async () => {
   mkdirSync(runDir);
 
   await expect(
-    loadOrCreateRun(
+    loadOrCreateRun({
       pipelinePath,
-      undefined,
-      undefined,
-      undefined,
       runDir,
-      false,
-      "nope",
-      buildPipelineContext(commandRegistries()),
-    ),
+      fresh: false,
+      startAt: "nope",
+      context: buildPipelineContext(commandRegistries()),
+    }),
   ).rejects.toThrow(/not found/);
 });
 
@@ -226,16 +220,13 @@ test("matchesStepSelector: validates the contract", () => {
 test("loadOrCreateRun: validates the contract", async () => {
   const dir = mkdtempSync(join(tmpdir(), "quality-filter-"));
   const pipelinePath = writeQualityFixture(dir);
-  const run = await loadOrCreateRun(
+  const { run } = await loadOrCreateRun({
     pipelinePath,
-    undefined,
-    ["quality"],
-    undefined,
-    join(dir, "run"),
-    true,
-    undefined,
-    buildPipelineContext(commandRegistries()),
-  );
+    stepFilter: ["quality"],
+    runDir: join(dir, "run"),
+    fresh: true,
+    context: buildPipelineContext(commandRegistries()),
+  });
   expect(run.steps.filter((step) => step.status === "pending").map((step) => step.id)).toEqual([
     "quality.format",
     "quality.static-analysis",
@@ -251,26 +242,13 @@ test("maxCostPerWorkItemUsd: validates the contract", async () => {
   const firstContext = buildPipelineContext({ ...commandRegistries(), cwd: dir, ticket: "PROJ-1" });
   const secondContext = buildPipelineContext({ ...commandRegistries(), cwd: dir, ticket: "PROJ-2" });
 
-  const first = await loadOrCreateRun(
+  const { run: first } = await loadOrCreateRun({ pipelinePath, ticket: "PROJ-1", fresh: true, context: firstContext });
+  const { run: second } = await loadOrCreateRun({
     pipelinePath,
-    "PROJ-1",
-    undefined,
-    undefined,
-    undefined,
-    true,
-    undefined,
-    firstContext,
-  );
-  const second = await loadOrCreateRun(
-    pipelinePath,
-    "PROJ-2",
-    undefined,
-    undefined,
-    undefined,
-    true,
-    undefined,
-    secondContext,
-  );
+    ticket: "PROJ-2",
+    fresh: true,
+    context: secondContext,
+  });
 
   expect(first.max_cost_usd).toBe(7);
   expect(second.max_cost_usd).toBe(7);
@@ -285,16 +263,7 @@ test("loadOrCreateRun: validates the contract", async () => {
   writeFileSync(join(runDir, "state.json"), '{"steps": [{"id"');
 
   await expect(
-    loadOrCreateRun(
-      pipelinePath,
-      undefined,
-      undefined,
-      undefined,
-      runDir,
-      undefined,
-      undefined,
-      buildPipelineContext(commandRegistries()),
-    ),
+    loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()) }),
   ).rejects.toThrow(/invalid JSON/);
   expect(readFileSync(join(runDir, "state.json"), "utf-8")).toBe('{"steps": [{"id"');
 });
@@ -305,20 +274,11 @@ test("loadOrCreateRun: validates the contract", async () => {
   const ticket = "PROJ-42";
   const context = buildPipelineContext({ ...commandRegistries(), cwd: dir, ticket });
 
-  const first = await loadOrCreateRun(pipelinePath, ticket, undefined, undefined, undefined, false, undefined, context);
+  const { run: first } = await loadOrCreateRun({ pipelinePath, ticket, fresh: false, context });
   expect(first.steps[0]?.status).toBe("pending");
 
   updateStep(first, first.steps[0]!, "failed", "failure to resume");
-  const resumed = await loadOrCreateRun(
-    pipelinePath,
-    ticket,
-    undefined,
-    undefined,
-    undefined,
-    false,
-    undefined,
-    context,
-  );
+  const { run: resumed } = await loadOrCreateRun({ pipelinePath, ticket, fresh: false, context });
 
   expect(resumed.runId).toBe(first.runId);
   expect(resumed.run_dir).toBe(first.run_dir);
@@ -327,16 +287,7 @@ test("loadOrCreateRun: validates the contract", async () => {
   // A SIGINT abort resumes by default: completed work is kept, nothing restarts
   // from scratch unless the outcome explicitly opted out (resumable: false).
   abortRun(resumed, "SIGINT");
-  const afterAbort = await loadOrCreateRun(
-    pipelinePath,
-    ticket,
-    undefined,
-    undefined,
-    undefined,
-    false,
-    undefined,
-    context,
-  );
+  const { run: afterAbort } = await loadOrCreateRun({ pipelinePath, ticket, fresh: false, context });
 
   expect(afterAbort.runId).toBe(first.runId);
   expect(afterAbort.run_dir).toBe(first.run_dir);
@@ -365,16 +316,7 @@ test("AUDIT #1: validates the contract", async () => {
 
   // loadOrCreateRun hydrates and THEN persists (saveRun), a round trip that used
   // to lose errors before the hydrate fix.
-  const run = await loadOrCreateRun(
-    pipelinePath,
-    undefined,
-    undefined,
-    undefined,
-    runDir,
-    undefined,
-    undefined,
-    buildPipelineContext(commandRegistries()),
-  );
+  const { run } = await loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()) });
   expect(run.steps[0]!.errors).toBe("boom: assertion failed");
 
   // `aborted` describes the previous run's termination, not a durable state. If
@@ -411,16 +353,7 @@ test("hydrate: an ABORTED run whose steps are all settled loads as live so it ca
     }),
   );
 
-  const run = await loadOrCreateRun(
-    pipelinePath,
-    undefined,
-    undefined,
-    undefined,
-    runDir,
-    undefined,
-    undefined,
-    buildPipelineContext(commandRegistries()),
-  );
+  const { run } = await loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()) });
 
   // Loaded as terminal, this run could never be finalized: a top-level resume
   // would start a new directory and replay every step, and a child run would
@@ -451,16 +384,7 @@ test("hydrate: an ABORTED settled run that opted out of resuming stays terminal"
     }),
   );
 
-  const run = await loadOrCreateRun(
-    pipelinePath,
-    undefined,
-    undefined,
-    undefined,
-    runDir,
-    undefined,
-    undefined,
-    buildPipelineContext(commandRegistries()),
-  );
+  const { run } = await loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()) });
 
   expect(run.status).toBe("ABORTED");
   expect(run.aborted).toBe(true);
@@ -493,16 +417,7 @@ test("hydrate derives live totals from steps instead of a stale finalized aggreg
     }),
   );
 
-  const run = await loadOrCreateRun(
-    pipelinePath,
-    undefined,
-    undefined,
-    undefined,
-    runDir,
-    undefined,
-    undefined,
-    buildPipelineContext(commandRegistries()),
-  );
+  const { run } = await loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()) });
   expect(run.steps[0]).toMatchObject({
     control: { duration_ms: 100, total_cost_usd: 0.4 },
     usage: { output_tokens: 40 },
@@ -536,18 +451,9 @@ test("loadOrCreateRun refuses to erase a persisted step removed from the definit
     }),
   );
 
-  expect(
-    loadOrCreateRun(
-      pipelinePath,
-      undefined,
-      undefined,
-      undefined,
-      runDir,
-      undefined,
-      undefined,
-      buildPipelineContext(commandRegistries()),
-    ),
-  ).rejects.toThrow("removed or renamed persisted step(s): removed-paid-step");
+  expect(loadOrCreateRun({ pipelinePath, runDir, context: buildPipelineContext(commandRegistries()) })).rejects.toThrow(
+    "removed or renamed persisted step(s): removed-paid-step",
+  );
   const unchanged = JSON.parse(readFileSync(join(runDir, "state.json"), "utf8"));
   expect(unchanged.steps).toHaveLength(2);
 });

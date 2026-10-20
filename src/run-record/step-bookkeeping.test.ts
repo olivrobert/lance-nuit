@@ -12,7 +12,9 @@ import {
   consumeRetry,
   recordDecision,
   recordLastCommand,
+  recordSkip,
   recordUnavailableSource,
+  recordUnfinishedOutputs,
   refundRetry,
 } from "./step-bookkeeping.js";
 
@@ -88,6 +90,25 @@ test("unavailable source: journaled for the step, the snapshot untouched", () =>
   expect(readRunEvents(run.run_dir)).toMatchObject([
     { type: "step.source.unavailable", stepId: "a", source: "ticket", reason: "tracker unreachable" },
   ]);
+  expect(existsSync(join(run.run_dir, "state.json"))).toBe(false);
+});
+
+test("admission's skips and unfinished outputs: journaled only, the snapshot carries neither", () => {
+  const step = runningStep();
+  const run = makeRun(step);
+
+  recordSkip(run, step, { reason: "outputs up to date with declared inputs", freshness: "abc" });
+  recordSkip(run, step, { reason: "operator selection" });
+  recordUnfinishedOutputs(run, step, ["plan.md", "notes.md"]);
+
+  const events = readRunEvents(run.run_dir).map(({ ts: _ts, ...event }) => event);
+  expect(events).toEqual([
+    { type: "step.skipped", stepId: "a", reason: "outputs up to date with declared inputs", freshness: "abc" },
+    { type: "step.skipped", stepId: "a", reason: "operator selection" },
+    { type: "step.outputs.unfinished", stepId: "a", outputs: ["plan.md", "notes.md"] },
+  ]);
+  // A skip settles the step through `updateStep`, which saves; the record itself does not.
+  expect(step.status).toBe("running");
   expect(existsSync(join(run.run_dir, "state.json"))).toBe(false);
 });
 

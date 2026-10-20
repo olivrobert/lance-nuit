@@ -267,10 +267,15 @@ resumes, while persisted step state (including the profile and session) is
 retained for correct attribution. Which of the two files is believed when they
 disagree is settled per concept in [Which record is authoritative](#which-record-is-authoritative).
 
-Resume is a boot step (`boot/resume.ts`): it loads the definition, projects the
-persisted state, applies the `--steps`/`--skip`/`--start-at` selectors to the
-projected steps, and assembles the in-memory run from the definition and those
-steps. The selectors come after the projection so they judge what the journal
+The run record opens the run (`openRun`, `run-record/run-opening.ts`): it
+selects the directory, reads the snapshot, projects the persisted state with
+the journal, and assembles the in-memory run from the definition and the
+projected steps, or creates a new run; every snapshot write and journal event of
+the opening is its own, and it tells its caller whether it resumed. Boot
+(`boot/resume.ts`) supplies the policy: it loads the definition — again, for a
+resume, under the snapshot's spec path and lot — validates `--start-at`, and
+applies the `--steps`/`--skip`/`--start-at` selectors to the projected steps,
+which `openRun` hands it before hydration. The selectors come after the projection so they judge what the journal
 knows: a step the snapshot still calls `running` but the journal finished stays
 `done` instead of becoming an exclusion. `--start-at X` requeues `X` and every
 later step, so the run is hydrated live with totals derived from the steps even
@@ -498,8 +503,8 @@ are the discriminators.
 A resume reads two files that were written at different instants, and a crash
 can leave either one behind the other. Rather than rebuilding everything from the
 events, each concept has one authoritative record, and a documented rule for the
-case where the other record knows more. `boot/resume.ts` assembles the run from
-the definition and the projection; `run-record/run-projection.ts` and
+case where the other record knows more. `run-record/run-opening.ts` assembles the
+run from the definition and the projection; `run-record/run-projection.ts` and
 `run-record/attempt-projection.ts` apply the rules below; `run-record/cost-accounting.ts`
 owns the spend rules among them (`projectStepSpend`, `restoreAttemptSpend`,
 `restoreRunTotals`). None of them charges anything: a figure read back is a
@@ -531,6 +536,7 @@ above exist for:
 
 | Transition | Order | Event alone leaves | Resolved on resume by |
 | --- | --- | --- | --- |
+| Run opening (`openRun`) | new run: snapshot → `run.started` (→ `run.unmetered.authorized`); resume: a new authorization's event and the crashed attempts' finishes → snapshot (only when one of them, or the location, changed) → `run.resumed` → snapshot | on a new run the snapshot comes first, so a crash leaves a run whose journal never recorded its start; on a resume, a `run.resumed` (or an authorization) over a snapshot that still describes the previous ending | nothing: the snapshot stays the record, the next opening settles nothing twice, applies an authorization only if it is given again, and journals its own `run.resumed` |
 | Attempt start (`openAttempt`) | attempt pushed in memory → `step.attempt.started` → snapshot (`last_attempt`) | an attempt the journal calls `running` and the snapshot never numbered | `settleCrashedAttempts` closes it failed and unpriced, journals the finish with `interrupted: true`; the number is taken from the journal |
 | Attempt end (`settleAttempt`) | `closeAttempt` (`step.attempt.finished`, step total in memory) → verdict → ledger → live-guard stops → `step.cost.unaccounted` → snapshot | a priced attempt absent from the step total | `projectStepSpend` rebuilds the step total from the journal when it holds more |
 | Step status (`updateStep`) | `step.status.changed` → snapshot | a step the journal finished and the snapshot still runs | `reconcileStepStatus`, terminal event over unfinished snapshot |

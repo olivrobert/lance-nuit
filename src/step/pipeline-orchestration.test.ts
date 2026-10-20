@@ -124,7 +124,7 @@ async function executeParent(
   contextOverride?: PipelineContext,
 ) {
   const context = contextOverride ?? buildPipelineContext({ cwd: root, ticket, agentBackendRegistry: REGISTRY });
-  const run = await loadOrCreateRun(parentPath, ticket, undefined, undefined, runDir, fresh, undefined, context);
+  const { run } = await loadOrCreateRun({ pipelinePath: parentPath, ticket, runDir, fresh, context });
   const outcome = await executeRunSteps(
     run,
     ticket,
@@ -151,16 +151,13 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
 `,
   );
   const parentRunDir = join(root, "parent-run");
-  const parent = await loadOrCreateRun(
-    parentPath,
-    "P",
-    undefined,
-    undefined,
-    parentRunDir,
-    true,
-    undefined,
-    buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
-  );
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir: parentRunDir,
+    fresh: true,
+    context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+  });
   const parentStep = parent.steps[0]!;
   const childRunId = "verdict-child";
   const childCtx = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
@@ -236,16 +233,13 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
 `,
   );
   const parentRunDir = join(root, "parent-run");
-  const parent = await loadOrCreateRun(
-    parentPath,
-    "P",
-    undefined,
-    undefined,
-    parentRunDir,
-    true,
-    undefined,
-    buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
-  );
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir: parentRunDir,
+    fresh: true,
+    context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+  });
   const parentStep = parent.steps[0]!;
   const childRunId = "blocked-child";
   const childCtx = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
@@ -406,16 +400,13 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
 `,
   );
   const parentRunDir = join(root, "parent-run");
-  const parent = await loadOrCreateRun(
-    parentPath,
-    "P",
-    undefined,
-    undefined,
-    parentRunDir,
-    true,
-    undefined,
-    buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
-  );
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir: parentRunDir,
+    fresh: true,
+    context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+  });
   const parentStep = parent.steps[0]!;
   const childRunId = "stopped-child";
   const childContext = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
@@ -779,16 +770,13 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
       },
     },
   });
-  const parent = await loadOrCreateRun(
-    parentPath,
-    "P",
-    undefined,
-    undefined,
-    join(root, "parent-run"),
-    true,
-    undefined,
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir: join(root, "parent-run"),
+    fresh: true,
     context,
-  );
+  });
   const parentStep = parent.steps[0]!;
   const childContext = buildPipelineContext({
     cwd: root,
@@ -797,23 +785,18 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
     agentBackendRegistry: REGISTRY,
   });
   const childRunDir = join(pipelineRunsDir("child", "P-01", childContext), "manual-child");
-  const childRun = await loadOrCreateRun(
-    childPath,
-    "P-01",
-    undefined,
-    undefined,
-    childRunDir,
-    true,
-    undefined,
-    childContext,
-    {
-      maxCostUsd: 1,
-      parentRunId: parent.runId,
-      parentNodeId: parentStep.id,
-      rootRunId: parent.rootRunId,
-      budgetScopeId: parent.budgetScopeId,
-    },
-  );
+  const { run: childRun } = await loadOrCreateRun({
+    pipelinePath: childPath,
+    ticket: "P-01",
+    runDir: childRunDir,
+    fresh: true,
+    context: childContext,
+    maxCostUsd: 1,
+    parentRunId: parent.runId,
+    parentNodeId: parentStep.id,
+    rootRunId: parent.rootRunId,
+    budgetScopeId: parent.budgetScopeId,
+  });
   const childOutcome = await executeRunSteps(
     childRun,
     "P-01",
@@ -1026,7 +1009,12 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
 
   // `--budget` on the parent is the answer the message asked for: the child must
   // get to run step "b" under the parent's remaining budget.
-  const approvedRun = await loadOrCreateRun(parentPath, "P", undefined, undefined, runDir, false, undefined, context, {
+  const { run: approvedRun } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir,
+    fresh: false,
+    context,
     maxCostUsd: 10,
     budgetApproved: true,
   });
@@ -1134,16 +1122,13 @@ test("pipeline-orchestration: a fan-out stops spawning children once its ceiling
   const { parentPath, context } = unpricedFanOut(root);
   unpricedSpawns.length = 0;
 
-  const parent = await loadOrCreateRun(
-    parentPath,
-    "P",
-    undefined,
-    undefined,
-    join(root, "parent-run"),
-    true,
-    undefined,
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir: join(root, "parent-run"),
+    fresh: true,
     context,
-  );
+  });
   const outcome = await executeRunSteps(
     parent,
     "P",
@@ -1186,17 +1171,14 @@ test("pipeline-orchestration: an authorized fan-out runs every item and both cal
   const { parentPath, context } = unpricedFanOut(root);
   unpricedSpawns.length = 0;
 
-  const parent = await loadOrCreateRun(
-    parentPath,
-    "P",
-    undefined,
-    undefined,
-    join(root, "parent-run"),
-    true,
-    undefined,
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir: join(root, "parent-run"),
+    fresh: true,
     context,
-    { allowUnmetered: true },
-  );
+    allowUnmetered: true,
+  });
   const outcome = await executeRunSteps(
     parent,
     "P",
@@ -1224,7 +1206,13 @@ test("pipeline-orchestration: re-reconciling a child that costs nothing new keep
 
   // First pass: the child spends tokens at an unknown price, so the parent stops
   // before the child's second step and the node is reconciled once.
-  const parent = await loadOrCreateRun(parentPath, "P", undefined, undefined, runDir, true, undefined, context);
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir,
+    fresh: true,
+    context,
+  });
   const outcome = await executeRunSteps(
     parent,
     "P",
@@ -1243,17 +1231,16 @@ test("pipeline-orchestration: re-reconciling a child that costs nothing new keep
   // node's own totals gone, as a snapshot written before this node had control
   // data leaves them. The flag must survive: an unpriced subtree charged at $0.00
   // exact is the same lie in a smaller font.
-  const authorizedChild = await loadOrCreateRun(
-    join(root, "child.ts"),
-    "P",
-    undefined,
-    undefined,
-    join(pipelineRunsDir("child", "P", context), ref.runId!),
-    false,
-    undefined,
+  const { run: authorizedChild } = await loadOrCreateRun({
+    pipelinePath: join(root, "child.ts"),
+    ticket: "P",
+    runDir: join(pipelineRunsDir("child", "P", context), ref.runId!),
+    fresh: false,
     context,
-    { parentRunId: parent.runId, parentNodeId: parent.steps[0]!.id, allowUnmetered: true },
-  );
+    parentRunId: parent.runId,
+    parentNodeId: parent.steps[0]!.id,
+    allowUnmetered: true,
+  });
   const childOutcome = await executeRunSteps(
     authorizedChild,
     "P",
@@ -1294,7 +1281,12 @@ test("pipeline-orchestration: an authorized root propagates the authorization to
   const { parentPath, context } = unpricedComposition(root);
   const runDir = join(root, "parent-run");
 
-  const parent = await loadOrCreateRun(parentPath, "P", undefined, undefined, runDir, true, undefined, context, {
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir,
+    fresh: true,
+    context,
     allowUnmetered: true,
   });
   expect(parent.allow_unmetered).toBe(true);
@@ -1329,7 +1321,13 @@ test("pipeline-orchestration: a composed child cannot authorize itself past a st
 
   // A strict root: the child stops after its first unpriced attempt, and the
   // parent reports the accounting stop rather than a technical failure.
-  const parent = await loadOrCreateRun(parentPath, "P", undefined, undefined, runDir, true, undefined, context);
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir,
+    fresh: true,
+    context,
+  });
   const outcome = await executeRunSteps(
     parent,
     "P",
@@ -1352,19 +1350,14 @@ test("pipeline-orchestration: a composed child cannot authorize itself past a st
   // policy its ancestor imposed: the authorization belongs to the run that owns
   // the budget scope, and is refused here.
   const childPath = join(root, "child.ts");
-  const resumedChild = await loadOrCreateRun(
-    childPath,
-    "P",
-    undefined,
-    undefined,
-    childDir,
-    false,
-    undefined,
+  const { run: resumedChild } = await loadOrCreateRun({
+    pipelinePath: childPath,
+    ticket: "P",
+    runDir: childDir,
+    fresh: false,
     context,
-    {
-      allowUnmetered: true,
-    },
-  );
+    allowUnmetered: true,
+  });
   expect(resumedChild.allow_unmetered).toBeUndefined();
   expect(resumedChild.cost_unaccounted).toBe(true);
   const childOutcome = await executeRunSteps(
@@ -1396,7 +1389,13 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
   );
   const parentRunDir = join(root, "parent-run");
   const context = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
-  const parent = await loadOrCreateRun(parentPath, "P", undefined, undefined, parentRunDir, true, undefined, context);
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir: parentRunDir,
+    fresh: true,
+    context,
+  });
   const parentStep = parent.steps[0]!;
   const childRunId = "named-child";
   parentStep.status = "running";
@@ -1601,7 +1600,13 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   );
   const parentRunDir = join(root, "parent-run");
   const context = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
-  const parent = await loadOrCreateRun(parentPath, "P", undefined, undefined, parentRunDir, true, undefined, context);
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir: parentRunDir,
+    fresh: true,
+    context,
+  });
   const parentStep = parent.steps[0]!;
   const childRunId = "interrupted-child";
   const childContext = buildPipelineContext({ cwd: root, ticket: "C-1", agentBackendRegistry: REGISTRY });
@@ -1814,7 +1819,13 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   );
   const runDir = join(root, "parent-run");
   const context = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
-  const parent = await loadOrCreateRun(parentPath, "P", undefined, undefined, runDir, true, undefined, context);
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir,
+    fresh: true,
+    context,
+  });
   const abort = createAbortScope();
   let activeAtSignal: string[] = [];
   (globalThis as Record<string, unknown>)[hook] = () => {

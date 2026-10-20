@@ -268,7 +268,7 @@ export const FLAGS: FlagSpec[] = [
     // Not forwarded to self-spawned children, exactly like --budget: authorizing
     // spend is a decision about one run, and a dispatch sweep must not grant it
     // to every item it launches. A composed child receives it through its budget
-    // scope instead (`boot/resume.ts`).
+    // scope instead (`run-record/run-opening.ts`).
     desc: "Authorize spend the runner could not price, and resume a run stopped by cost-unaccounted. The ceiling still applies to the priced spend.",
   },
   {

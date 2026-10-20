@@ -163,27 +163,21 @@ test("run-journal: validates the integration contract", async () => {
   const stateStore = new MemoryRunStateStore(runDir, calls);
   const eventStore = new MemoryRunEventStore(calls);
 
-  const run = await loadOrCreateRun(pipelinePath, undefined, undefined, undefined, runDir, true, undefined, context, {
-    stateStore,
-    eventStore,
-  });
+  const { run } = await loadOrCreateRun({ pipelinePath, runDir, fresh: true, context, stateStore, eventStore });
 
   expect(run.eventStore).toBe(eventStore);
   expect(calls).toEqual(["snapshot", "event:run.started"]);
   expect(eventStore.read(basename(runDir)).map((event) => event.type)).toEqual(["run.started"]);
 
   calls.length = 0;
-  const resumed = await loadOrCreateRun(
+  const { run: resumed } = await loadOrCreateRun({
     pipelinePath,
-    undefined,
-    undefined,
-    undefined,
     runDir,
-    false,
-    undefined,
+    fresh: false,
     context,
-    { stateStore, eventStore },
-  );
+    stateStore,
+    eventStore,
+  });
 
   expect(resumed.eventStore).toBe(eventStore);
   expect(calls).toEqual(["event:run.resumed", "snapshot"]);

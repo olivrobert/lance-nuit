@@ -55,9 +55,9 @@ function childSource(root: string, runDir: string, pipelinePath: string, stopSou
     `import { installChildKillHandlers } from ${module("src/entry/signals.ts")};`,
     `import { createAbortScope } from ${module("src/runtime/abort.ts")};`,
     `const ctx = buildPipelineContext({ ...commandRegistries(), cwd: ${JSON.stringify(root)}, ticket: "T-9" });`,
-    `const run = await loadOrCreateRun(${JSON.stringify(pipelinePath)}, "T-9", undefined, undefined, ${JSON.stringify(
+    `const { run } = await loadOrCreateRun({ pipelinePath: ${JSON.stringify(pipelinePath)}, ticket: "T-9", runDir: ${JSON.stringify(
       runDir,
-    )}, false, undefined, ctx);`,
+    )}, fresh: false, context: ctx });`,
     'updateStep(run, run.steps[0], "done");',
     'updateStep(run, run.steps[1], "running");',
     'const logPath = allocateAttempt(run, run.steps[1], "step").logPath;',
@@ -159,7 +159,7 @@ test("a real SIGTERM during a step persists the abort and leaves a resumable run
   // The relaunch: the same directory, loaded by the same boot path, executed by
   // the real loop. The completed step must not be spawned again.
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-9" });
-  const resumed = await loadOrCreateRun(pipelinePath, "T-9", undefined, undefined, runDir, false, undefined, ctx);
+  const { run: resumed } = await loadOrCreateRun({ pipelinePath, ticket: "T-9", runDir, fresh: false, context: ctx });
   expect(resumed.steps.map((step) => step.status)).toEqual(["done", "aborted", "pending"]);
   const spawned: string[] = [];
   const outcome = await executeRunSteps(

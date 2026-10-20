@@ -172,17 +172,9 @@ const RAW_READS =
 
 /**
  * The files outside the run record that still name a raw read, each with why.
- * Opening a run to execute it is boot's until the run record owns it.
+ * Opening a run to execute it is the run record's (`openRun`): boot names none.
  */
 const ALLOWED: Record<string, string[]> = {
-  // Opening and restoring a run before executing it.
-  "boot/resume.ts": [
-    "FileRunEventStore",
-    "FileRunStateStore",
-    "projectRunState",
-    "readRunEvents",
-    "readRunSnapshotDiagnostic",
-  ],
   "entry/startup.ts": ["FileRunStateStore", "resolveLatestRunSnapshot"],
   "step/pipeline-orchestration-child.ts": ["FileRunStateStore", '"state.json"'],
   // The journal of the run this process just executed, handed to the statistics
