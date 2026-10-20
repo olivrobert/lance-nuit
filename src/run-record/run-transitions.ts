@@ -44,7 +44,7 @@ import type { RunStepView, RunView } from "../model/run.js";
 import type { RunStep } from "./run.js";
 import { writable } from "./run.js";
 import { closeAttempt } from "./attempt-closure.js";
-import { aggregateControl, aggregateUsage } from "./cost-accounting.js";
+import { aggregateControl, sumStepUsage } from "./cost-accounting.js";
 import { appendRunEvent, relativeRunPath } from "./run-journal.js";
 import { isSettledStatus } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
@@ -248,7 +248,7 @@ export function abortRun(
     resumable: true,
   };
   run.total_control = aggregateControl(run.steps);
-  run.total_usage = aggregateUsage(run.steps);
+  run.total_usage = sumStepUsage(run.steps);
   appendRunEvent(run, "run.aborted", { status: run.status, reason, logPath });
   saveRun(run);
 }
@@ -354,7 +354,7 @@ function stopKindOf(outcome: RunFinalizationSignals | undefined): RunOutcomeStop
 export function finalizeRun(runView: RunView, outcome?: RunFinalizationSignals): void {
   const run = writable(runView);
   run.total_control = aggregateControl(run.steps);
-  run.total_usage = aggregateUsage(run.steps);
+  run.total_usage = sumStepUsage(run.steps);
   // A failed step the selection set aside did not end this invocation: naming
   // it would point the outcome at a step that never ran, away from the real stop.
   const failed = run.steps.find((step) => step.status === "failed" && !outcome?.setAside?.includes(step.id));

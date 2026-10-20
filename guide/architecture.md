@@ -582,13 +582,41 @@ outcome, an attempt or a child reference, and lists — and defined from the
 persisted shape rather than from the mutable one. `openRun`, `openAttempt`,
 `openOrchestration` and `declareChild` hand views out; each operation of the
 entry takes a view back and recovers the run it shows with `writable`, the one
-place the module turns a view into its record. `tsc` therefore refuses any write
-to a run outside the module, ESLint refuses an assertion back to a mutable run
-shape there (`eslint.config.mjs`), and `tests/runner/run-view-readonly.test.ts`
-proves both halves: a probe module of the step layer cannot write a run, and the
-entry hands out no mutable part of one except the copies a reader or a store
-receives. The `RunBudget` ledger an execution spends against is not part of the
-run and stays a plain object.
+place the module turns a view into its record. The run's figures leave the
+module read-only too (`aggregateControl`, `aggregateUsage`): a total summed from
+a single step is that step's own usage. The `RunBudget` ledger an execution
+spends against is not part of the run and stays a plain object.
+
+Three checks hold the rule, and each covers what the one before cannot:
+
+- **`tsc`** refuses a write through a view: an assignment, `delete`, `++`, or an
+  array method on a field, a nested record or a list. It does not refuse a view
+  given to a mutable type of the same shape — a `StepControl` parameter, a
+  `RunOutcomeState` variable — which TypeScript accepts for any object without
+  a list, nor `Object.assign` or `Reflect.set` on a view.
+- **ESLint** (`eslint.config.mjs`) refuses, in production code outside the
+  module, an assertion to a mutable run or persisted record (`as Run`,
+  `as PersistedStepState[]`).
+- **`tests/runner/run-view-readonly.test.ts`** checks three things. A probe of
+  the step layer cannot compile a write through a view. The entry hands out no
+  mutable part of an executing run, nor of a value it carries; the copies a
+  reader returns and what a store is given to serialize are listed there, each
+  with its reason. And every write in production code outside the module (`src/`
+  without `src/run-record/` and tests) is scanned with the checker: a write whose
+  object, or any object it was read from, has a run shape — a persisted record,
+  a view, a control, a usage, a session, a lineage entry — fails the test, seen
+  through casts and through `Object.assign`, `Object.defineProperty` and
+  `Reflect.set`. That catches the aliases `tsc` accepts, wherever the write
+  lands. The few writes on such a shape that are not a run (a backend adjusting
+  the figures it parsed, before the run record copies them) are listed with
+  their reason; a new one fails until it is argued for.
+
+None of them proves what a deliberate bypass hides: a value whose type no longer
+names a run shape — a view passed through `unknown` or a generic parameter and
+written there, or copied into a hand-written type of the same fields — or a
+write in test code or inside the module. A store injected into `openRun`
+receives the snapshot and the events to serialize, which share the run's nested
+values: it must not write what it is given.
 
 ## 8. Profiles, backends, and the two escalations
 

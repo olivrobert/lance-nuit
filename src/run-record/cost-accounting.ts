@@ -82,8 +82,9 @@ type FiguresView = DeepReadonly<SpendFigures>;
 
 /** A usage value as the module shares it. Every charge replaces a step's or a
  *  run's usage with a new object and none is changed in place, so one usage may
- *  stand at once for an attempt, its step total and a child reference. The view
- *  outside only forbids writing it, which no code here does. */
+ *  stand at once for an attempt, its step total and a child reference. It leaves
+ *  the module only read-only (a `RunView`, `aggregateUsage`), and no code here
+ *  writes one. */
 function usageValue(usage: DeepReadonly<StepUsage> | undefined): StepUsage | undefined {
   return usage as StepUsage | undefined;
 }
@@ -149,16 +150,24 @@ function mergeUsage(existing?: DeepReadonly<StepUsage>, incoming?: DeepReadonly<
 // Derived totals. Reads: they compute, they never store.
 // ---------------------------------------------------------------------------
 
-export function aggregateControl(steps: readonly FiguresView[]): StepControl {
+export function aggregateControl(steps: readonly FiguresView[]): DeepReadonly<StepControl> {
   let total: StepControl = { duration_ms: 0 };
   for (const step of steps) total = mergeControl(total, step.control);
   return total;
 }
 
-export function aggregateUsage(steps: readonly FiguresView[]): StepUsage | undefined {
+/** The steps' usage summed, shared as `usageValue` says: when a single step
+ *  spent, it is that step's own usage, so the run total stands for it. */
+export function sumStepUsage(steps: readonly FiguresView[]): StepUsage | undefined {
   let total: StepUsage | undefined;
   for (const step of steps) total = mergeUsage(total, step.usage);
   return total;
+}
+
+/** `sumStepUsage` for a reader outside the module. Read-only because the sum may
+ *  be a step's own usage: writing it would rewrite that step's tokens. */
+export function aggregateUsage(steps: readonly FiguresView[]): DeepReadonly<StepUsage> | undefined {
+  return sumStepUsage(steps);
 }
 
 /**
@@ -174,7 +183,7 @@ export function controlForRun(run: Pick<RunView, "steps" | "total_control">): St
 /** Token counterpart of `controlForRun`: the run's materialized usage when it has
  *  one, otherwise the sum of its steps. */
 export function usageForRun(run: Pick<RunView, "steps" | "total_usage">): StepUsage | undefined {
-  return usageValue(run.total_usage) ?? aggregateUsage(run.steps);
+  return usageValue(run.total_usage) ?? sumStepUsage(run.steps);
 }
 
 /** A run's measured cost, or `fallback` when it measured nothing. A child that
