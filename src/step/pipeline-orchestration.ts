@@ -14,9 +14,10 @@ import {
   commitChildCall,
   declareChild,
   failChildLaunch,
+  freezeOrchestrationItems,
   isChildSettled,
+  openOrchestration,
   recordStepVerdict,
-  saveRun,
   skipChild,
   updateStep,
 } from "../run-record/index.js";
@@ -46,20 +47,6 @@ function childFailure(
     ...(result.costUnaccounted ? { costUnaccounted: true } : {}),
     ...(result.costUnaccountedStop ? { costUnaccountedStop: true } : {}),
   };
-}
-
-function ensureState(step: RunStep, def: PipelineOrchestrationDefinition): PersistedPipelineOrchestrationState {
-  const current = step.orchestration;
-  if (current) {
-    if (current.kind !== def.kind) throw new Error(`Step "${step.id}": orchestration type changed during resume`);
-    return current;
-  }
-  const state: PersistedPipelineOrchestrationState = {
-    kind: def.kind,
-    children: [],
-  };
-  step.orchestration = state;
-  return state;
 }
 
 function invocationForMain(def: PipelineOrchestrationDefinition, ticket?: string): PipelineInvocationDefinition {
@@ -135,7 +122,8 @@ async function executeForEachPipeline(
   def: Extract<PipelineOrchestrationDefinition, { kind: "forEachPipeline" }>,
   state: PersistedPipelineOrchestrationState,
 ): Promise<PipelineOrchestrationResult> {
-  if (!state.items) {
+  let items = state.items;
+  if (!items) {
     const raw = (await resolveTemplateAsync(def.items, input.baseCtx)) as unknown;
     if (!Array.isArray(raw) || !raw.every((item) => typeof item === "string" && item.trim())) {
       updateStep(
@@ -146,11 +134,10 @@ async function executeForEachPipeline(
       );
       return { action: "failed", budgetExceeded: false };
     }
-    state.items = [...raw];
-    saveRun(input.run);
+    items = freezeOrchestrationItems(input.run, state, raw);
   }
 
-  for (const [index, item] of state.items.entries()) {
+  for (const [index, item] of items.entries()) {
     if (input.abort.isRunAborted(input.run)) return { action: "stopped", budgetExceeded: false };
     const ticket = await resolveTicket(def.ticket, input.baseCtx, item);
     const lot = def.lot ? await def.lot(input.baseCtx, item) : undefined;
@@ -209,9 +196,9 @@ export async function executePipelineOrchestration(
     updateStep(input.run, input.step, "failed", "orchestration definition missing");
     return { action: "failed", budgetExceeded: false };
   }
-  const state = ensureState(input.step, def);
+  // The lineage first: the snapshot that opens the node carries it.
   currentLineage(input.run);
-  saveRun(input.run);
+  const state = openOrchestration(input.run, input.step, def.kind);
   try {
     return def.kind === "runPipeline"
       ? await executeRunPipeline(input, def, state)

@@ -1,7 +1,7 @@
 import type { StepResult } from "../exec/runners.js";
 import { artifactScopeFor } from "../exec/runners.js";
 import { resolveTemplateAsync } from "../model/definition.js";
-import { saveRun } from "../run-record/index.js";
+import { bindSession } from "../run-record/index.js";
 import { buildFixContext, type FixRun, selectResumedSession } from "./fix-loop-runtime.js";
 import { type FixResult, runAttempt, runFixAttempt, startFreshSession } from "./step-attempt.js";
 
@@ -72,10 +72,7 @@ export async function performFixAttempt(
   if (useResume && opts.resumeSession !== undefined) {
     const target = run.steps.find((candidate) => candidate.def.id === opts.resumeSession);
     const resumed = fix.session ?? resumedSession;
-    if (target && resumed) {
-      target.session = resumed;
-      saveRun(run);
-    }
+    if (target && resumed) bindSession(run, target, resumed);
   }
 
   return { fix, extractedErrors: extraction.errors };
@@ -85,8 +82,7 @@ export async function performFixAttempt(
 export async function runStepCommandFresh(fx: FixRun, label: string, banner: string): Promise<StepResult> {
   const { run, step, budget, deps } = fx;
   fx.output.emit({ type: "runner.message", level: "info", message: `  → ${label} ${step.def.name}...` });
-  const session = startFreshSession(step, fx.backend);
-  saveRun(run);
+  const session = startFreshSession(run, step, fx.backend);
   return runAttempt(run, step, {
     command: fx.command,
     context: fx.baseCtx,

@@ -32,10 +32,11 @@ import { clearLiveAttemptCost } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
 import {
   type AttemptResult,
-  appendRunEvent,
+  bindSession,
   type CostWarning,
   type OpenedAttempt,
   openAttempt,
+  recordUnavailableSource,
   remainingBudget,
   type RunBudget,
   settleAttempt,
@@ -92,19 +93,22 @@ function warnUnaccountedCost(run: Run, warning: CostWarning): void {
  * must not overwrite `step.session`. The fix loop's `resumeSession` mode
  * writes its forked session back to the resumed step itself.
  */
-export function applyStepSession(step: RunStep, result: AttemptRecord): void {
-  if (result.session) step.session = result.session;
+export function applyStepSession(run: Run, step: RunStep, result: AttemptRecord): void {
+  if (result.session) bindSession(run, step, result.session);
 }
 
 /**
  * Open a fresh session for an attempt that must not continue the previous one
  * (initial attempt, rerun, retry after a fix). Backends that mint their session
  * lazily return nothing, and the step keeps whatever the attempt reports later.
- * The snapshot is the caller's: it is written together with the attempt counter.
  */
-export function startFreshSession(step: RunStep, backend: AgentBackend | undefined): AgentSession | undefined {
+export function startFreshSession(
+  run: Run,
+  step: RunStep,
+  backend: AgentBackend | undefined,
+): AgentSession | undefined {
   const session = backend?.createSession?.();
-  if (session) step.session = session;
+  if (session) bindSession(run, step, session);
   return session;
 }
 
@@ -126,7 +130,7 @@ export const bannerMiddleware: AttemptMiddleware = async (ctx, next) => {
  * the kill must not rotate `step.session` under it. */
 export const sessionMiddleware: AttemptMiddleware = async (ctx, next) => {
   const record = await next(ctx);
-  if (ctx.kind === "step" && ctx.attempt.status === "running") applyStepSession(ctx.step, record);
+  if (ctx.kind === "step" && ctx.attempt.status === "running") applyStepSession(ctx.run, ctx.step, record);
   return record;
 };
 
@@ -346,9 +350,7 @@ export async function runAttempt(run: Run, step: RunStep, options: RunAttemptOpt
         const after = await readInputs(options.context, inputsReadAfterAttempt(ctx.step.def));
         // The record then says `null`, which re-runs the step next time; the
         // journal is where a diagnosis learns why.
-        for (const { source, reason } of after.unavailable) {
-          appendRunEvent(ctx.run, "step.source.unavailable", { stepId: ctx.step.id, source, reason });
-        }
+        for (const unavailable of after.unavailable) recordUnavailableSource(ctx.run, ctx.step, unavailable);
         fingerprints = { ...given, ...after.fingerprints };
       }
       // A step without input records an empty fingerprint: the record still names

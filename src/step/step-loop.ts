@@ -28,7 +28,6 @@ import {
   recordAbsorbedInputs,
   type RunBudget,
   type RunOutcome,
-  saveRun,
   stopRun,
   updateStep,
 } from "../run-record/index.js";
@@ -110,9 +109,8 @@ async function runInitialAttempt(input: {
   const { run, step, stepLogDir } = input;
   const agentSpec = backendSpecForStep(step.def);
   const agentBackend = agentSpec ? requireAgentBackendRegistry(input.context).resolve(agentSpec) : undefined;
-  const initialSession = startFreshSession(step, agentBackend);
+  const initialSession = startFreshSession(run, step, agentBackend);
   if (initialSession) {
-    saveRun(run);
     input.output.emit({ type: "step.session", step, sessionId: initialSession.id });
   }
   input.output.emit({

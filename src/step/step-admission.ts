@@ -20,6 +20,8 @@ import {
   lastPassInterrupted,
   owesWork,
   type RunBudget,
+  recordLastCommand,
+  recordUnavailableSource,
   stopRun,
   updateStep,
 } from "../run-record/index.js";
@@ -191,7 +193,7 @@ export function answersToOutputs(def: StepDefinition, reconcile: boolean | undef
 function reportUnavailableSources(input: AdmitStepInput, unavailable: readonly UnavailableSource[]): void {
   const { run, step } = input;
   for (const { source, reason } of unavailable) {
-    appendRunEvent(run, "step.source.unavailable", { stepId: step.id, source, reason });
+    recordUnavailableSource(run, step, { source, reason });
     input.output.emit({
       type: "runner.message",
       level: "warn",
@@ -414,7 +416,7 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
   }
 
   const command = (await resolveTemplateAsync(step.def.command, baseCtx))!;
-  step.last_command = command;
+  recordLastCommand(step, command);
 
   // Environment guard runs before spawn at zero token cost. An unreachable app
   // fails here instead of paying an agent to discover infrastructure failure and
