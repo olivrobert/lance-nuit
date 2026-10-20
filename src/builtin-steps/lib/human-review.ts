@@ -36,7 +36,7 @@ import { reject } from "../../dsl/preconditions.js";
 import { declareApproval, inferredPipelineName } from "../../dsl/work-item-assembly.js";
 import type { PipelineContext } from "../../model/context.js";
 import type { RunStopState } from "../../model/persisted.js";
-import { decisionMatchesArtifact, readDecision, rejectionStatus } from "../../work-item-store/index.js";
+import { artifactKey, decisionMatchesArtifact, readDecision, rejectionStatus } from "../../work-item-store/index.js";
 import { abandonWorkItemBranch } from "./branch.js";
 import { workItemEscalateStep } from "./work-item-steps.js";
 
@@ -316,7 +316,7 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
    *  expected recovery, and the reason as the exit point wrote it. */
   const stopInfo = (detail: string, subject: string | undefined): RunStopState => ({
     ...(subject ? { subject } : {}),
-    artifact: `artifacts/${opts.artifact.name}`,
+    artifact: artifactKey(opts.artifact.name),
     kind: opts.kind,
     detail,
     ...(reworkable ? { reworkable: true } : {}),
