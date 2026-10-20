@@ -125,7 +125,7 @@ async function executeParent(
   contextOverride?: PipelineContext,
 ) {
   const context = contextOverride ?? buildPipelineContext({ cwd: root, ticket, agentBackendRegistry: REGISTRY });
-  const { run } = await loadOrCreateRun({ pipelinePath: parentPath, ticket, runDir, fresh, context });
+  const { run } = await loadOrCreateRun({ pipelinePath: parentPath, ticket, runDir, fresh, context, worktree: false });
   const outcome = await executeRunSteps(
     run,
     ticket,
@@ -160,6 +160,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
         runDir: parentRunDir,
         fresh: true,
         context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+        worktree: false,
       })
     ).run,
   );
@@ -246,6 +247,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
         runDir: parentRunDir,
         fresh: true,
         context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+        worktree: false,
       })
     ).run,
   );
@@ -417,6 +419,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
         runDir: parentRunDir,
         fresh: true,
         context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+        worktree: false,
       })
     ).run,
   );
@@ -791,6 +794,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
         runDir: join(root, "parent-run"),
         fresh: true,
         context,
+        worktree: false,
       })
     ).run,
   );
@@ -813,6 +817,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
     parentNodeId: parentStep.id,
     rootRunId: parent.rootRunId,
     budgetScopeId: parent.budgetScopeId,
+    worktree: false,
   });
   const childOutcome = await executeRunSteps(
     childRun,
@@ -1034,6 +1039,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
     context,
     maxCostUsd: 10,
     budgetApproved: true,
+    worktree: false,
   });
   const approved = await executeRunSteps(
     approvedRun,
@@ -1145,6 +1151,7 @@ test("pipeline-orchestration: a fan-out stops spawning children once its ceiling
     runDir: join(root, "parent-run"),
     fresh: true,
     context,
+    worktree: false,
   });
   const outcome = await executeRunSteps(
     parent,
@@ -1195,6 +1202,7 @@ test("pipeline-orchestration: an authorized fan-out runs every item and both cal
     fresh: true,
     context,
     allowUnmetered: true,
+    worktree: false,
   });
   const outcome = await executeRunSteps(
     parent,
@@ -1231,6 +1239,7 @@ test("pipeline-orchestration: re-reconciling a child that costs nothing new keep
         runDir,
         fresh: true,
         context,
+        worktree: false,
       })
     ).run,
   );
@@ -1261,6 +1270,7 @@ test("pipeline-orchestration: re-reconciling a child that costs nothing new keep
     parentRunId: parent.runId,
     parentNodeId: parent.steps[0]!.id,
     allowUnmetered: true,
+    worktree: false,
   });
   const childOutcome = await executeRunSteps(
     authorizedChild,
@@ -1309,6 +1319,7 @@ test("pipeline-orchestration: an authorized root propagates the authorization to
     fresh: true,
     context,
     allowUnmetered: true,
+    worktree: false,
   });
   expect(parent.allow_unmetered).toBe(true);
   const outcome = await executeRunSteps(
@@ -1348,6 +1359,7 @@ test("pipeline-orchestration: a composed child cannot authorize itself past a st
     runDir,
     fresh: true,
     context,
+    worktree: false,
   });
   const outcome = await executeRunSteps(
     parent,
@@ -1378,6 +1390,7 @@ test("pipeline-orchestration: a composed child cannot authorize itself past a st
     fresh: false,
     context,
     allowUnmetered: true,
+    worktree: false,
   });
   expect(resumedChild.allow_unmetered).toBeUndefined();
   expect(resumedChild.cost_unaccounted).toBe(true);
@@ -1418,6 +1431,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
         runDir: parentRunDir,
         fresh: true,
         context,
+        worktree: false,
       })
     ).run,
   );
@@ -1633,6 +1647,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
         runDir: parentRunDir,
         fresh: true,
         context,
+        worktree: false,
       })
     ).run,
   );
@@ -1854,6 +1869,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
     runDir,
     fresh: true,
     context,
+    worktree: false,
   });
   const abort = createAbortScope();
   let activeAtSignal: string[] = [];

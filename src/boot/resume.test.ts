@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { appendRunEvent, readRunEvents } from "../run-record/run-journal.js";
-import { loadOrCreateRun } from "./resume.js";
+import { type LoadOrCreateRunOptions, loadOrCreateRun } from "./resume.js";
 import { pendingSteps, resumeDecision } from "../run-record/run-predicates.js";
 import { saveRun } from "../run-record/run-repository.js";
 import { readRunSnapshot } from "../run-record/run-snapshot.js";
@@ -52,6 +52,7 @@ test("resume: a selected snapshot disappearing before the final read does not in
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   updateStep(initial, initial.steps[0]!, "failed", "interrupted");
   unlinkSync(join(dir, "runner.lock"));
@@ -69,7 +70,7 @@ test("resume: a selected snapshot disappearing before the final read does not in
   };
 
   await expect(
-    loadOrCreateRun({ pipelinePath: path, ticket: "T-race", fresh: false, context: ctx, stateStore }),
+    loadOrCreateRun({ pipelinePath: path, ticket: "T-race", fresh: false, context: ctx, stateStore, worktree: false }),
   ).rejects.toThrow(/is missing/);
   expect(existsSync(join(dir, "state.json"))).toBe(false);
   expect(existsSync(join(dir, "runner.lock"))).toBe(false);
@@ -86,6 +87,7 @@ test("resume: an explicit selection whose directory disappears does not recreate
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   updateStep(initial, initial.steps[0]!, "failed", "interrupted");
   if (!initial.runId) throw new Error("fixture run must have an id");
@@ -101,6 +103,7 @@ test("resume: an explicit selection whose directory disappears does not recreate
       fresh: false,
       context: ctx,
       strictSnapshot: selection.strictSnapshot,
+      worktree: false,
     }),
   ).rejects.toThrow(/is missing/);
   expect(existsSync(dir)).toBe(false);
@@ -113,7 +116,16 @@ test("resume: a guard stop is kept until --budget approves more spend", async ()
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-3", undefined, true, ctx);
   const run = writable(
-    (await loadOrCreateRun({ pipelinePath: path, ticket: "T-3", runDir: dir, fresh: false, context: ctx })).run,
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-3",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+        worktree: false,
+      })
+    ).run,
   );
   run.budget_exceeded = true;
   updateStep(run, run.steps[0]!, "failed", "process killed: budget exceeded");
@@ -126,6 +138,7 @@ test("resume: a guard stop is kept until --budget approves more spend", async ()
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(resumed.budget_exceeded).toBe(true);
 
@@ -137,6 +150,7 @@ test("resume: a guard stop is kept until --budget approves more spend", async ()
     fresh: false,
     context: ctx,
     maxCostUsd: 5,
+    worktree: false,
   });
   expect(approved.budget_exceeded).toBeUndefined();
   expect(approved.max_cost_usd).toBe(5);
@@ -147,7 +161,14 @@ test("resume: SIGINT after the last step but before finalizeRun keeps the same r
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-1" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-1", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-1", runDir: dir, fresh: false, context: ctx });
+  const { run } = await loadOrCreateRun({
+    pipelinePath: path,
+    ticket: "T-1",
+    runDir: dir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   for (const step of run.steps) updateStep(run, step, "done");
   abortRun(run, "SIGINT");
 
@@ -169,6 +190,7 @@ test("resume: SIGINT after the last step but before finalizeRun keeps the same r
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(resumed.status).toBe("RUNNING");
   expect(resumed.aborted).toBe(false);
@@ -188,6 +210,7 @@ for (const ending of ["STOPPED", "FAIL"] as const) {
           runDir: dir,
           fresh: false,
           context: ctx,
+          worktree: false,
         })
       ).run,
     );
@@ -212,6 +235,7 @@ for (const ending of ["STOPPED", "FAIL"] as const) {
       skipFilter: ["c"],
       fresh: false,
       context: ctx,
+      worktree: false,
     });
     expect(resumed.run_dir).toBe(dir);
     expect(resumed.status).toBe("RUNNING");
@@ -259,12 +283,29 @@ test("a run records where it executes, so a reader finds its artifacts", async (
   expect(resumed.worktree).toBe(true);
 });
 
+test("a caller must say whether the run it opens is in a worktree", () => {
+  // Checked by tsc: the option used to default to false, so a caller that forgot
+  // it recorded a worktree run as one in the main clone.
+  // @ts-expect-error worktree is required
+  const missing: LoadOrCreateRunOptions = { pipelinePath: "p.ts" };
+  const given: LoadOrCreateRunOptions = { pipelinePath: "p.ts", worktree: false };
+  expect(missing.worktree).toBeUndefined();
+  expect(given.worktree).toBe(false);
+});
+
 test("resume selectors apply to an aborted step, not only to pending ones", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-selectors-"));
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-2" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-2", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-2", runDir: dir, fresh: false, context: ctx });
+  const { run } = await loadOrCreateRun({
+    pipelinePath: path,
+    ticket: "T-2",
+    runDir: dir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   updateStep(run, run.steps[0]!, "done");
   updateStep(run, run.steps[1]!, "running");
   abortRun(run, "SIGINT");
@@ -279,6 +320,7 @@ test("resume selectors apply to an aborted step, not only to pending ones", asyn
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(onlyC.steps[1]!.status).toBe("skipped");
 
@@ -289,6 +331,7 @@ test("resume selectors apply to an aborted step, not only to pending ones", asyn
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(skipB.steps[1]!.status).toBe("skipped");
 });
@@ -304,6 +347,7 @@ test("resume selectors leave a step the journal finished as done, even when the 
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   updateStep(run, run.steps[0]!, "done");
   updateStep(run, run.steps[1]!, "running");
@@ -323,6 +367,7 @@ test("resume selectors leave a step the journal finished as done, even when the 
       runDir: dir,
       fresh: false,
       context: ctx,
+      worktree: false,
     });
     expect(resumed.steps[1]!.status).toBe("done");
     expect(resumed.steps[1]!.excluded).toBeUndefined();
@@ -334,7 +379,14 @@ test("resume: an attempt priced in the journal but missing from the snapshot sti
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-4" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-4", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-4", runDir: dir, fresh: false, context: ctx });
+  const { run } = await loadOrCreateRun({
+    pipelinePath: path,
+    ticket: "T-4",
+    runDir: dir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   updateStep(run, run.steps[0]!, "running");
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
   // `finishAttempt` appends the finish event, then writes the snapshot. Die in between.
@@ -354,6 +406,7 @@ test("resume: an attempt priced in the journal but missing from the snapshot sti
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(resumed.steps[0]!.attempts?.[0]?.control?.total_cost_usd).toBe(1);
   // The budget ledger seeds from step totals: the journaled spend must reach them.
@@ -368,7 +421,16 @@ test("resume: the snapshot total wins when it already covers the journaled attem
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-5", undefined, true, ctx);
   const run = writable(
-    (await loadOrCreateRun({ pipelinePath: path, ticket: "T-5", runDir: dir, fresh: false, context: ctx })).run,
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-5",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+        worktree: false,
+      })
+    ).run,
   );
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
   appendRunEvent(run, "step.attempt.finished", {
@@ -388,6 +450,7 @@ test("resume: the snapshot total wins when it already covers the journaled attem
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(resumed.steps[0]!.control).toEqual({ duration_ms: 5, total_cost_usd: 1.5, model: "m" });
 });
@@ -398,7 +461,16 @@ test("resume: a fix pass left running by a crash is closed as failed and unprice
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6", undefined, true, ctx);
   const run = writable(
-    (await loadOrCreateRun({ pipelinePath: path, ticket: "T-6", runDir: dir, fresh: false, context: ctx })).run,
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-6",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+        worktree: false,
+      })
+    ).run,
   );
   updateStep(run, run.steps[0]!, "running");
   // A priced step attempt, then a fix pass that never reported: the runner died.
@@ -421,6 +493,7 @@ test("resume: a fix pass left running by a crash is closed as failed and unprice
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   const step = resumed.steps[0]!;
   expect(step.attempts.map((attempt) => attempt.status)).toEqual(["failed", "failed"]);
@@ -452,6 +525,7 @@ test("resume: a fix pass left running by a crash is closed as failed and unprice
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(again.steps[0]!.attempts.map((attempt) => attempt.status)).toEqual(["failed", "failed"]);
   expect(readRunEvents(dir).filter((event) => event.type === "step.attempt.finished")).toHaveLength(2);
@@ -470,6 +544,7 @@ test("resume: an attempt left running by a crash is projected as interrupted on 
         runDir: dir,
         fresh: false,
         context: ctx,
+        worktree: false,
       })
     ).run,
   );
@@ -483,6 +558,7 @@ test("resume: an attempt left running by a crash is projected as interrupted on 
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(resumed.steps[0]!.attempts[0]).toMatchObject({ status: "failed", interrupted: true });
   const finished = readRunEvents(dir).filter((event) => event.type === "step.attempt.finished");
@@ -496,6 +572,7 @@ test("resume: an attempt left running by a crash is projected as interrupted on 
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(again.steps[0]!.attempts[0]).toMatchObject({ status: "failed", interrupted: true });
 });
@@ -513,6 +590,7 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   const { deps } = countingDeps([]);
   const spawn = deps.executeStep;
@@ -545,6 +623,7 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   const b = resumed.steps[1]!;
   expect(b.attempts).toHaveLength(1);
@@ -588,7 +667,16 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-6c", undefined, true, ctx);
   crashDuring(
-    (await loadOrCreateRun({ pipelinePath: path, ticket: "T-6c", runDir: dir, fresh: false, context: ctx })).run,
+    (
+      await loadOrCreateRun({
+        pipelinePath: path,
+        ticket: "T-6c",
+        runDir: dir,
+        fresh: false,
+        context: ctx,
+        worktree: false,
+      })
+    ).run,
     "a",
   );
 
@@ -598,6 +686,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   const first = countingDeps([]);
   const outcome = await executeRunSteps(resumed, "T-6c", undefined, { resuming: true }, first.deps, ctx);
@@ -615,6 +704,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   const second = countingDeps([]);
   expect((await executeRunSteps(again, "T-6c", undefined, { resuming: true }, second.deps, ctx)).stopped).toBe(true);
@@ -626,6 +716,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   const third = countingDeps([]);
   const replayed = await executeRunSteps(
@@ -654,7 +745,16 @@ for (const option of ["replayInterrupted", "rerunOnResume"]) {
     );
     const dir = resolveRunDir("p", "T-6d", undefined, true, ctx);
     crashDuring(
-      (await loadOrCreateRun({ pipelinePath: path, ticket: "T-6d", runDir: dir, fresh: false, context: ctx })).run,
+      (
+        await loadOrCreateRun({
+          pipelinePath: path,
+          ticket: "T-6d",
+          runDir: dir,
+          fresh: false,
+          context: ctx,
+          worktree: false,
+        })
+      ).run,
       "a",
     );
 
@@ -664,6 +764,7 @@ for (const option of ["replayInterrupted", "rerunOnResume"]) {
       runDir: dir,
       fresh: false,
       context: ctx,
+      worktree: false,
     });
     const loop = countingDeps([]);
     const outcome = await executeRunSteps(resumed, "T-6d", undefined, { resuming: true }, loop.deps, ctx);
@@ -686,6 +787,7 @@ test("resume: a --start-at replay interrupted by a second crash stops the next r
         runDir: dir,
         fresh: false,
         context: ctx,
+        worktree: false,
       })
     ).run,
   );
@@ -701,6 +803,7 @@ test("resume: a --start-at replay interrupted by a second crash stops the next r
         fresh: false,
         startAt: "b",
         context: ctx,
+        worktree: false,
       })
     ).run,
     "b",
@@ -712,6 +815,7 @@ test("resume: a --start-at replay interrupted by a second crash stops the next r
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   // The persisted requeue outlives the invocation that asked for it.
   expect(resumed.steps[1]!.replay).toBe(true);
@@ -767,7 +871,14 @@ test("resume: a mid-step .maxCost() kill stops the run, and its cost is read bac
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-8" });
   const path = budgetedPipelineFile(root, 1);
   const dir = resolveRunDir("p", "T-8", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-8", runDir: dir, fresh: false, context: ctx });
+  const { run } = await loadOrCreateRun({
+    pipelinePath: path,
+    ticket: "T-8",
+    runDir: dir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   expect(run.max_cost_usd).toBe(1);
 
   // The live guard killed step `a` mid-flight on an estimate above the ceiling.
@@ -802,6 +913,7 @@ test("resume: a mid-step .maxCost() kill stops the run, and its cost is read bac
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(resumed.max_cost_usd).toBe(1);
   expect(resumed.budget_exceeded).toBe(true);
@@ -819,7 +931,14 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-9" });
   const path = budgetedPipelineFile(root, 5);
   const dir = resolveRunDir("p", "T-9", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-9", runDir: dir, fresh: false, context: ctx });
+  const { run } = await loadOrCreateRun({
+    pipelinePath: path,
+    ticket: "T-9",
+    runDir: dir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
 
   // Step `a` completes, spends $1 the runner could price, and consumes tokens it
   // could not: the $5 ceiling is no longer enforceable against the remainder.
@@ -841,6 +960,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(resumed.cost_unaccounted).toBe(true);
   expect(resumed.allow_unmetered).toBeUndefined();
@@ -859,6 +979,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
     context: ctx,
     maxCostUsd: 50,
     budgetApproved: true,
+    worktree: false,
   });
   expect(raised.max_cost_usd).toBe(50);
   expect(raised.cost_unaccounted).toBe(true);
@@ -876,6 +997,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
     fresh: false,
     context: ctx,
     allowUnmetered: true,
+    worktree: false,
   });
   expect(authorized.allow_unmetered).toBe(true);
   expect(readRunSnapshot(join(dir, "state.json"))?.allow_unmetered).toBe(true);
@@ -898,6 +1020,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(inherited.allow_unmetered).toBe(true);
   expect(readRunEvents(dir).filter((event) => event.type === "run.unmetered.authorized")).toHaveLength(1);
@@ -917,6 +1040,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(run.max_cost_usd).toBeUndefined();
   const first = countingDeps([
@@ -940,6 +1064,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
     context: ctx,
     maxCostUsd: 10,
     budgetApproved: true,
+    worktree: false,
   });
   expect(capped.max_cost_usd).toBe(10);
   expect(capped.cost_unaccounted).toBe(true);
@@ -957,6 +1082,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
     fresh: false,
     context: ctx,
     allowUnmetered: true,
+    worktree: false,
   });
   const third = countingDeps([{ ok: true }, { ok: true }]);
   const allowed = await executeRunSteps(authorized, "T-12", undefined, { resuming: true }, third.deps, ctx);
@@ -976,6 +1102,7 @@ test("resume: a fresh run inherits neither the authorization nor the accounting 
     fresh: false,
     context: ctx,
     allowUnmetered: true,
+    worktree: false,
   });
   expect(authorized.allow_unmetered).toBe(true);
   const first = countingDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 1, cost_unknown: true } }]);
@@ -984,7 +1111,13 @@ test("resume: a fresh run inherits neither the authorization nor the accounting 
 
   // `--fresh` is a new run, not a continuation: it starts strict, with no spend
   // and no authorization to inherit from the run it replaces.
-  const { run: fresh } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-10", fresh: true, context: ctx });
+  const { run: fresh } = await loadOrCreateRun({
+    pipelinePath: path,
+    ticket: "T-10",
+    fresh: true,
+    context: ctx,
+    worktree: false,
+  });
   expect(fresh.run_dir).not.toBe(dir);
   expect(fresh.allow_unmetered).toBeUndefined();
   expect(fresh.cost_unaccounted).toBeUndefined();
@@ -1002,6 +1135,7 @@ test("resume: an authorized run still stops when the spend it could price reache
     fresh: false,
     context: ctx,
     allowUnmetered: true,
+    worktree: false,
   });
   expect(run.allow_unmetered).toBe(true);
 
@@ -1035,9 +1169,23 @@ test("resume selectors apply to a step added to the definition after the snapsho
   // Two snapshots taken while the definition holds a and b only.
   const before = definition("before.ts", ["a", "b"]);
   const selected = resolveRunDir("p", "T-new", undefined, true, ctx);
-  await loadOrCreateRun({ pipelinePath: before, ticket: "T-new", runDir: selected, fresh: false, context: ctx });
+  await loadOrCreateRun({
+    pipelinePath: before,
+    ticket: "T-new",
+    runDir: selected,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   const skipped = resolveRunDir("p", "T-new", undefined, true, ctx);
-  await loadOrCreateRun({ pipelinePath: before, ticket: "T-new", runDir: skipped, fresh: false, context: ctx });
+  await loadOrCreateRun({
+    pipelinePath: before,
+    ticket: "T-new",
+    runDir: skipped,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
 
   // A step added afterwards has no persisted state, so hydration would default it
   // to pending: it must still answer to the resume selectors.
@@ -1050,6 +1198,7 @@ test("resume selectors apply to a step added to the definition after the snapsho
     runDir: selected,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   const outsideSelection = onlyA.steps.find((entry) => entry.id === "deploy")!;
   expect(outsideSelection.status).toBe("skipped");
@@ -1062,6 +1211,7 @@ test("resume selectors apply to a step added to the definition after the snapsho
     runDir: skipped,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   const explicitlySkipped = withoutDeploy.steps.find((entry) => entry.id === "deploy")!;
   expect(explicitlySkipped.status).toBe("skipped");
@@ -1081,6 +1231,7 @@ test("--start-at leaves a done step before it to the resume re-check instead of 
         runDir: dir,
         fresh: false,
         context: ctx,
+        worktree: false,
       })
     ).run,
   );
@@ -1094,6 +1245,7 @@ test("--start-at leaves a done step before it to the resume re-check instead of 
     fresh: false,
     startAt: "c",
     context: ctx,
+    worktree: false,
   });
   const [a, b] = resumed.steps;
   // The step loop re-admits a `done` step declaring `input` (step-loop.test.ts):
@@ -1111,7 +1263,14 @@ test("invariant: a resume over an unreadable journal fails instead of forgetting
   const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "T-9" });
   const path = pipelineFile(root);
   const dir = resolveRunDir("p", "T-9", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({ pipelinePath: path, ticket: "T-9", runDir: dir, fresh: false, context: ctx });
+  const { run } = await loadOrCreateRun({
+    pipelinePath: path,
+    ticket: "T-9",
+    runDir: dir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
   updateStep(run, run.steps[0]!, "running");
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
   appendRunEvent(run, "step.attempt.finished", {
@@ -1126,7 +1285,7 @@ test("invariant: a resume over an unreadable journal fails instead of forgetting
   mkdirSync(join(dir, "events.jsonl"));
 
   await expect(
-    loadOrCreateRun({ pipelinePath: path, ticket: "T-9", runDir: dir, fresh: false, context: ctx }),
+    loadOrCreateRun({ pipelinePath: path, ticket: "T-9", runDir: dir, fresh: false, context: ctx, worktree: false }),
   ).rejects.toThrow(/EISDIR/);
   // The snapshot is untouched: restoring the journal makes the run resumable again.
   expect(readRunSnapshot(join(dir, "state.json"))?.steps[0]?.status).toBe("running");
@@ -1150,6 +1309,7 @@ test("resume: materialized totals are trusted on a terminal snapshot and derived
         runDir: passDir,
         fresh: false,
         context: ctx,
+        worktree: false,
       })
     ).run,
   );
@@ -1165,6 +1325,7 @@ test("resume: materialized totals are trusted on a terminal snapshot and derived
     runDir: passDir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(terminal.status).toBe("PASS");
   expect(terminal.total_control?.total_cost_usd).toBe(3);
@@ -1180,6 +1341,7 @@ test("resume: materialized totals are trusted on a terminal snapshot and derived
         runDir: liveDir,
         fresh: false,
         context: ctx,
+        worktree: false,
       })
     ).run,
   );
@@ -1195,6 +1357,7 @@ test("resume: materialized totals are trusted on a terminal snapshot and derived
     runDir: liveDir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(resumed.status).toBe("RUNNING");
   expect(resumed.total_control).toBeUndefined();
@@ -1227,6 +1390,7 @@ test("resume: a failed journal append keeps the attempt numbering through the sn
         fresh: false,
         context: ctx,
         eventStore,
+        worktree: false,
       })
     ).run,
   );
@@ -1247,6 +1411,7 @@ test("resume: a failed journal append keeps the attempt numbering through the sn
         fresh: false,
         context: ctx,
         eventStore,
+        worktree: false,
       })
     ).run,
   );
@@ -1271,6 +1436,7 @@ test("resume: loading the same run twice neither adds spend nor reuses an attemp
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   updateStep(run, run.steps[0]!, "running");
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
@@ -1291,6 +1457,7 @@ test("resume: loading the same run twice neither adds spend nor reuses an attemp
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   const { run: twice } = await loadOrCreateRun({
     pipelinePath: path,
@@ -1298,6 +1465,7 @@ test("resume: loading the same run twice neither adds spend nor reuses an attemp
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   for (const resumed of [once, twice].map((opened) => writable(opened))) {
     expect(resumed.steps[0]!.attempts.map((attempt) => attempt.attempt)).toEqual([1]);
@@ -1324,6 +1492,7 @@ test("resume: --start-at requeues the target and every later step, keeping their
         runDir: dir,
         fresh: false,
         context: ctx,
+        worktree: false,
       })
     ).run,
   );
@@ -1341,6 +1510,7 @@ test("resume: --start-at requeues the target and every later step, keeping their
     fresh: false,
     startAt: "b",
     context: ctx,
+    worktree: false,
   });
   expect(resumed.status).toBe("RUNNING");
   expect(resumed.steps.map((step) => [step.status, step.replay])).toEqual([
@@ -1373,6 +1543,7 @@ test("resume: a step requeued by --start-at stays pending when the next invocati
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   for (const step of run.steps) updateStep(run, step, "done");
 
@@ -1385,6 +1556,7 @@ test("resume: a step requeued by --start-at stays pending when the next invocati
     fresh: false,
     startAt: "b",
     context: ctx,
+    worktree: false,
   });
   const { run: resumed } = await loadOrCreateRun({
     pipelinePath: path,
@@ -1392,6 +1564,7 @@ test("resume: a step requeued by --start-at stays pending when the next invocati
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   expect(resumed.steps.map((step) => step.status)).toEqual(["done", "pending", "pending"]);
 
@@ -1411,6 +1584,7 @@ test("resume: --start-at replays a target an earlier --start-at excluded", async
     runDir: dir,
     fresh: false,
     context: ctx,
+    worktree: false,
   });
   updateStep(run, run.steps[0]!, "failed", "acceptance refused");
 
@@ -1422,6 +1596,7 @@ test("resume: --start-at replays a target an earlier --start-at excluded", async
     fresh: false,
     startAt: "b",
     context: ctx,
+    worktree: false,
   });
   expect(skipping.steps[0]).toMatchObject({ status: "skipped", excluded: true });
   await executeRunSteps(skipping, "T-excl", undefined, { resuming: true }, countingDeps([]).deps, ctx);
@@ -1434,6 +1609,7 @@ test("resume: --start-at replays a target an earlier --start-at excluded", async
     fresh: false,
     startAt: "a",
     context: ctx,
+    worktree: false,
   });
   expect(replaying.steps[0]!.excluded).toBeUndefined();
   const deps = countingDeps([{ ok: true }, { ok: true }, { ok: true }]);
@@ -1454,6 +1630,7 @@ test("resume: --start-at on an explicitly selected PASS run replays from the tar
         runDir: dir,
         fresh: false,
         context: ctx,
+        worktree: false,
       })
     ).run,
   );
@@ -1474,6 +1651,7 @@ test("resume: --start-at on an explicitly selected PASS run replays from the tar
     startAt: "c",
     context: ctx,
     strictSnapshot: selection.strictSnapshot,
+    worktree: false,
   });
   // Loaded live, with totals derived from the steps rather than the PASS verdict.
   expect(resumed.status).toBe("RUNNING");
@@ -1500,6 +1678,7 @@ test("resume: --start-at refuses to replay a composed step whose children alread
         runDir: dir,
         fresh: false,
         context: ctx,
+        worktree: false,
       })
     ).run,
   );
@@ -1513,7 +1692,14 @@ test("resume: --start-at refuses to replay a composed step whose children alread
 
   // Selected through `latest`, which takes the run lock: the refusal must give it back.
   await expect(
-    loadOrCreateRun({ pipelinePath: path, ticket: "T-comp", fresh: false, startAt: "a", context: ctx }),
+    loadOrCreateRun({
+      pipelinePath: path,
+      ticket: "T-comp",
+      fresh: false,
+      startAt: "a",
+      context: ctx,
+      worktree: false,
+    }),
   ).rejects.toThrow(/--start-at: step "b" composes pipelines .*--fresh/);
   expect(readRunSnapshot(join(dir, "state.json"))).toEqual(before);
   expect(existsSync(join(dir, "runner.lock"))).toBe(false);
@@ -1531,6 +1717,7 @@ test("a new run started with --start-at marks the target and later steps as repl
     fresh: false,
     startAt: "b",
     context: ctx,
+    worktree: false,
   });
   expect(run.steps.map((step) => [step.status, step.excluded, step.replay])).toEqual([
     ["skipped", true, undefined],
@@ -1575,6 +1762,7 @@ test("reconcile: a new run started with selectors persists no exclusion and leav
         fresh: false,
         startAt,
         context: ctx,
+        worktree: false,
       });
       expect(run.steps.map((step) => step.status)).toEqual(["pending", "pending", "pending"]);
       expect(run.steps.map((step) => step.excluded)).toEqual([undefined, undefined, undefined]);
@@ -1600,6 +1788,7 @@ test("reconcile: a resume applies no selector at boot and drops an exclusion a l
           runDir: dir,
           fresh: false,
           context: ctx,
+          worktree: false,
         })
       ).run,
     );
@@ -1617,6 +1806,7 @@ test("reconcile: a resume applies no selector at boot and drops an exclusion a l
           runDir: dir,
           fresh: false,
           context: ctx,
+          worktree: false,
         })
       ).run,
     );
