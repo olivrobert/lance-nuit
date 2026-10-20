@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { RunJournalEvent } from "../model/journal.js";
-import type { Run } from "../model/run.js";
+import type { Run } from "../run-record/run.js";
 import { createLogRef, type RunEventStore, type RunLogStore } from "../model/storage-ports.js";
 import { makeRunStep } from "../run-record/run-step.js";
 import { projectRunStatsEntry } from "./run-stats-projector.js";

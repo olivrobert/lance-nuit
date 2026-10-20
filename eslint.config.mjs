@@ -45,6 +45,27 @@ export default [
     files: ["src/modules/ui/app/**/*.ts", "src/modules/ui/app/**/*.tsx"],
   },
   {
+    // Only the run record writes a run. Outside `src/run-record/` a run is a
+    // `RunView`, read-only at every depth (`model/run.ts`), and `tsc` refuses a
+    // write through it; an assertion back to a mutable shape is the one way
+    // around that, so it is refused here. Tests set fixtures up through the
+    // module's internals instead (`run-record/run.ts`, `writable`).
+    files: ["src/**/*.ts", "src/**/*.tsx"],
+    ignores: ["src/run-record/**", "**/*.test.ts", "**/*.test.tsx"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...["TSAsExpression", "TSTypeAssertion"].flatMap((assertion) =>
+          ["", "TSArrayType > "].map((array) => ({
+            selector: `${assertion} > ${array}TSTypeReference > Identifier.typeName[name=/^(Run|RunStep|PersistedRun|PersistedStepState|PersistedAttempt|PersistedPipelineChildRef|PersistedPipelineOrchestrationState)$/]`,
+            message:
+              "only src/run-record/ writes a run: keep the RunView and hand it to a run-record operation instead of asserting it mutable",
+          })),
+        ),
+      ],
+    },
+  },
+  {
     // `lance-nuit/contracts` is installed on its own by external adapters: it
     // must reach neither the platform nor an npm package. `.dependency-cruiser.cjs`
     // (`contracts-pure`, `contracts-no-platform`) covers the imports; this block

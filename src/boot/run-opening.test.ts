@@ -24,6 +24,7 @@ import { pipelineRunsDir, resolveRunDir } from "../run-record/stores/run-storage
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { executeRunSteps, stepLoopDeps } from "../step/step-loop.js";
 import { loadOrCreateRun } from "./resume.js";
+import { writable } from "../run-record/run.js";
 
 /** Every snapshot and journal write a store receives, interleaved. */
 type Write = string;
@@ -166,7 +167,7 @@ test("resuming an interrupted run journals the resume, then rewrites the snapsho
 
 test("resuming after a crash during an attempt settles it, saves, then journals the resume and saves again", async () => {
   const f = fixture("open-crash-", "T-crash");
-  const { run } = await open(f, "T-crash");
+  const run = writable((await open(f, "T-crash")).run);
   const step = run.steps[0]!;
   updateStep(run, step, "running");
   appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });

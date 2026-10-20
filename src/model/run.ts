@@ -1,8 +1,16 @@
-/** In-memory run shapes: the persisted schema (`model/persisted.ts`) merged with
- *  the frozen step definitions and runtime-only dependencies. */
+/** Run shapes seen from outside the run record: the frozen step definitions and a
+ *  read-only view of an executing run. The mutable run is internal to
+ *  `src/run-record/` (`run-record/run.ts`): only its operations move a run, and
+ *  every other module holds the view below. */
 import type { PipelineStep } from "./definition.js";
-import type { PersistedAttempt, PersistedRun, PersistedStepState } from "./persisted.js";
-import type { RunEventStore, RunLogStore, RunStateStore } from "./storage-ports.js";
+import type {
+  PersistedAttempt,
+  PersistedPipelineChildRef,
+  PersistedPipelineOrchestrationState,
+  PersistedRun,
+  PersistedStepState,
+} from "./persisted.js";
+import type { RunEventStore, RunLogStore } from "./storage-ports.js";
 
 /** Step definition FROZEN when the run starts: `runner` is resolved and mutation
  *  is forbidden (`readonly` in types, `Object.freeze` at runtime). Pass this
@@ -16,57 +24,48 @@ export type StepDefinition = Readonly<PipelineStep> & {
   readonly runner: NonNullable<PipelineStep["runner"]>;
 };
 
-/** In-memory step: MUTABLE run state (status, retries, control/usage, session)
- *  plus its frozen definition under `def`. The separation is structural:
- *  execution can no longer mutate the declaration accidentally.
- *
- *  Definition fields are not persisted in the state. */
-export interface RunStep extends PersistedStepState {
+/** `T` read-only at every depth, arrays included; functions are kept as they are.
+ *  A shallow `Readonly` would still let `step.attempts.push(…)` or
+ *  `run.outcome.reason = …` through. */
+export type DeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends readonly (infer U)[]
+    ? readonly DeepReadonly<U>[]
+    : T extends object
+      ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+      : T;
+
+/** One attempt of a step, as the run record keeps it. */
+export type RunAttemptView = DeepReadonly<PersistedAttempt>;
+
+/** The state of a `runPipeline` / `forEachPipeline` node, and the reference it
+ *  keeps for each child call. */
+export type OrchestrationView = DeepReadonly<PersistedPipelineOrchestrationState>;
+export type ChildRefView = DeepReadonly<PersistedPipelineChildRef>;
+
+/** A step of an executing run: its persisted state and its frozen definition,
+ *  read-only at every depth. */
+export interface RunStepView extends DeepReadonly<PersistedStepState> {
   readonly def: StepDefinition;
-  /** Attempts of this step, projected from the journal on resume. Runtime-only:
-   *  the snapshot no longer carries them. */
-  attempts: PersistedAttempt[];
-  /** Last rendered command (for debugging only). Runtime-only: it is the whole
-   *  agent prompt, and re-serializing it in every snapshot cost more than the
-   *  rest of the run state put together. */
-  last_command?: string;
+  /** Attempts of this step, projected from the journal on resume. */
+  readonly attempts: readonly RunAttemptView[];
 }
 
-/** In-memory run: merged definition and state.
- *
- *  Every persisted field is inherited from `PersistedRun`: a field added there is
- *  automatically available here, with no risk of the two shapes drifting apart.
- *  Only the differences are declared below. */
-export interface Run extends Omit<PersistedRun, "pipeline_path" | "steps"> {
+/** An executing run, read-only at every depth. Code outside `src/run-record/`
+ *  receives it from `openRun` and hands it back to the run record's operations
+ *  (`updateStep`, `settleAttempt`, `finalizeRun`…), which alone write the run, its
+ *  journal and its snapshot. Defined from the persisted shape, not from the
+ *  mutable run, so no level below the run record names a type that can be
+ *  written. */
+export interface RunView extends DeepReadonly<Omit<PersistedRun, "pipeline_path" | "steps">> {
   /** Always resolved in memory, unlike the persisted snapshot. */
-  pipeline_path: string;
+  readonly pipeline_path: string;
   /** Run directory, derived at load time and never persisted. */
-  run_dir: string;
-  steps: RunStep[];
-  /** The pipeline declares `.reconcile()`. Boot sets it from the definition it
-   *  loads the steps from, and every later reader takes it from here, so boot and
-   *  the step loop cannot disagree on the mode. Runtime-only: the mode belongs to
-   *  the pipeline, never to the snapshot. */
-  reconcile?: boolean;
-  /** The step whose pass this process started and has not ended, written by
-   *  `updateStep` alone and read by `abortRun`. Runtime-only: a step left
-   *  `running` by a runner that died is not executing, and only this process
-   *  knows which one is. */
-  executingStepId?: string;
-  /** Runtime-only dependency; never included in PersistedRun. */
-  stateStore?: RunStateStore;
-  /** Runtime-only dependency; never included in PersistedRun. */
-  eventStore?: RunEventStore;
-  /** Runtime-only dependency; never included in PersistedRun. */
-  logStore?: RunLogStore;
+  readonly run_dir: string;
+  readonly steps: readonly RunStepView[];
+  /** The pipeline declares `.reconcile()`, as boot loaded it. */
+  readonly reconcile?: boolean;
+  /** The journal and attempt-log stores a caller injected, if any. */
+  readonly eventStore?: RunEventStore;
+  readonly logStore?: RunLogStore;
 }
-
-/** Read-only view of a step for presentation. Shallow on purpose: it stops
- *  `step.status = ...` at the type level; nested objects are still shared. */
-export type RunStepView = Readonly<RunStep>;
-
-/** Read-only view of a run for the consumers that inspect or display it — the
- *  console report, the statistics projection — and must never move the run
- *  forward. Execution transitions take a `Run` and live in
- *  `run-record/run-transitions.ts`. Shallow, like `RunStepView`. */
-export type RunView = Readonly<Omit<Run, "steps">> & { readonly steps: readonly RunStepView[] };

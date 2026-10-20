@@ -7,7 +7,7 @@ import type { AgentSession } from "../contracts/backends.ts";
 import type { executeStep, runWithAgent } from "../exec/runners.ts";
 import type { ArtifactRef, WorkItemArtifactStore } from "../model/artifact-ports.ts";
 import type { PipelineStep } from "../model/definition.ts";
-import type { Run, RunStep } from "../model/run.ts";
+import type { Run, RunStep } from "../run-record/run.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { settleAttemptStats } from "../run-record/attempt-closure.ts";
 import type { RunBudget } from "../run-record/budget.ts";

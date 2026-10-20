@@ -4,7 +4,8 @@
 // creation, and tests all use this boundary, so def/state shape has one definition.
 
 import type { PipelineStep } from "../model/definition.js";
-import type { RunStep, StepDefinition } from "../model/run.js";
+import type { StepDefinition } from "../model/run.js";
+import type { RunStep } from "./run.js";
 
 /** Initial step state supplied by a new run, a snapshot, or the journal. It covers
  *  `RunStep` rather than `PersistedStepState`: `attempts` and `last_command` live

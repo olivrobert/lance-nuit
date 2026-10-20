@@ -10,7 +10,7 @@ import { copyFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Run, RunStep } from "../model/run.js";
+import type { Run, RunStep } from "./run.js";
 import { projectStepAttempts } from "./attempt-projection.js";
 import { readRunEvents } from "./run-journal.js";
 import { attemptFacts } from "../run-stats/run-stats-projection.js";

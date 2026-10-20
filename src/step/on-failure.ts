@@ -9,7 +9,7 @@ import type { ExtractionResult } from "../contracts/extraction.js";
 import type { executeStep } from "../exec/runners.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../model/context.js";
 import type { StepFailure } from "../model/definition.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import type { AbortScope } from "../runtime/abort.js";
 import {
@@ -26,8 +26,8 @@ import { settleStepFailure } from "./non-blocking.js";
 import { runAttempt, startFreshSession } from "./step-attempt.js";
 
 export interface OnFailureContext {
-  run: Run;
-  step: RunStep;
+  run: RunView;
+  step: RunStepView;
   /** Resolved step command. */
   command: string;
   /** Last attempt output, used by the first fix_prompt. */

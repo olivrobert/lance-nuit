@@ -3,7 +3,7 @@
 // Keep `blocking: false` handling in one place, so every guard absorbs a step
 // failure into `step.errors` the same way regardless of which one caught it.
 
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { absorbStepFailure, updateStep } from "../run-record/index.js";
 
@@ -21,7 +21,13 @@ import { absorbStepFailure, updateStep } from "../run-record/index.js";
  * absorbed failure is a warning an operator must be able to read, so the caller
  * says where it goes instead of the message reaching for a global logger.
  */
-export function absorbNonBlocking(run: Run, step: RunStep, output: RunOutput, reason?: string, detail?: string): void {
+export function absorbNonBlocking(
+  run: RunView,
+  step: RunStepView,
+  output: RunOutput,
+  reason?: string,
+  detail?: string,
+): void {
   const kept = reason ?? step.errors ?? "non-blocking failure";
   absorbStepFailure(run, step, kept);
   output.emit({
@@ -47,8 +53,8 @@ export function absorbNonBlocking(run: Run, step: RunStep, output: RunOutput, re
  * step.failed event of a blocking step.
  */
 export function settleStepFailure(
-  run: Run,
-  step: RunStep,
+  run: RunView,
+  step: RunStepView,
   output: RunOutput,
   reason: string | undefined,
   labels: { absorbDetail?: string; failSuffix: string },

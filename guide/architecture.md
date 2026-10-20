@@ -397,13 +397,13 @@ and each rule they read has one owner:
 
 | Decision | Owner |
 | --- | --- |
-| **Re-admission**: whether a settled step goes through admission again, and, in reconcile mode, whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). Boot (`boot/resume.ts`) applies the selectors to the snapshot in the default mode only; in both modes it requeues the `--start-at` target and the steps after it |
+| **Re-admission**: whether a settled step goes through admission again, and, in reconcile mode, whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). Boot (`boot/resume.ts`) decides the selection a resume applies to the snapshot — the selectors in the default mode only, and in both modes the requeue of the `--start-at` target and the steps after it — and `openRun` applies it |
 | **Admission**: budget, `when`, a pending rejection, the freshness or presence of the outputs, the interruption guard, then the environment guard | `step/step-admission.ts` (`admitStep`; `answersToOutputs` says whether the outputs decide, `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished) |
 | **Standing of an output**: `missing`, `unfinished`, `unknown`, `stale`, `fresh` or adoptable, and the doubt `unguaranteed` carries | `work-item-store/provenance.ts`, the only writer of `artifacts/.provenance/`. `standingOf` is the one reading rule for a record: admission (`stepFreshness`), the public `freshness()` and the dashboard all read it there. The attempt (`step/step-attempt.ts`) only chooses when to write: the in-flight mark before each attempt (`markInFlight`), the record after a success |
 | **Reconcile classification**: which steps the mode re-admits (those declaring `output` or `rerunOnResume`), the build error for a step declaring neither, and the orchestration nodes that keep the authority of their status | `model/definition.ts` (`deliversOutputs`, `reconcilable`, `stepsWithoutDeliverable`), shared by the build (`.reconcile()`), the loader's validation (`validation/structure.ts`), admission and the loop; `rerunsOnResume`, which leaves a node's `rerunOnResume` without effect in this mode, is used by `reconcilable`, the loop and the resume header |
 
 Two run facts beside the decision are runtime-only and never persisted
-(`model/run.ts`): `Run.reconcile`, set by boot from the definition it loads the
+(`run-record/run.ts`): `Run.reconcile`, set by boot from the definition it loads the
 steps from and read by the step loop, so boot and the loop cannot disagree on
 the mode; and `Run.executingStepId`, written by `updateStep` alone and read by
 `abortRun`, so that a signal interrupts the step this process is running and
@@ -567,14 +567,28 @@ unmetered authorization, and journals `run.resumed`, or creates the run and
 journals `run.started`; it returns whether it resumed, which the step loop
 reads instead of deriving it again. Boot (`boot/resume.ts`) keeps the policy:
 the definition a snapshot runs against and the selection, which `openRun`
-calls at the point where each applies. Admission journals its skips and the
+calls at the point where each applies; boot reads the steps and says which to
+exclude or requeue, and `openRun` writes them. Admission journals its skips and the
 unfinished outputs it found through `recordSkip` and `recordUnfinishedOutputs`
 (`run-record/step-bookkeeping.ts`), so nothing outside the module saves the run
 or appends to its journal: neither `saveRun` nor `appendRunEvent` is exported. Which of the snapshot and
 the journal is believed for each concept, and what each crash window leaves behind, is tabled in
-[persistence](persistence.md#which-record-is-authoritative). Presentation and
-statistics read a `RunView` (`model/run.ts`), a read-only view of the run, and
-never move it forward.
+[persistence](persistence.md#which-record-is-authoritative).
+
+Only the module writes a run. The mutable `Run` and `RunStep` are its internals
+(`run-record/run.ts`); everything outside holds a `RunView` and `RunStepView`
+(`model/run.ts`), read-only at every depth — fields, nested records such as the
+outcome, an attempt or a child reference, and lists — and defined from the
+persisted shape rather than from the mutable one. `openRun`, `openAttempt`,
+`openOrchestration` and `declareChild` hand views out; each operation of the
+entry takes a view back and recovers the run it shows with `writable`, the one
+place the module turns a view into its record. `tsc` therefore refuses any write
+to a run outside the module, ESLint refuses an assertion back to a mutable run
+shape there (`eslint.config.mjs`), and `tests/runner/run-view-readonly.test.ts`
+proves both halves: a probe module of the step layer cannot write a run, and the
+entry hands out no mutable part of one except the copies a reader or a store
+receives. The `RunBudget` ledger an execution spends against is not part of the
+run and stays a plain object.
 
 ## 8. Profiles, backends, and the two escalations
 

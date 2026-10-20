@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import type { Run } from "../model/run.js";
+import type { Run } from "../run-record/run.js";
 import { makeRunStep } from "../run-record/run-step.js";
 import { setColorEnabled, visibleLength } from "./color.js";
 import {

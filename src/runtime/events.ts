@@ -9,7 +9,7 @@
 // This is also the destination for observability middleware in the attempt chain
 // (attempt-chain.ts): they publish here instead of writing inside caller loops.
 
-import type { RunStep } from "../model/run.js";
+import type { RunStepView } from "../model/run.js";
 import { configuredLiveFeed, type LiveFeed } from "./live-feed.js";
 
 /** Normalized spawn event for dashboards that do not need to know about Claude. */
@@ -69,33 +69,33 @@ export interface PipelineStepEvent {
  * making the loop know where a message is rendered. */
 export interface StepStartedEvent {
   type: "step.started";
-  step: RunStep;
+  step: RunStepView;
   index: number;
   total: number;
 }
 
 export interface StepSessionEvent {
   type: "step.session";
-  step: RunStep;
+  step: RunStepView;
   sessionId: string;
 }
 
 export interface StepLogsEvent {
   type: "step.logs";
-  step: RunStep;
+  step: RunStepView;
   path: string;
   live: boolean;
 }
 
 export interface StepDoneEvent {
   type: "step.done";
-  step: RunStep;
+  step: RunStepView;
   suffix?: string;
 }
 
 export interface StepFailedEvent {
   type: "step.failed";
-  step: RunStep;
+  step: RunStepView;
   suffix?: string;
 }
 

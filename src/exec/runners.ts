@@ -19,7 +19,7 @@ import { hasBlockedPrefix } from "../contracts/verdict.js";
 import { errorMessage } from "../lib/errors.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../model/context.js";
 import type { PipelineStep } from "../model/definition.js";
-import type { RunStep } from "../model/run.js";
+import type { RunStepView } from "../model/run.js";
 import { DEFAULT_BASH_TIMEOUT_MS, runBashStreaming } from "./bash-runner.js";
 import { DEFAULT_PROCESS_TIMEOUT_MS } from "./process-runner.js";
 import { discardStaleReports } from "./report-extraction.js";
@@ -178,7 +178,7 @@ function invokeBackendWithBudget(
 }
 
 export async function executeStep(
-  step: RunStep,
+  step: RunStepView,
   command: string,
   budget?: {
     timeout?: number;

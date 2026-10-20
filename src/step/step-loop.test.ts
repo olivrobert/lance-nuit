@@ -21,7 +21,7 @@ import { executeStep, type StepResult } from "../exec/runners.ts";
 import type { ArtifactRef, WorkItemArtifactStore } from "../model/artifact-ports.ts";
 import type { PipelineContext } from "../model/context.ts";
 import type { PipelineStep } from "../model/definition.ts";
-import type { Run, RunStep } from "../model/run.ts";
+import type { Run, RunStep } from "../run-record/run.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { sha256Text } from "../work-item-store/hash.ts";
 import { writeProvenance } from "../work-item-store/provenance.ts";

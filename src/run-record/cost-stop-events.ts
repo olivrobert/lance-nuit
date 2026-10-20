@@ -43,7 +43,9 @@
 //   that lifts the `unaccounted` stop. Owned by `run-record/run-opening.ts` and the CLI;
 //   this module never touches it.
 
-import type { Run } from "../model/run.js";
+import type { RunView } from "../model/run.js";
+import type { Run } from "./run.js";
+import { writable } from "./run.js";
 import { type CostDecision, costDecision, type RunBudget } from "./budget.js";
 import { appendRunEvent } from "./run-journal.js";
 
@@ -116,7 +118,8 @@ export function recordCostStop(run: Run, budget: RunBudget, stop: CostStop, orig
  * recorded on `run`: for a composed launch that is the parent, the scope that
  * owns the ceiling.
  */
-export function costGate(run: Run, budget: RunBudget, stepId: string | null): CostStop | undefined {
+export function costGate(runView: RunView, budget: RunBudget, stepId: string | null): CostStop | undefined {
+  const run = writable(runView);
   const decision = costDecision(run.max_cost_usd, budget);
   if (decision === "continue") return undefined;
   recordCostStop(run, budget, decision, { kind: "gate", stepId });
@@ -144,7 +147,7 @@ export interface LedgerStops {
  * (`hasUnfinishedWork`). `exceeded` keeps its precedence over `unaccounted`, as
  * in `costDecision`.
  */
-export function ledgerStops(run: Run, budget: RunBudget, unfinished: boolean): LedgerStops {
+export function ledgerStops(run: RunView, budget: RunBudget, unfinished: boolean): LedgerStops {
   const decision = unfinished ? costDecision(run.max_cost_usd, budget) : "continue";
   return {
     budgetExceeded: budget.exceeded === true && unfinished,
@@ -161,7 +164,8 @@ export function ledgerStops(run: Run, budget: RunBudget, unfinished: boolean): L
  * recorded it there) and on the parent's `run.finished` outcome; the parent
  * appends no event of its own for it.
  */
-export function inheritChildBudgetStop(parent: Run, budget: RunBudget): void {
+export function inheritChildBudgetStop(parentView: RunView, budget: RunBudget): void {
+  const parent = writable(parentView);
   latchBudgetExceeded(parent, budget);
 }
 

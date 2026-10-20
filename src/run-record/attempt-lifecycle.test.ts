@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run, RunStep } from "../model/run.js";
+import type { Run, RunStep } from "./run.js";
 import { openAttempt, settleAttempt } from "./attempt-lifecycle.js";
 import type { RunBudget } from "./budget.js";
 import { readRunEvents } from "./run-journal.js";

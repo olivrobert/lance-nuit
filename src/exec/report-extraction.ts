@@ -9,7 +9,7 @@ import { readFile, unlink } from "node:fs/promises";
 import type { ErrorExtractor, ExtractionResult } from "../contracts/extraction.js";
 import { errnoCode, isErrno } from "../lib/errors.js";
 import { MAX_ERROR_CHARS, truncate } from "../lib/truncate.js";
-import type { RunStep } from "../model/run.js";
+import type { RunStepView } from "../model/run.js";
 import { log } from "../runtime/logging.js";
 
 const extractors = new Map<string, ErrorExtractor>();
@@ -27,7 +27,7 @@ async function loadExtractor(name: string): Promise<ErrorExtractor> {
 
 /** Remove a previous report before rerunning so stale errors cannot be extracted or
  * hide a crash that happened before the report was written. */
-export async function discardStaleReports(step: RunStep): Promise<void> {
+export async function discardStaleReports(step: RunStepView): Promise<void> {
   for (const path of step.def.report_paths ?? []) {
     try {
       await unlink(path);
@@ -52,7 +52,7 @@ export async function discardStaleReports(step: RunStep): Promise<void> {
  * `undefined` when the step declares none, so there was nothing to find.
  */
 async function extractorInput(
-  step: RunStep,
+  step: RunStepView,
   output: string,
 ): Promise<{ input: string; reportPresent: boolean | undefined }> {
   const paths = step.def.report_paths;
@@ -68,7 +68,7 @@ async function extractorInput(
     : { input: output, reportPresent: false };
 }
 
-export async function extractErrors(step: RunStep, output: string): Promise<ExtractionResult> {
+export async function extractErrors(step: RunStepView, output: string): Promise<ExtractionResult> {
   if (step.def.error_extractor) {
     const extractor = await loadExtractor(step.def.error_extractor);
     const { input, reportPresent } = await extractorInput(step, output);

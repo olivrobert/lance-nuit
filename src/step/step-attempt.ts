@@ -27,7 +27,7 @@ import type { executeStep, runWithAgent, StepResult } from "../exec/runners.js";
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineContext } from "../model/context.js";
 import type { PipelineStep } from "../model/definition.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import { clearLiveAttemptCost } from "../runtime/live-cost.js";
 import { log } from "../runtime/logging.js";
 import {
@@ -67,7 +67,7 @@ import {
  * without a ceiling. The settlement reports the uncertainty itself, not the
  * strict stop, so this also fires for an attempt that died before reporting any
  * figure — whose total is a lower bound even though the run keeps going. */
-function warnUnaccountedCost(run: Run, warning: CostWarning): void {
+function warnUnaccountedCost(run: RunView, warning: CostWarning): void {
   const model = warning.model ?? "unknown model";
   // Name the uncertainty the figures actually show. "no pricing entry" over an
   // attempt that reported no usage at all (a 400 before the first token, a
@@ -93,7 +93,7 @@ function warnUnaccountedCost(run: Run, warning: CostWarning): void {
  * must not overwrite `step.session`. The fix loop's `resumeSession` mode
  * writes its forked session back to the resumed step itself.
  */
-export function applyStepSession(run: Run, step: RunStep, result: AttemptRecord): void {
+export function applyStepSession(run: RunView, step: RunStepView, result: AttemptRecord): void {
   if (result.session) bindSession(run, step, result.session);
 }
 
@@ -103,8 +103,8 @@ export function applyStepSession(run: Run, step: RunStep, result: AttemptRecord)
  * lazily return nothing, and the step keeps whatever the attempt reports later.
  */
 export function startFreshSession(
-  run: Run,
-  step: RunStep,
+  run: RunView,
+  step: RunStepView,
   backend: AgentBackend | undefined,
 ): AgentSession | undefined {
   const session = backend?.createSession?.();
@@ -175,8 +175,8 @@ interface AttemptOptionsBase {
 }
 
 export interface RunTrackedAttemptOptions<R extends AttemptRecord> extends AttemptOptionsBase {
-  run: Run;
-  step: RunStep;
+  run: RunView;
+  step: RunStepView;
   kind: "step" | "fix";
   /** Resolved step command or repair prompt. */
   command: string;
@@ -197,7 +197,13 @@ export interface RunTrackedAttemptOptions<R extends AttemptRecord> extends Attem
  * result the resumed step will not give — and the run keeps the step session as
  * it was, since the abort promises a fresh attempt on resume.
  */
-function finishAttempt(run: Run, step: RunStep, opened: OpenedAttempt, budget: RunBudget, result: AttemptResult): void {
+function finishAttempt(
+  run: RunView,
+  step: RunStepView,
+  opened: OpenedAttempt,
+  budget: RunBudget,
+  result: AttemptResult,
+): void {
   const { costWarning } = settleAttempt(run, step, opened, result, budget);
   if (costWarning) warnUnaccountedCost(run, costWarning);
 }
@@ -268,7 +274,7 @@ export interface RunAttemptOptions extends AttemptOptionsBase {
 }
 
 /** Execute one step-command attempt through the chain. */
-export async function runAttempt(run: Run, step: RunStep, options: RunAttemptOptions): Promise<StepResult> {
+export async function runAttempt(run: RunView, step: RunStepView, options: RunAttemptOptions): Promise<StepResult> {
   return runTrackedAttempt({
     run,
     step,
@@ -448,7 +454,11 @@ export interface RunFixAttemptOptions extends AttemptOptionsBase {
 /** Execute one repair pass through the same chain as `runAttempt`. Without this
  * entry point, fix spawns would be invisible to middleware despite representing a
  * major share of run cost. */
-export async function runFixAttempt(run: Run, step: RunStep, options: RunFixAttemptOptions): Promise<FixResult> {
+export async function runFixAttempt(
+  run: RunView,
+  step: RunStepView,
+  options: RunFixAttemptOptions,
+): Promise<FixResult> {
   return runTrackedAttempt({
     run,
     step,

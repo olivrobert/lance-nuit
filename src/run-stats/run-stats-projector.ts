@@ -7,7 +7,7 @@ import { basename } from "node:path";
 import type { AgentSession } from "../contracts/backends.js";
 import { backendSpecForStep } from "../contracts/backends.js";
 import type { RunOutcomeState } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import type { RunEventStore, RunLogStore } from "../model/storage-ports.js";
 import { costIsLowerBound, isResumableStatus, recordedVerdict, relativeRunPath } from "../run-record/index.js";
 import {
@@ -32,9 +32,9 @@ export interface RunStatsProjectionOptions {
 }
 
 function outcomeOf(
-  run: Run,
+  run: RunView,
   status: RunStatsEntry["status"],
-  failed: RunStep | undefined,
+  failed: RunStepView | undefined,
   options: RunStatsProjectionOptions,
 ): RunOutcomeState {
   const existing = run.outcome;
@@ -51,9 +51,9 @@ function outcomeOf(
 /** Session of the last agent step that finished, by `finished_at`. Feeds the
  *  stats `sessionId`/`sessionProvider` pair now that runs no longer remember a
  *  dedicated coder session. */
-function lastFinishedAgentSession(run: Run): AgentSession | undefined {
+function lastFinishedAgentSession(run: RunView): AgentSession | undefined {
   let latest: { finishedAt: string; session: AgentSession } | undefined;
-  for (const step of run.steps as RunStep[]) {
+  for (const step of run.steps) {
     if (!step.finished_at) continue;
     if (!backendSpecForStep(step.def)) continue;
     const session = step.session;
@@ -63,7 +63,7 @@ function lastFinishedAgentSession(run: Run): AgentSession | undefined {
   return latest?.session;
 }
 
-export function projectRunStatsEntry(run: Run, options: RunStatsProjectionOptions = {}): RunStatsEntry {
+export function projectRunStatsEntry(run: RunView, options: RunStatsProjectionOptions = {}): RunStatsEntry {
   const eventStore = options.eventStore ?? run.eventStore;
   const logStore = options.logStore ?? run.logStore;
   const aggregate: ProjectionAccumulator = {
@@ -75,7 +75,7 @@ export function projectRunStatsEntry(run: Run, options: RunStatsProjectionOption
   let startedAt: string | null = run.createdAt ?? null;
   let endedAt: string | null = null;
 
-  for (const step of run.steps as RunStep[]) {
+  for (const step of run.steps) {
     if (step.started_at && (!startedAt || step.started_at < startedAt)) startedAt = step.started_at;
     if (step.finished_at && (!endedAt || step.finished_at > endedAt)) endedAt = step.finished_at;
     projectStepStats(run, step, eventStore, aggregate);

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run, RunStep } from "../model/run.js";
+import type { Run, RunStep } from "./run.js";
 import { freezeOrchestrationItems, openOrchestration } from "./child-transitions.js";
 import { readRunEvents } from "./run-journal.js";
 import { readRunSnapshot } from "./run-snapshot.js";

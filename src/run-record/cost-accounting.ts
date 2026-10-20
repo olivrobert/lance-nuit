@@ -55,13 +55,10 @@
 // the budget decision, and every gate built on it read `isUnpricedSpend`.
 
 import type { StepControl, StepUsage } from "../contracts/backends.js";
-import type {
-  PersistedAttempt,
-  PersistedPipelineChildRef,
-  PersistedRun,
-  PersistedStepState,
-} from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { PersistedAttempt, PersistedRun, PersistedStepState } from "../model/persisted.js";
+import type { ChildRefView, DeepReadonly, RunStepView, RunView } from "../model/run.js";
+import type { Run } from "./run.js";
+import { writable } from "./run.js";
 import type { RunBudget } from "./budget.js";
 import { appendRunEvent } from "./run-journal.js";
 import { usageDelta } from "./cost-figures.js";
@@ -78,6 +75,17 @@ export interface SpendFigures {
  *  attempt list: the snapshot deliberately keeps only the step totals). */
 export interface SpendingStep extends SpendFigures {
   attempts?: SpendFigures[];
+}
+
+/** Figures as code outside the module holds them, through a `RunView`. */
+type FiguresView = DeepReadonly<SpendFigures>;
+
+/** A usage value as the module shares it. Every charge replaces a step's or a
+ *  run's usage with a new object and none is changed in place, so one usage may
+ *  stand at once for an attempt, its step total and a child reference. The view
+ *  outside only forbids writing it, which no code here does. */
+function usageValue(usage: DeepReadonly<StepUsage> | undefined): StepUsage | undefined {
+  return usage as StepUsage | undefined;
 }
 
 /** One attempt's normalized figures, as `settleAttemptStats` produces them. */
@@ -115,9 +123,9 @@ function mergeControl(existing?: StepControl, incoming?: StepControl): StepContr
 }
 
 /** Token counterpart of `mergeControl`, private for the same reason. */
-function mergeUsage(existing?: StepUsage, incoming?: StepUsage): StepUsage | undefined {
-  if (!existing) return incoming;
-  if (!incoming) return existing;
+function mergeUsage(existing?: DeepReadonly<StepUsage>, incoming?: DeepReadonly<StepUsage>): StepUsage | undefined {
+  if (!existing) return usageValue(incoming);
+  if (!incoming) return usageValue(existing);
 
   const tools = [...(existing.tools_used ?? [])];
   for (const tool of incoming.tools_used ?? []) {
@@ -141,13 +149,13 @@ function mergeUsage(existing?: StepUsage, incoming?: StepUsage): StepUsage | und
 // Derived totals. Reads: they compute, they never store.
 // ---------------------------------------------------------------------------
 
-export function aggregateControl(steps: readonly RunStep[]): StepControl {
+export function aggregateControl(steps: readonly FiguresView[]): StepControl {
   let total: StepControl = { duration_ms: 0 };
   for (const step of steps) total = mergeControl(total, step.control);
   return total;
 }
 
-export function aggregateUsage(steps: readonly RunStep[]): StepUsage | undefined {
+export function aggregateUsage(steps: readonly FiguresView[]): StepUsage | undefined {
   let total: StepUsage | undefined;
   for (const step of steps) total = mergeUsage(total, step.usage);
   return total;
@@ -159,19 +167,19 @@ export function aggregateUsage(steps: readonly RunStep[]): StepUsage | undefined
  * fallback keeps budget seeding and child reconciliation from repeating their own
  * step reductions (and from disagreeing about the fallback semantics).
  */
-export function controlForRun(run: Pick<Run, "steps" | "total_control">): StepControl {
+export function controlForRun(run: Pick<RunView, "steps" | "total_control">): StepControl {
   return run.total_control ?? aggregateControl(run.steps);
 }
 
 /** Token counterpart of `controlForRun`: the run's materialized usage when it has
  *  one, otherwise the sum of its steps. */
-export function usageForRun(run: Pick<Run, "steps" | "total_usage">): StepUsage | undefined {
-  return run.total_usage ?? aggregateUsage(run.steps);
+export function usageForRun(run: Pick<RunView, "steps" | "total_usage">): StepUsage | undefined {
+  return usageValue(run.total_usage) ?? aggregateUsage(run.steps);
 }
 
 /** A run's measured cost, or `fallback` when it measured nothing. A child that
  *  died before pricing anything still reports the ledger the loop kept for it. */
-export function measuredRunCost(run: Pick<Run, "steps" | "total_control">, fallback: number): number {
+export function measuredRunCost(run: Pick<RunView, "steps" | "total_control">, fallback: number): number {
   const measured = controlForRun(run).total_cost_usd ?? 0;
   return measured || fallback;
 }
@@ -181,7 +189,7 @@ export function measuredRunCost(run: Pick<Run, "steps" | "total_control">, fallb
 // ---------------------------------------------------------------------------
 
 /** Tokens a provider actually counted. */
-function consumedTokens(usage?: StepUsage): number {
+function consumedTokens(usage?: DeepReadonly<StepUsage>): number {
   return (
     (usage?.input_tokens ?? 0) +
     (usage?.output_tokens ?? 0) +
@@ -201,7 +209,7 @@ function consumedTokens(usage?: StepUsage): number {
  * closure precaution over an attempt that died before reporting anything: it
  * keeps the total honest (`≥`) without stopping the run.
  */
-export function isUnpricedSpend(control?: StepControl, usage?: StepUsage): boolean {
+export function isUnpricedSpend(control?: StepControl, usage?: DeepReadonly<StepUsage>): boolean {
   if (control?.cost_unknown !== true) return false;
   return consumedTokens(usage) > 0 || control.total_cost_usd != null;
 }
@@ -216,7 +224,7 @@ export function isUnpricedSpend(control?: StepControl, usage?: StepUsage): boole
  * its reconciled child figures ARE its totals, so the fallback is the right read
  * there and on any snapshot (attempts live in the journal, not the snapshot).
  */
-export function stepProvesUnpricedSpend(step: SpendingStep): boolean {
+export function stepProvesUnpricedSpend(step: DeepReadonly<SpendingStep>): boolean {
   const settled = step.attempts?.filter((attempt) => attempt.control !== undefined) ?? [];
   if (settled.length > 0) return settled.some((attempt) => isUnpricedSpend(attempt.control, attempt.usage));
   return isUnpricedSpend(step.control, step.usage);
@@ -230,7 +238,9 @@ export function stepProvesUnpricedSpend(step: SpendingStep): boolean {
  * bare `total_control.cost_unknown` no longer is — an aggregate cannot say which
  * attempt the flag came from.
  */
-export function runProvesUnpricedSpend(run: { steps?: SpendingStep[] } | null | undefined): boolean {
+export function runProvesUnpricedSpend(
+  run: { readonly steps?: readonly DeepReadonly<SpendingStep>[] } | null | undefined,
+): boolean {
   return (run?.steps ?? []).some(stepProvesUnpricedSpend);
 }
 
@@ -247,7 +257,7 @@ export function runProvesUnpricedSpend(run: { steps?: SpendingStep[] } | null | 
 export function costIsLowerBound(run: {
   cost_unaccounted?: boolean;
   total_control?: StepControl;
-  steps?: readonly { control?: StepControl; attempts?: readonly SpendFigures[] }[];
+  steps?: readonly { control?: StepControl; attempts?: readonly FiguresView[] }[];
 }): boolean {
   if (run.cost_unaccounted === true || run.total_control?.cost_unknown === true) return true;
   return (run.steps ?? []).some(
@@ -352,7 +362,8 @@ export function chargeAttemptToLedger(
  * One ledger per execution, shared by every phase (admission, attempts, verdict,
  * repair, composed children): a resume opens a new one over the same run.
  */
-export function openRunLedger(run: Run): RunBudget {
+export function openRunLedger(runView: RunView): RunBudget {
+  const run = writable(runView);
   const ledger: RunBudget = {
     cumulative: controlForRun(run).total_cost_usd ?? 0,
     // A guard stop persisted by a previous generation still holds: the ledger
@@ -380,12 +391,12 @@ export function openRunLedger(run: Run): RunBudget {
 }
 
 export interface ChildReconciliation {
-  parent: Run;
+  parent: RunView;
   /** Orchestration node the child hangs from; it carries the child's spend. */
-  step: RunStep;
+  step: RunStepView;
   /** The parent's record of what it has already charged for this child. */
-  ref: PersistedPipelineChildRef;
-  child: Run;
+  ref: ChildRefView;
+  child: RunView;
   budget: RunBudget;
   /** Cost the loop kept for a child whose own totals measured nothing. */
   fallbackCost: number;
@@ -403,7 +414,10 @@ export interface ChildReconciliation {
  * Returns the cost delta charged, and journals the reconciliation.
  */
 export function chargeChildReconciliation(input: ChildReconciliation): number {
-  const { parent, step, ref, child, budget } = input;
+  const { child, budget } = input;
+  const parent = writable(input.parent);
+  const step = writable(input.step);
+  const ref = writable(input.ref);
   const totalCost = Math.max(0, measuredRunCost(child, input.fallbackCost));
   const previousCost = Math.max(0, ref.accountedCostUsd ?? 0);
   const delta = Math.max(0, totalCost - previousCost);

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "../../src/model/run.js";
+import type { Run } from "../../src/run-record/run.js";
 import { buildPipelineContext } from "../../src/pipeline/context.js";
 import { finalizeRun } from "../../src/run-record/run-transitions.js";
 import { makeRunStep } from "../../src/run-record/run-step.js";

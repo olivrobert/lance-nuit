@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PipelineStep } from "../model/definition.ts";
-import type { Run } from "../model/run.ts";
+import type { Run } from "./run.ts";
 import { saveRun } from "./run-repository.ts";
 import { makeRunStep } from "./run-step.ts";
 import { PersistedStepStateSchema } from "./schema.ts";

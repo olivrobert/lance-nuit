@@ -12,7 +12,7 @@ import { enforceCleanTree } from "../boot/gitguard.js";
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineContext } from "../model/context.js";
 import { reconcilable, rerunsOnResume } from "../model/definition.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import { consoleReport } from "../output/console-reporter.js";
 import { ConsoleRunOutput, LiveFeedOutput } from "../output/run-output.js";
 import { CompositeRunOutput, type RunOutput } from "../runtime/run-output.js";
@@ -38,7 +38,7 @@ import type { ReadyRun } from "./startup.js";
 
 export type PreparedRun =
   | { kind: "exit"; code: number }
-  | { kind: "ok"; run: Run; context: PipelineContext; resuming: boolean };
+  | { kind: "ok"; run: RunView; context: PipelineContext; resuming: boolean };
 
 /**
  * Resolve the run directory this invocation targets.
@@ -74,7 +74,7 @@ function resolveTargetRunDir(ready: ReadyRun): { dir?: string; explicit?: Explic
  * `onRunCreated` fires as soon as the run exists, before any further bookkeeping:
  * the signal handler must be able to persist an abort for it from that moment on.
  */
-export async function prepareRun(ready: ReadyRun, onRunCreated: (run: Run) => void): Promise<PreparedRun> {
+export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) => void): Promise<PreparedRun> {
   const { args, pipelineDef, pipelinePath, stateStore, worktreeMode } = ready;
   let context = ready.context;
 
@@ -93,7 +93,7 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: Run) => vo
   // holder and the options. It still counts as resuming here, so the guard does
   // not replace that diagnosis with a dirty-tree refusal.
   const resumesExisting = !!target.dir || wouldResumeLatest(pipelineDef.name, args.ticket, args.fresh, context);
-  let run: Run;
+  let run: RunView;
   let resuming: boolean;
   try {
     await enforceCleanTree({
@@ -168,7 +168,7 @@ export interface WiredOutputs {
  * writes every event it receives to the configured feed, so adding it would write
  * each step.* line twice into the very file the watcher pane reads.
  */
-export function wireRunOutputs(run: Run, args: RunnerArgs): WiredOutputs {
+export function wireRunOutputs(run: RunView, args: RunnerArgs): WiredOutputs {
   const liveFeed = startLiveFeed(run.run_dir, args.watch, { autoClose: args.watchAutoClose });
   const statusLine = new StatusLineOutput();
   const releaseStatusLine = statusLine.attach();
@@ -184,7 +184,7 @@ export function wireRunOutputs(run: Run, args: RunnerArgs): WiredOutputs {
 
 /** Header printed before the first step: what runs, and what a resume skipped.
  *  `reconcile` is the pipeline's mode, which widens what the loop re-admits. */
-export function announceRun(run: Run, args: RunnerArgs, reconcile = false): void {
+export function announceRun(run: RunView, args: RunnerArgs, reconcile = false): void {
   log(`\nPipeline: ${run.name}`);
   if (args.ticket) log(`Ticket: ${args.ticket}`);
   if (run.max_cost_usd) log(`Budget: $${run.max_cost_usd}`);
@@ -196,9 +196,9 @@ export function announceRun(run: Run, args: RunnerArgs, reconcile = false): void
   // replays unconditionally, while a step declaring `input` or reworking a gated
   // artifact is only re-examined and costs nothing when its sources have not moved
   // and no rejection is pending.
-  const reexamined = (s: RunStep) =>
+  const reexamined = (s: RunStepView) =>
     (s.def.sources?.length ?? 0) > 0 || (s.def.rework_for?.length ?? 0) > 0 || (reconcile && reconcilable(s.def));
-  const reruns = (s: RunStep) => rerunsOnResume(s.def, reconcile);
+  const reruns = (s: RunStepView) => rerunsOnResume(s.def, reconcile);
   const rerun = done.filter(reruns);
   const rechecked = done.filter((s) => !reruns(s) && reexamined(s));
   const settled = done.filter((s) => !reruns(s) && !reexamined(s));
@@ -215,7 +215,7 @@ export function announceRun(run: Run, args: RunnerArgs, reconcile = false): void
  *  read (`runEnding`): an abort outranks the outcome, and its code names the
  *  signal that requested it (Ctrl+C by default). */
 export function reportRun(
-  run: Run,
+  run: RunView,
   outcome: RunOutcome,
   context: PipelineContext,
   abort: Pick<AbortScope, "isAbortRequested" | "requestedSignal">,

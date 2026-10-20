@@ -18,7 +18,7 @@
 import type { AgentSession, AttemptStats, StepControl, StepUsage } from "../contracts/backends.js";
 import { isAgentStep } from "../contracts/backends.js";
 import type { PersistedAttempt } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { Run, RunStep } from "./run.js";
 import { chargeClosedAttempt, type SettledSpend } from "./cost-accounting.js";
 import { appendRunEvent } from "./run-journal.js";
 import { splitAttemptStats } from "./cost-figures.js";

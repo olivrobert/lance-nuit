@@ -7,14 +7,14 @@
 
 import type { StepFailCause, StepFailKind } from "../contracts/backends.js";
 import type { PipelineContext } from "../model/context.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import type { AbortScope } from "../runtime/abort.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import type { RunBudget } from "../run-record/index.js";
 
 export interface PipelineOrchestrationInput {
-  run: Run;
-  step: RunStep;
+  run: RunView;
+  step: RunStepView;
   baseCtx: PipelineContext;
   baseBranch?: string;
   /** Parent run budget; each child posts its reconciled delta here. */

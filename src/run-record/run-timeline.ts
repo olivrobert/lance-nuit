@@ -7,14 +7,14 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isLogicalSegment } from "../model/artifact-ports.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import { type LogRef, type RunLogStore, type RunRef, runRefFromRun } from "../model/storage-ports.js";
 
 type RunLogStoreWithLatest = RunLogStore & {
   findLatest?(run: RunRef, stepId: string): LogRef | null;
 };
 
-function runtimeRunRef(run: Run): RunRef {
+function runtimeRunRef(run: RunView): RunRef {
   return runRefFromRun({
     runId: run.runId ?? basename(run.run_dir),
     pipeline: run.pipeline,
@@ -39,14 +39,14 @@ export function logicalAttemptLogPath(stepId: string, attempt: number): string {
 /** Path for the next attempt, retained for callers that explicitly request a path
  *  before spawning. Registering the attempt belongs to `openAttempt`
  *  (`run-record/attempt-lifecycle.ts`). */
-export function stepLogPath(run: Run, step: RunStep): string {
+export function stepLogPath(run: RunView, step: RunStepView): string {
   return attemptLogPath(run, step, nextAttemptNumber(step));
 }
 
 /** Next attempt number is max(existing)+1, not length+1: a journal with a lost
  *  head can leave holes (e.g. attempts [1, 3]), and length+1 would collide with
  *  an existing attempt directory and append into its log. */
-export function nextAttemptNumber(step: RunStep): number {
+export function nextAttemptNumber(step: RunStepView): number {
   const attempts = step.attempts ?? [];
   let max = step.last_attempt ?? 0;
   for (const entry of attempts) {
@@ -57,7 +57,7 @@ export function nextAttemptNumber(step: RunStep): number {
 
 /** Attempt path: each attempt has its own directory and cannot overwrite a
  * previous execution's diagnostics. */
-export function attemptLogPath(run: Run, step: RunStep, attempt: number): string {
+export function attemptLogPath(run: RunView, step: RunStepView, attempt: number): string {
   if (run.logStore) {
     return requiredLocalPath(run.logStore.allocate(runtimeRunRef(run), step.id, attempt));
   }
@@ -77,7 +77,7 @@ export function writeAttemptCommand(stepLogPath: string, command: string): void 
   writeFileSync(join(dirname(stepLogPath), ATTEMPT_COMMAND_FILE), command, { encoding: "utf-8" });
 }
 
-export function latestAttemptLog(run: Run, step: RunStep): string | null {
+export function latestAttemptLog(run: RunView, step: RunStepView): string | null {
   const attempts = step.attempts ?? [];
   const latest = attempts.at(-1);
   if (latest?.log_path) {
@@ -89,9 +89,13 @@ export function latestAttemptLog(run: Run, step: RunStep): string | null {
   return run.logStore ? findStepLog(run, step.id) : findStepLog(run.run_dir, run.pipeline, step.id);
 }
 
-export function findStepLog(run: Run, stepId: string): string | null;
+export function findStepLog(run: RunView, stepId: string): string | null;
 export function findStepLog(runDir: string, pipeline: string, stepId: string): string | null;
-export function findStepLog(runOrDir: Run | string, pipelineOrStep: string, explicitStepId?: string): string | null {
+export function findStepLog(
+  runOrDir: RunView | string,
+  pipelineOrStep: string,
+  explicitStepId?: string,
+): string | null {
   if (typeof runOrDir !== "string") {
     const run = runOrDir;
     const stepId = pipelineOrStep;

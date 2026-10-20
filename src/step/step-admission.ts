@@ -12,7 +12,7 @@ import { truncate } from "../lib/truncate.js";
 import type { PipelineContext } from "../model/context.js";
 import { deliversOutputs, resolveTemplateAsync } from "../model/definition.js";
 import type { RunStopState } from "../model/persisted.js";
-import type { Run, RunStep, StepDefinition } from "../model/run.js";
+import type { RunStepView, RunView, StepDefinition } from "../model/run.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import {
   costGate,
@@ -66,7 +66,7 @@ export type StepAdmission =
 
 /** Evaluate `when` admissions in declaration order. */
 export async function checkInputs(
-  step: RunStep,
+  step: RunStepView,
   ctx: PipelineContext,
   conditions: readonly StepInputCondition[] = step.def.inputs ?? [],
 ): Promise<InputDecision> {
@@ -97,8 +97,8 @@ export async function checkInputs(
 }
 
 function applyInputDecision(
-  run: Run,
-  step: RunStep,
+  run: RunView,
+  step: RunStepView,
   output: RunOutput,
   action: InputAction,
   reason: string,
@@ -148,7 +148,7 @@ export type OperatorSelectionSkip = "settled" | "unfinished";
  * adopted is not decided here: the in-flight mark answers that on every
  * invocation, whatever the status (`work-item-store/provenance.ts`).
  */
-export function skipForOperatorSelection(run: Run, step: RunStep, output: RunOutput): OperatorSelectionSkip {
+export function skipForOperatorSelection(run: RunView, step: RunStepView, output: RunOutput): OperatorSelectionSkip {
   if (passLeftUnfinished(step) || lastPassInterrupted(step)) {
     recordSkip(run, step, { reason: SKIP_OPERATOR_SELECTION });
     output.emit({
@@ -163,8 +163,8 @@ export function skipForOperatorSelection(run: Run, step: RunStep, output: RunOut
 }
 
 export interface AdmitStepInput {
-  run: Run;
-  step: RunStep;
+  run: RunView;
+  step: RunStepView;
   baseCtx: PipelineContext;
   budget: RunBudget;
   output: RunOutput;
@@ -232,14 +232,14 @@ function rejectAdmission(
 
 /** A materialized orchestration freezes its admission decision in the snapshot.
  * Re-evaluating it on resume could make an active child disappear. */
-function orchestrationAlreadyStarted(step: RunStep): boolean {
+function orchestrationAlreadyStarted(step: RunStepView): boolean {
   if (step.def.runner !== "pipeline" || !step.orchestration) return false;
   return step.orchestration.items !== undefined || step.orchestration.children.length > 0;
 }
 
 /** Once materialized, only admissions marked `frozenOnStart` disappear; other author
  * guards remain evaluated on every resume. */
-function admissionsToEvaluate(step: RunStep): readonly StepInputCondition[] {
+function admissionsToEvaluate(step: RunStepView): readonly StepInputCondition[] {
   const conditions = step.def.inputs ?? [];
   if (!orchestrationAlreadyStarted(step)) return conditions;
   return conditions.filter((condition) => !condition.frozenOnStart);
@@ -249,7 +249,7 @@ function admissionsToEvaluate(step: RunStep): readonly StepInputCondition[] {
  *  rerun, whatever freshness would say of the outputs it left. A run fact, lost
  *  once the step settles or is requeued; the in-flight mark is what keeps a
  *  partial output from being adopted beyond that (`work-item-store/provenance.ts`). */
-function passLeftUnfinished(step: RunStep): boolean {
+function passLeftUnfinished(step: RunStepView): boolean {
   return step.status !== "pending" && owesWork(step.status);
 }
 

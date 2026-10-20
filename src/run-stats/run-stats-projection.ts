@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import type { StepControl, StepUsage } from "../contracts/backends.js";
 import type { RunJournalEvent } from "../model/journal.js";
 import type { PersistedAttempt } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { DeepReadonly, RunStepView, RunView } from "../model/run.js";
 import { createLogRef, type RunEventStore, type RunLogStore, runRefFromRun } from "../model/storage-ports.js";
 import { relativeRunPath } from "../run-record/index.js";
 import type { PhaseStats, RunStatsEntry, TokenCounts, UsageStatus } from "./stats-core.js";
@@ -38,7 +38,7 @@ function costStatusOf(control: StepControl | undefined): UsageStatus | undefined
   return control.total_cost_usd != null ? "partial" : "unavailable";
 }
 
-export function tokensOf(usage?: StepUsage): TokenCounts {
+export function tokensOf(usage?: DeepReadonly<StepUsage>): TokenCounts {
   return {
     in: usage?.input_tokens ?? 0,
     out: usage?.output_tokens ?? 0,
@@ -60,7 +60,7 @@ function isAttemptStatus(value: unknown): value is AttemptFact["status"] {
   return value === "running" || value === "done" || value === "failed" || value === "aborted";
 }
 
-function eventsOf(run: Run, eventStore?: RunEventStore): RunJournalEvent[] {
+function eventsOf(run: RunView, eventStore?: RunEventStore): RunJournalEvent[] {
   const store = eventStore ?? run.eventStore;
   if (!store) return [];
   const runId = run.runId ?? basename(run.run_dir);
@@ -87,7 +87,7 @@ function isAttemptEvent(event: RunJournalEvent): event is AttemptEvent {
 
 /** Return execution facts without reconstructing attempts from `step.retries`. The
  * journal is preferred; snapshots provide fallback for in-memory projections. */
-export function attemptFacts(run: Run, step: RunStep, eventStore?: RunEventStore): AttemptFact[] {
+export function attemptFacts(run: RunView, step: RunStepView, eventStore?: RunEventStore): AttemptFact[] {
   const facts = new Map<number, AttemptFact>();
   for (const event of eventsOf(run, eventStore)) {
     if (!isAttemptEvent(event) || event.stepId !== step.id) continue;
@@ -122,7 +122,7 @@ export function attemptFacts(run: Run, step: RunStep, eventStore?: RunEventStore
   }));
 }
 
-function logTail(run: Run, stepId: string, attempt: number, logStore?: RunLogStore): string | null {
+function logTail(run: RunView, stepId: string, attempt: number, logStore?: RunLogStore): string | null {
   if (!logStore) return null;
   try {
     const runRef = runRefFromRun({
@@ -139,7 +139,7 @@ function logTail(run: Run, stepId: string, attempt: number, logStore?: RunLogSto
   }
 }
 
-export function runnerFixEvents(run: Run, eventStore?: RunEventStore, logStore?: RunLogStore): unknown[] {
+export function runnerFixEvents(run: RunView, eventStore?: RunEventStore, logStore?: RunLogStore): unknown[] {
   const out: unknown[] = [];
   for (const step of run.steps) {
     for (const attempt of attemptFacts(run, step, eventStore).filter((item) => item.status === "failed")) {
@@ -156,15 +156,19 @@ export function runnerFixEvents(run: Run, eventStore?: RunEventStore, logStore?:
   return out;
 }
 
-function addModelUsage(models: Record<string, TokenCounts>, model: string, usage: StepUsage | undefined): void {
+function addModelUsage(
+  models: Record<string, TokenCounts>,
+  model: string,
+  usage: DeepReadonly<StepUsage> | undefined,
+): void {
   models[model] ??= zeroTokens();
   addTokens(models[model], tokensOf(usage));
 }
 
 /** Projects one step into phase, model, profile and total aggregates. */
 export function projectStepStats(
-  run: Run,
-  step: RunStep,
+  run: RunView,
+  step: RunStepView,
   eventStore: RunEventStore | undefined,
   aggregate: ProjectionAccumulator,
 ): void {
@@ -225,7 +229,7 @@ export function projectStepStats(
   }
 }
 
-export function warningsForSteps(run: Run, eventStore?: RunEventStore): Array<{ phase: string; reason: string }> {
+export function warningsForSteps(run: RunView, eventStore?: RunEventStore): Array<{ phase: string; reason: string }> {
   const warnings = run.steps
     .filter((step) => step.def.blocking === false && !!step.errors)
     .map((step) => ({ phase: step.id, reason: step.errors! }));

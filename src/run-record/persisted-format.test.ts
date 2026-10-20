@@ -10,7 +10,7 @@ import { assumptionsArtifact, lotsArtifact } from "../builtin-steps/lib/artifact
 import { textArtifact } from "../dsl/artifact.js";
 import { loadPipelineConfig } from "../env/config.js";
 import type { ArtifactRef, WorkItemArtifactStore } from "../model/artifact-ports.js";
-import type { Run } from "../model/run.js";
+import type { Run } from "./run.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { makeRunStep } from "./run-step.js";
 import { projectStepAttempts } from "./attempt-projection.js";

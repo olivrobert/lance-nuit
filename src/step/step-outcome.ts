@@ -9,7 +9,7 @@ import type { ExtractionResult } from "../contracts/extraction.js";
 import type { extractErrors } from "../exec/report-extraction.js";
 import type { executeStep, StepResult } from "../exec/runners.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../model/context.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import type { AbortScope } from "../runtime/abort.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { costGate, latestAttemptLog, type RunBudget, stopRun, updateStep } from "../run-record/index.js";
@@ -28,8 +28,8 @@ export interface ResolveOutcomeDeps {
 }
 
 export interface ResolveOutcomeInput {
-  run: Run;
-  step: RunStep;
+  run: RunView;
+  step: RunStepView;
   command: string;
   baseCtx: PipelineContext;
   budget: RunBudget;

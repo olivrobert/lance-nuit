@@ -5,7 +5,7 @@ import { executeStep, runWithAgent } from "../exec/runners.js";
 import { truncateMiddle } from "../lib/truncate.js";
 import type { AgentBackendRegistry } from "../contracts/backends.js";
 import { type FixContext, type PipelineContext, requireAgentBackendRegistry } from "../model/context.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { RunStepView, RunView } from "../model/run.js";
 import type { AbortScope } from "../runtime/abort.js";
 import type { RunOutput } from "../runtime/run-output.js";
 import { deriveContext } from "../pipeline/context.js";
@@ -55,8 +55,8 @@ export interface FixLoopOpts {
 
 /** Values resolved once at entry: backends, prompt, limits, and dependencies. */
 export interface FixRun {
-  run: Run;
-  step: RunStep;
+  run: RunView;
+  step: RunStepView;
   command: string;
   baseCtx: PipelineContext;
   budget: RunBudget;
@@ -72,7 +72,7 @@ export interface FixRun {
   fixReason: string;
   fixBackend: AgentBackend;
   backendOptions: unknown;
-  fixPrompt: NonNullable<RunStep["def"]["on_failure"]>["fix_prompt"];
+  fixPrompt: NonNullable<RunStepView["def"]["on_failure"]>["fix_prompt"];
   sizeThresholdKb: number;
   output: RunOutput;
   abort: AbortScope;
@@ -82,8 +82,8 @@ const RESUME_THRESHOLD_KB_DEFAULT = 1000;
 
 /** Prepare repair session state without running a pass. */
 export function prepareFixRun(
-  run: Run,
-  step: RunStep,
+  run: RunView,
+  step: RunStepView,
   command: string,
   baseCtx: PipelineContext,
   budget: RunBudget,
@@ -137,8 +137,8 @@ export interface FixBackendChoice {
  * retained backend and otherwise starts from that backend's defaults.
  */
 export function chooseFixBackend(
-  run: Run,
-  step: RunStep,
+  run: RunView,
+  step: RunStepView,
   baseCtx: PipelineContext,
   registry: AgentBackendRegistry,
   resumeSession?: string,
@@ -192,13 +192,13 @@ export function chooseFixBackend(
 }
 
 /** Session recorded by the step `stepId` of this run, if any. */
-export function resumableSessionOf(run: Run, stepId: string): AgentSession | undefined {
+export function resumableSessionOf(run: RunView, stepId: string): AgentSession | undefined {
   return run.steps.find((candidate) => candidate.def.id === stepId)?.session;
 }
 
 /** Select the session of the step named by `resumeSession`, and the resume decision. */
 export function selectResumedSession(
-  run: Run,
+  run: RunView,
   fixSpec: { id: string },
   fixBackend: ReturnType<AgentBackendRegistry["resolve"]>,
   sizeThresholdKb: number,

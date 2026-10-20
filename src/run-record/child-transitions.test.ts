@@ -7,7 +7,8 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PersistedPipelineOrchestrationState } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { Run, RunStep } from "./run.js";
+import { writable } from "./run.js";
 import {
   bindChildRun,
   commitChildCall,
@@ -163,7 +164,9 @@ test("failChildLaunch: the child never ran, the reference stays resumable under 
 
 test("settleChild: done from a PASS, failed otherwise, journaled then persisted", () => {
   const { parent, step, state } = makeParent();
-  const ref = declareChild(parent, state, { key: "main", kind: "main", pipeline: "./child.ts", ticket: "T-1" });
+  const ref = writable(
+    declareChild(parent, state, { key: "main", kind: "main", pipeline: "./child.ts", ticket: "T-1" }),
+  );
   bindChildRun(parent, ref, "child-run");
   ref.accountedCostUsd = 1.5;
   const child = makeChild({ outcome: { phase: null, reason: null, logPath: null, resumable: false } });

@@ -6,6 +6,10 @@
 // this folder imports this file only (`module-run-record-entry-only` in
 // `.dependency-cruiser.cjs`); the other files are internals.
 //
+// Outside this folder a run is a `RunView` (`model/run.ts`), read-only at every
+// depth: the operations below take it back and alone write the run, its journal
+// and its snapshot. The mutable run is internal (`run.ts`).
+//
 // The groups below say what each part of the surface is for. The entry exports
 // only what code outside the folder calls.
 

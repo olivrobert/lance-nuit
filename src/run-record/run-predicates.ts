@@ -1,4 +1,5 @@
-import type { PersistedAttempt, PersistedRun, PersistedStepState, StepStatus } from "../model/persisted.js";
+import type { PersistedRun, StepStatus } from "../model/persisted.js";
+import type { DeepReadonly, RunAttemptView } from "../model/run.js";
 import { isCompleted, isProvisionalStatus } from "./run-status.js";
 
 /**
@@ -18,7 +19,7 @@ export function owesWork(status: StepStatus): boolean {
 
 interface StepAttempts {
   status: StepStatus;
-  attempts?: readonly PersistedAttempt[];
+  attempts?: readonly RunAttemptView[];
 }
 
 /**
@@ -32,7 +33,7 @@ export function lastPassInterrupted(step: StepAttempts): boolean {
 }
 
 /** An interrupted attempt was followed by another one: the step was replayed. */
-export function replayedAfterInterruption(step: { attempts?: readonly PersistedAttempt[] }): boolean {
+export function replayedAfterInterruption(step: { attempts?: readonly RunAttemptView[] }): boolean {
   const attempts = step.attempts ?? [];
   return attempts.slice(0, -1).some((attempt) => attempt.interrupted === true);
 }
@@ -71,7 +72,9 @@ export function settledButUnfinalized(run: PersistedRun | null): boolean {
 }
 
 /** Steps still to execute, which determines resumability. */
-export function pendingSteps(run: PersistedRun | null): PersistedStepState[] {
+export function pendingSteps<S extends { readonly status: StepStatus }>(
+  run: { readonly steps: readonly S[] } | null,
+): S[] {
   return run?.steps?.filter((step) => owesWork(step.status)) ?? [];
 }
 
@@ -84,7 +87,7 @@ export function pendingSteps(run: PersistedRun | null): PersistedStepState[] {
  * execute counts, which is what makes "a completed run is not failed after the
  * fact" safe to apply to the cost stops.
  */
-export function hasUnfinishedWork(run: PersistedRun | null): boolean {
+export function hasUnfinishedWork(run: DeepReadonly<PersistedRun> | null): boolean {
   if (!run) return false;
   if (pendingSteps(run).length > 0) return true;
   return (run.steps ?? []).some((step) => {

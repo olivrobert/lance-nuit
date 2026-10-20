@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PersistedRun } from "../model/persisted.js";
-import type { Run } from "../model/run.js";
+import type { Run } from "./run.js";
 import { makeRunStep } from "./run-step.js";
 import { finalizeRun } from "./run-transitions.js";
 import { isResumableStatus } from "./run-status.js";

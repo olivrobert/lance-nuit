@@ -8,7 +8,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "../model/run.js";
+import type { Run } from "./run.js";
 import type { RunBudget } from "./budget.js";
 import { inheritChildBudgetStop, ledgerStops, recordCostStop } from "./cost-stop-events.js";
 import { readRunEvents } from "./run-journal.js";

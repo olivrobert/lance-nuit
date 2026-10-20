@@ -8,15 +8,17 @@
 //
 // What the invocation asks for stays with its caller (`boot/resume.ts`): the
 // definition a snapshot runs against, and the selection (`--steps`, `--skip`,
-// `--start-at`) applied to the steps. They come in as a policy, called at the
-// one point of the opening where each applies.
+// `--start-at`) to apply to the steps. They come in as a policy, called at the
+// one point of the opening where each applies; the caller reads the steps and
+// decides, and the opening writes them.
 
 import { basename } from "node:path";
 import { DEFAULT_SPEC_PATH } from "../env/tickets.js";
 import type { PipelineContext, PipelineLot } from "../model/context.js";
 import type { Pipeline, PipelineStep } from "../model/definition.js";
 import type { PersistedRun, PersistedStepState, PipelineLineageEntry } from "../model/persisted.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { DeepReadonly, RunView } from "../model/run.js";
+import type { Run, RunStep } from "./run.js";
 import type { RunEventStore, RunLogStore, RunStateStore } from "../model/storage-ports.js";
 import { log } from "../runtime/logging.js";
 import { restoreRunTotals } from "./cost-accounting.js";
@@ -66,14 +68,28 @@ export interface StrictSnapshotRead {
   expectedIdentity?: { runId: string; pipeline: string; ticket?: string };
 }
 
+/** What the invocation's selection does to the steps of a resumed run. The caller
+ *  decides it on the journal-reconciled states; the opening applies it, in this
+ *  order, before the states become the run's steps. */
+export interface ResumedSelection {
+  /** Steps this invocation leaves out of work they still owe: `skipped`, and
+   *  recorded as an operator exclusion. */
+  readonly exclude: readonly string[];
+  /** Forget the exclusions an earlier invocation persisted (reconcile mode). */
+  readonly dropExclusions: boolean;
+  /** Steps requeued for replay, whatever their status: `pending`, marked
+   *  `replay`, and no longer excluded. */
+  readonly replay: readonly string[];
+}
+
 /** What the invocation decides, called at the point of the opening where it applies. */
 export interface RunOpeningPolicy {
   /** The definition a snapshot about to be resumed runs against. */
-  resumeDefinition(saved: PersistedRun): Promise<Pipeline>;
-  /** The selection applied to a resumed run's steps, each already reconciled
-   *  with the journal; returns whether it took out work the run still owed. A
-   *  throw refuses the resume, and the run lock this opening took is released. */
-  selectResumed(states: readonly PersistedStepState[], reconcile: boolean): boolean;
+  resumeDefinition(saved: DeepReadonly<PersistedRun>): Promise<Pipeline>;
+  /** The selection for a resumed run's steps, each already reconciled with the
+   *  journal. A throw refuses the resume, and the run lock this opening took is
+   *  released. */
+  selectResumed(states: readonly DeepReadonly<PersistedStepState>[], reconcile: boolean): ResumedSelection;
   /** The initial state of one step of a new run. */
   selectNew(def: PipelineStep, reconcile: boolean): StepStateInput;
 }
@@ -97,7 +113,7 @@ export interface OpenRunRequest {
 }
 
 export interface OpenedRun {
-  run: Run;
+  run: RunView;
   /** An existing snapshot was restored, rather than a new run created. */
   resumed: boolean;
 }
@@ -349,6 +365,28 @@ function selectDirectory(request: OpenRunRequest): SelectedDirectory {
   return { dir, stateStore, eventStore, logStore, saved, releaseLock };
 }
 
+/** Apply the invocation's selection to the reconciled states; returns whether it
+ *  took out work the run still owed. */
+function applySelection(states: readonly PersistedStepState[], selection: ResumedSelection): boolean {
+  const exclude = new Set(selection.exclude);
+  const replay = new Set(selection.replay);
+  let tookWork = false;
+  for (const state of states) {
+    if (!exclude.has(state.id)) continue;
+    state.status = "skipped";
+    state.excluded = true;
+    tookWork = true;
+  }
+  if (selection.dropExclusions) for (const state of states) delete state.excluded;
+  for (const state of states) {
+    if (!replay.has(state.id)) continue;
+    state.status = "pending";
+    state.replay = true;
+    delete state.excluded;
+  }
+  return tookWork;
+}
+
 /** Restore a snapshot: project it with its journal, apply the invocation's
  *  selection, merge it with the definition, then record what this opening
  *  changed — a new authorization, the crashed attempts it settled, its location
@@ -361,13 +399,14 @@ async function restore(request: OpenRunRequest, selected: SelectedDirectory, sav
   const projected = projectRunState(saved, readRunEvents({ run_dir: dir, runId: saved.runId, eventStore }));
   const states = [...projected.steps.values()].flatMap((step) => (step.state ? [step.state] : []));
   const reconcile = pipeline.reconcile === true;
-  let selectionTookWork: boolean;
+  let selection: ResumedSelection;
   try {
-    selectionTookWork = policy.selectResumed(states, reconcile);
+    selection = policy.selectResumed(states, reconcile);
   } catch (error) {
     selected.releaseLock();
     throw error;
   }
+  const selectionTookWork = applySelection(states, selection);
   const run = hydrate(pipeline, request.pipelinePath, saved, scope, projected, selectionTookWork);
   run.reconcile = reconcile;
   run.run_dir = dir;

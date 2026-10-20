@@ -8,6 +8,7 @@
 // runs.jsonl, the persisted state and the console cannot diverge on it.
 
 import type { PersistedRun } from "../model/persisted.js";
+import type { DeepReadonly } from "../model/run.js";
 import { allStepsSettled } from "./run-predicates.js";
 import { hasVerdict, type RunVerdict, runEnding } from "./run-status.js";
 
@@ -22,7 +23,7 @@ export interface RunVerdictSignals {
   costUnaccounted?: boolean;
 }
 
-type VerdictInput = Pick<PersistedRun, "aborted" | "steps" | "stopped_reason">;
+type VerdictInput = DeepReadonly<Pick<PersistedRun, "aborted" | "steps" | "stopped_reason">>;
 
 /**
  * The run's verdict from its steps and the loop's signals.

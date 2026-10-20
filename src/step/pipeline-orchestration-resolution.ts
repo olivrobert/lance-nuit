@@ -6,7 +6,7 @@ import { errorMessage } from "../lib/errors.js";
 import type { AsyncTemplated, PipelineContext, PipelineLot } from "../model/context.js";
 import { resolveTemplateAsync } from "../model/definition.js";
 import type { PipelineLineageEntry } from "../model/persisted.js";
-import type { Run } from "../model/run.js";
+import type { RunView } from "../model/run.js";
 import { agentBackendRegistryOf, buildPipelineContext, workItemRegistryOf } from "../pipeline/context.js";
 
 export const MAX_PIPELINE_COMPOSITION_DEPTH = 16;
@@ -17,7 +17,7 @@ function canonicalPipelinePath(path: string): string {
 
 /** The run's lineage: the persisted one, or the root entry a top-level run has
  *  not recorded yet. Pure: `openOrchestration` records it on the run. */
-export function currentLineage(run: Run): PipelineLineageEntry[] {
+export function currentLineage(run: RunView): readonly PipelineLineageEntry[] {
   if (run.pipelineLineage?.length) return run.pipelineLineage;
   return [
     {
@@ -33,7 +33,11 @@ function formatLineage(lineage: readonly PipelineLineageEntry[]): string {
     .join(" → ");
 }
 
-export function lineageForChild(parent: Run, pipelinePath: string, ticket: string | undefined): PipelineLineageEntry[] {
+export function lineageForChild(
+  parent: RunView,
+  pipelinePath: string,
+  ticket: string | undefined,
+): PipelineLineageEntry[] {
   const lineage = currentLineage(parent);
   const candidate: PipelineLineageEntry = {
     pipelinePath: canonicalPipelinePath(pipelinePath),

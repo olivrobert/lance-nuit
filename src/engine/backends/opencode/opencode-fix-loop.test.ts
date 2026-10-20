@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentBackendRegistry } from "../../../contracts/backends.js";
 import { executeStep, runWithAgent } from "../../../exec/runners.js";
-import type { Run } from "../../../model/run.js";
+import type { Run } from "../../../run-record/run.js";
 import { buildPipelineContext } from "../../../pipeline/context.js";
 import { performFixAttempt } from "../../../step/fix-loop-pass.js";
 import { prepareFixRun } from "../../../step/fix-loop-runtime.js";

@@ -7,7 +7,7 @@ import { skipIf, skipUnlessCommand } from "../dsl/input.js";
 import type { ArtifactRef, WorkItemArtifactStore } from "../model/artifact-ports.js";
 import type { PipelineContext } from "../model/context.js";
 import type { PipelineStep } from "../model/definition.js";
-import type { Run, RunStep } from "../model/run.js";
+import type { Run, RunStep } from "../run-record/run.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { pendingRejection, recordRejection } from "../work-item-store/decisions.js";

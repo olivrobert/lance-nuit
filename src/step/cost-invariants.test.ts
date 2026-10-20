@@ -16,7 +16,8 @@ import type { StepResult } from "../exec/runners.ts";
 import type { PipelineContext } from "../model/context.ts";
 import type { PipelineStep } from "../model/definition.ts";
 import type { PersistedPipelineChildRef } from "../model/persisted.ts";
-import type { Run, RunStep } from "../model/run.ts";
+import type { Run, RunStep } from "../run-record/run.ts";
+import type { RunStepView } from "../model/run.ts";
 import { buildRunReport } from "../output/run-report.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import type { RunBudget } from "../run-record/budget.ts";
@@ -72,7 +73,7 @@ function eventsOf(run: Run, ...types: string[]): Array<Record<string, unknown>> 
 }
 
 /** Step loop dependencies whose attempts answer from a script, in order. */
-function scriptedDeps(script: Array<Partial<StepResult> | ((step: RunStep) => Partial<StepResult>)>): StepLoopDeps {
+function scriptedDeps(script: Array<Partial<StepResult> | ((step: RunStepView) => Partial<StepResult>)>): StepLoopDeps {
   let index = 0;
   return {
     executeStep: async (step) => {
