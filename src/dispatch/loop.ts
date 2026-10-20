@@ -14,7 +14,7 @@ import { DISPATCH_CHILD_ENV, selfSpawnRunner } from "../exec/self-spawn.js";
 import type { PersistedRun } from "../model/persisted.js";
 import { UNTIL_STOP_EXIT_CODE } from "../model/cli-options.js";
 import { log } from "../runtime/logging.js";
-import { FileRunStateStore, isPersistedRunComplete } from "../run-record/index.js";
+import { isPersistedRunComplete, readLatestRun } from "../run-record/index.js";
 import { DispatchAbort } from "./abort.js";
 import type { DispatchClassification, DispatchEnv, DispatchOutcome, DispatchStrategy } from "./dispatch-strategy.js";
 
@@ -51,7 +51,7 @@ const defaultDeps: DispatchDeps = {
 };
 
 function latestRunFor(env: DispatchEnv, ticket: string): PersistedRun | null {
-  return (env.stateStore ?? new FileRunStateStore({ context: env.ctx })).loadLatest(env.def.name, ticket);
+  return readLatestRun(env.def.name, ticket, env.ctx)?.state ?? null;
 }
 
 /** Assemble the loop's per-ticket result, keeping `runId` off the object when the

@@ -7,9 +7,10 @@
 // need from me now", not "what did each pipeline do". The other runs stay
 // visible in the explorer (ticket 03).
 //
-// Every read goes through the state layer's own readers and ports
-// (`RunStateStore`, `WorkItemArtifactStore`, `gateDecisionStatus`):
-// this module composes them, it never parses `state.json` itself. Nothing is
+// Every read goes through the runner's own readers: the run record's `readRun`
+// and `readRunHistory`, the work-item store's `WorkItemArtifactStore` and
+// `gateDecisionStatus`. This module composes them, it never parses `state.json`
+// or the journal itself. Nothing is
 // cached across calls — a per-call cache is enough for a few dozen work items
 // per project, and a persistent one would show a stale morning box.
 
@@ -21,8 +22,6 @@ import type { PersistedRun } from "../../model/persisted.js";
 import {
   awaitsHuman,
   costIsLowerBound,
-  FileRunEventStore,
-  FileRunStateStore,
   hasUnfinishedWork,
   hasVerdict,
   isClosureCurrent,
@@ -30,8 +29,9 @@ import {
   isFailure,
   lastPassInterrupted,
   owesWork,
-  projectStepAttempts,
+  type RunHistory,
   readClosureAt,
+  readRunHistory,
   runProvesUnpricedSpend,
 } from "../../run-record/index.js";
 import {
@@ -43,7 +43,7 @@ import {
 import { type HistoryEntry, readHistory } from "../../run-stats/index.js";
 import { latestLaunchByItem } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl } from "./projects.js";
-import { effectiveCwd, latestRuns, selectedRunStatus, ticketDirectories, workItemDirOf } from "./runs.js";
+import { effectiveCwd, latestRuns, ticketDirectories, workItemDirOf } from "./runs.js";
 import type {
   Item,
   ItemApproval,
@@ -195,9 +195,9 @@ function interruptedStepOf(
   stop: ItemStop | undefined,
 ): string | undefined {
   if (!interrupted && !(stop && !stop.subject)) return undefined;
-  let attemptsByStep: ReturnType<typeof projectStepAttempts>;
+  let attemptsByStep: RunHistory["attempts"];
   try {
-    attemptsByStep = projectStepAttempts(new FileRunEventStore().readAt(runDir));
+    attemptsByStep = readRunHistory(runDir).attempts;
   } catch {
     // An unreadable journal only loses the replay offer: the item keeps the
     // verbs it would have had without it.
@@ -362,17 +362,11 @@ function readTicketHead(workItemDir: string): string | undefined {
   }
 }
 
-async function buildItem(
-  project: ProjectEntry,
-  ticket: string,
-  store: FileRunStateStore,
-  cache: RequestCache,
-): Promise<Item | undefined> {
-  const [selected] = latestRuns(project, ticket, store);
+async function buildItem(project: ProjectEntry, ticket: string, cache: RequestCache): Promise<Item | undefined> {
+  const [selected] = latestRuns(project, ticket);
   if (!selected) return undefined;
 
-  const { state } = selected;
-  const { status, interrupted } = selectedRunStatus(project, selected);
+  const { state, status, interrupted } = selected;
   const runId = state.runId ?? "";
   const stop = status === "STOPPED" ? stopOf(state) : undefined;
   const interruptedStep = interruptedStepOf(selected.runDir, state, interrupted, stop);
@@ -439,12 +433,11 @@ function compareItems(a: Item, b: Item): number {
  *  contributes nothing and does not interrupt the others. */
 export async function listItems(options: ReadModelOptions = {}): Promise<Item[]> {
   const cache = createCache(options);
-  const store = new FileRunStateStore();
   const items: Item[] = [];
   for (const project of readProjects(options)) {
     if (!project.found) continue;
     for (const ticket of ticketDirectories(project)) {
-      const item = await buildItem(project, ticket, store, cache);
+      const item = await buildItem(project, ticket, cache);
       if (item) items.push(item);
     }
   }
@@ -460,5 +453,5 @@ export async function readItem(
 ): Promise<Item | undefined> {
   const project = readProjects(options).find((entry) => entry.name === projectName && entry.found);
   if (!project || !ticketDirectories(project).includes(ticket)) return undefined;
-  return buildItem(project, ticket, new FileRunStateStore(), createCache(options));
+  return buildItem(project, ticket, createCache(options));
 }

@@ -7,7 +7,7 @@
 import type { PipelineContext } from "../model/context.js";
 import type { Pipeline } from "../model/definition.js";
 import type { DispatchOutcomeKind } from "../model/scan-record.js";
-import type { RunStateStore, ScanStore } from "../model/storage-ports.js";
+import type { ScanStore } from "../model/storage-ports.js";
 
 // Declared in the model layer because the durable scan record persists it.
 export type { DispatchOutcomeKind };
@@ -40,8 +40,6 @@ export interface DispatchEnv {
   ctx: PipelineContext;
   /** Pipeline definition loaded once before selection. */
   def: Pipeline;
-  /** Store shared by dispatch; absent when the caller manages its own store. */
-  stateStore?: RunStateStore;
   /** Sink for the durable scan record. Only the scan strategy writes one; it
    *  resolves the file store itself when this is absent, and tests inject an
    *  in-memory store here. The loop never touches it. */

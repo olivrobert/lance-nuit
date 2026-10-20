@@ -177,7 +177,7 @@ test("steps: a run whose runner died reports no live event and its running step 
   ]);
 });
 
-test("steps: a terminal journal status the snapshot missed is shown as the runner projects it", () => {
+test("steps: a terminal journal status the snapshot of a dead runner missed is shown as the runner projects it", () => {
   const project = listedProject();
   const runDir = writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
@@ -189,7 +189,9 @@ test("steps: a terminal journal status the snapshot missed is shown as the runne
       { id: "review", status: "pending", retries: 0 },
     ],
   });
-  writeRunLock(runDir, process.ppid);
+  // The runner died between the event and the snapshot: the journal is the
+  // later record of `coder`.
+  writeRunLock(runDir, DEAD_PID);
   writeRunEvents(runDir, [
     // The snapshot is written after the event: a terminal snapshot is the later
     // record, so it wins over the journal.
@@ -199,12 +201,17 @@ test("steps: a terminal journal status the snapshot missed is shown as the runne
 
   const view = readSteps("demo-app", "DEMO-1");
 
-  expect(view?.status).toBe("RUNNING");
+  expect(view?.status).toBe("ABORTED");
   expect(view?.steps).toEqual([
     { id: "lint", status: "failed", error: "lint failed" },
     { id: "coder", status: "done", finishedAt: "2026-09-05T08:02:00.000Z" },
     { id: "review", status: "pending" },
   ]);
+
+  // A runner still alive is at most one write behind: its snapshot is read
+  // alone, and the journal is not parsed on every poll.
+  writeRunLock(runDir, process.ppid);
+  expect(readSteps("demo-app", "DEMO-1")?.steps.map((step) => step.status)).toEqual(["failed", "running", "pending"]);
 });
 
 test("coder session: the last coder step with a resumable session, in the run's directory", () => {

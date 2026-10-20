@@ -13,13 +13,10 @@ import { log } from "../runtime/logging.js";
 import {
   awaitsHuman,
   closureOf,
-  effectiveStatus,
-  isRunHeld,
   latestRunFile,
   readClosureAt,
-  readRunSnapshot,
+  readLatestRun,
   removeClosureAt,
-  runsLocationOf,
   writeClosureAt,
 } from "../run-record/index.js";
 import { decisionActor } from "../work-item-store/index.js";
@@ -43,12 +40,9 @@ function contextFor(cwd: string, ticket: string): PipelineContext {
  * runner that died is an interrupted run, which waits on somebody like any other.
  */
 export function closeLatestRun(cwd: string, ticket: string, pipeline: string, actor: string): ClosureResult {
-  const context = contextFor(cwd, ticket);
-  const file = latestRunFile(pipeline, ticket, context);
-  const state = file ? readRunSnapshot(file) : null;
-  if (!file || !state) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
-  const runDir = dirname(file);
-  const { status } = effectiveStatus(state, () => isRunHeld(runDir, state, runsLocationOf(context)));
+  const run = readLatestRun(pipeline, ticket, contextFor(cwd, ticket));
+  if (!run) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
+  const { runDir, state, status } = run;
   if (!awaitsHuman(status)) {
     return {
       ok: false,

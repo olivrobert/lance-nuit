@@ -11,7 +11,8 @@
 // Like a step opened from the timeline, this read parses the whole journal: the
 // Run tab asks for it while it is shown, the item's poll never does.
 
-import { FileRunEventStore, projectStepAttempts, type RunJournalEvent } from "../../run-record/index.js";
+import type { RunJournalEvent } from "../../model/journal.js";
+import { readRunHistory } from "../../run-record/index.js";
 import { runTreePath } from "./explorer.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
@@ -34,7 +35,7 @@ function decisionOf(value: unknown): RunPause["decision"] {
  * decision a resume carries is journaled right after it, before any step
  * event; one found later belongs to no pause.
  */
-function pausesOf(events: RunJournalEvent[]): RunPause[] {
+function pausesOf(events: readonly RunJournalEvent[]): RunPause[] {
   const pauses: RunPause[] = [];
   let lastTs: string | undefined;
   let stopReason: string | undefined;
@@ -75,11 +76,11 @@ export function readRunJourney(
   const resolved = resolveRun(projectName, ticket, options);
   if (!resolved) return undefined;
   const { runDir, state, pipeline } = resolved.run;
-  const events = new FileRunEventStore().readAt(runDir);
+  const history = readRunHistory(runDir);
   const treePathOf = (inRun: string): string => runTreePath(resolved.workItemDir, runDir, inRun);
 
   const attempts: RunJourneyAttempt[] = [];
-  for (const [stepId, stepAttempts] of projectStepAttempts(events)) {
+  for (const [stepId, stepAttempts] of history.attempts) {
     for (const attempt of stepAttempts) attempts.push({ stepId, ...attemptView(attempt, treePathOf) });
   }
   attempts.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
@@ -92,6 +93,6 @@ export function readRunJourney(
     ...(startedAt ? { startedAt } : {}),
     ...(typeof state.max_cost_usd === "number" ? { maxCostUsd: state.max_cost_usd } : {}),
     attempts,
-    pauses: pausesOf(events),
+    pauses: pausesOf(history.events),
   };
 }

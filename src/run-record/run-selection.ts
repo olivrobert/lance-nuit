@@ -16,6 +16,7 @@ import { errorMessage } from "../lib/errors.js";
 import { createRunRef } from "../model/storage-ports.js";
 import type { PipelineContext } from "../model/context.js";
 import { pendingSteps, resumeDecision, settledButUnfinalized } from "./run-predicates.js";
+import { readListedRun } from "./run-read.js";
 import { describeRunSnapshotProblem, readRunSnapshotDiagnostic } from "./run-snapshot.js";
 import {
   claimRunDir,
@@ -24,6 +25,7 @@ import {
   releaseRunDir,
   resolveLatestRunSnapshot,
   runLockHolder,
+  runsLocationOf,
   STATE_FILE,
 } from "./stores/run-storage.js";
 
@@ -97,7 +99,10 @@ export function selectExplicitRun(
   if (mismatches.length > 0) {
     throw new Error(`--run: snapshot identity mismatch for "${runId}": ${mismatches.join(", ")}`);
   }
-  if (options.replay !== true && pendingSteps(snapshot).length === 0 && !settledButUnfinalized(snapshot)) {
+  // What is left to do is read as every reader reads it: a runner that died
+  // after the journal recorded a step finished left that step done.
+  const { state } = readListedRun({ state: snapshot, runDir }, runsLocationOf(context));
+  if (options.replay !== true && pendingSteps(state).length === 0 && !settledButUnfinalized(state)) {
     throw new Error(`--run: run "${runId}" has no remaining step to execute — nothing to resume.`);
   }
 
@@ -159,7 +164,7 @@ export function discardedResumeNotice(
 ): string | undefined {
   const latest = resolveLatestRunSnapshot(pipelineName, ticket, context);
   if (!latest) return undefined;
-  const snapshot = latest.snapshot;
+  const snapshot = readListedRun({ state: latest.snapshot, runDir: latest.runDir }, runsLocationOf(context)).state;
   const decision = resumeDecision(snapshot);
   if (decision.resume) return undefined;
 

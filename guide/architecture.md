@@ -239,12 +239,14 @@ The server side reads work items only through `src/modules/read-model/`
 direction). It projects snapshots into the DTO the front end renders. It takes
 the work-item paths from `workItemLayout` and a stopped gate's decision from
 `gateDecisionStatus`, both in `work-item-store`, the rule the runner's gate and
-`--inspect` read too. The selected run's status is the run record's
-`effectiveStatus`, asked with the runner's `isRunHeld` (the run lock, or for a
-composed child the lock of the run that composed it, up to the root): a snapshot without a
-verdict that no live process holds is served as an interrupted `ABORTED` run, so
-the dashboard and a later resume agree on what is live. Its step list is the snapshot reconciled with the
-journal by `projectRunState`, the projection a resume applies. Two of its readers take
+`--inspect` read too. Every run it serves is read through the run record's
+`readRun`. The status is `effectiveStatus`, asked with the runner's `isRunHeld`
+(the run lock, or for a composed child the lock of the run that composed it, up
+to the root): a snapshot without a verdict that no live process holds is served
+as an interrupted `ABORTED` run, so the dashboard and a later resume agree on
+what is live. The steps of such a run are the snapshot reconciled with the
+journal by the projection a resume applies; the attempts of a step and the run's
+timeline come from `readRunHistory`. Two of its readers take
 content a pipeline wrote rather than runner state: `Item.title`, the first
 `# ` heading of `artifacts/ticket.md` (a leading ticket key dropped), read
 from a bounded prefix of the file and absent when there is none, and `readReport`, which validates
@@ -515,7 +517,17 @@ failure, waiting on somebody, resumable), the `≥` of a partial total
 headline and the entry point its exit code. The dashboard, `--inspect`,
 `lancenuit close`, `clean --keep-failed`, the statistics, the stack stop, the
 signal handler and a composing parent all ask it instead of comparing statuses
-(`tests/runner/run-status-readers.test.ts` refuses a copy). After an interruption only `finalizeRun`
+(`tests/runner/run-status-readers.test.ts` refuses a copy). Reading a run has
+one owner as well, `run-record/run-read.ts`: `readRun` returns the snapshot, its
+steps reconciled with the journal when the runner died before writing what the
+journal holds, and the status a reader shows; `readRunHistory` returns the
+attempts and events only the journal records. The journal is parsed only for an
+interrupted run that still has a step pending or running: a live runner's
+snapshot is at most one write behind, and a verdict is written after every event
+of its pass. The dashboard, `--inspect`, `--logs`, `clean`, `close`, the dispatch
+loop and `--run` read through it; outside the module, only boot still opens a
+run with the stores and the projection directly
+(`tests/runner/run-read-readers.test.ts` lists each exception). After an interruption only `finalizeRun`
 still moves the run: it keeps `ABORTED` and completes the outcome, the totals
 and the snapshot, while the other transitions change neither memory nor
 snapshot. Attempt closure (`run-record/attempt-closure.ts`), cost figures
