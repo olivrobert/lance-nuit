@@ -8,7 +8,7 @@ import type { RunStateStore } from "../../model/storage-ports.js";
 import { buildPipelineContext } from "../../pipeline/context.js";
 import { loadOrCreateRun } from "../../boot/resume.js";
 import { isPersistedRunComplete, isPersistedRunResumable } from "../run-predicates.js";
-import { commandRegistries } from "../../commands/registries.js";
+import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import { writable } from "../run.js";
 
 interface SaveAtCall {
@@ -131,7 +131,7 @@ test("run-state-store: validates the integration contract", async () => {
   const runDir = join(root, "memory-run");
   const store = new MemoryRunStateStore(root);
   const context: PipelineContext = buildPipelineContext({
-    ...commandRegistries(),
+    ...builtinRegistries(),
     cwd: root,
     runnerBin: join(root, "runner.ts"),
     runnerDir: root,
@@ -185,7 +185,7 @@ test("loadOrCreateRun resumes via loadLatest for has store without extension loc
   const pipelinePath = writePipelineFixture(root);
   const store = new RequiredOnlyRunStateStore();
   const context = buildPipelineContext({
-    ...commandRegistries(),
+    ...builtinRegistries(),
     cwd: root,
     ticket: "PROJ-1",
     runnerBin: join(root, "runner.ts"),

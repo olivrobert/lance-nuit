@@ -2,6 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { RunnerArgs } from "../model/cli-options.js";
+import { composeRunnerRegistries } from "../entry/registries.js";
 import { inspectCommand } from "./diagnostics.js";
 
 /**
@@ -24,7 +25,7 @@ test("inspect: the report goes to stdout, not to stderr", async () => {
   process.chdir(mkdtempSync(`${tmpdir()}/lancenuit-inspect-`));
   let code: number;
   try {
-    code = await inspectCommand.run({ ticket: "PROJ-1" } as RunnerArgs);
+    code = await inspectCommand.run({ ticket: "PROJ-1" } as RunnerArgs, { composeRegistries: composeRunnerRegistries });
   } finally {
     process.chdir(cwd);
     stdout.mockRestore();

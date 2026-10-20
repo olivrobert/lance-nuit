@@ -8,14 +8,14 @@ import type { RunnerArgs } from "../model/cli-options.js";
 import type { PipelineConfig } from "../env/config.js";
 import type { WorktreeSpec } from "../env/worktree.js";
 import type { PipelineContext } from "../model/context.js";
-import type { RunnerRegistries } from "./extensions.js";
+import type { ComposeRegistries, RunnerRegistries } from "./extensions.js";
 
 export interface BootState {
   args: RunnerArgs;
   cwd: string;
-  /** Built-in providers composed by the entry point; the extension manifest
-   *  extends THIS pair. Boot prepares a run, it never composes one. */
-  baseRegistries: RunnerRegistries;
+  /** Supplied by the entry point and called once cwd is final, with the
+   *  configuration read there. Boot prepares a run, it never composes one. */
+  composeRegistries: ComposeRegistries;
   /** Resolved by `pipelinePathStep`; guaranteed after `runBoot`. */
   pipelinePath?: string;
   /** Set by `configStep`; guaranteed after `runBoot`. */

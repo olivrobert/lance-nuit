@@ -10,7 +10,7 @@ import { buildPipelineContext } from "../pipeline/context.js";
 import { appendRunEvent, readRunEvents, readRunJournal } from "./run-journal.js";
 import { FileRunEventStore } from "./stores/file-run-event-store.js";
 import { loadOrCreateRun } from "../boot/resume.js";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 
 class MemoryRunEventStore implements RunEventStore {
   readonly events = new Map<string, RunJournalEvent[]>();
@@ -158,7 +158,7 @@ test("run-journal: validates the integration contract", async () => {
     pipelinePath,
     `export default ({ pipeline, bashStep }) => pipeline("fixture").add(bashStep({ id: "inspect", name: "Inspect", command: "true" })).build();\n`,
   );
-  const context = buildPipelineContext({ ...commandRegistries(), cwd: root, runnerBin: pipelinePath, runnerDir: root });
+  const context = buildPipelineContext({ ...builtinRegistries(), cwd: root, runnerBin: pipelinePath, runnerDir: root });
   const calls: string[] = [];
   const stateStore = new MemoryRunStateStore(runDir, calls);
   const eventStore = new MemoryRunEventStore(calls);

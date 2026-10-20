@@ -18,14 +18,14 @@ import {
   stepOverrideFor,
 } from "./step-overrides.ts";
 import { createDefaultAgentBackendRegistry } from "../engine/default-registry.ts";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 
 /** Explicit registry: the DSL no longer falls back to the built-in composition. */
 const REGISTRY = createDefaultAgentBackendRegistry();
 
 const CONFIG = ".lance-nuit/config.json";
 /** The registry travels with the context; `applyStepOverrides` reads it from there. */
-const CONTEXT = buildPipelineContext({ ...commandRegistries(), agentBackendRegistry: REGISTRY });
+const CONTEXT = buildPipelineContext({ ...builtinRegistries(), agentBackendRegistry: REGISTRY });
 
 beforeEach(clearCapabilityCache);
 
@@ -53,7 +53,7 @@ function projectWithSkill(name: string, frontmatter: string): PipelineContext {
   mkdirSync(join(dir, ".claude", "skills", name), { recursive: true });
   writeFileSync(join(dir, ".claude", "skills", name, "SKILL.md"), `---\nname: ${name}\n${frontmatter}---\n\ncorps\n`);
   return buildPipelineContext({
-    ...commandRegistries(),
+    ...builtinRegistries(),
     cwd: dir,
     runnerDir: join(dir, "kit", "lance-nuit", "runner"),
   });
@@ -223,7 +223,7 @@ test("checkStepOverrides: one generic key reaching N steps reports once", () => 
 
 test("stepCapability: validates the contract", () => {
   const step = claudeStep("spec", { command: (ctx) => `/pipeline-spec ${ctx.ticket}` });
-  expect(stepCapability(step, buildPipelineContext({ ...commandRegistries(), cwd: process.cwd() }))).toEqual({
+  expect(stepCapability(step, buildPipelineContext({ ...builtinRegistries(), cwd: process.cwd() }))).toEqual({
     kind: "skill",
     name: "pipeline-spec",
   });
@@ -246,7 +246,7 @@ test("stepCapability: a rejecting async command imposes no capability and leaks 
         throw new Error("branch.json not found");
       },
     });
-    expect(stepCapability(step, buildPipelineContext({ ...commandRegistries(), cwd: process.cwd() }))).toBeUndefined();
+    expect(stepCapability(step, buildPipelineContext({ ...builtinRegistries(), cwd: process.cwd() }))).toBeUndefined();
     // Drain the microtask queue: an adopted rejection settles here, an orphan one
     // reaches the process handler.
     await new Promise((resolve) => setTimeout(resolve, 10));

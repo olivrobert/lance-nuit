@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { PipelineContext } from "../src/model/context.js";
 import type { Pipeline } from "../src/model/definition.js";
 import type { Run } from "../src/run-record/run.js";
-import { commandRegistries } from "../src/commands/registries.js";
+import { builtinRegistries } from "../tests/builtin-registries.ts";
 import { buildPipelineContext } from "../src/pipeline/context.js";
 import { createProjectDsl } from "../src/pipeline/loader.js";
 import { finalizeRun } from "../src/run-record/run-transitions.js";
@@ -52,7 +52,7 @@ async function execute(def: Pipeline, context: PipelineContext, ticket: string):
 
 test("generic shell example has no optional integration command", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pipeline-example-generic-"));
-  const context = buildPipelineContext({ ...commandRegistries(), cwd, ticket: "build-42" });
+  const context = buildPipelineContext({ ...builtinRegistries(), cwd, ticket: "build-42" });
   const def = genericShell(createProjectDsl(context, cwd));
   expect(def.steps).toHaveLength(1);
   expect(String(def.steps[0]?.command)).not.toMatch(/acli|glab|docker/i);
@@ -69,7 +69,7 @@ test("Jira example runs against a fake acli without network", async () => {
   );
   chmodSync(acli, 0o755);
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
-  const context = buildPipelineContext({ ...commandRegistries(), cwd, ticket: "DEMO-123" });
+  const context = buildPipelineContext({ ...builtinRegistries(), cwd, ticket: "DEMO-123" });
   const def = jiraAcli(createProjectDsl(context, join(import.meta.dir, "jira-acli")));
   const run = await execute(def, context, "DEMO-123");
   expect(run.status).toBe("PASS");
@@ -86,7 +86,7 @@ test("GitLab example runs against a fake glab without network", async () => {
   chmodSync(glab, 0o755);
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.FAKE_GLAB_LOG = log;
-  const context = buildPipelineContext({ ...commandRegistries(), cwd, ticket: "delivery-42" });
+  const context = buildPipelineContext({ ...builtinRegistries(), cwd, ticket: "delivery-42" });
   const def = gitlabGlab(createProjectDsl(context, join(import.meta.dir, "gitlab-glab")));
   const run = await execute(def, context, "delivery-42");
   expect(run.status).toBe("PASS");

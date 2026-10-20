@@ -4,20 +4,19 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ComposeRegistries } from "../boot/extensions.js";
 import { backendSpecForStep } from "../contracts/backends.js";
 import { isPipelineName, resolveBuiltinPipeline } from "../env/builtin-pipeline.js";
 import { capabilityAxes, capabilityRoots } from "../env/capability-frontmatter.js";
 import type { PipelineContext } from "../model/context.js";
 import type { Pipeline, PipelineStep } from "../model/definition.js";
-import { buildPipelineContext } from "../pipeline/context.js";
 import { loadPipelineDefinition } from "../pipeline/loader.js";
 import type { RunnerArgs } from "../model/cli-options.js";
 import { log } from "../runtime/logging.js";
 import { stepCapability } from "../validation/step-overrides.js";
-import type { RunnerCommand } from "./runner-command.js";
+import type { CommandEnvironment, RunnerCommand } from "./runner-command.js";
 import { pipelineNotFoundError } from "./pipeline-reference.js";
-import { commandRegistries } from "./registries.js";
-import { errorMessage } from "./shared.js";
+import { contextWithProjectProviders, errorMessage } from "./shared.js";
 
 /** The single option `--lint-pipeline` reads; the parser guarantees it is set. */
 type LintPipelineArgs = Pick<RunnerArgs, "pipelinePath">;
@@ -94,23 +93,27 @@ export function lintPipelineDefinition(
   };
 }
 
-/** Load and validate a pipeline through the same loader used by a run. */
-export async function lintPipeline(
-  reference: string,
-  options: { cwd?: string; context?: PipelineContext } = {},
-): Promise<PipelineLintReport> {
+/** The caller's own context, or the registries to compose one like a run's. */
+export type PipelineLintOptions = { readonly cwd?: string } & (
+  | { readonly context: PipelineContext }
+  | { readonly composeRegistries: ComposeRegistries }
+);
+
+/** Load and validate a pipeline through the same loader, with the same providers, as a run. */
+export async function lintPipeline(reference: string, options: PipelineLintOptions): Promise<PipelineLintReport> {
   const cwd = options.cwd ?? process.cwd();
   let source = reference;
   try {
     source = resolvePipelineForLint(reference, cwd);
+    // Composed inside the try: a manifest that cannot load is reported as a load finding.
     const context =
-      options.context ??
-      buildPipelineContext({
-        cwd,
-        ticket: LINT_TICKET,
-        runnerDir: RUNNER_DIR,
-        ...commandRegistries(),
-      });
+      "context" in options
+        ? options.context
+        : await contextWithProjectProviders(options.composeRegistries, {
+            cwd,
+            ticket: LINT_TICKET,
+            runnerDir: RUNNER_DIR,
+          });
     const pipeline = await loadPipelineDefinition(source, context);
     return lintPipelineDefinition(pipeline, context, source);
   } catch (error) {
@@ -178,8 +181,10 @@ export const lintPipelineCommand: RunnerCommand = {
   flag: "--lint-pipeline",
   key: "lintPipeline",
   desc: "Load and validate a pipeline, then display its steps without starting a run.",
-  async run(args: LintPipelineArgs): Promise<number> {
-    const formatted = formatPipelineLintReport(await lintPipeline(args.pipelinePath!));
+  async run(args: LintPipelineArgs, environment: CommandEnvironment): Promise<number> {
+    const formatted = formatPipelineLintReport(
+      await lintPipeline(args.pipelinePath!, { composeRegistries: environment.composeRegistries }),
+    );
     log(formatted.text);
     return formatted.exitCode;
   },

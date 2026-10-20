@@ -11,7 +11,7 @@ import { loadOrCreateRun } from "../boot/resume.js";
 import { pendingSteps, resumeDecision } from "./run-predicates.js";
 import { diagnoseRunSnapshot, isRunSnapshot, readRunSnapshot } from "./run-snapshot.js";
 import { resolveRunDir } from "./stores/run-storage.js";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 
 const FIXTURES = fileURLToPath(new URL("../../tests/fixtures/state/", import.meta.url));
 
@@ -78,7 +78,7 @@ test("run snapshot fixtures: a real resume through loadOrCreateRun reads a snaps
   .add(actionStep({ id: "tests", name: "tests", run: () => {}, describe: "c" }))
   .build();`,
   );
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: root, ticket: "QUALITY" });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "QUALITY" });
   const dir = resolveRunDir("quality", "QUALITY", undefined, true, ctx);
   writeSnapshot(dir, raw);
 

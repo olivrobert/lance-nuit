@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { parseRunnerArgs } from "../cli/parse.js";
+import { composeRunnerRegistries } from "../entry/registries.js";
 import { setLogInterceptor } from "../runtime/logging.js";
 import { aggregateHistory, type HistoryEntry } from "../run-stats/history-reader.js";
 import { COMMANDS } from "./command.js";
@@ -102,7 +103,11 @@ test("stats: an invalid --since is refused before any history is read", () => {
     return true;
   }) as typeof process.stderr.write;
   try {
-    expect(statsCommand.run(parseRunnerArgs(["--stats", "--since", "yesterday"]))).toBe(1);
+    expect(
+      statsCommand.run(parseRunnerArgs(["--stats", "--since", "yesterday"]), {
+        composeRegistries: composeRunnerRegistries,
+      }),
+    ).toBe(1);
   } finally {
     process.stderr.write = original;
     setLogInterceptor(undefined);

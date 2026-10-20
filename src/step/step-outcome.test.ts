@@ -11,7 +11,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { commandRegistries } from "../commands/registries.ts";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import type { AgentSession } from "../contracts/backends.ts";
 import { artifact } from "../dsl/artifact.ts";
 import type { StepResult } from "../exec/runners.ts";
@@ -296,7 +296,7 @@ function refusedCaptureInput(
     run,
     step,
     command: "triage the ticket",
-    baseCtx: buildPipelineContext({ ...commandRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
+    baseCtx: buildPipelineContext({ ...builtinRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
     budget: { cumulative: state.cumulative ?? 0 },
     abort: createAbortScope(),
     // What `runAttempt` returns for the refused initial attempt: the command

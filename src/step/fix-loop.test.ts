@@ -13,7 +13,7 @@ import { buildFixContext, type FixLoopDeps, runFixLoop } from "./fix-loop.ts";
 import { chooseFixBackend } from "./fix-loop-runtime.ts";
 import { makeRunStep } from "../run-record/run-step.ts";
 import { executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import { createAbortScope } from "../runtime/abort.js";
 import { NULL_RUN_OUTPUT, type RunOutput } from "../runtime/run-output.js";
 
@@ -47,7 +47,7 @@ function fakeBackendFactory(id: string, opts: { sizeKb?: number; resume?: boolea
 }
 
 const baseCtx: PipelineContext = buildPipelineContext({
-  ...commandRegistries(),
+  ...builtinRegistries(),
   cwd: ".",
   runnerBin: "",
   runnerDir: "",
@@ -155,7 +155,7 @@ test("runner failure reason precedes extracted errors: validates the contract", 
 
 test("buildFixContext keeps the work-item gateway lazy", () => {
   const context = buildPipelineContext({
-    ...commandRegistries(),
+    ...builtinRegistries(),
     config: {
       ...baseCtx.config,
       workItem: { ...baseCtx.config.workItem, provider: "provider-qui-nexiste-pas" as never },

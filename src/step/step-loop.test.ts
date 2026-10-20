@@ -32,7 +32,7 @@ import { isPersistedRunResumable, pendingSteps } from "../run-record/run-predica
 import { readRunSnapshot } from "../run-record/run-snapshot.ts";
 import { makeRunStep, type StepStateInput } from "../run-record/run-step.ts";
 import { admitStep, buildContext, executeRunSteps, resolveOutcome, type StepLoopDeps } from "./step-loop.ts";
-import { commandRegistries } from "../commands/registries.js";
+import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import { createAbortScope } from "../runtime/abort.js";
 import { humanReview } from "../builtin-steps/lib/human-review.js";
 import { bashStep as dslBashStep, pipeline } from "../dsl.js";
@@ -210,7 +210,7 @@ test("executeRunSteps: a transport failure before the first usage event does not
     { ok: true, stats: { duration_ms: 5, total_cost_usd: 0.5 } },
   ]);
 
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: run.run_dir });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: run.run_dir });
   const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps, ctx);
 
   expect(calls.ids).toEqual(["implement", "implement", "after"]);
@@ -1217,7 +1217,7 @@ test("step-loop: validates the integration contract", async () => {
 
 /** Agent steps resolve their backend on the context: the registry is explicit,
  * nothing falls back to the built-in composition. */
-const agentContext = () => buildPipelineContext({ ...commandRegistries(), cwd: "." });
+const agentContext = () => buildPipelineContext({ ...builtinRegistries(), cwd: "." });
 
 const ticketArtifact = textArtifact("ticket.md");
 const specArtifact = textArtifact("spec.md");
@@ -1244,7 +1244,7 @@ function artifactContext(initial: Record<string, string> = {}): {
   };
   return {
     values,
-    ctx: buildPipelineContext({ ...commandRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
+    ctx: buildPipelineContext({ ...builtinRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
   };
 }
 
@@ -1550,7 +1550,7 @@ test("step-loop: an agent step timeout kills the process tree, closes the attemp
   );
   const next = bashStep("after", "echo never");
   const run = makeRun([agent, next]);
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: dir });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: dir });
   const { deps, fixCalls } = realSpawnDeps();
 
   const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps, ctx);
@@ -1677,7 +1677,7 @@ test("executeRunSteps: a retry withheld for unaccounted spend is journaled once 
     { ok: false, failReason: "assertion failed", stats: { duration_ms: 5, output_tokens: 1100 } },
   ]);
 
-  const ctx = buildPipelineContext({ ...commandRegistries(), cwd: run.run_dir });
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: run.run_dir });
   const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps, ctx);
 
   expect(calls.ids).toEqual(["implement"]);
@@ -1779,7 +1779,7 @@ function reworkContext(initial: Record<string, string>) {
   return {
     values,
     ctx: buildPipelineContext({
-      ...commandRegistries(),
+      ...builtinRegistries(),
       cwd: mkdtempSync(join(tmpdir(), "rework-")),
       ticket: "PROJ-1",
       artifacts: ctx.artifacts,
