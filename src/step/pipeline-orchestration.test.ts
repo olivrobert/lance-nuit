@@ -15,6 +15,7 @@ import { readRunSnapshot } from "../run-record/run-snapshot.js";
 import { pipelineRunsDir } from "../run-record/stores/run-storage.js";
 import { createAbortScope } from "../runtime/abort.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
+import { childContext } from "./pipeline-orchestration-resolution.js";
 import { executeRunSteps, stepLoopDeps } from "./step-loop.js";
 import { writable } from "../run-record/run.js";
 
@@ -1960,4 +1961,15 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a composed pipeline runs where its parent runs: in the worktree when the parent does", () => {
+  const parent = buildPipelineContext({
+    cwd: tmpdir(),
+    ticket: "P-01",
+    worktree: true,
+    agentBackendRegistry: REGISTRY,
+  });
+
+  expect(childContext(parent, "P-01").worktree).toBe(true);
 });

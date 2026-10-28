@@ -136,6 +136,7 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) =
       cwd: context.cwd,
       ticket: args.ticket,
       baseBranch: args.baseBranch,
+      worktree: context.worktree,
       runnerBin: context.runnerBin,
       runnerDir: context.runnerDir,
       config: { ...context.config, specPath: run.specPath ?? context.config.specPath },

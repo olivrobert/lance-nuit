@@ -136,6 +136,7 @@ export function childContext(parent: PipelineContext, ticket?: string, lot?: Pip
     ticket,
     lot,
     baseBranch: parent.baseBranch,
+    worktree: parent.worktree,
     runnerBin: parent.runnerBin,
     runnerDir: parent.runnerDir,
     config: parent.config,

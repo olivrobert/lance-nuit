@@ -57,7 +57,9 @@ When `approval` is present, the note displays `lancenuit run <ticket> --pipeline
 feature --approve triage`; `feature` comes from `pipeline("feature")`, so renaming
 the pipeline does not require changing the review declaration. That single command
 records the decision and resumes the run — only the `approve` subcommand (which
-forces `--approve-only`) writes the decision without running anything.
+forces `--approve-only`) writes the decision without running anything. A run
+started with `--worktree` is offered the command with `--worktree`, to type from
+the main clone: a resume without it would move the run out of its worktree.
 
 ### Approval by verdict
 

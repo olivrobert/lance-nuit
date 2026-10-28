@@ -26,6 +26,7 @@ export interface BuildPipelineContextOptions {
   cwd?: string;
   ticket?: string;
   baseBranch?: string;
+  worktree?: boolean;
   runnerBin?: string;
   runnerDir?: string;
   config?: PipelineConfig;
@@ -112,6 +113,7 @@ export function buildPipelineContext(opts: BuildPipelineContextOptions = {}): Pi
     ticketDir,
     lot: opts.lot,
     baseBranch: opts.baseBranch,
+    worktree: opts.worktree,
     runnerBin,
     runnerDir: opts.runnerDir ?? dirname(runnerBin),
     config,
