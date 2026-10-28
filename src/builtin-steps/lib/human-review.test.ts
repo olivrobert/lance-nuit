@@ -15,7 +15,7 @@ import type { ArtifactRef, WorkItemArtifactStore } from "../../model/artifact-po
 import type { PipelineContext } from "../../model/context.js";
 import type { PipelineStep } from "../../model/definition.js";
 import { createFakeWorkItemGateway } from "../../modules/work-item/fake.js";
-import { buildPipelineContext } from "../../pipeline/context.js";
+import { buildPipelineContext, deriveContext } from "../../pipeline/context.js";
 import { checkInputs } from "../../step/step-admission.js";
 import { humanReview } from "./human-review.js";
 
@@ -219,6 +219,16 @@ test("stop message: unlock command derives from subject, ticket, and pipeline", 
   );
 });
 
+test("stop message: a run in its worktree is lifted by a command that keeps it there", async () => {
+  const steps = build({ approval: { subject: "sujet" } });
+  const { ctx } = fixture({ blocked: true });
+
+  const gate = await admit(stepOf(steps, "demo-gate"), deriveContext(ctx, { worktree: true }));
+  expect(gate.action === "pass" ? "" : gate.reason).toBe(
+    'escalated: blocking verdict — lift with "lancenuit run PROJ-1 --pipeline test --approve sujet --worktree"',
+  );
+});
+
 test("the gate describes its stop: subject, expected recovery, undecorated reason", async () => {
   const steps = build({ approval: { subject: "sujet" } });
   const { ctx } = fixture({ blocked: true });
@@ -296,6 +306,24 @@ test("note closes with approval command derived from the gate subject", async ()
   // No escalation template writes this command: it comes from the subject actually
   // declared by the gate and remains correct after a rename.
   expect(body).toContain("Approve : lancenuit run PROJ-1 --pipeline test --approve sujet");
+});
+
+test("note: a run in its worktree is approved by a command that keeps it there", async () => {
+  const gateway = createFakeWorkItemGateway({ items: [{ ref: TICKET, queues: ["featureTodo"], state: "todo" }] });
+  const { ctx: base } = fixture({ blocked: true });
+  const ctx = buildPipelineContext({
+    cwd: base.cwd,
+    ticket: TICKET,
+    worktree: true,
+    artifacts: base.artifacts,
+    workItem: gateway,
+  });
+
+  await stepOf(build({ approval: { subject: "sujet" } }), "escalate-demo").action!(ctx);
+
+  expect(gateway.bodiesOf(TICKET)[0]!).toContain(
+    "Approve : lancenuit run PROJ-1 --pipeline test --approve sujet --worktree",
+  );
 });
 
 test("without approval declared: no command promised to the human", async () => {

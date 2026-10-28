@@ -42,6 +42,9 @@ export interface PipelineContext {
   ticketDir?: string;
   /** Base branch passed through --base-branch. */
   baseBranch?: string;
+  /** True when the run executes in its ticket worktree (`--worktree`). A command
+   *  that resumes the run must repeat it: every resume rewrites the run location. */
+  worktree?: boolean;
   /** Current batch when a feature pipeline runs a bounded sub-run. */
   lot?: PipelineLot;
   /** Absolute path to runner.ts (process.argv[1]). */
