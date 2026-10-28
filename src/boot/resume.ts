@@ -151,6 +151,7 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
             cwd: buildContext.cwd,
             ticket,
             baseBranch: buildContext.baseBranch,
+            worktree: buildContext.worktree,
             runnerBin: buildContext.runnerBin,
             runnerDir: buildContext.runnerDir,
             config: { ...buildContext.config, specPath: saved.specPath ?? DEFAULT_SPEC_PATH },

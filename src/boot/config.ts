@@ -18,6 +18,7 @@ export const configStep: BootStep = {
     const context = buildPipelineContext({
       ticket: s.args.ticket,
       baseBranch: s.args.baseBranch,
+      worktree: s.worktreeMode,
       config,
       workItemRegistry: registries.workItems,
       agentBackendRegistry: registries.backends,

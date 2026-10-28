@@ -138,9 +138,12 @@ export interface HumanReviewOptions<T> {
 }
 
 /** Unlock command for the human to type. Derived from the subject actually declared
- *  by the gate, so no escalation template writes it and survives a rename wrongly. */
-function approveCommand(subject: string, ticket: string | undefined, pipelineName: string): string {
-  return `lancenuit run ${ticket ?? "<ticket>"} --pipeline ${pipelineName} --approve ${subject}`;
+ *  by the gate, so no escalation template writes it and survives a rename wrongly.
+ *  It resumes the run, so it repeats `--worktree`: a resume without it would move a
+ *  worktree run into the checkout it is typed from. */
+function approveCommand(subject: string, ticket: string | undefined, pipelineName: string, worktree: boolean): string {
+  const location = worktree ? " --worktree" : "";
+  return `lancenuit run ${ticket ?? "<ticket>"} --pipeline ${pipelineName} --approve ${subject}${location}`;
 }
 
 /** Rejection command for the human to type; the reason placeholder is theirs to write. */
@@ -162,12 +165,13 @@ function withReviewFields(
   subject: string | undefined,
   ticket: string | undefined,
   pipelineName: string,
+  worktree: boolean,
   reworkable: boolean,
 ): WorkItemNote {
   const at = note.fields.findIndex((existing) => existing.label === "State");
   const fields = [...note.fields];
   fields.splice(at < 0 ? fields.length : at, 0, { label: "Type", value: KIND_LABEL[kind] });
-  if (subject) fields.push({ label: "Approve", value: approveCommand(subject, ticket, pipelineName) });
+  if (subject) fields.push({ label: "Approve", value: approveCommand(subject, ticket, pipelineName, worktree) });
   if (subject && reworkable) fields.push({ label: "Reject", value: rejectCommand(subject, ticket, pipelineName) });
   return { ...note, fields };
 }
@@ -199,7 +203,9 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
   // is renamed, without copying the name into every review declaration.
   let gate: ActionStepBuilder;
   const approvalCommand = (subject: string | undefined, ctx: PipelineContext): string | undefined =>
-    subject ? approveCommand(subject, ctx.ticket, inferredPipelineName(gate) ?? failPipelineName()) : undefined;
+    subject
+      ? approveCommand(subject, ctx.ticket, inferredPipelineName(gate) ?? failPipelineName(), ctx.worktree === true)
+      : undefined;
   /** Console hint naming every way out the gate accepts for `subject`. `--approve`
    *  on a run records the decision AND resumes: there is no second command to type. */
   const liftHint = (subject: string | undefined, ctx: PipelineContext): string => {
@@ -290,6 +296,7 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
               await offeredSubject(value, ctx),
               ctx.ticket,
               inferredPipelineName(gate) ?? failPipelineName(),
+              ctx.worktree === true,
               reworkable,
             ),
           // Replay is safe: the note's execution key dedupes it and the move is
