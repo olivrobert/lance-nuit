@@ -1,5 +1,8 @@
-import { describe, expect, it } from "bun:test";
-import { adfToMarkdown } from "./index.js";
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { adfToMarkdown, resolveAdfConverter } from "./index.js";
 
 describe("jira gateway — internal ADF conversion", () => {
   it("headings, marks, links, and inline code", () => {
@@ -224,5 +227,28 @@ describe("jira gateway — internal ADF conversion", () => {
     expect(adfToMarkdown(doc)).toBe("info");
     expect(adfToMarkdown(undefined)).toBe("");
     expect(adfToMarkdown({ type: "doc" })).toBe("");
+  });
+});
+
+describe("jira gateway — ADF converter resolution", () => {
+  const originalPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  afterEach(() => {
+    if (originalPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+    else process.env.CLAUDE_PLUGIN_ROOT = originalPluginRoot;
+  });
+
+  it("ignores a converter script found under CLAUDE_PLUGIN_ROOT", () => {
+    const root = mkdtempSync(join(tmpdir(), "adf-plugin-root-"));
+    mkdirSync(join(root, "scripts"));
+    writeFileSync(join(root, "scripts", "adf-to-markdown.py"), "#!/usr/bin/env python3\n");
+    process.env.CLAUDE_PLUGIN_ROOT = root;
+    expect(resolveAdfConverter()).toBeUndefined();
+  });
+
+  it("keeps an explicit converter that exists, drops one that does not", () => {
+    const script = join(mkdtempSync(join(tmpdir(), "adf-explicit-")), "convert.py");
+    writeFileSync(script, "#!/usr/bin/env python3\n");
+    expect(resolveAdfConverter(script)).toBe(script);
+    expect(resolveAdfConverter(join(tmpdir(), "adf-absent", "convert.py"))).toBeUndefined();
   });
 });
