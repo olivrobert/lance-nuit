@@ -193,6 +193,34 @@ describe("jira gateway — reading a ticket", () => {
     expect(item.description).toBe("## Contexte\n\nL'export plante en prod.");
   });
 
+  it("ADF table and expand title reach the fetched description (internal fallback)", async () => {
+    const cell = (text: string, type = "tableCell") => ({
+      type,
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+    });
+    const description = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            { type: "tableRow", content: [cell("Id", "tableHeader"), cell("Decision", "tableHeader")] },
+            { type: "tableRow", content: [cell("R-1"), cell("FIX")] },
+          ],
+        },
+        {
+          type: "expand",
+          attrs: { title: "Technical notes" },
+          content: [{ type: "paragraph", content: [{ type: "text", text: "See the repository class" }] }],
+        },
+      ],
+    };
+    const { gateway } = harness([{ key: "PROJ-24", description }]);
+    expect((await gateway.fetch("PROJ-24")).description).toBe(
+      "| Id | Decision |\n| --- | --- |\n| R-1 | FIX |\n\n**Technical notes**\n\nSee the repository class",
+    );
+  });
+
   it("text description → kept as is", async () => {
     const { gateway } = harness([{ key: "PROJ-24", description: "Texte simple\n" }]);
     expect((await gateway.fetch("PROJ-24")).description).toBe("Texte simple");
