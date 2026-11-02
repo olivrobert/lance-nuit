@@ -131,6 +131,55 @@ function listItemToMarkdown(node: AdfNode, indent: number, ordered = false, inde
   return parts.join("\n");
 }
 
+/**
+ * A Markdown table row holds one line, so a cell's blocks (several paragraphs, a
+ * list) are joined with `<br>`; `|` is escaped because it would otherwise end
+ * the cell, even inside inline code.
+ */
+function tableCellToMarkdown(node: AdfNode, indent: number): string {
+  return nodesOf(node.content)
+    .map((child) => adfToMarkdown(child, indent).trim())
+    .filter((part) => part.length > 0)
+    .join("<br>")
+    .replace(/\n/g, "<br>")
+    .replace(/\|/g, "\\|");
+}
+
+function tableRowCells(row: AdfNode, indent: number): string[] {
+  return nodesOf(row.content).flatMap((cell) => {
+    // A merged cell still occupies its columns: without the padding every cell
+    // after it would shift left under the wrong header.
+    const span = attrsOf(cell).colspan;
+    const padding = typeof span === "number" && span > 1 ? Array<string>(span - 1).fill("") : [];
+    return [tableCellToMarkdown(cell, indent), ...padding];
+  });
+}
+
+function isHeaderRow(row: AdfNode): boolean {
+  const cells = nodesOf(row.content);
+  return cells.length > 0 && cells.every((cell) => cell.type === "tableHeader");
+}
+
+function tableToMarkdown(node: AdfNode, indent: number): string {
+  const rows = nodesOf(node.content).filter((row) => row.type === "tableRow");
+  if (rows.length === 0) return "";
+  const [first, ...rest] = rows as [AdfNode, ...AdfNode[]];
+  const header = isHeaderRow(first) ? tableRowCells(first, indent) : [];
+  const body = (header.length > 0 ? rest : rows).map((row) => tableRowCells(row, indent));
+  const width = Math.max(1, header.length, ...body.map((cells) => cells.length));
+  // GFM has no headerless table: an empty header row keeps the first data row
+  // from being promoted to column titles it never was.
+  const line = (cells: string[]): string =>
+    `| ${Array.from({ length: width }, (_, column) => cells[column] ?? "").join(" | ")} |`;
+  return [line(header), `| ${Array<string>(width).fill("---").join(" | ")} |`, ...body.map(line)].join("\n");
+}
+
+function expandToMarkdown(node: AdfNode, indent: number): string {
+  const title = attrsOf(node).title;
+  const heading = typeof title === "string" && title.trim() ? `**${title.trim()}**` : "";
+  return [heading, blocksOf(node, indent)].filter((part) => part.length > 0).join("\n\n");
+}
+
 export function adfToMarkdown(node: unknown, indent = 0): string {
   if (typeof node === "string") return node;
   if (!node || typeof node !== "object") return "";
@@ -174,6 +223,11 @@ export function adfToMarkdown(node: unknown, indent = 0): string {
         .join("\n");
     case "rule":
       return "---";
+    case "table":
+      return tableToMarkdown(current, indent);
+    case "expand":
+    case "nestedExpand":
+      return expandToMarkdown(current, indent);
     case "mediaSingle":
     case "media":
       return "";

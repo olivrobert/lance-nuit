@@ -85,6 +85,128 @@ describe("jira gateway — internal ADF conversion", () => {
     expect(adfToMarkdown(doc)).toBe("- [ ] parent\n  - child\n  - [x] sub");
   });
 
+  describe("tables", () => {
+    const paragraph = (...content: unknown[]) => ({ type: "paragraph", content });
+    const text = (value: string, marks?: unknown[]) => ({ type: "text", text: value, ...(marks ? { marks } : {}) });
+    const cell = (value: string, type = "tableCell") => ({ type, content: [paragraph(text(value))] });
+    const row = (...cells: unknown[]) => ({ type: "tableRow", content: cells });
+    const table = (...rows: unknown[]) => ({ type: "doc", content: [{ type: "table", content: rows }] });
+
+    it("header row and data rows keep their rows and columns", () => {
+      const doc = table(
+        row(cell("Id", "tableHeader"), cell("Rule", "tableHeader"), cell("Decision", "tableHeader")),
+        row(cell("R-1"), cell("Sorting by name fails"), cell("FIX")),
+        row(cell("R-2"), cell("Export is slow"), cell("WONTFIX")),
+      );
+      expect(adfToMarkdown(doc)).toBe(
+        [
+          "| Id | Rule | Decision |",
+          "| --- | --- | --- |",
+          "| R-1 | Sorting by name fails | FIX |",
+          "| R-2 | Export is slow | WONTFIX |",
+        ].join("\n"),
+      );
+    });
+
+    it("inline marks, links, and code survive inside cells", () => {
+      const doc = table(
+        row(cell("Case", "tableHeader"), cell("Check", "tableHeader")),
+        row(
+          { type: "tableCell", content: [paragraph(text("bold", [{ type: "strong" }]))] },
+          {
+            type: "tableCell",
+            content: [
+              paragraph(
+                text("run", [{ type: "code" }]),
+                text(" then "),
+                text("docs", [{ type: "link", attrs: { href: "https://x.test/d" } }]),
+              ),
+            ],
+          },
+        ),
+      );
+      expect(adfToMarkdown(doc)).toBe(
+        "| Case | Check |\n| --- | --- |\n| **bold** | `run` then [docs](https://x.test/d) |",
+      );
+    });
+
+    it("pipes are escaped, even inside inline code", () => {
+      const doc = table(
+        row(cell("Expr", "tableHeader")),
+        row({ type: "tableCell", content: [paragraph(text("a|b"), text(" "), text("x || y", [{ type: "code" }]))] }),
+      );
+      expect(adfToMarkdown(doc)).toBe("| Expr |\n| --- |\n| a\\|b `x \\|\\| y` |");
+    });
+
+    it("several paragraphs, a hard break, or a list stay on the cell's row", () => {
+      const list = {
+        type: "bulletList",
+        content: [
+          { type: "listItem", content: [paragraph(text("one"))] },
+          { type: "listItem", content: [paragraph(text("two"))] },
+        ],
+      };
+      const doc = table(
+        row(cell("Notes", "tableHeader"), cell("Steps", "tableHeader")),
+        row(
+          {
+            type: "tableCell",
+            content: [paragraph(text("first")), paragraph(text("line"), { type: "hardBreak" }, text("break"))],
+          },
+          { type: "tableCell", content: [list] },
+        ),
+      );
+      expect(adfToMarkdown(doc)).toBe("| Notes | Steps |\n| --- | --- |\n| first<br>line<br>break | - one<br>- two |");
+    });
+
+    it("first row without header cells → empty header row, the data stays data", () => {
+      const doc = table(row(cell("R-1"), cell("FIX")), row(cell("R-2"), cell("KEEP")));
+      expect(adfToMarkdown(doc)).toBe("|  |  |\n| --- | --- |\n| R-1 | FIX |\n| R-2 | KEEP |");
+    });
+
+    it("header column only (first cell of each row) is not a header row", () => {
+      const doc = table(row(cell("Id", "tableHeader"), cell("R-1")), row(cell("Rule", "tableHeader"), cell("Sort")));
+      expect(adfToMarkdown(doc)).toBe("|  |  |\n| --- | --- |\n| Id | R-1 |\n| Rule | Sort |");
+    });
+
+    it("uneven rows, empty cells, and merged cells keep every row as wide as the table", () => {
+      const doc = table(
+        row(cell("A", "tableHeader"), cell("B", "tableHeader"), cell("C", "tableHeader")),
+        row(cell("1")),
+        row({ type: "tableCell", attrs: { colspan: 2 }, content: [paragraph(text("wide"))] }, cell("3")),
+        row({ type: "tableCell", content: [] }, cell("y"), cell("z")),
+      );
+      expect(adfToMarkdown(doc)).toBe(
+        ["| A | B | C |", "| --- | --- | --- |", "| 1 |  |  |", "| wide |  | 3 |", "|  | y | z |"].join("\n"),
+      );
+    });
+
+    it("table without rows → nothing", () => {
+      expect(adfToMarkdown({ type: "doc", content: [{ type: "table", content: [] }] })).toBe("");
+    });
+  });
+
+  it("expand and nested expand keep their title before their content", () => {
+    const paragraph = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+    const doc = {
+      type: "doc",
+      content: [
+        {
+          type: "expand",
+          attrs: { title: "Technical notes" },
+          content: [
+            paragraph("See the repository class"),
+            { type: "nestedExpand", attrs: { title: "Out of scope" }, content: [paragraph("The export")] },
+          ],
+        },
+        { type: "expand", attrs: { title: "" }, content: [paragraph("untitled")] },
+      ],
+    };
+    expect(adfToMarkdown(doc)).toBe(
+      "**Technical notes**\n\nSee the repository class\n\n**Out of scope**\n\nThe export\n\nuntitled",
+    );
+  });
+
   it("unknown block node keeps its children separated", () => {
     const paragraph = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
     const doc = {
