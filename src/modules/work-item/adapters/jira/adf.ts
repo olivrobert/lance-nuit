@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 
 const BLOCK_TYPES = new Set([
   "blockquote",
@@ -235,12 +234,11 @@ export function adfToMarkdown(node: unknown, indent = 0): string {
       return holdsBlocks(current) ? blocksOf(current, indent) : inlineOf(current, indent);
   }
 }
+/**
+ * Only an explicitly passed converter replaces the internal one. A script picked
+ * up from the environment made the output depend on what happened to be
+ * installed, and a run could not tell which converter it got.
+ */
 export function resolveAdfConverter(explicit?: string): string | undefined {
-  if (explicit) return existsSync(explicit) ? explicit : undefined;
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  return pluginRoot
-    ? existsSync(join(pluginRoot, "scripts", "adf-to-markdown.py"))
-      ? join(pluginRoot, "scripts", "adf-to-markdown.py")
-      : undefined
-    : undefined;
+  return explicit && existsSync(explicit) ? explicit : undefined;
 }

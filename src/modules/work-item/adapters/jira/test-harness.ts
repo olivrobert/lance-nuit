@@ -45,8 +45,7 @@ export const LABELS: PipelineLabels = {
 const QUEUE_OF_LABEL = inverseStringMap(LABELS);
 const STATE_OF_STATUS = inverseStringMap({ todo: WORK_ITEM.todoState, inReview: WORK_ITEM.reviewState });
 
-/** Guaranteed-missing path that forces internal ADF conversion without depending
- * on the pipeline-jira plugin being installed. */
+/** Guaranteed-missing path: the adapter falls back to internal ADF conversion. */
 export const NO_CONVERTER = join(tmpdir(), "pipeline-adf-absent", "adf-to-markdown.py");
 
 /** Fake converter never executed because the simulator intercepts the call. It
