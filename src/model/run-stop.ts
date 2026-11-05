@@ -2,6 +2,17 @@
 // surface needs it too: a step's `when` predicate returns this shape, and pipeline
 // authors must not depend on how a run is stored.
 
+/**
+ * Exit code of a run `--until` stopped with steps left after its bound.
+ *
+ * Non-zero so that `--scan`, cron and shell scripts do not read an unfinished run
+ * as complete; distinct from 1, which every failure, budget stop and usage error
+ * already returns, so a caller can tell "stopped where asked" from "broke". 2 is
+ * avoided because shells and argument parsers use it for usage errors, 126/127
+ * for a command that cannot run, and 128+n for a signal (130, 143).
+ */
+export const UNTIL_STOP_EXIT_CODE = 3;
+
 /** Expected recovery for a clean stop, in the reader's vocabulary. The first three
  *  mirror the review kinds a `humanReview` gate declares; `blocked` is the step
  *  fail cause of the same name — an obstacle outside the code. `until` is the

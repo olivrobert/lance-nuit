@@ -63,6 +63,7 @@ function scanBaseBranch(env: DispatchEnv): string {
 export const scanStrategy: DispatchStrategy = {
   id: "scan",
   flag: "--scan",
+  isActive: (args) => args.scan,
   ticket: "forbidden",
   desc: "Discover tickets in the tracker and process them sequentially (continue on failure).",
   ticketError: "--scan does not accept a ticket (it discovers tickets in the tracker).",

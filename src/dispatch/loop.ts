@@ -12,7 +12,7 @@
 
 import { DISPATCH_CHILD_ENV, selfSpawnRunner } from "../exec/self-spawn.js";
 import type { PersistedRun } from "../model/persisted.js";
-import { UNTIL_STOP_EXIT_CODE } from "../model/cli-options.js";
+import { UNTIL_STOP_EXIT_CODE } from "../model/run-stop.js";
 import { log } from "../runtime/logging.js";
 import { isPersistedRunComplete, readLatestRun } from "../run-record/index.js";
 import { DispatchAbort } from "./abort.js";
