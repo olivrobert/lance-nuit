@@ -1,27 +1,17 @@
 // model/cli-options.ts
 //
 // CLI option METADATA: the `RunnerArgs` shape and the `FLAGS` registry that
-// describes every option. Pure data — no parsing, no I/O — so boot, dispatch and
-// commands can read the registry without pulling the parser in.
+// describes every option. Pure data — no parsing, no I/O — so boot and commands
+// can read the registry without pulling the parser in.
 //
 // Declaring an option means adding one entry here: the parsing loop
 // (`cli/parse.ts`), the help renderers and the command incompatibilities
 // (`foreignFlag`) are all DERIVED from this registry, so an option a command does
 // not claim is rejected by it without a second list. `RunnerArgs` remains
-// handwritten: it is the typed surface read by boot, dispatch, and commands.
+// handwritten: it is the typed surface read by boot and commands.
 
 import { DEFAULT_UI_PORT, UI_HOST } from "../lib/ui-defaults.js";
-
-/**
- * Exit code of a run `--until` stopped with steps left after its bound.
- *
- * Non-zero so that `--scan`, cron and shell scripts do not read an unfinished run
- * as complete; distinct from 1, which every failure, budget stop and usage error
- * already returns, so a caller can tell "stopped where asked" from "broke". 2 is
- * avoided because shells and argument parsers use it for usage errors, 126/127
- * for a command that cannot run, and 128+n for a signal (130, 143).
- */
-export const UNTIL_STOP_EXIT_CODE = 3;
+import { UNTIL_STOP_EXIT_CODE } from "./run-stop.js";
 
 export interface RunnerArgs {
   pipelinePath?: string;

@@ -2,7 +2,7 @@
 // differences in dispatch behavior instead of flattening them accidentally.
 
 import { expect, test } from "bun:test";
-import { UNTIL_STOP_EXIT_CODE } from "../model/cli-options.ts";
+import { UNTIL_STOP_EXIT_CODE } from "../model/run-stop.ts";
 import type { Pipeline } from "../model/definition.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { classifyPersistedRunOutcome, type DispatchDeps, runDispatch } from "./loop.ts";
@@ -28,6 +28,7 @@ function strategy(overrides: Partial<DispatchStrategy> = {}): DispatchStrategy {
   return {
     id: "fake",
     flag: null,
+    isActive: () => false,
     ticket: "required",
     desc: "test strategy",
     onFailure: "continue",

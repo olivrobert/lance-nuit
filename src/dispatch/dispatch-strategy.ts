@@ -46,10 +46,19 @@ export interface DispatchEnv {
   scanStore?: ScanStore;
 }
 
+/** What selecting a strategy reads from the command line, out of the options the
+ *  runner parses. */
+export interface DispatchArgs {
+  scan: boolean;
+  ticket?: string;
+}
+
 export interface DispatchStrategy {
   id: string;
   /** CLI flag that activates it, or null for automatic detection. */
   flag: string | null;
+  /** Whether this invocation asks for it. */
+  isActive(args: DispatchArgs): boolean;
   /** Positional ticket: required or forbidden when the strategy discovers it. */
   ticket: "required" | "forbidden";
   desc: string;

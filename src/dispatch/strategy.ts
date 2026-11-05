@@ -12,8 +12,7 @@
 
 import type { PipelineContext } from "../model/context.js";
 import type { Pipeline } from "../model/definition.js";
-import { flagSpec, type RunnerArgs } from "../model/cli-options.js";
-import type { DispatchStrategy } from "./dispatch-strategy.js";
+import type { DispatchArgs, DispatchStrategy } from "./dispatch-strategy.js";
 import { scanStrategy } from "./scan.js";
 
 export { DispatchAbort } from "./abort.js";
@@ -30,7 +29,7 @@ function dispatchDisabled(env: NodeJS.ProcessEnv): boolean {
  * state, so selection belongs at this layer.
  */
 export function selectDispatch(
-  args: RunnerArgs,
+  args: DispatchArgs,
   _def: Pipeline,
   _ctx: PipelineContext,
   env: NodeJS.ProcessEnv = process.env,
@@ -45,22 +44,12 @@ export function selectDispatch(
  * Validate strategy usage before side effects such as worktree chdir or locking.
  * Return an error message, or null.
  */
-export function validateDispatchArgs(args: RunnerArgs): string | null {
+export function validateDispatchArgs(args: DispatchArgs): string | null {
   for (const strategy of DISPATCH) {
-    if (!strategy.flag) continue;
-    const active = (args as unknown as Record<string, unknown>)[flagKeyOf(strategy.flag)];
-    if (active !== true) continue;
+    if (!strategy.isActive(args)) continue;
     if (strategy.ticket === "forbidden" && args.ticket) {
       return strategy.ticketError ?? `${strategy.flag} does not accept a ticket.`;
     }
   }
   return null;
-}
-
-/** Resolve the `RunnerArgs` key for a long flag through the FLAGS registry. */
-function flagKeyOf(long: string): string {
-  const spec = flagSpec(long);
-  if (!spec)
-    throw new Error(`Dispatch strategy: flag "${long}" is missing from the FLAGS registry (model/cli-options.ts).`);
-  return spec.key;
 }
