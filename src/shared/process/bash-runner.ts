@@ -1,13 +1,17 @@
 //
 // Bash execution, progress-bar filtering, and live streaming.
 
-import { spawn } from "node:child_process";
 import { closeSync, openSync, writeSync } from "node:fs";
 import type { RunnerResult } from "../../contracts/backends.js";
 import { liveFeedFilePath } from "../runtime/live-feed.js";
-import { spawnSupervisedProcess } from "./process-runner.js";
-import { withoutRunnerInternalEnv } from "./self-spawn.js";
-import { captureProcessOutput, defaultScope, isProcessAlive, whenProcessSettled } from "./process-supervision.js";
+import {
+  describeKill,
+  killedByPolicy,
+  killedByTimeout,
+  type ProcessEnd,
+  spawnSupervisedProcess,
+} from "./process-runner.js";
+import { captureProcessOutput } from "./process-supervision.js";
 
 /** Documented default timeout for Bash steps. */
 export const DEFAULT_BASH_TIMEOUT_MS = 600_000;
@@ -44,65 +48,43 @@ export function exitCodeFailReason(code: number | null, stderr: string): string 
   return `${head}\n${clipped}`;
 }
 
-export interface AsyncBashOptions {
-  timeoutMs?: number;
+/** Bash options. `timeoutMs` follows `SupervisedSpawnOptions.timeoutMs`. */
+export interface BashOptions {
+  timeoutMs: number;
+}
+
+/** The result fields every bash run derives from how it ended. */
+function bashOutcome(end: ProcessEnd, stderr: string): Pick<RunnerResult, "ok" | "timedOut" | "failReason"> {
+  const killed = killedByPolicy(end.kill);
+  const ok = !killed && end.code === 0;
+  return {
+    ok,
+    ...(killedByTimeout(end.kill) ? { timedOut: true } : {}),
+    ...(!ok
+      ? {
+          failReason:
+            killed && end.kill ? `process killed: ${describeKill(end.kill)}` : exitCodeFailReason(end.code, stderr),
+        }
+      : {}),
+  };
 }
 
 /**
  * Asynchronous supervised bash for admissions and preflight: the runner keeps
  * handling signals during execution and kills the whole group on timeout.
  */
-export function runBashAsync(command: string, opts: AsyncBashOptions = {}): Promise<RunnerResult> {
+export async function runBashAsync(command: string, opts: BashOptions): Promise<RunnerResult> {
   const supervised = spawnSupervisedProcess("bash", ["-c", command], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: withoutRunnerInternalEnv(process.env),
     detached: true,
     timeoutMs: opts.timeoutMs,
   });
-  const child = supervised.child;
-
-  return new Promise<RunnerResult>((resolve, reject) => {
-    let finalized = false;
-    let killedForCleanup = false;
-    const captured = captureProcessOutput(child);
-
-    const finish = async (code: number | null): Promise<void> => {
-      if (finalized) return;
-      finalized = true;
-      if (!supervised.killed && supervised.isAlive()) {
-        killedForCleanup = true;
-        supervised.kill("child exited with live descendants");
-      }
-      if (supervised.killed) await supervised.waitForKill();
-      const stdout = captured.stdout();
-      const stderr = captured.stderr();
-      if (stderr) process.stderr.write(stderr);
-      const output = combineShellOutput(stdout, stderr);
-      const killedByPolicy = supervised.killed && !killedForCleanup;
-      const timedOut = killedByPolicy && supervised.killReason.startsWith("timeout");
-      const ok = !killedByPolicy && code === 0;
-      child.stdout?.destroy();
-      child.stderr?.destroy();
-      supervised.clear();
-      resolve({
-        output,
-        ok,
-        ...(timedOut ? { timedOut: true } : {}),
-        ...(!ok
-          ? {
-              failReason: killedByPolicy
-                ? `process killed: ${supervised.killReason}`
-                : exitCodeFailReason(code, stderr),
-            }
-          : {}),
-      });
-    };
-
-    // A descendant may keep stdout/stderr open after bash exits. The shared
-    // supervisor allows a brief output drain, then cleans up the group even if
-    // `close` never arrives.
-    void whenProcessSettled(child, finish).catch(reject);
-  });
+  const captured = captureProcessOutput(supervised.child);
+  const end = await supervised.settle();
+  const stdout = captured.stdout();
+  const stderr = captured.stderr();
+  if (stderr) process.stderr.write(stderr);
+  return { output: combineShellOutput(stdout, stderr), ...bashOutcome(end, stderr) };
 }
 
 // In non-TTY mode, some tools print one line per progress-bar tick.
@@ -138,161 +120,113 @@ export function stripProgressNoise(text: string): string {
 }
 
 /**
- * Streaming bash execution for bash STEPS: async spawn, push stdout/stderr to
- * the live feed (events {type:"bash-output"}) and the step log as output arrives.
- * Used by executeStep; admissions use runBashAsync.
+ * Streaming bash execution for bash STEPS: push stdout/stderr to the live feed
+ * (events {type:"bash-output"}) and the step log as output arrives. Used by
+ * executeStep; admissions use runBashAsync.
  */
-export function runBashStreaming(
+export async function runBashStreaming(
   command: string,
-  opts: { timeoutMs?: number; stepLogPath?: string } = {},
+  opts: BashOptions & { stepLogPath?: string },
 ): Promise<RunnerResult> {
-  return new Promise((resolve, reject) => {
-    const timeoutMs = opts.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
-    let liveFd: number | undefined;
-    try {
-      liveFd = openSync(liveFeedFilePath(), "a");
-    } catch {}
-    const stepLogFd = opts.stepLogPath ? openSync(opts.stepLogPath, "a") : undefined;
-    // Detached bash becomes its group leader, so gracefulKill also kills its
-    // descendants (see killTree). Tradeoff: terminal SIGINT no longer applies;
-    // hence the liveChildren registry.
-    const child = spawn("bash", ["-c", command], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: withoutRunnerInternalEnv(process.env),
-      detached: true,
-    });
-    defaultScope().track(child, { group: true });
-
-    let output = "";
-    let killed = false;
-    let killedForCleanup = false;
-    let timedOut = false;
-    let killReason = "";
-    // Partial-line buffers per stream: filter progress bars
-    // line by line, so wait for a complete line (\n) before emitting.
-    let outBuf = "";
-    let errBuf = "";
-    // stderr alone, for the failure reason: bounded, since only its tail is read.
-    let stderrTail = "";
-    let killPromise: Promise<void> | undefined;
-    const timer = timeoutMs
-      ? setTimeout(() => {
-          killed = true;
-          timedOut = true;
-          killReason = `timeout (${Math.round(timeoutMs / 1000)}s)`;
-          killPromise = defaultScope().gracefulKill(child, { group: true });
-        }, timeoutMs)
-      : undefined;
-    timer?.unref();
-
-    const emit = (clean: string, isErr: boolean) => {
-      if (!clean) return;
-      output += clean;
-      if (isErr) {
-        process.stderr.write(clean);
-        stderrTail = (stderrTail + clean).slice(-4096);
-      }
-      if (liveFd !== undefined) {
-        try {
-          const event = JSON.stringify({
-            ts: new Date().toISOString(),
-            type: "bash-output",
-            stderr: isErr,
-            chunk: clean,
-          });
-          writeSync(liveFd, `${event}\n`);
-        } catch {}
-      }
-      if (stepLogFd !== undefined) {
-        try {
-          writeSync(stepLogFd, clean);
-        } catch {}
-      }
-    };
-
-    // Accumulate through the last complete line, filter progress bars, and emit
-    // the rest; keep a partial line buffered (collapse \r to bound its size).
-    const pump = (incoming: string, isErr: boolean) => {
-      const combined = (isErr ? errBuf : outBuf) + incoming;
-      const nl = combined.lastIndexOf("\n");
-      if (nl === -1) {
-        const buf = collapseCR(combined);
-        if (isErr) errBuf = buf;
-        else outBuf = buf;
-        return;
-      }
-      const complete = combined.slice(0, nl + 1);
-      const rest = collapseCR(combined.slice(nl + 1));
-      if (isErr) errBuf = rest;
-      else outBuf = rest;
-      emit(stripProgressNoise(complete), isErr);
-    };
-
-    // Flush the remaining partial line (without a final \n) when the process ends.
-    const flush = (isErr: boolean) => {
-      const leftover = collapseCR(isErr ? errBuf : outBuf);
-      if (isErr) errBuf = "";
-      else outBuf = "";
-      if (leftover && !isProgressLine(leftover)) emit(leftover, isErr);
-    };
-
-    // Decode through the stream so a multi-byte UTF-8 sequence split across two
-    // chunks is reassembled instead of becoming U+FFFD.
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (text: string) => pump(text, false));
-    child.stderr?.on("data", (text: string) => pump(text, true));
-
-    let finalized = false;
-    const finalize = async (code: number | null) => {
-      if (finalized) return;
-      finalized = true;
-      if (!killed && child.pid != null && isProcessAlive(child.pid, true)) {
-        killedForCleanup = true;
-        killReason = "child exited with live descendants";
-        killPromise = defaultScope().gracefulKill(child, { group: true });
-      }
-      if (timer) clearTimeout(timer);
-      // A timeout does not return until kill escalation has finished: a
-      // descendant that ignores TERM must not contaminate the next step.
-      if (killPromise) await killPromise;
-      flush(false);
-      flush(true);
-      if (timedOut) {
-        // Trace visible in the step log / stepOutput of fix prompts. Live observers
-        // and error extractors must not neutralize this failure (see runner.ts).
-        output += `\n[runner] step killed: timeout (${Math.round(timeoutMs / 1000)}s)\n`;
-      }
-      if (liveFd !== undefined) {
-        try {
-          closeSync(liveFd);
-        } catch {}
-      }
-      if (stepLogFd !== undefined) {
-        try {
-          closeSync(stepLogFd);
-        } catch {}
-      }
-      child.stdout?.destroy();
-      child.stderr?.destroy();
-      const killedByPolicy = killed && !killedForCleanup;
-      const ok = !killedByPolicy && code === 0;
-      resolve({
-        output,
-        ok,
-        timedOut,
-        ...(!ok
-          ? {
-              failReason:
-                timedOut || killedByPolicy ? `process killed: ${killReason}` : exitCodeFailReason(code, stderrTail),
-            }
-          : {}),
-      });
-    };
-
-    // `close` waits for stdout/stderr pipes to close; stubborn grandchildren
-    // can keep them open indefinitely. The shared supervisor bounds the residual
-    // drain while preserving all complete output.
-    void whenProcessSettled(child, finalize).catch(reject);
+  let liveFd: number | undefined;
+  try {
+    liveFd = openSync(liveFeedFilePath(), "a");
+  } catch {}
+  const stepLogFd = opts.stepLogPath ? openSync(opts.stepLogPath, "a") : undefined;
+  // Detached bash becomes its group leader, so a kill reaches its descendants.
+  // Tradeoff: terminal SIGINT no longer applies; the process scope stops it.
+  // stdin is closed: a step that reads it gets EOF instead of waiting for its
+  // deadline.
+  const supervised = spawnSupervisedProcess("bash", ["-c", command], {
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+    timeoutMs: opts.timeoutMs,
   });
+  const child = supervised.child;
+
+  let output = "";
+  // Partial-line buffers per stream: filter progress bars
+  // line by line, so wait for a complete line (\n) before emitting.
+  let outBuf = "";
+  let errBuf = "";
+  // stderr alone, for the failure reason: bounded, since only its tail is read.
+  let stderrTail = "";
+
+  const emit = (clean: string, isErr: boolean) => {
+    if (!clean) return;
+    output += clean;
+    if (isErr) {
+      process.stderr.write(clean);
+      stderrTail = (stderrTail + clean).slice(-4096);
+    }
+    if (liveFd !== undefined) {
+      try {
+        const event = JSON.stringify({
+          ts: new Date().toISOString(),
+          type: "bash-output",
+          stderr: isErr,
+          chunk: clean,
+        });
+        writeSync(liveFd, `${event}\n`);
+      } catch {}
+    }
+    if (stepLogFd !== undefined) {
+      try {
+        writeSync(stepLogFd, clean);
+      } catch {}
+    }
+  };
+
+  // Accumulate through the last complete line, filter progress bars, and emit
+  // the rest; keep a partial line buffered (collapse \r to bound its size).
+  const pump = (incoming: string, isErr: boolean) => {
+    const combined = (isErr ? errBuf : outBuf) + incoming;
+    const nl = combined.lastIndexOf("\n");
+    if (nl === -1) {
+      const buf = collapseCR(combined);
+      if (isErr) errBuf = buf;
+      else outBuf = buf;
+      return;
+    }
+    const complete = combined.slice(0, nl + 1);
+    const rest = collapseCR(combined.slice(nl + 1));
+    if (isErr) errBuf = rest;
+    else outBuf = rest;
+    emit(stripProgressNoise(complete), isErr);
+  };
+
+  // Flush the remaining partial line (without a final \n) when the process ends.
+  const flush = (isErr: boolean) => {
+    const leftover = collapseCR(isErr ? errBuf : outBuf);
+    if (isErr) errBuf = "";
+    else outBuf = "";
+    if (leftover && !isProgressLine(leftover)) emit(leftover, isErr);
+  };
+
+  // Decode through the stream so a multi-byte UTF-8 sequence split across two
+  // chunks is reassembled instead of becoming U+FFFD.
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (text: string) => pump(text, false));
+  child.stderr?.on("data", (text: string) => pump(text, true));
+
+  const end = await supervised.settle();
+  flush(false);
+  flush(true);
+  if (killedByTimeout(end.kill) && end.kill) {
+    // Trace visible in the step log / stepOutput of fix prompts. Live observers
+    // and error extractors must not neutralize this failure (see runner.ts).
+    output += `\n[runner] step killed: ${describeKill(end.kill)}\n`;
+  }
+  if (liveFd !== undefined) {
+    try {
+      closeSync(liveFd);
+    } catch {}
+  }
+  if (stepLogFd !== undefined) {
+    try {
+      closeSync(stepLogFd);
+    } catch {}
+  }
+  return { output, timedOut: false, ...bashOutcome(end, stderrTail) };
 }

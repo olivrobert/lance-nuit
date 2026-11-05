@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { withoutRunnerInternalEnv } from "../../src/shared/process/self-spawn.js";
+import { withoutRunnerState } from "../../src/shared/env/runner-env.js";
 
 const runnerEntry = resolve(import.meta.dir, "../../src/runner.ts");
 const liveFeedModule = resolve(import.meta.dir, "../../src/shared/runtime/live-feed.ts");
@@ -18,7 +18,7 @@ const liveFeedModule = resolve(import.meta.dir, "../../src/shared/runtime/live-f
 /** The suite may itself run inside a step of a runner that leaks its state: the
  *  outer runner of each test must start clean, or it skips its own lock. */
 function outerEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  return { ...withoutRunnerInternalEnv(process.env), ...extra };
+  return { ...withoutRunnerState(process.env), ...extra };
 }
 
 function runOuter(cwd: string, args: string[], extra: Record<string, string> = {}) {

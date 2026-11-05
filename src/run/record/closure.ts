@@ -11,9 +11,9 @@
 // the closure no longer describes the run and readers ignore it. Nothing has to
 // remember to delete it.
 
-import { randomUUID } from "node:crypto";
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "../../shared/lib/atomic-write.js";
 import type { PersistedRun } from "../persisted.js";
 
 export const CLOSURE_FILE = "closure.json";
@@ -68,14 +68,7 @@ export function closureOf(state: PersistedRun, actor: string, now: Date = new Da
 
 export function writeClosureAt(runDir: string, closure: RunClosure): void {
   const path = join(runDir, CLOSURE_FILE);
-  const temporary = `${path}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(closure, null, 2)}\n`, "utf-8");
-    renameSync(temporary, path);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
-  }
+  writeFileAtomic(path, `${JSON.stringify(closure, null, 2)}\n`);
 }
 
 export function removeClosureAt(runDir: string): void {

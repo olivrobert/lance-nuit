@@ -401,10 +401,22 @@ carries the ticket, the pipeline and the propagated options, never `--scan`. The
 parent coordinates; the child executes the actual steps.
 
 Only the dispatch children the runner spawns itself inherit its internal state:
-`RUNNER_LOCK_HELD`, `RUNNER_IN_WORKTREE` and `RUNNER_EVENTS_FILE`/`RUNNER_LIVE_FEED`.
-Bash steps, admission commands and agent backends get the environment without them
-(`RUNNER_BIN` and `RUNNER_DIR` stay), so a runner started from a step takes the
-lock, applies the worktree guards and writes its own journal.
+`RUNNER_LOCK_HELD`, `RUNNER_IN_WORKTREE` and `RUNNER_LIVE_FEED`, all named in
+`shared/env/runner-env.ts`. Every process starts through
+`spawnSupervisedProcess` (`shared/process/process-runner.ts`), which removes them
+by default; only `selfSpawnRunner` asks to pass them on. Bash steps, admission
+commands, sources, agent backends, tracker CLIs and project hooks therefore get the
+environment without them (`RUNNER_BIN` and `RUNNER_DIR` stay), so a runner started
+from any of them takes the lock, applies the worktree guards and writes its own
+journal. A hook that relaunches `lancenuit` in the same checkout is refused by the
+lock its parent holds instead of running beside it.
+
+The same primitive owns the rest of a process's life: one deadline rule (a
+positive `timeoutMs`, `null` for none, anything else for the 900-second
+default), one teardown (clean a group a descendant kept alive, wait for the kill,
+release the streams), and a typed kill (`ProcessKill`: `timeout`,
+`no-first-event`, `budget`, `cost-unaccounted`, `signal`, `cleanup`) carried by
+the result. Readers branch on the cause; the text a log shows is derived from it.
 
 ## 5. The step lifecycle
 
@@ -547,9 +559,11 @@ falls through a fallback branch and is ignored, a field of the wrong kind reads
 as absent, and an unreadable `docker compose ps` entry is skipped — a required
 service missing from the result is then reported as absent by the preflight.
 
-Writes use temporary files and rename operations where atomicity matters. A process
-interruption therefore leaves either the previous valid snapshot or a complete new
-one. Logs and events remain useful even when a provider is killed before its final
+Writes go through `writeFileAtomic` (`shared/lib/atomic-write.ts`) where
+atomicity matters: a temporary named after the writer's pid plus a random part,
+then a rename, and the temporary removed on failure. A process interruption
+therefore leaves either the previous valid file or a complete new one, and two
+concurrent writers never publish each other's half-written bytes. Logs and events remain useful even when a provider is killed before its final
 result event.
 
 The console report is the human-facing projection. The run-stats projector derives

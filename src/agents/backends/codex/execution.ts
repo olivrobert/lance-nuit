@@ -1,7 +1,6 @@
-import { runSupervisedStream, supervisorTimeout } from "../../../shared/process/process-runner.js";
-import { withoutRunnerInternalEnv } from "../../../shared/process/self-spawn.js";
+import { runSupervisedStream } from "../../../shared/process/process-runner.js";
 import { jsonRecords } from "../../../shared/lib/json-values.js";
-import { budgetExceededReason, costUnaccountedReason, lineSplitter, liveMessageSink } from "../host-helpers.js";
+import { budgetExceededKill, costUnaccountedKill, lineSplitter, liveMessageSink } from "../host-helpers.js";
 import { accumulateCodexUsage, agentMessageFromEvent, newCodexUsageTotals } from "./events.js";
 import { parseCodexEvent } from "./events.schema.js";
 import { computeCostUsd } from "./pricing.js";
@@ -47,15 +46,14 @@ function stderrForwarder(): { push(text: string): void; flush(): void } {
 export function createNodeCodexHost(hostOptions: NodeCodexHostOptions = {}): CodexBackendHost {
   return {
     async execute(options: CodexExecutionOptions): Promise<RawCodexExecutionResult> {
-      const { killedForCleanup, ...result } = await runSupervisedStream(
+      const result = await runSupervisedStream(
         options.bin,
         options.args,
         {
           cwd: options.cwd,
-          env: withoutRunnerInternalEnv(process.env),
           stdio: ["ignore", "pipe", "pipe"],
           detached: true,
-          timeoutMs: supervisorTimeout(options.timeoutMs),
+          timeoutMs: options.timeoutMs,
         },
         (control) => {
           const stderr = stderrForwarder();
@@ -81,12 +79,12 @@ export function createNodeCodexHost(hostOptions: NodeCodexHostOptions = {}): Cod
             // An attempt that has not reported usage yet reaches neither branch —
             // `checkBudget` only runs on a usage event, and silence is not proof.
             if (options.strictCostAccounting === true && estimated == null && spentTokens > 0) {
-              control.kill(costUnaccountedReason(`${totals.model ?? "unknown model"}: no pricing entry`));
+              control.kill(costUnaccountedKill(`${totals.model ?? "unknown model"}: no pricing entry`));
               return;
             }
             if (options.budgetRemaining == null) return;
             if (estimated != null && estimated > options.budgetRemaining) {
-              control.kill(budgetExceededReason(estimated, options.budgetRemaining, "estimated"));
+              control.kill(budgetExceededKill(estimated, options.budgetRemaining, "estimated"));
             }
           };
           const lines = lineSplitter((line) => {
@@ -112,7 +110,7 @@ export function createNodeCodexHost(hostOptions: NodeCodexHostOptions = {}): Cod
       // Unlike the Claude host, a straggler rejects the run: `codex exec` owns its
       // process tree, so a descendant outliving it means the run did not complete
       // as reported.
-      return { ...result, killed: result.killed || killedForCleanup };
+      return result;
     },
     onSpawn: hostOptions.onSpawn,
   };

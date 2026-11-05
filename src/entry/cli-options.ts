@@ -147,7 +147,7 @@ export type CommandScope = "create";
  * `passthrough` rule, previously undocumented: an option is forwarded to children
  * iff the child cannot infer it from its environment.
  *  - `--fresh` / `--allow-dirty` / `--base-branch`: parent decisions invisible to the child → forwarded.
- *  - `--worktree`: the child inherits cwd (chdir) + `RUNNER_IN_WORKTREE` → NOT forwarded.
+ *  - `--worktree`: the child inherits cwd (chdir) + `RUNNER_STATE_ENV.inWorktree` → NOT forwarded.
  *  - `--watch`: forwarded only by the multi-work-item strategy (tmux pane per child), not here.
  *  - `--steps` / `--skip`: the operator's selection applies to every ticket → forwarded.
  *  - `--until`: the bound of a sweep (a night of triage only) applies to every ticket → forwarded.

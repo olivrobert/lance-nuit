@@ -58,7 +58,7 @@ const CONTEXTS = [
   },
   {
     name: "shared",
-    path: "^src/contracts/|^src/shared/lib/|^src/shared/language/(context|artifact-ports|config|profiles|run-stop)\\.ts$|^src/shared/runtime/(logging|live-feed|events|context)\\.ts$|^src/shared/process/(process-runner|process-supervision|self-spawn|bash-runner)\\.ts$|^src/shared/env/(config|config\\.schema|kit-paths|tickets|lock|pricing|pricing\\.schema|capability-frontmatter)\\.ts$",
+    path: "^src/contracts/|^src/shared/lib/|^src/shared/language/(context|artifact-ports|config|profiles|run-stop)\\.ts$|^src/shared/runtime/(logging|live-feed|events|context)\\.ts$|^src/shared/process/(process-runner|process-supervision|self-spawn|bash-runner)\\.ts$|^src/shared/env/(config|config\\.schema|kit-paths|kit-layout|runner-env|tickets|lock|pricing|pricing\\.schema|capability-frontmatter)\\.ts$",
     mayImport: [],
     comment: "Primitives and the language every context shares; it imports no context.",
   },

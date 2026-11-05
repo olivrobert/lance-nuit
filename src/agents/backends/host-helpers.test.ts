@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { lineSplitter } from "./host-helpers.js";
+import { describeKill } from "../../shared/process/process-runner.js";
+import { budgetExceededKill, lineSplitter } from "./host-helpers.js";
 
 // `lineSplitter` is the single line reassembler of the three agent backends: the
 // stdout of `claude`, `codex exec` and `opencode run` is NDJSON, and a pipe
@@ -119,4 +120,10 @@ test("lineSplitter: single-byte chunks reassemble the same lines as one big writ
 
   expect(byteByByte).toEqual(source);
   expect(oneWrite).toEqual(source);
+});
+
+test("the budget kill names both amounts in dollars", () => {
+  expect(describeKill(budgetExceededKill(1.2, 1, "estimated"))).toBe(
+    "budget exceeded ($1.20 estimated > $1.00 remaining)",
+  );
 });

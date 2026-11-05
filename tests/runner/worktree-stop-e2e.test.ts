@@ -34,7 +34,7 @@ function repoWith(pipelineSource: string, stopHook: string): { repo: string; wor
 const RECORDING_HOOK = 'echo "→ stopping services"\necho "$1" >> "$(dirname "$0")/stop.called"';
 
 function envFor(worktrees: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const { RUNNER_IN_WORKTREE: _inherited, RUNNER_EVENTS_FILE: _feed, ...env } = process.env;
+  const { RUNNER_IN_WORKTREE: _inherited, RUNNER_LIVE_FEED: _feed, ...env } = process.env;
   return { ...env, WORKTREES_ROOT: worktrees, ...extra };
 }
 

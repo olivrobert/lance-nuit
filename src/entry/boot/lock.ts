@@ -5,7 +5,9 @@
 //
 // Position in BOOT[]: after worktree setup, because the lock is keyed by cwd.
 
-import { acquireRunnerLock, releaseRunnerLock, runnerLockPath, shouldSkipRunnerLock } from "../env/runlock.js";
+import { acquireRunnerLock, releaseRunnerLock, shouldSkipRunnerLock } from "../env/runlock.js";
+import { runnerLockPath } from "../../shared/env/kit-layout.js";
+import { RUNNER_STATE_ENV } from "../../shared/env/runner-env.js";
 import { log } from "../../shared/runtime/logging.js";
 import type { BootState, BootStep } from "./boot-state.js";
 
@@ -43,11 +45,12 @@ export const lockStep: BootStep = {
       process.exit(1);
     }
     // Side effects not represented by Partial<BootState>:
-    // - selfSpawnRunner inherits RUNNER_LOCK_HELD, so dispatch children do not
-    //   re-lock; steps and agents do not get it, so a runner they start does;
+    // - selfSpawnRunner passes the flag on, so dispatch children do not re-lock;
+    //   every other child (step, agent, project hook) does not get it, so a
+    //   runner it starts takes the lock;
     // - the lock is released on exit. installChildKillHandlers converts
     //   SIGINT/SIGTERM into process.exit, which triggers this handler.
-    process.env.RUNNER_LOCK_HELD = "1";
+    process.env[RUNNER_STATE_ENV.lockHeld] = "1";
     process.on("exit", () => releaseRunnerLock(process.cwd()));
     return {};
   },

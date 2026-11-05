@@ -3,9 +3,9 @@
 // the optional `worktree-stop.sh` hook. Resume starts them again through the
 // boot path (stack preflight, then `worktree-ready.sh`).
 //
-// Only the process that entered the worktree owns its stack: dispatch children
-// inherit `RUNNER_IN_WORKTREE=1`, and a failing child pipeline must not stop
-// the services its parent is still using.
+// Only the process that entered the worktree owns its stack: a runner that did
+// not enter it (a dispatch child, or one started inside the worktree) must not
+// stop the services another runner is still using.
 //
 // The hook gets its own process scope. The signal handler sweeps the default
 // scope on the first Ctrl+C, which would kill a half-done `docker compose stop`;

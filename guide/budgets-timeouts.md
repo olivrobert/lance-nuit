@@ -387,7 +387,9 @@ Set a per-step timeout in seconds:
 bashStep({ id: "tests", name: "Tests", command: "npm test", timeout: 300 });
 ```
 
-The timeout kills the supervised process tree. It is distinct from a cost
+The timeout kills the supervised process tree. opencode's `firstEventTimeoutMs`
+is a deadline too: a model that never emits its first event is killed and
+counted as a timeout. It is distinct from a cost
 ceiling: a timeout is a technical failure, while exhausting `maxCost` stops the
 run because its financial limit has been reached. An `onFail.escalate.model`
 policy can switch model directly after a timeout; ordinary retry escalation can
@@ -400,7 +402,9 @@ step timeouts. Its default readiness window is 300 seconds; `startCommand` and
 `worktree-ready.sh` hook that follows it also runs before the first step, outside
 step timeouts, with a fixed 30-minute limit. `worktree-stop.sh` runs after the run
 is finalized, outside step timeouts and cost accounting, with a fixed 5-minute
-limit.
+limit. Each call to a tracker CLI (`acli`, `gh`) is killed after 120 seconds:
+one that waits for credentials or a dead network fails the operation instead of
+freezing a scan or a step. See [the work-item port](work-item-port.md).
 
 ## Informational output-token signal
 

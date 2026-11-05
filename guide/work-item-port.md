@@ -101,6 +101,14 @@ and state transitions, and reserves `closed` in the port for an issue actually
 closed on GitHub. Authenticate first with `gh auth login` (or the normal
 `GH_TOKEN` environment variable flow).
 
+The built-in adapters run `acli` and `gh` under the runner's process
+supervision, with a 120-second deadline per call (`TRACKER_COMMAND_TIMEOUT_MS`).
+A call answers in seconds; one that waits for credentials, a prompt or a dead
+network is killed and fails the operation instead of freezing a scan or a step.
+The error quotes what the CLI printed on stderr, or `<cli> timed out after 120s`
+when it printed nothing. Two minutes leaves room for a slow search,
+the same bound as the runner's own `git` calls.
+
 The non-negotiable contract is **idempotence**. A run may die between a provider
 side effect and local persistence, and a step may be replayed on resume: every write
 must therefore be replayable without duplicates, and each `moveTo` operation must

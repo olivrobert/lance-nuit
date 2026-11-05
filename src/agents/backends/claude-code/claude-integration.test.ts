@@ -6,12 +6,11 @@ import { join } from "node:path";
 
 type Outcome = { ok: boolean; output?: string; failReason?: string; timedOut?: boolean };
 
-/** Base environment for a replayed backend spawn. `RUNNER_EVENTS_FILE` takes
- * precedence over `RUNNER_LIVE_FEED`, so inheriting it from a runner that is
- * itself executing these tests would send the replayed events to that run's
- * journal instead of the feed the test reads back. */
+/** Base environment for a replayed backend spawn. Inheriting the feed of a
+ * runner that is itself executing these tests would send the replayed events to
+ * that run's journal when a test sets no feed of its own. */
 function backendEnv(): NodeJS.ProcessEnv {
-  const { RUNNER_EVENTS_FILE: _ignored, ...env } = process.env;
+  const { RUNNER_LIVE_FEED: _ignored, ...env } = process.env;
   return env;
 }
 

@@ -4,17 +4,14 @@
 // that the bus, the backends and the step loop can depend on the port without
 // pulling the presentation layer (`output/`) into the runtime.
 
+import { RUNNER_STATE_ENV } from "../env/runner-env.js";
+
 /** Minimal port for the append-only live feed. */
 export interface LiveFeed {
   path(): string;
   ensure(): void;
   append(event: unknown): void;
 }
-
-/** Environment variables carrying the feed path to child processes, in lookup
- * order. They are named here because both the port and its file adapter resolve
- * them, and a second spelling would silently split the feed in two. */
-export const LIVE_FEED_ENV_VARS = ["RUNNER_EVENTS_FILE", "RUNNER_LIVE_FEED"] as const;
 
 let currentFeed: LiveFeed | undefined;
 
@@ -31,11 +28,7 @@ export function configuredLiveFeed(): LiveFeed | undefined {
 
 /** Feed path advertised by the environment, without building an adapter. */
 export function liveFeedPathFromEnvironment(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  for (const name of LIVE_FEED_ENV_VARS) {
-    const filePath = env[name];
-    if (filePath) return filePath;
-  }
-  return undefined;
+  return env[RUNNER_STATE_ENV.liveFeed] || undefined;
 }
 
 /** Path streaming backends append raw output to. Unlike the event bus, they write

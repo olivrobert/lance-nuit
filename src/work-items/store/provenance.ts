@@ -21,8 +21,7 @@
 // adoption names whichever step adopted.
 
 import { exitCodeFailReason } from "../../shared/process/bash-runner.js";
-import { runSupervisedCommand } from "../../shared/process/process-runner.js";
-import { withoutRunnerInternalEnv } from "../../shared/process/self-spawn.js";
+import { killedByTimeout, runSupervisedCommand } from "../../shared/process/process-runner.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { Artifact } from "../artifact.js";
 import { createArtifactRef } from "../../shared/language/artifact-ports.js";
@@ -167,8 +166,8 @@ function ref(ctx: PipelineContext, name: string) {
 
 /**
  * Run a source's command and return its raw stdout. It runs in the context's
- * working directory, with the environment of a step (runner-internal `RUNNER_*`
- * variables removed), and is killed after `timeoutMs`. Rejects with the reason
+ * working directory, with the environment of a step, and is killed after
+ * `timeoutMs`. Rejects with the reason
  * when the command cannot be resolved, exits non-zero, or times out.
  */
 async function sourceBytes(ctx: PipelineContext, source: Source, timeoutMs: number): Promise<Buffer> {
@@ -176,10 +175,10 @@ async function sourceBytes(ctx: PipelineContext, source: Source, timeoutMs: numb
   if (!command?.trim()) throw new Error(`source "${source.name}": command resolved to an empty string`);
   const result = await runSupervisedCommand("bash", ["-c", command], {
     cwd: ctx.cwd,
-    env: withoutRunnerInternalEnv(process.env),
     timeoutMs,
   });
-  if (result.timedOut) throw new Error(`source "${source.name}": command timed out after ${timeoutMs / 1000}s`);
+  if (killedByTimeout(result.kill))
+    throw new Error(`source "${source.name}": command timed out after ${timeoutMs / 1000}s`);
   if (result.status !== 0) {
     throw new Error(`source "${source.name}": ${exitCodeFailReason(result.status, result.stderr)}`);
   }

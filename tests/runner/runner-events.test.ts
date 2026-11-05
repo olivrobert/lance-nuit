@@ -27,8 +27,6 @@ const SPAWN: RunnerEvent = {
  *  installs — but the bus itself only ever sees the injected port. */
 function withLiveFeed<T>(fn: (feed: string) => T, feed?: string): T {
   const previous = process.env.RUNNER_LIVE_FEED;
-  const previousEvents = process.env.RUNNER_EVENTS_FILE;
-  delete process.env.RUNNER_EVENTS_FILE;
   process.env.RUNNER_LIVE_FEED = feed ?? join(mkdtempSync(join(tmpdir(), "runner-events-")), "live.jsonl");
   setRunnerLiveFeed(new FileLiveFeed(process.env.RUNNER_LIVE_FEED));
   try {
@@ -37,8 +35,6 @@ function withLiveFeed<T>(fn: (feed: string) => T, feed?: string): T {
     setRunnerLiveFeed(undefined);
     if (previous == null) delete process.env.RUNNER_LIVE_FEED;
     else process.env.RUNNER_LIVE_FEED = previous;
-    if (previousEvents == null) delete process.env.RUNNER_EVENTS_FILE;
-    else process.env.RUNNER_EVENTS_FILE = previousEvents;
   }
 }
 
@@ -95,8 +91,6 @@ test("the environment alone does not feed the bus", () => {
   // from the environment, which is what keeps child runs writing to their parent.
   const path = join(mkdtempSync(join(tmpdir(), "runner-events-env-")), "live.jsonl");
   const previous = process.env.RUNNER_LIVE_FEED;
-  const previousEvents = process.env.RUNNER_EVENTS_FILE;
-  delete process.env.RUNNER_EVENTS_FILE;
   process.env.RUNNER_LIVE_FEED = path;
   try {
     emitRunnerEvent(SPAWN);
@@ -104,7 +98,6 @@ test("the environment alone does not feed the bus", () => {
   } finally {
     if (previous == null) delete process.env.RUNNER_LIVE_FEED;
     else process.env.RUNNER_LIVE_FEED = previous;
-    if (previousEvents != null) process.env.RUNNER_EVENTS_FILE = previousEvents;
   }
 });
 
@@ -187,9 +180,7 @@ test("an unavailable feed remains silent and allows other subscribers", () => {
 
 test("missing injected and configured feeds remain silent", () => {
   const previousLive = process.env.RUNNER_LIVE_FEED;
-  const previousEvents = process.env.RUNNER_EVENTS_FILE;
   delete process.env.RUNNER_LIVE_FEED;
-  delete process.env.RUNNER_EVENTS_FILE;
   const seen: RunnerEvent[] = [];
   subscribe((event) => seen.push(event));
   try {
@@ -197,7 +188,6 @@ test("missing injected and configured feeds remain silent", () => {
     expect(seen).toEqual([SPAWN]);
   } finally {
     if (previousLive != null) process.env.RUNNER_LIVE_FEED = previousLive;
-    if (previousEvents != null) process.env.RUNNER_EVENTS_FILE = previousEvents;
   }
 });
 

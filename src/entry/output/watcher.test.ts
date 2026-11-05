@@ -3,20 +3,19 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RUNNER_STATE_ENV } from "../../shared/env/runner-env.js";
+import { setRunnerLiveFeed } from "../../shared/runtime/live-feed.js";
+import { startLiveFeed } from "../composition/feed.js";
 import { FileLiveFeed } from "./live-feed.js";
-import { buildWatcherCommand, ensureLiveFeed } from "./watcher.ts";
+import { buildWatcherCommand } from "./watcher.ts";
 
 let saved: Record<string, string | undefined>;
 let runDir: string;
 
 beforeEach(() => {
-  saved = {
-    RUNNER_EVENTS_FILE: process.env.RUNNER_EVENTS_FILE,
-    RUNNER_LIVE_FEED: process.env.RUNNER_LIVE_FEED,
-  };
+  saved = { [RUNNER_STATE_ENV.liveFeed]: process.env[RUNNER_STATE_ENV.liveFeed] };
   runDir = mkdtempSync(join(tmpdir(), "watcher-"));
-  delete process.env.RUNNER_EVENTS_FILE;
-  delete process.env.RUNNER_LIVE_FEED;
+  delete process.env[RUNNER_STATE_ENV.liveFeed];
 });
 
 afterEach(() => {
@@ -24,6 +23,7 @@ afterEach(() => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
+  setRunnerLiveFeed(undefined);
   rmSync(runDir, { recursive: true, force: true });
 });
 
@@ -31,35 +31,27 @@ const live = () => join(runDir, "live.jsonl");
 
 test("preserves existing log on top-level relaunch", () => {
   writeFileSync(live(), "previous attempt\n");
-  ensureLiveFeed(new FileLiveFeed(live()));
+  new FileLiveFeed(live()).ensure();
   expect(readFileSync(live(), "utf-8")).toBe("previous attempt\n");
 });
 
 test("preserves existing feed", () => {
   writeFileSync(live(), "feed parent\n");
-  ensureLiveFeed(new FileLiveFeed(live()));
+  new FileLiveFeed(live()).ensure();
   expect(readFileSync(live(), "utf-8")).toBe("feed parent\n");
 });
 
 test("creates empty feed when absent (both modes)", () => {
   expect(existsSync(live())).toBe(false);
-  ensureLiveFeed(new FileLiveFeed(live()));
+  new FileLiveFeed(live()).ensure();
   expect(existsSync(live())).toBe(true);
   expect(readFileSync(live(), "utf-8")).toBe("");
 });
 
-test("sets RUNNER_LIVE_FEED on the run dir", () => {
-  ensureLiveFeed(new FileLiveFeed(live()));
-  expect(process.env.RUNNER_LIVE_FEED).toBe(live());
-});
-
-test("advertises the injected feed path to child processes", () => {
-  const injected = join(runDir, "nested", "events.jsonl");
-  ensureLiveFeed(new FileLiveFeed(injected));
-  expect(existsSync(injected)).toBe(true);
-  expect(existsSync(live())).toBe(false);
-  expect(process.env.RUNNER_EVENTS_FILE).toBe(injected);
-  expect(process.env.RUNNER_LIVE_FEED).toBe(injected);
+test("advertises the run feed path to child processes", () => {
+  const feed = startLiveFeed(join(runDir, "nested"), false);
+  expect(existsSync(feed.path())).toBe(true);
+  expect(process.env[RUNNER_STATE_ENV.liveFeed]).toBe(feed.path());
 });
 
 test("watcher remains persistent by default and closes only with the option", () => {

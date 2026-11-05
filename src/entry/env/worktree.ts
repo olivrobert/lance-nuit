@@ -15,8 +15,10 @@ import {
   symlinkSync,
   unlinkSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { CONFIG_FILE } from "../../shared/env/kit-paths.js";
+import { HISTORY_DIR, kitPath, RUNNER_STATE_DIR, worktreesRoot } from "../../shared/env/kit-layout.js";
 import { runSupervisedCommand } from "../../shared/process/process-runner.js";
 import type { ProcessScope } from "../../shared/process/process-supervision.js";
 import { log } from "../../shared/runtime/logging.js";
@@ -83,10 +85,6 @@ export type WorktreeMode = "light" | "full";
 export interface WorktreeSetupResult {
   reused: boolean;
   warnings: string[];
-}
-
-export function worktreesRoot(): string {
-  return process.env.WORKTREES_ROOT || join(homedir(), ".lance-nuit", "worktrees");
 }
 
 /** Filesystem/compose-safe slug: "PROJ-62" → "proj-62", "exports/PROJ-1478" → "exports-proj-1478". */
@@ -162,7 +160,7 @@ async function ensureWorktreeAsync(spec: WorktreeSpec, baseBranch: string): Prom
  * explicitly under `.lance-nuit/`; no runner parent path is probed.
  */
 function projectHookFor(spec: WorktreeSpec, name: string): string | null {
-  return firstExistingPath([join(spec.path, ".lance-nuit", name), join(spec.mainRepo, ".lance-nuit", name)]);
+  return firstExistingPath([kitPath(spec.path, name), kitPath(spec.mainRepo, name)]);
 }
 
 /** Optional project hook for worktree initialization. */
@@ -176,9 +174,9 @@ async function runInitScriptAsync(spec: WorktreeSpec, warnings: string[]): Promi
   }
 }
 
-/** `.lance-nuit/run` must be local to the worktree to isolate runner.lock. */
+/** The runner state directory must be local to the worktree to isolate its run lock. */
 function unshareRunDir(worktreePath: string): void {
-  const runDir = join(worktreePath, ".lance-nuit", "run");
+  const runDir = kitPath(worktreePath, RUNNER_STATE_DIR);
   try {
     if (lstatSync(runDir).isSymbolicLink()) unlinkSync(runDir);
   } catch {
@@ -296,7 +294,7 @@ function linkSharedDir(
  * A project that tracks its pipelines instead is served by Git: the checkout
  * already carries them, and the two flags below leave that copy alone. */
 const SHARED_KIT_DIRS = [
-  { name: "pipeline-history" },
+  { name: HISTORY_DIR },
   { name: "node_modules" },
   { name: "pipelines", sourceRequired: true, shadowIsNormal: true },
 ] as const;
@@ -304,7 +302,7 @@ const SHARED_KIT_DIRS = [
 /** Point the kit sub-directories of the worktree at the main clone's. */
 function linkSharedKitDirs(spec: WorktreeSpec): void {
   for (const { name, ...options } of SHARED_KIT_DIRS) {
-    linkSharedDir(join(spec.mainRepo, ".lance-nuit", name), join(spec.path, ".lance-nuit", name), options);
+    linkSharedDir(kitPath(spec.mainRepo, name), kitPath(spec.path, name), options);
   }
 }
 
@@ -313,8 +311,8 @@ function provisionLocalFiles(spec: WorktreeSpec, ticketDir: string | undefined, 
   unshareRunDir(spec.path);
   linkSharedKitDirs(spec);
 
-  const configMain = join(spec.mainRepo, ".lance-nuit", "config.json");
-  const configWt = join(spec.path, ".lance-nuit", "config.json");
+  const configMain = kitPath(spec.mainRepo, CONFIG_FILE);
+  const configWt = kitPath(spec.path, CONFIG_FILE);
   if (existsSync(configMain) && !existsSync(configWt)) {
     mkdirSync(dirname(configWt), { recursive: true });
     cpSync(configMain, configWt);
@@ -330,7 +328,7 @@ function provisionLocalFiles(spec: WorktreeSpec, ticketDir: string | undefined, 
 
 /** Optional setup hook under `.lance-nuit/`. */
 export function setupScriptFor(worktreePath: string, mode: WorktreeMode = "full"): string | null {
-  return firstExistingPath(setupHookNames(mode).map((name) => join(worktreePath, ".lance-nuit", name)));
+  return firstExistingPath(setupHookNames(mode).map((name) => kitPath(worktreePath, name)));
 }
 
 /** Run a hook through SETUP_PIPE; on failure, return the tail of its raw output. */

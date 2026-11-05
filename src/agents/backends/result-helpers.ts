@@ -6,27 +6,28 @@ import {
   type Verdict,
   verdictFromStructured,
 } from "../../contracts/index.js";
+import { describeKill, killedByTimeout, type ProcessKill } from "../../shared/process/process-runner.js";
 
 /** Common optional fields emitted by every process-backed agent mapper. */
 export function agentSession(provider: string, id: string | undefined, resumable = true): AgentSession | undefined {
   return id ? { provider, id, resumable } : undefined;
 }
 
-/** Kill cause, read from the reason the supervisor recorded. A budget kill is a
- *  spend decision, not a technical break: keeping the two apart is what lets the
- *  report say "Budget exceeded" instead of "Technical error". */
-export function killFields(
-  killed: boolean,
-  killReason: string | undefined,
-): { timedOut?: boolean; budgetExceeded?: boolean; costUnaccounted?: boolean } {
-  if (!killed) return {};
+/** The result flags of a kill. A budget kill is a spend decision, not a
+ *  technical break: keeping the two apart is what lets the report say "Budget
+ *  exceeded" instead of "Technical error", and the accounting stop apart from the
+ *  budget one is what points an operator at `--allow-unmetered` instead of
+ *  `--budget`, which cannot price a closed attempt. */
+export function killFields(kill: ProcessKill | undefined): {
+  timedOut?: boolean;
+  budgetExceeded?: boolean;
+  costUnaccounted?: boolean;
+} {
+  if (!kill) return {};
   return {
-    timedOut: killReason?.startsWith("timeout") ?? false,
-    ...(killReason?.startsWith("budget exceeded") ? { budgetExceeded: true } : {}),
-    // The accounting guard's own prefix. Kept apart from the budget one so the
-    // report can say "Spending unaccounted" and point at `--allow-unmetered`
-    // instead of `--budget`, which cannot price a closed attempt.
-    ...(killReason?.startsWith("cost unaccounted") ? { costUnaccounted: true } : {}),
+    timedOut: killedByTimeout(kill),
+    ...(kill.cause === "budget" ? { budgetExceeded: true } : {}),
+    ...(kill.cause === "cost-unaccounted" ? { costUnaccounted: true } : {}),
   };
 }
 
@@ -71,8 +72,8 @@ export interface VerdictOutcomeError {
 }
 
 export interface VerdictOutcomeInput {
-  killed: boolean;
-  killReason?: string;
+  /** Any kill the backend counts as one, the cleanup of a straggler included. */
+  kill?: ProcessKill;
   code: number | null;
   /** Parsed transport/stream error; any value forces a technical failure. */
   error?: VerdictOutcomeError;
@@ -116,11 +117,12 @@ export interface VerdictOutcome {
  * | ok                       | none; `success: true, blocked: true` is ok    |
  */
 export function resolveVerdictOutcome(input: VerdictOutcomeInput): VerdictOutcome {
-  const { killed, killReason, code, error, requiresVerdict, verdict, invalidReason, missingVerdictLabel } = input;
+  const { kill, code, error, requiresVerdict, verdict, invalidReason, missingVerdictLabel } = input;
   const verdictOk = !requiresVerdict || verdict?.success === true;
+  const killed = kill !== undefined;
   const ok = !killed && code === 0 && !error && verdictOk;
-  const failReason = killed
-    ? `process killed: ${killReason}`
+  const failReason = kill
+    ? `process killed: ${describeKill(kill)}`
     : error
       ? error.text
       : requiresVerdict && !verdict

@@ -19,12 +19,11 @@ function quotaSpawn(resetsAtMs: number) {
       JSON.stringify({ type: "result", is_error: true, api_error_status: 429, result: "session limit" }),
     ].join("\n"),
     code: 1,
-    killed: false,
     durationMs: 1,
   };
 }
 
-const success = { output: JSON.stringify({ type: "result", duration_ms: 1 }), code: 0, killed: false, durationMs: 1 };
+const success = { output: JSON.stringify({ type: "result", duration_ms: 1 }), code: 0, durationMs: 1 };
 
 function fakeWait(maxWaitMs: number): RateLimitWait & { slept: number[]; logs: string[] } {
   const slept: number[] = [];
@@ -80,10 +79,9 @@ describe("Claude transport", () => {
                   result: "overloaded",
                 }),
                 code: 0,
-                killed: false,
                 durationMs: 1,
               }
-            : { output: JSON.stringify({ type: "result", duration_ms: 1 }), code: 0, killed: false, durationMs: 1 };
+            : { output: JSON.stringify({ type: "result", duration_ms: 1 }), code: 0, durationMs: 1 };
         },
         (output) => parseClaudeEvents(output),
       );
@@ -104,7 +102,6 @@ describe("Claude transport", () => {
               result: "quota",
             }),
             code: 0,
-            killed: false,
             durationMs: 1,
           };
         },
@@ -179,7 +176,6 @@ describe("Claude transport", () => {
             total_cost_usd: cost,
           }),
           code: 0,
-          killed: false,
           durationMs: 1,
         };
       },
@@ -202,7 +198,6 @@ describe("Claude transport", () => {
         return {
           output: JSON.stringify({ type: "result", duration_ms: 1, total_cost_usd: 3.5, duration_api_ms: 900 }),
           code: 0,
-          killed: false,
           durationMs: 1,
         };
       },
@@ -234,7 +229,7 @@ describe("Claude transport", () => {
               })
             : // Resumed: $0.40 of the discarded attempt plus $0.30 of its own.
               JSON.stringify({ type: "result", duration_ms: 1, total_cost_usd: 0.7 });
-        return { output, code: 0, killed: false, durationMs: 1 };
+        return { output, code: 0, durationMs: 1 };
       },
       (output) => parseClaudeEvents(output),
       [0],
@@ -270,7 +265,7 @@ describe("Claude transport", () => {
               })
             : // Resumed once more: $12 restored plus $1 of its own.
               JSON.stringify({ type: "result", duration_ms: 1, total_cost_usd: 13 });
-        return { output, code: 0, killed: false, durationMs: 1 };
+        return { output, code: 0, durationMs: 1 };
       },
       (output) => parseClaudeEvents(output),
       [0],
@@ -308,7 +303,7 @@ describe("Claude transport", () => {
         calls++;
         const output =
           calls < 3 ? overloaded(0.2) : JSON.stringify({ type: "result", duration_ms: 1, total_cost_usd: 0.1 });
-        return { output, code: 0, killed: false, durationMs: 1 };
+        return { output, code: 0, durationMs: 1 };
       },
       (output) => parseClaudeEvents(output),
       [0, 0],
@@ -334,8 +329,8 @@ describe("Claude transport", () => {
         calls++;
         // The final spawn is killed by the timeout: no `result`, wall time only.
         return calls === 1
-          ? { output: overloaded, code: 0, killed: false, durationMs: 300 }
-          : { output: "", code: null, killed: true, killReason: "timeout (1s)", durationMs: 900 };
+          ? { output: overloaded, code: 0, durationMs: 300 }
+          : { output: "", code: null, kill: { cause: "timeout" as const, afterMs: 1000 }, durationMs: 900 };
       },
       (output) => parseClaudeEvents(output),
       [5],

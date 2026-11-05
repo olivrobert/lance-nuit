@@ -1,5 +1,6 @@
 import type { LiveCostSink } from "../../../contracts/backends.js";
 import type { ProjectPricing } from "../../../contracts/index.js";
+import type { ProcessKill } from "../../../shared/process/process-runner.js";
 import type { BackendSpawnEvent } from "../spawn-event.js";
 
 export {
@@ -42,8 +43,8 @@ export interface RawOpencodeExecutionResult {
   /** stderr, kept because `stream error` lines only ever appear there. */
   logs: string;
   code: number | null;
-  killed: boolean;
-  killReason?: string;
+  /** The kill this backend counts as one. */
+  kill?: ProcessKill;
   durationMs: number;
 }
 

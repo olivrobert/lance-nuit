@@ -222,7 +222,8 @@ the repair would resume on that backend and the model name would not apply. Drop
 on every backend.
 
 Timeouts are drained with fresh reruns before a fix policy receives a truncated
-output. This timeout-drain quota is separate from the normal `retries` quota. A
+output. An opencode attempt killed for emitting no first event within
+`firstEventTimeoutMs` is a timeout too and is drained the same way. This timeout-drain quota is separate from the normal `retries` quota. A
 persistent timeout fails (or warns for a non-blocking step) without sending an
 uninformative fix prompt.
 

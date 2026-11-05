@@ -8,8 +8,9 @@
 // artifact (`.approval(subject, artifact)`). This module knows no subject names;
 // artifact shape is validated by its own parser, not copied rules.
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { writeFileAtomic } from "../../shared/lib/atomic-write.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { Artifact } from "../artifact.js";
 import { createArtifactRef } from "../../shared/language/artifact-ports.js";
@@ -100,11 +101,9 @@ async function validateArtifact(
   return { path, body };
 }
 
-function atomicWrite(path: string, value: ApprovalDecision): void {
+function writeDecision(path: string, value: ApprovalDecision): void {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
-  renameSync(tmp, path);
+  writeFileAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 /** Outcome of `recordApproval`. `written` is false when a decision already covered
@@ -140,7 +139,7 @@ export async function recordApproval(
     decidedAt: new Date().toISOString(),
     decidedBy: decisionActor(),
   };
-  atomicWrite(path, decision);
+  writeDecision(path, decision);
   return { decision, written: true, path };
 }
 
@@ -188,7 +187,7 @@ export async function recordRejection(
     reason: trimmed,
     round,
   };
-  atomicWrite(path, decision);
+  writeDecision(path, decision);
   return { decision, written: true, path };
 }
 

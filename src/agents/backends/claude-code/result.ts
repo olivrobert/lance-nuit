@@ -40,7 +40,7 @@ export function mapClaudeExecutionResult(
   const parsed = parseClaudeEvents(raw.output, options.model);
   // `duration_ms` only arrives on the CLI's final `result` event, which a process
   // killed for timeout or budget never emits: fall back to the supervisor's clock.
-  if (raw.killed || !parsed.stats.duration_ms) parsed.stats.duration_ms = raw.durationMs;
+  if (raw.kill || !parsed.stats.duration_ms) parsed.stats.duration_ms = raw.durationMs;
   if (raw.priorAttemptsDurationMs) parsed.stats.duration_ms += raw.priorAttemptsDurationMs;
   // A resumed spawn reports the session ledger the CLI restored, not its own work.
   // Charge the difference against that baseline — the reconciliation the
@@ -72,10 +72,9 @@ export function mapClaudeExecutionResult(
   const verdictResult: VerdictDetails = structured
     ? verdictFromStructured(parsed.structuredOutput)
     : extractVerdictDetails(parsed.text);
-  if (parsed.transportError && !raw.killed) options.log?.(`  ⚠ ${summary(parsed.transportError)}`);
+  if (parsed.transportError && !raw.kill) options.log?.(`  ⚠ ${summary(parsed.transportError)}`);
   const { ok, failReason, failKind, failCause } = resolveVerdictOutcome({
-    killed: raw.killed,
-    killReason: raw.killReason,
+    kill: raw.kill,
     code: raw.code,
     error: parsed.transportError ? failReasonFor(parsed.transportError) : undefined,
     requiresVerdict: options.outputFormat === "json",
@@ -97,7 +96,7 @@ export function mapClaudeExecutionResult(
     stats: parsed.stats,
     ...(session ? { session } : {}),
     ...(structuredOutput != null ? { structuredOutput } : {}),
-    ...killFields(raw.killed, raw.killReason),
+    ...killFields(raw.kill),
     ...(failReason ? { failReason } : {}),
     ...(failKind ? { failKind } : {}),
     ...(failCause ? { failCause } : {}),

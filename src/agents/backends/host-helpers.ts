@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 import type { JsonRecord } from "../../shared/lib/json-values.js";
+import type { ProcessKill } from "../../shared/process/process-runner.js";
 
 export function appendBestEffort(path: string, text: string): void {
   try {
@@ -50,25 +51,19 @@ export function lineSplitter(onLine: (line: string) => void): { push(text: strin
   };
 }
 
-/** Kill reason shared by every backend's budget guard. `source` says whether the
- *  amount was estimated from a price table or reported by the provider. */
-export function budgetExceededReason(
+/** Kill of every backend's budget guard. `source` says whether the amount was
+ *  estimated from a price table or reported by the provider. */
+export function budgetExceededKill(
   amountUsd: number,
   remainingUsd: number,
   source: "estimated" | "reported",
-): string {
-  return `budget exceeded ($${amountUsd.toFixed(2)} ${source} > $${remainingUsd.toFixed(2)} remaining)`;
+): ProcessKill {
+  return { cause: "budget", detail: `$${amountUsd.toFixed(2)} ${source} > $${remainingUsd.toFixed(2)} remaining` };
 }
 
-/**
- * Kill reason of the accounting guard, shared by every backend that can prove a
- * live attempt unpriceable. The prefix is the contract `killFields` reads, so it
- * must stay distinct from `budget exceeded`: the two stops send an operator to
- * two different flags.
- *
- * `detail` names what could not be priced (the model, or the reported zero), so
- * the step log says why rather than only that.
- */
-export function costUnaccountedReason(detail: string): string {
-  return `cost unaccounted (${detail}) — rerun with --allow-unmetered to authorize it`;
+/** Kill of the accounting guard, shared by every backend that can prove a live
+ *  attempt unpriceable. `detail` names what could not be priced (the model, or
+ *  the reported zero), so the step log says why rather than only that. */
+export function costUnaccountedKill(detail: string): ProcessKill {
+  return { cause: "cost-unaccounted", detail };
 }
