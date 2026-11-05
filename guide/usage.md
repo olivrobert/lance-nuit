@@ -417,8 +417,9 @@ claude --resume <session-id> --fork-session
 ```
 
 The fork leaves the run's conversation untouched, so a later
-`resume_session` repair does not inherit what you typed. Only Claude sessions
-can be reopened this way; the request is refused when the run's directory no
+`resume_session` repair does not inherit what you typed. Only the built-in
+backends that declare `interactiveReopen` can be reopened this way, which today
+means Claude; the request is refused when the run's directory no
 longer exists (a removed worktree). A coder session already open for the item is
 reused.
 

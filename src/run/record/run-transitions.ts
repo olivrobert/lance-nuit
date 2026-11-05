@@ -54,6 +54,26 @@ import { latestAttemptLog } from "./run-timeline.js";
 import { isResumableStatus } from "./run-status.js";
 import { deriveRunStatus } from "./run-verdict.js";
 
+/**
+ * Forget the failure of the pass a step leaves behind.
+ *
+ * `errors` survives every resume round trip, so the `!step.errors` guard of
+ * `updateStep` would keep the first run's cause forever and the final report would
+ * name a timeout long after the real failure became a rejected patch or a verdict.
+ * The kind likewise: a run resumed after a technical error that now stops on a verdict
+ * must be reported as a verdict. And the cause: a step replayed once the external
+ * obstacle is lifted must not stay marked blocked.
+ *
+ * Only these two moves clear all three. `errors` outlives the other two elsewhere: an
+ * absorbed failure keeps it on a `done` step, an interruption writes it on an `aborted`
+ * one, and a successful verdict drops the kind and the cause alone.
+ */
+function clearStepFailure(step: RunStep): void {
+  delete step.errors;
+  delete step.fail_kind;
+  delete step.fail_cause;
+}
+
 export function updateStep(runView: RunView, stepView: RunStepView, status: RunStep["status"], errors?: string): void {
   const run = writable(runView);
   const step = writable(stepView);
@@ -70,29 +90,15 @@ export function updateStep(runView: RunView, stepView: RunStepView, status: RunS
     step.started_at = new Date().toISOString();
     // A resume/retry must not retain an earlier terminal timestamp.
     delete step.finished_at;
-    // Nor an earlier failure reason. `step.errors` survives every resume round
-    // trip, so the `!step.errors` guard below would keep the first run's cause
-    // forever and the final report would name a timeout long after the real
-    // failure became a rejected patch or a verdict.
-    delete step.errors;
-    // Same reasoning for the nature of the failure: a run resumed after a
-    // technical error that now stops on a verdict must be reported as a verdict.
-    delete step.fail_kind;
-    // And for the cause: a step replayed once the external obstacle is lifted
-    // must not stay marked blocked.
-    delete step.fail_cause;
+    clearStepFailure(step);
     // And for the inputs an absorbed failure settled at: a new pass decides anew.
     delete step.absorbed_inputs;
   } else {
     step.finished_at = new Date().toISOString();
   }
-  if (status === "skipped") {
-    // A skipped step did not fail: it must not keep showing the failure of the
-    // pass it abandoned. Its spend stays in `control`, still owed to the budget.
-    delete step.errors;
-    delete step.fail_kind;
-    delete step.fail_cause;
-  }
+  // A skipped step did not fail: it must not keep showing the failure of the
+  // pass it abandoned. Its spend stays in `control`, still owed to the budget.
+  if (status === "skipped") clearStepFailure(step);
   // A `--start-at` replay is owed until the step settles: a failed or
   // interrupted replay must still run on a resume that no longer names it.
   if (isSettledStatus(status)) delete step.replay;

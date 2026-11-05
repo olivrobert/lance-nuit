@@ -1,3 +1,3 @@
 // What other contexts may import from this one: re-exports only, every name with a caller outside.
 // `module-<context>-entry-only` in `.dependency-cruiser.cjs` holds the rule.
-export { DEFAULT_UI_PORT, startUiServer, staticDir } from "./ui/index.js";
+export { DEFAULT_UI_PORT, reopenSessionCommand, startUiServer, staticDir } from "./ui/index.js";

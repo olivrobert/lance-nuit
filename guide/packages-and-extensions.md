@@ -48,6 +48,12 @@ the table above is an error, and an `id` the registries already hold, built-in
 or not, is an error. A composition that wants to replace a built-in provider
 therefore builds registries that do not register it, instead of shadowing it.
 
+A backend factory may also declare two hooks. `describeWriteGrant` names the
+options that let the agent write to the working tree, which `parallelize` refuses
+at load. `interactiveReopen` gives the words that reopen a session in a terminal;
+the dashboard reads it from the built-in backends only, because it spans projects
+that each name their own manifest.
+
 `defineExtension` types a manifest in place, without importing the interface.
 It performs no validation and registers nothing:
 

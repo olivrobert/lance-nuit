@@ -8,8 +8,9 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { createDefaultAgentBackendRegistry } from "../../agents/index.js";
+import { DEFAULT_UI_PORT, reopenSessionCommand, startUiServer, staticDir } from "../../dashboard/index.js";
 import { createDefaultWorkItemGatewayRegistry } from "../../work-items/composition.js";
-import { DEFAULT_UI_PORT, startUiServer, staticDir } from "../../dashboard/index.js";
 import type { RunnerArgs } from "../cli-options.js";
 import { log } from "../../shared/runtime/logging.js";
 import type { RunnerCommand } from "./runner-command.js";
@@ -54,9 +55,11 @@ export async function serveUi(args: UiArgs): Promise<number> {
 
   let running: Awaited<ReturnType<typeof startUiServer>>;
   try {
+    // Built-in providers only: the dashboard spans projects, each with its own manifest.
     running = await startUiServer({
       port: args.port ?? DEFAULT_UI_PORT,
       workItems: createDefaultWorkItemGatewayRegistry(),
+      sessionCommand: reopenSessionCommand(createDefaultAgentBackendRegistry()),
     });
   } catch (error) {
     log(`Dashboard failed to start: ${errorMessage(error)}`);

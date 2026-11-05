@@ -212,6 +212,28 @@ for (const sandbox of ["workspace-write", "danger-full-access"] as const) {
   });
 }
 
+test("a member is refused on what its backend says it grants, whichever the backend", () => {
+  const registry = createDefaultAgentBackendRegistry().register({
+    id: "scribe",
+    capabilities: { structuredOutput: true, streaming: false, resume: false, usageTokens: false, cost: "none" },
+    describeWriteGrant: () => 'mode "scribble"',
+    create: () => {
+      throw new Error("validation never creates a backend");
+    },
+  });
+  const built = pipeline("p")
+    .add(
+      group(
+        llmStep({ id: "audits.a", name: "a", profile: "coder", backend: "scribe", command: "read" } as never, registry),
+        member("audits.b"),
+      ),
+    )
+    .build();
+  expect(() =>
+    validatePipeline(built, "test", { context: buildPipelineContext({ agentBackendRegistry: registry }) }),
+  ).toThrow('parallel group "audits": step "audits.a": mode "scribble" lets it write');
+});
+
 test("a group is declared in one piece", () => {
   const built = pipeline("p")
     .add(

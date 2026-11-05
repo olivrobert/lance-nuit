@@ -210,6 +210,15 @@ export interface AgentBackendFactory {
   readonly capabilities: AgentCapabilities;
   readonly usage?: AgentUsageAccounting;
   readonly normalizeAuthorOptions?: (options: unknown) => unknown;
+  /** The part of these options that lets the agent write to the working tree, in
+   *  words for an error message; undefined when they grant nothing. `parallelize`
+   *  refuses such a member at load. Absent: the options never grant a write. */
+  readonly describeWriteGrant?: (options: unknown) => string | undefined;
+  /** The words that reopen a session in an interactive terminal, without changing the
+   *  session a run may still resume. `readOnly` asks for an agent that cannot edit
+   *  files. Undefined when this id is not safe to type into a shell. Absent: the
+   *  backend's sessions cannot be reopened by a human. */
+  readonly interactiveReopen?: (sessionId: string, options: { readOnly: boolean }) => readonly string[] | undefined;
   create(options?: unknown): AgentBackend;
 }
 
@@ -255,6 +264,14 @@ export class AgentBackendRegistry {
   normalizeAuthorOptions(id: string, options?: unknown): unknown {
     const normalize = this.factories.get(id)?.normalizeAuthorOptions;
     return normalize ? normalize(options) : options;
+  }
+
+  writeGrantOf(spec: BackendSpec): string | undefined {
+    return this.factories.get(spec.id)?.describeWriteGrant?.(spec.options);
+  }
+
+  interactiveReopenOf(id: string): AgentBackendFactory["interactiveReopen"] {
+    return this.factories.get(id)?.interactiveReopen;
   }
 
   resolve(spec: BackendSpec): AgentBackend {

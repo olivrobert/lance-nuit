@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
+import { createDefaultAgentBackendRegistry } from "../../agents/default-registry.ts";
 import { createDefaultWorkItemGatewayRegistry } from "../../work-items/providers/registry.ts";
 import { cleanupTempDirs, makeProject } from "../read-model/test-harness.js";
 import type { CoderSessionRead, Item, ProjectEntry } from "../read-model/index.js";
@@ -13,7 +14,7 @@ import {
   operatorCommand,
   type PaneCommandBuilder,
   paneShell,
-  resumeCoderCommand,
+  reopenSessionCommand,
   type SessionCommandBuilder,
   sessionName,
   shellJoin,
@@ -391,16 +392,32 @@ test("session: a step attempt that is malformed or left no session is refused", 
 test("session command: a forked Claude resume, and nothing for another provider or a bad id", () => {
   const id = "0b5f7c3e-1111-4222-8333-444455556666";
   const writable = { readOnly: false };
-  expect(resumeCoderCommand({ provider: "codex", sessionId: id }, writable)).toMatchObject({ ok: false, status: 409 });
-  expect(resumeCoderCommand({ provider: "claude", sessionId: "x; rm -rf /" }, writable)).toMatchObject({ ok: false });
-  const built = resumeCoderCommand({ provider: "claude", sessionId: id }, writable);
-  if (!hasClaudeCli()) {
-    expect(built).toEqual({ ok: false, status: 503, reason: "claude CLI not found" });
-    return;
-  }
-  expect(built).toEqual({ ok: true, words: ["claude", "--resume", id, "--fork-session"] });
-  expect(resumeCoderCommand({ provider: "claude", sessionId: id }, { readOnly: true })).toEqual({
+  const command = reopenSessionCommand(createDefaultAgentBackendRegistry(), (name) => `/usr/local/bin/${name}`);
+  expect(command({ provider: "codex", sessionId: id }, writable)).toEqual({
+    ok: false,
+    status: 409,
+    reason: "a codex session cannot be reopened from the dashboard",
+  });
+  expect(command({ provider: "claude", sessionId: "x; rm -rf /" }, writable)).toEqual({
+    ok: false,
+    status: 409,
+    reason: "the session id is malformed",
+  });
+  expect(command({ provider: "claude", sessionId: id }, writable)).toEqual({
+    ok: true,
+    words: ["claude", "--resume", id, "--fork-session"],
+  });
+  expect(command({ provider: "claude", sessionId: id }, { readOnly: true })).toEqual({
     ok: true,
     words: ["claude", "--resume", id, "--fork-session", "--permission-mode", "plan"],
   });
+});
+
+test("session command: a CLI missing from PATH is named, and looked up at each launch", () => {
+  const session = { provider: "claude", sessionId: "0b5f7c3e-1111-4222-8333-444455556666" };
+  let installed = false;
+  const command = reopenSessionCommand(createDefaultAgentBackendRegistry(), () => (installed ? "/bin/claude" : null));
+  expect(command(session, { readOnly: false })).toEqual({ ok: false, status: 503, reason: "claude CLI not found" });
+  installed = true;
+  expect(command(session, { readOnly: false })).toMatchObject({ ok: true });
 });
