@@ -1,79 +1,38 @@
 // runner/step/step-loop.ts
 //
 // Run step orchestration. Business responsibilities are split into admission
-// (pre-spawn guards), attempt execution, and verdict resolution. The loop keeps
-// only global step order.
+// (pre-spawn guards) and the pass of an admitted step (`step-pass.ts`: attempt
+// execution and verdict resolution). The loop keeps only global step order.
 
-import { join } from "node:path";
-import { backendSpecForStep } from "../../contracts/backends.js";
 import { extractErrors } from "../report-extraction.js";
-import { executeStep, type StepResult } from "../runners.js";
-import { type PipelineContext, requireAgentBackendRegistry } from "../../shared/language/context.js";
+import { executeStep } from "../runners.js";
+import type { PipelineContext } from "../../shared/language/context.js";
 import { reconcilable, rerunsOnResume, buildPipelineContext } from "../../definition/index.js";
 import type { RunStepView, RunView } from "../../run/index.js";
 import type { RunOutput } from "../run-output.js";
 import { type AbortScope, createAbortScope } from "../abort.js";
-import { emitRunnerEvent } from "../../shared/runtime/events.js";
 import {
   hasUnfinishedWork,
-  inheritChildBudgetStop,
   isSettledStatus,
   lastPassInterrupted,
-  latestAttemptLog,
   ledgerStops,
   matchesStepSelector,
   openRunLedger,
   owesWork,
-  recordAbsorbedInputs,
-  type RunBudget,
   type RunOutcome,
   stopRun,
-  updateStep,
 } from "../../run/index.js";
-import { fingerprintInputs, pureInputsOf } from "../../work-items/index.js";
 
 import { runFixLoop } from "./fix-loop.js";
-import { executePipelineOrchestration } from "./pipeline-orchestration.js";
-import {
-  admitStep,
-  answersToOutputs,
-  checkInputs,
-  type StepAdmission,
-  skipForOperatorSelection,
-} from "./step-admission.js";
-import { runAttempt, startFreshSession } from "./step-attempt.js";
+import { admitStep, checkInputs, type StepAdmission, skipForOperatorSelection } from "./step-admission.js";
 import { resolveOutcome } from "./step-outcome.js";
+import { admissionStop, runStepPass, type StepLoopDeps, type StepLoopStop, type StepPassEnv } from "./step-pass.js";
 
-export type { StepAdmission };
+export type { StepAdmission, StepLoopDeps };
 export { admitStep, checkInputs, resolveOutcome };
-
-function emitPipelineStep(run: RunView, step: RunStepView, index: number, total: number): void {
-  // Keep the existing pipeline-step event on the runtime bus. Other progress
-  // events use the injected output fan-out below.
-  emitRunnerEvent({
-    type: "pipeline-step",
-    id: step.id,
-    name: step.def.name,
-    index,
-    total,
-    pipeline: run.pipeline,
-    ticket: run.ticket,
-  });
-}
 
 export function buildContext(ticket: string | undefined, baseBranch: string | undefined): PipelineContext {
   return buildPipelineContext({ ticket, baseBranch });
-}
-
-export interface StepLoopDeps {
-  executeStep: typeof executeStep;
-  extractErrors: typeof extractErrors;
-  runFixLoop: typeof runFixLoop;
-  /** Structured destination for step progress AND for the loop's own messages.
-   * Required, and so is `deps` itself on `executeRunSteps`: the port carries the
-   * prose as well as the events, so a caller that omitted it would run mute. A
-   * caller that wants that says so with `NULL_RUN_OUTPUT`. */
-  output: RunOutput;
 }
 
 /** Build production dependencies while allowing callers to replace only the
@@ -87,48 +46,6 @@ export function stepLoopDeps(output: RunOutput): StepLoopDeps {
  *  it feeds (`run/record/run-transitions.ts`). */
 export type { RunOutcome } from "../../run/index.js";
 export { loadOrCreateRun } from "./load-or-create-run.js";
-
-/**
- * Initial step attempt: create a fresh session when the backend provides one, then
- * pass once through middleware. The backend owns context-window management,
- * including compaction; the runner does not kill or recreate a session for it.
- *
- * `budgetRemaining` is not set here; the chain calculates it at spawn time, as it
- * does for retries and fixes.
- */
-async function runInitialAttempt(input: {
-  run: RunView;
-  step: RunStepView;
-  command: string;
-  context: PipelineContext;
-  stepLogDir: string;
-  budget: RunBudget;
-  executeStep: typeof executeStep;
-  output: RunOutput;
-}): Promise<{ result: StepResult; stepLog: string }> {
-  const { run, step, stepLogDir } = input;
-  const agentSpec = backendSpecForStep(step.def);
-  const agentBackend = agentSpec ? requireAgentBackendRegistry(input.context).resolve(agentSpec) : undefined;
-  const initialSession = startFreshSession(run, step, agentBackend);
-  if (initialSession) {
-    input.output.emit({ type: "step.session", step, sessionId: initialSession.id });
-  }
-  input.output.emit({
-    type: "step.logs",
-    step,
-    path: stepLogDir,
-    live: !!agentBackend?.capabilities.streaming,
-  });
-
-  const result = await runAttempt(run, step, {
-    command: input.command,
-    context: input.context,
-    budget: input.budget,
-    executeStep: input.executeStep,
-    spawn: { session: step.session },
-  });
-  return { result, stepLog: latestAttemptLog(run, step) ?? join(stepLogDir, "attempt-001", "output.log") };
-}
 
 export interface ExecuteRunStepsOptions {
   resuming: boolean;
@@ -220,26 +137,27 @@ export async function executeRunSteps(
     const { resuming } = opts;
     // The mode as boot read it from the definition the steps come from.
     const reconcile = run.reconcile === true;
-    const loopDeps = {
-      executeStep: deps.executeStep,
-      extractErrors: deps.extractErrors,
-      runFixLoop: deps.runFixLoop,
-      output: deps.output,
-    };
 
     // One ledger, shared by every phase of this execution.
     const budget = openRunLedger(run);
-    let failed = false;
-    let stopped = false;
-    let budgetExceeded = false;
-    let costUnaccounted = false;
-    let costUnaccountedStop = false;
+    let stop: StepLoopStop = {};
     let boundReached = false;
     const setAside: string[] = [];
     let leftUnfinished: RunStepView | undefined;
     const bound = untilStepOf(run, opts.until);
     const baseCtx = context ?? buildContext(ticket, baseBranch);
     const isAborted = () => abort.isRunAborted(run);
+    const passEnv: StepPassEnv = {
+      run,
+      baseCtx,
+      baseBranch,
+      budget,
+      abort,
+      resuming,
+      reconcile,
+      replayInterrupted: opts.replayInterrupted,
+      deps,
+    };
 
     for (const step of run.steps) {
       if (isAborted()) break;
@@ -256,7 +174,7 @@ export async function executeRunSteps(
         break;
       }
       if (reconcile && leftOutBySelection(run, step, opts)) {
-        if (skipForOperatorSelection(run, step, loopDeps.output) === "unfinished") leftUnfinished ??= step;
+        if (skipForOperatorSelection(run, step, deps.output) === "unfinished") leftUnfinished ??= step;
         setAside.push(step.id);
         continue;
       }
@@ -290,119 +208,21 @@ export async function executeRunSteps(
         step,
         baseCtx,
         budget,
-        output: loopDeps.output,
+        output: deps.output,
         replayInterrupted: opts.replayInterrupted,
         startAt: opts.startAt,
         reconcile,
       });
       if (isAborted()) break;
       if (admission.kind === "skip") continue;
-      if (admission.kind === "budget-exceeded") {
-        budgetExceeded = true;
-        break;
-      }
-      // Not routed through the non-blocking absorber: an unaccountable spend is a
-      // run-level fact, not this step's failure, so `blocking: false` cannot
-      // swallow it and keep spending.
-      if (admission.kind === "cost-unaccounted") {
-        costUnaccounted = true;
-        costUnaccountedStop = true;
-        break;
-      }
-      if (admission.kind === "stopped") {
-        stopped = true;
-        break;
-      }
-      if (admission.kind === "failed") {
-        failed = true;
+      if (admission.kind !== "ready") {
+        stop = admissionStop(admission);
         break;
       }
 
-      const { command, stepLogDir } = admission;
-      const stepIndex = run.steps.indexOf(step) + 1;
-      loopDeps.output.emit({ type: "step.started", step, index: stepIndex, total: run.steps.length });
-      updateStep(run, step, "running");
-      emitPipelineStep(run, step, stepIndex, run.steps.length);
-
-      if (step.def.runner === "pipeline") {
-        const orchestration = await executePipelineOrchestration({
-          run,
-          step,
-          baseCtx,
-          baseBranch,
-          budget,
-          resuming,
-          abort,
-          replayInterrupted: opts.replayInterrupted,
-          output: loopDeps.output,
-        });
-        if (isAborted()) break;
-        // A child stopped by its guard stops the parent the same durable way.
-        if (orchestration.budgetExceeded) inheritChildBudgetStop(run, budget);
-        if (orchestration.action === "failed") {
-          failed = true;
-          budgetExceeded ||= orchestration.budgetExceeded;
-          costUnaccounted ||= orchestration.costUnaccounted === true;
-          // A fan-out that refused to launch the next child, or a child that
-          // stopped at its own gate, is an accounting stop the parent reports as
-          // one: the failed node is the carrier of the stop, not a defect to fix.
-          costUnaccountedStop ||= orchestration.costUnaccountedStop === true;
-          break;
-        }
-        if (orchestration.action === "stopped") {
-          stopped = true;
-          budgetExceeded ||= orchestration.budgetExceeded;
-          costUnaccounted ||= orchestration.costUnaccounted === true;
-          costUnaccountedStop ||= orchestration.costUnaccountedStop === true;
-          break;
-        }
-        continue;
-      }
-
-      const attempt = await runInitialAttempt({
-        run,
-        step,
-        command,
-        context: baseCtx,
-        stepLogDir,
-        budget,
-        executeStep: loopDeps.executeStep,
-        output: loopDeps.output,
-      });
-      if (isAborted()) break;
-
-      const action = await resolveOutcome({
-        run,
-        step,
-        command,
-        baseCtx,
-        budget,
-        abort,
-        result: attempt.result,
-        stepLog: attempt.stepLog,
-        deps: {
-          executeStep: loopDeps.executeStep,
-          extractErrors: loopDeps.extractErrors,
-          runFixLoop: loopDeps.runFixLoop,
-        },
-        output: loopDeps.output,
-      });
-      if (isAborted()) break;
-      // `updateStep(running)` cleared `errors` for this pass, so a `done` step
-      // carrying one absorbed its failure. Fingerprinted here, after any fix that
-      // rewrote the inputs and before a later step can: a resume then re-checks
-      // the step only when something else changed them. In reconcile mode a step
-      // without input answers to its missing outputs too, so it needs the same
-      // record (an empty one) not to replay its failure on every invocation.
-      if (answersToOutputs(step.def, reconcile) && step.status === "done" && step.errors !== undefined) {
-        recordAbsorbedInputs(run, step, await fingerprintInputs(baseCtx, pureInputsOf(step.def)));
-      }
-      if (action === "failed") {
-        failed = true;
-        break;
-      }
-      if (action === "stopped") {
-        stopped = true;
+      const passStop = await runStepPass(passEnv, step, admission);
+      if (passStop) {
+        stop = passStop;
         break;
       }
     }
@@ -416,14 +236,18 @@ export async function executeRunSteps(
     const unfinished = hasUnfinishedWork(run);
     // A bound with nothing owed after it changes nothing: the run completes.
     const untilStop = boundReached && bound !== undefined && unfinished;
-    if (untilStop) stopAtBound(run, bound, loopDeps.output);
+    if (untilStop) stopAtBound(run, bound, deps.output);
+    const failed = stop.failed === true;
+    const stopped = stop.stopped === true;
+    const budgetExceeded = stop.budgetExceeded === true;
+    const costUnaccounted = stop.costUnaccounted === true;
     // A loop that went to the end can still not pass: the selection left a step
     // whose last pass is unfinished in that state, and a PASS would start a new
     // run that loses the facts of that pass: an interruption to authorize, a
     // rerun owed. Nothing else ended the run, so this is its stop.
     const ranToEnd = !failed && !stopped && !budgetExceeded && !costUnaccounted && !untilStop && !isAborted();
     const selectionStop = ranToEnd ? leftUnfinished : undefined;
-    if (selectionStop) stopOnUnfinishedSelection(run, selectionStop, loopDeps.output);
+    if (selectionStop) stopOnUnfinishedSelection(run, selectionStop, deps.output);
     const ledger = ledgerStops(run, budget, unfinished);
     return {
       failed,
@@ -433,7 +257,7 @@ export async function executeRunSteps(
       costUnaccounted: costUnaccounted || ledger.costUnaccounted,
       // The retry and fix gates record their refusal on the shared ledger; the
       // admission gate and the orchestration gates report theirs directly.
-      costUnaccountedStop: costUnaccountedStop || ledger.costUnaccountedStop,
+      costUnaccountedStop: stop.costUnaccountedStop === true || ledger.costUnaccountedStop,
       cumulativeCost: budget.cumulative,
       setAside,
     };

@@ -186,7 +186,7 @@ async function executeForEachPipeline(
   return { action: "continue", budgetExceeded: false };
 }
 
-/** Entry point called by step-loop after node admission. */
+/** Entry point called by step-pass after node admission. */
 export async function executePipelineOrchestration(
   input: PipelineOrchestrationInput,
 ): Promise<PipelineOrchestrationResult> {

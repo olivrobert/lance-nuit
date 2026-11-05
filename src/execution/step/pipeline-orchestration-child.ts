@@ -225,8 +225,8 @@ export async function executeChild(
   };
   const childNeedsExecution = childRun.status === "RUNNING" || pendingSteps(childRun).length > 0;
   if (!completedSuccessfully(childRun) && childNeedsExecution) {
-    // Keep the recursive dependency out of the step-loop → orchestration →
-    // step-loop load graph.
+    // Keep the recursive dependency out of the step-loop → step-pass →
+    // orchestration → step-loop load graph.
     const { executeRunSteps, stepLoopDeps } = await import("./step-loop.js");
     // The child runs under the parent's abort scope: a signal received by the
     // process stops its loops too, and the handler persists it as an active run.
