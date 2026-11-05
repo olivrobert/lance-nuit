@@ -4,8 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run } from "../../src/run-record/run.js";
 import { buildPipelineContext } from "../../src/pipeline/context.js";
-import type { RunnerEvent } from "../../src/runtime/events.js";
-import type { RunOutput } from "../../src/runtime/run-output.js";
+import type { RunOutput, RunOutputEvent } from "../../src/runtime/run-output.js";
 import { makeRunStep } from "../../src/run-record/run-step.js";
 import { executeRunSteps, stepLoopDeps } from "../../src/step/step-loop.js";
 
@@ -14,7 +13,7 @@ test("a code step that throws leaves its message and stack in the output.log the
   const runDir = mkdtempSync(join(tmpdir(), "pipeline-fn-throw-run-"));
   const ticket = "fn-throw";
   const context = buildPipelineContext({ cwd, ticket });
-  const events: RunnerEvent[] = [];
+  const events: RunOutputEvent[] = [];
   const output: RunOutput = { emit: (event) => events.push(event) };
 
   const step = makeRunStep({

@@ -1,15 +1,61 @@
 // runner/runtime/run-output.ts
 //
-// Port of the structured run output, and the two destinations that only depend on
-// the runtime itself. Presentation destinations (console, live feed, status line)
-// stay in `output/`; the step loop only ever sees this interface.
+// Port of the structured run output, its step events, and the destinations that
+// only depend on the runtime itself. Presentation destinations (console, live feed,
+// status line) stay in `output/`; the step loop only ever sees this interface.
 
-import { emitRunnerEvent, type RunnerEvent } from "./events.js";
+import type { RunStepView } from "../model/run.js";
+import type { RunnerEvent } from "./events.js";
+
+/** Step progress emitted by the step loop. It travels on `RunOutput` and never on
+ * the process-wide bus, whose publishers (agent backends included) know nothing of
+ * a run; a run can still have several observers (console, JSONL, tests) without the
+ * loop knowing where a message is rendered. */
+export interface StepStartedEvent {
+  type: "step.started";
+  step: RunStepView;
+  index: number;
+  total: number;
+}
+
+export interface StepSessionEvent {
+  type: "step.session";
+  step: RunStepView;
+  sessionId: string;
+}
+
+export interface StepLogsEvent {
+  type: "step.logs";
+  step: RunStepView;
+  path: string;
+  live: boolean;
+}
+
+export interface StepDoneEvent {
+  type: "step.done";
+  step: RunStepView;
+  suffix?: string;
+}
+
+export interface StepFailedEvent {
+  type: "step.failed";
+  step: RunStepView;
+  suffix?: string;
+}
+
+/** What a destination receives: the step events, plus what the bus carries. */
+export type RunOutputEvent =
+  | RunnerEvent
+  | StepStartedEvent
+  | StepSessionEvent
+  | StepLogsEvent
+  | StepDoneEvent
+  | StepFailedEvent;
 
 /** A destination for structured run output. Implementations must be best effort:
  * output failures must never change the pipeline result. */
 export interface RunOutput {
-  emit(event: RunnerEvent): void;
+  emit(event: RunOutputEvent): void;
 }
 
 /** Fan out one event to all destinations. A broken destination is isolated from
@@ -17,7 +63,7 @@ export interface RunOutput {
 export class CompositeRunOutput implements RunOutput {
   constructor(private readonly outputs: readonly RunOutput[]) {}
 
-  emit(event: RunnerEvent): void {
+  emit(event: RunOutputEvent): void {
     for (const output of this.outputs) {
       try {
         output.emit(event);
@@ -25,13 +71,6 @@ export class CompositeRunOutput implements RunOutput {
         // Observability is deliberately non-blocking.
       }
     }
-  }
-}
-
-/** Adapter retaining the existing event bus for backend-owned events. */
-export class RunnerEventOutput implements RunOutput {
-  emit(event: RunnerEvent): void {
-    emitRunnerEvent(event);
   }
 }
 

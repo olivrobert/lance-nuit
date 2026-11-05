@@ -3,18 +3,18 @@
 // Presentation destinations for the `RunOutput` port declared in
 // `runtime/run-output.ts`: the JSONL live feed and the human-readable console.
 
+import type { RunnerMessageEvent } from "../runtime/events.js";
+import type { LiveFeed } from "../runtime/live-feed.js";
+import { withSeverityGlyph, writeStderr } from "../runtime/logging.js";
 import type {
-  RunnerEvent,
-  RunnerMessageEvent,
+  RunOutput,
+  RunOutputEvent,
   StepDoneEvent,
   StepFailedEvent,
   StepLogsEvent,
   StepSessionEvent,
   StepStartedEvent,
-} from "../runtime/events.js";
-import type { LiveFeed } from "../runtime/live-feed.js";
-import { withSeverityGlyph, writeStderr } from "../runtime/logging.js";
-import type { RunOutput } from "../runtime/run-output.js";
+} from "../runtime/run-output.js";
 import { logStepDone, logStepFailed, logStepLogs, logStepSession, logStepStarted } from "./console-reporter.js";
 
 /** Direct JSONL destination for callers that do not want to use the global event
@@ -23,14 +23,14 @@ import { logStepDone, logStepFailed, logStepLogs, logStepSession, logStepStarted
 export class LiveFeedOutput implements RunOutput {
   constructor(private readonly feed: LiveFeed) {}
 
-  emit(event: RunnerEvent): void {
+  emit(event: RunOutputEvent): void {
     this.feed.append({ ts: new Date().toISOString(), ...liveEvent(event) });
   }
 }
 
 /** Keep the JSONL feed a useful event stream rather than serializing the entire
  * mutable RunStep (which can contain prompts and backend definitions). */
-function liveEvent(event: RunnerEvent): Record<string, unknown> {
+function liveEvent(event: RunOutputEvent): Record<string, unknown> {
   if (!("step" in event)) return { ...event };
   const { step, ...rest } = event;
   return {
@@ -45,7 +45,7 @@ function liveEvent(event: RunnerEvent): Record<string, unknown> {
 /** Human-readable step progress destination. It intentionally ignores backend
  * telemetry; stream formatters remain the owner of that presentation. */
 export class ConsoleRunOutput implements RunOutput {
-  emit(event: RunnerEvent): void {
+  emit(event: RunOutputEvent): void {
     switch (event.type) {
       case "step.started":
         renderStepStarted(event);

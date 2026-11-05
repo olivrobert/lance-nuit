@@ -9,7 +9,6 @@
 // This is also the destination for observability middleware in the attempt chain
 // (attempt-chain.ts): they publish here instead of writing inside caller loops.
 
-import type { RunStepView } from "../model/run.js";
 import { configuredLiveFeed, type LiveFeed } from "./live-feed.js";
 
 /** Normalized spawn event for dashboards that do not need to know about Claude. */
@@ -64,41 +63,6 @@ export interface PipelineStepEvent {
   ticket?: string;
 }
 
-/** Output events emitted by the step loop.  Keeping these on the existing event
- * bus means a run can have several observers (console, JSONL, tests) without
- * making the loop know where a message is rendered. */
-export interface StepStartedEvent {
-  type: "step.started";
-  step: RunStepView;
-  index: number;
-  total: number;
-}
-
-export interface StepSessionEvent {
-  type: "step.session";
-  step: RunStepView;
-  sessionId: string;
-}
-
-export interface StepLogsEvent {
-  type: "step.logs";
-  step: RunStepView;
-  path: string;
-  live: boolean;
-}
-
-export interface StepDoneEvent {
-  type: "step.done";
-  step: RunStepView;
-  suffix?: string;
-}
-
-export interface StepFailedEvent {
-  type: "step.failed";
-  step: RunStepView;
-  suffix?: string;
-}
-
 /** Severity of an execution message. It qualifies the message, not the run: a
  *  `warn` says a gate degraded something, never that the run ends badly. The
  *  glyph each level renders as lives in `runtime/logging.ts`. */
@@ -120,11 +84,6 @@ export type RunnerEvent =
   | ActivityRunnerEvent
   | TransportRetryEvent
   | PipelineStepEvent
-  | StepStartedEvent
-  | StepSessionEvent
-  | StepLogsEvent
-  | StepDoneEvent
-  | StepFailedEvent
   | RunnerMessageEvent;
 
 export type RunnerEventSubscriber = (event: RunnerEvent) => void;

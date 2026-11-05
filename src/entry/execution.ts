@@ -165,9 +165,9 @@ export interface WiredOutputs {
  * step header, and it also listens to the bus: backend telemetry (context
  * occupancy, tool calls) is published there, not through the step fan-out.
  *
- * `RunnerEventOutput` is deliberately absent from the composite: the bus already
- * writes every event it receives to the configured feed, so adding it would write
- * each step.* line twice into the very file the watcher pane reads.
+ * Step events are not bus events (`RunOutputEvent`): the bus writes what it receives
+ * to the configured feed, so carrying them too would write each step.* line twice
+ * into the very file the watcher pane reads.
  */
 export function wireRunOutputs(run: RunView, args: RunnerArgs): WiredOutputs {
   const liveFeed = startLiveFeed(run.run_dir, args.watch, { autoClose: args.watchAutoClose });

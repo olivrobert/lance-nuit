@@ -2,10 +2,10 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunnerEvent, RunnerMessageLevel } from "../runtime/events.js";
+import type { RunnerMessageLevel } from "../runtime/events.js";
 import { setRunnerLiveFeed } from "../runtime/live-feed.js";
 import { setLogInterceptor } from "../runtime/logging.js";
-import { CompositeRunOutput, RunnerEventOutput } from "../runtime/run-output.js";
+import { CompositeRunOutput, type RunOutputEvent } from "../runtime/run-output.js";
 import { makeRunStep } from "../run-record/run-step.ts";
 import { FileLiveFeed } from "./live-feed.ts";
 import { ConsoleRunOutput, LiveFeedOutput } from "./run-output.ts";
@@ -60,8 +60,8 @@ test("every destination sees every event in composite order and in emission orde
   const first: string[] = [];
   const second: string[] = [];
   const output = new CompositeRunOutput([
-    { emit: (e: RunnerEvent) => first.push(`1:${e.type}`) },
-    { emit: (e: RunnerEvent) => second.push(`2:${e.type}`) },
+    { emit: (e: RunOutputEvent) => first.push(`1:${e.type}`) },
+    { emit: (e: RunOutputEvent) => second.push(`2:${e.type}`) },
   ]);
 
   output.emit({ type: "runner.message", level: "info", message: "a" });
@@ -84,9 +84,8 @@ test("LiveFeedOutput writes compact step events", () => {
 });
 
 test("a step event configured on the same feed is written exactly once", () => {
-  // `wireRunOutputs` deliberately leaves `RunnerEventOutput` out of the composite:
-  // the bus already writes to the configured feed, so adding it would duplicate
-  // every step.* line in the very file the watcher pane reads.
+  // The bus writes what it receives to the configured feed. Step events stay off it,
+  // or every step.* line would be duplicated in the very file the watcher pane reads.
   const path = feedPath();
   const feed = new FileLiveFeed(path);
   setRunnerLiveFeed(feed);
@@ -95,19 +94,6 @@ test("a step event configured on the same feed is written exactly once", () => {
   new CompositeRunOutput([new LiveFeedOutput(feed)]).emit({ type: "step.done", step });
 
   expect(readFileSync(path, "utf8").trim().split("\n")).toHaveLength(1);
-});
-
-test("routing a step event through the bus as well writes it twice", () => {
-  // The counterpart of the previous case: the duplication is real, which is why
-  // the composite owns the feed and the bus is left to backend telemetry.
-  const path = feedPath();
-  const feed = new FileLiveFeed(path);
-  setRunnerLiveFeed(feed);
-  const step = makeRunStep({ id: "check", name: "Check", command: "true", runner: "bash" });
-
-  new CompositeRunOutput([new LiveFeedOutput(feed), new RunnerEventOutput()]).emit({ type: "step.done", step });
-
-  expect(readFileSync(path, "utf8").trim().split("\n")).toHaveLength(2);
 });
 
 test("the console gives each message level its glyph, and only that glyph", () => {

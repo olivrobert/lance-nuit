@@ -13,6 +13,7 @@
 // the fan-out either way, and simply does nothing.
 
 import type { RunnerEvent } from "../runtime/events.js";
+import type { RunOutputEvent } from "../runtime/run-output.js";
 import { setLogInterceptor } from "../runtime/logging.js";
 import { cyan, dim, visibleLength, yellow } from "./color.js";
 import { formatContextShare } from "./format.js";
@@ -107,7 +108,7 @@ export class StatusLineOutput {
     };
   }
 
-  emit(event: RunnerEvent): void {
+  emit(event: RunOutputEvent): void {
     if (!this.enabled) return;
     switch (event.type) {
       case "step.started":
