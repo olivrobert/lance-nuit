@@ -91,13 +91,13 @@ const CONTEXTS = [
   },
   {
     name: "definition",
-    path: "^src/(dsl|builtin-steps|builtins|validation|project|extractors|pipeline)/|^src/dsl\\.ts$|^src/model/(definition|input)\\.ts$|^src/env/builtin-pipeline\\.ts$",
+    path: "^src/(dsl|builtin-steps|builtins|validation|project|extractors|pipeline)/|^src/dsl\\.ts$|^src/model/(definition|input|run-report)\\.ts$|^src/env/builtin-pipeline\\.ts$",
     mayImport: ["work-items", "shared"],
     comment: "What a pipeline is, and whether it is valid.",
   },
   {
     name: "run",
-    path: "^src/(run-record|run-stats)/|^src/model/(run|persisted|journal|storage-ports|run-report|scan-record)\\.ts$",
+    path: "^src/(run-record|run-stats)/|^src/model/(run|persisted|journal|storage-ports|scan-record)\\.ts$",
     mayImport: ["definition", "shared"],
     comment: "What happened during a run, and what it cost.",
   },
