@@ -256,13 +256,3 @@ export function withoutDeliverableMessage(steps: readonly PipelineStep[]): strin
     `or set rerunOnResume: true if replaying it on every invocation is idempotent.`
   );
 }
-
-/** Resolve templated values that accept an `async` function. A sync function
- *  remains valid: `await` passes through a non-thenable value. */
-export async function resolveTemplateAsync<TCtx, TValue = string>(
-  value: AsyncTemplated<TCtx, TValue> | undefined,
-  ctx: TCtx,
-): Promise<TValue | undefined> {
-  if (value == null) return undefined;
-  return typeof value === "function" ? await (value as (c: TCtx) => TValue | Promise<TValue>)(ctx) : value;
-}

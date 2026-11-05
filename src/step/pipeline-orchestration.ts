@@ -7,7 +7,7 @@
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineLot } from "../model/context.js";
 import type { PipelineInvocationDefinition, PipelineOrchestrationDefinition } from "../model/definition.js";
-import { resolveTemplateAsync } from "../model/definition.js";
+import { resolveTemplateAsync } from "../model/context.js";
 import type { ChildRefView, OrchestrationView, RunStepView } from "../model/run.js";
 import {
   commitChildCall,
