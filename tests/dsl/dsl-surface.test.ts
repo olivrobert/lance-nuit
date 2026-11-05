@@ -42,20 +42,20 @@ const FORBIDDEN_AUTHORING_FORMS: Array<[string, RegExp, ("all" | "authoring")?]>
 ];
 
 test("DSL surface: removed authoring forms do not reappear", () => {
-  const internalWorkItemSource = join(RUNNER_DIR, "src", "builtin-steps", "lib", "work-item-steps.ts");
+  const internalWorkItemSource = join(RUNNER_DIR, "src", "definition", "builtin-steps", "lib", "work-item-steps.ts");
   const files = [
-    join(RUNNER_DIR, "src", "dsl.ts"),
-    join(RUNNER_DIR, "src", "pipeline", "loader.ts"),
-    join(RUNNER_DIR, "src", "commands", "create-pipeline.ts"),
+    join(RUNNER_DIR, "src", "definition", "dsl.ts"),
+    join(RUNNER_DIR, "src", "definition", "pipeline", "loader.ts"),
+    join(RUNNER_DIR, "src", "entry", "commands", "create-pipeline.ts"),
     join(RUNNER_DIR, "README.md"),
-    ...productionPipelineSources(join(RUNNER_DIR, "src", "builtin-steps")),
+    ...productionPipelineSources(join(RUNNER_DIR, "src", "definition", "builtin-steps")),
   ];
   const violations = files.flatMap((file) => {
     const source = readFileSync(file, "utf8");
     return FORBIDDEN_AUTHORING_FORMS.filter(
       ([name, pattern, scope]) =>
         !(name === "workItemSourceStep" && file === internalWorkItemSource) &&
-        (scope !== "authoring" || file !== join(RUNNER_DIR, "src", "dsl.ts")) &&
+        (scope !== "authoring" || file !== join(RUNNER_DIR, "src", "definition", "dsl.ts")) &&
         pattern.test(source),
     ).map(([name]) => `${file}: ${name}`);
   });

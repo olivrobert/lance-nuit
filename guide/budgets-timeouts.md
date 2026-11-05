@@ -330,7 +330,7 @@ promises the stop it can prove, not an exact invoice.
 ### Where spend is written
 
 One module writes every figure the runner accounts for:
-`src/run-record/cost-accounting.ts`. It also owns the reads that say what a figure
+`src/run/record/cost-accounting.ts`. It also owns the reads that say what a figure
 proves, so changing a cost rule means changing that file and checking the
 behaviors it names, rather than looking for whoever else might touch a budget.
 
@@ -344,7 +344,7 @@ Four facts move money, and each has its own entry point there:
 | A resume reads figures back from the snapshot and the journal, and an execution opens its ledger from them | `projectStepSpend`, `restoreAttemptSpend`, `restoreRunTotals`, `openRunLedger` | nothing new — a total already accounted for is rebuilt or restored, never charged again |
 
 `chargeAttemptToLedger` is purely arithmetic and performs no I/O: the attempt's
-settlement (`settleAttempt` in `src/run-record/attempt-lifecycle.ts`) calls it
+settlement (`settleAttempt` in `src/run/record/attempt-lifecycle.ts`) calls it
 with the figures `closeAttempt` accepted, on every exit of an attempt — a
 returned verdict or a rejected spawn alike — and the gate that decides to stop is
 what journals the stop. The charge is not a middleware: nothing in the optional
@@ -358,7 +358,7 @@ reconciliation. Which record a resume believes for each concept is tabled in
 [persistence](persistence.md#which-record-is-authoritative).
 
 Every site about to spend asks one gate, `costGate`
-(`src/run-record/cost-stop-events.ts`): step admission, the re-ask of a refused
+(`src/run/record/cost-stop-events.ts`): step admission, the re-ask of a refused
 capture, a rerun, a repair pass, the replay after a repair, and a composed launch.
 It decides from the ledger and records the stop, so the same ledger gives the
 same `run.budget.exceeded` or `run.cost.unaccounted` whichever site observed it.

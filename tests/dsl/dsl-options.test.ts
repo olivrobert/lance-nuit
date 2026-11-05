@@ -11,11 +11,11 @@ import {
   runPipeline,
   source as externalSource,
   textArtifact,
-} from "../../src/dsl.ts";
-import { assertStrictSchema } from "../../src/dsl/dsl-steps.ts";
-import { CODEX_SANDBOX } from "../../src/engine/backends/codex/types.ts";
-import { PipelineStructureValidator } from "../../src/validation/structure.ts";
-import { createDefaultAgentBackendRegistry } from "../../src/engine/default-registry.js";
+} from "../../src/definition/dsl.ts";
+import { assertStrictSchema } from "../../src/definition/dsl/dsl-steps.ts";
+import { CODEX_SANDBOX } from "../../src/agents/backends/codex/types.ts";
+import { PipelineStructureValidator } from "../../src/definition/validation/structure.ts";
+import { createDefaultAgentBackendRegistry } from "../../src/agents/default-registry.js";
 
 /** Explicit registry: the DSL no longer falls back to the built-in composition. */
 const REGISTRY = createDefaultAgentBackendRegistry();

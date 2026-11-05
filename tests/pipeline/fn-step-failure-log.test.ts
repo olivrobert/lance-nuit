@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "../../src/run-record/run.js";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
-import type { RunOutput, RunOutputEvent } from "../../src/runtime/run-output.js";
-import { makeRunStep } from "../../src/run-record/run-step.js";
-import { executeRunSteps, stepLoopDeps } from "../../src/step/step-loop.js";
+import type { Run } from "../../src/run/record/run.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
+import type { RunOutput, RunOutputEvent } from "../../src/execution/run-output.js";
+import { makeRunStep } from "../../src/run/record/run-step.js";
+import { executeRunSteps, stepLoopDeps } from "../../src/execution/step/step-loop.js";
 
 test("a code step that throws leaves its message and stack in the output.log the console points to", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pipeline-fn-throw-"));

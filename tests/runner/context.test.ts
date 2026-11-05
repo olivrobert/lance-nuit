@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { contextEvent, contextTokensFromUsage } from "../../src/runtime/context.js";
+import { contextEvent, contextTokensFromUsage } from "../../src/shared/runtime/context.js";
 
 test("contextTokensFromUsage sums input, cache read, and cache creation without output", () => {
   expect(

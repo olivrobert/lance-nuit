@@ -6,9 +6,9 @@ import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
-const startup = resolve(import.meta.dir, "../../src/entry/startup.ts");
-const dslTypes = resolve(import.meta.dir, "../../src/project/dsl-types.ts");
-const typescriptRuntime = resolve(import.meta.dir, "../../src/project/dsl-types/typescript-runtime.ts");
+const startup = resolve(import.meta.dir, "../../src/entry/composition/startup.ts");
+const dslTypes = resolve(import.meta.dir, "../../src/definition/project/dsl-types.ts");
+const typescriptRuntime = resolve(import.meta.dir, "../../src/definition/project/dsl-types/typescript-runtime.ts");
 
 function loadedModules(script: string): string[] {
   const result = spawnSync(process.execPath, ["-e", script], { encoding: "utf8" });

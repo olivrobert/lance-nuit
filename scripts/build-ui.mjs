@@ -4,7 +4,7 @@
 //
 // The runner ships no bundler at runtime and the dashboard must stay a folder of
 // plain files the static handler can serve, so the React sources under
-// `src/modules/ui/app/` are compiled ahead of time into exactly the two assets
+// `src/dashboard/ui/app/` are compiled ahead of time into exactly the two assets
 // `index.html` already asks for: `/app.js` and `/app.css`.
 //
 // Two things are worth knowing about this build.
@@ -37,8 +37,8 @@ const dev = watch || process.argv.includes("--dev");
 /** @type {import("esbuild").BuildOptions} */
 const options = {
   absWorkingDir: root,
-  entryPoints: [join(root, "src/modules/ui/app/index.tsx")],
-  outfile: join(root, "src/modules/ui/static/app.js"),
+  entryPoints: [join(root, "src/dashboard/ui/app/index.tsx")],
+  outfile: join(root, "src/dashboard/ui/static/app.js"),
   bundle: true,
   format: "esm",
   target: "es2022",
@@ -56,8 +56,8 @@ const options = {
 if (watch) {
   const ctx = await context(options);
   await ctx.watch();
-  console.log("build-ui: watching src/modules/ui/app");
+  console.log("build-ui: watching src/dashboard/ui/app");
 } else {
   await build(options);
-  console.log("build-ui: emitted src/modules/ui/static/app.js and app.css");
+  console.log("build-ui: emitted src/dashboard/ui/static/app.js and app.css");
 }

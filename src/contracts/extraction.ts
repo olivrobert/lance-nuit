@@ -1,5 +1,5 @@
 /** Contract implemented by every module in `extractors/` through its exported
- *  `extract` function (see `extractors/registry.ts`). */
+ *  `extract` function (see `definition/extractors/registry.ts`). */
 export interface ExtractionResult {
   hasErrors: boolean;
   errors: string;

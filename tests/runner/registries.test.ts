@@ -4,14 +4,14 @@
 // (and therefore never parsed), and a key matching nothing in RunnerArgs.
 
 import { expect, test } from "bun:test";
-import { BOOT } from "../../src/boot/step.ts";
-import { COMMANDS } from "../../src/commands/command.ts";
-import { DISPATCH } from "../../src/dispatch/strategy.ts";
-import { AgentBackendRegistry } from "../../src/engine/registry.ts";
-import { requireAgentBackendRegistry } from "../../src/model/context.ts";
-import { buildPipelineContext } from "../../src/pipeline/context.ts";
-import { FLAGS, flagSpec } from "../../src/model/cli-options.ts";
-import { parseRunnerArgs } from "../../src/cli/parse.ts";
+import { BOOT } from "../../src/entry/boot/step.ts";
+import { COMMANDS } from "../../src/entry/commands/command.ts";
+import { DISPATCH } from "../../src/execution/dispatch/strategy.ts";
+import { AgentBackendRegistry } from "../../src/agents/registry.ts";
+import { requireAgentBackendRegistry } from "../../src/shared/language/context.ts";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.ts";
+import { FLAGS, flagSpec } from "../../src/entry/cli-options.ts";
+import { parseRunnerArgs } from "../../src/entry/cli/parse.ts";
 
 test("FLAGS contains no long-flag or short-alias collisions", () => {
   const names = FLAGS.flatMap((f) => (f.short ? [f.long, f.short] : [f.long]));

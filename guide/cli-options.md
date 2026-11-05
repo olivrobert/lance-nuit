@@ -1,7 +1,7 @@
 # CLI options
 
-Source of truth: the `FLAGS` registry in `model/cli-options.ts`, which drives the
-parser (`cli/parse.ts`) and `runner --help`. The `pipeline` wrapper maps `run`, `single`, `inspect`, `logs`,
+Source of truth: the `FLAGS` registry in `entry/cli-options.ts`, which drives the
+parser (`entry/cli/parse.ts`) and `runner --help`. The `pipeline` wrapper maps `run`, `single`, `inspect`, `logs`,
 `clean`, `worktree clean`, `stats`, `typecheck`, `lint`, `create`, `approve`, `reject`, `close`, `reopen`, and `list` to these
 flags.
 

@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { workItemDeliveryStep } from "../../src/builtin-steps/lib/work-item-steps.js";
-import type { OnFail } from "../../src/dsl/dsl-types.js";
-import { createProjectBashStep } from "../../src/dsl/dsl-steps.js";
+import { workItemDeliveryStep } from "../../src/definition/builtin-steps/lib/work-item-steps.js";
+import type { OnFail } from "../../src/definition/dsl/dsl-types.js";
+import { createProjectBashStep } from "../../src/definition/dsl/dsl-steps.js";
 import {
   createInternalWorkItemSourceStep,
   forEachPipeline,
@@ -12,11 +12,11 @@ import {
   mechanicalFix,
   pipeline,
   runPipeline,
-} from "../../src/dsl.js";
-import { createFakeWorkItemGateway } from "../../src/modules/work-item/fake.js";
-import { createDefaultWorkItemGatewayRegistry } from "../../src/modules/work-item/registry.js";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
-import { createDefaultAgentBackendRegistry } from "../../src/engine/default-registry.js";
+} from "../../src/definition/dsl.js";
+import { createFakeWorkItemGateway } from "../../src/work-items/providers/fake.js";
+import { createDefaultWorkItemGatewayRegistry } from "../../src/work-items/providers/registry.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
+import { createDefaultAgentBackendRegistry } from "../../src/agents/default-registry.js";
 
 /** Explicit registry: the DSL no longer falls back to the built-in composition. */
 const REGISTRY = createDefaultAgentBackendRegistry();

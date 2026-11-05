@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { CliError, FLAGS } from "../../src/model/cli-options.ts";
-import { parseRunnerArgs } from "../../src/cli/parse.ts";
+import { CliError, FLAGS } from "../../src/entry/cli-options.ts";
+import { parseRunnerArgs } from "../../src/entry/cli/parse.ts";
 
 test("positional ticket only", () => {
   const a = parseRunnerArgs(["PROJ-28"]);

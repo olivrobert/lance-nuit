@@ -17,19 +17,18 @@
 //                                                  ↓
 //                                stack stop (worktree-stop.sh) unless PASS
 //
-// Everything above `selectDispatch` lives in `entry/startup.ts`, the normal run
-// in `entry/execution.ts`. Those phases RETURN their outcome; this file owns the
+// Everything above `selectDispatch` lives in `entry/composition/startup.ts`, the normal run
+// in `entry/composition/execution.ts`. Those phases RETURN their outcome; this file owns the
 // process boundary — the single `process.exit` — which is what lets the phases be
 // tested without one.
 
-import { announceRun, prepareRun, reportRun, wireRunOutputs } from "./entry/execution.js";
-import { installChildKillHandlers } from "./entry/signals.js";
-import { createStackStop, NO_STACK_STOP, type StackStop, stopsStack } from "./entry/stack-stop.js";
-import { startup } from "./entry/startup.js";
-import type { RunView } from "./model/run.js";
-import { createAbortScope } from "./runtime/abort.js";
-import { log } from "./runtime/logging.js";
-import { executeRunSteps, stepLoopDeps } from "./step/step-loop.js";
+import { announceRun, prepareRun, reportRun, wireRunOutputs } from "./entry/composition/execution.js";
+import { installChildKillHandlers } from "./entry/composition/signals.js";
+import { createStackStop, NO_STACK_STOP, type StackStop, stopsStack } from "./entry/composition/stack-stop.js";
+import { startup } from "./entry/composition/startup.js";
+import type { RunView } from "./run/index.js";
+import { createAbortScope, executeRunSteps, stepLoopDeps } from "./execution/index.js";
+import { log } from "./shared/runtime/logging.js";
 
 // Module-level so `main().catch` and the signal handler, both installed before
 // startup returns, reach the stop of the worktree this process entered.

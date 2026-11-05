@@ -93,15 +93,14 @@ beyond that belongs in the code, in a comment, or in the pull request.
   change and `bun install --frozen-lockfile` for reproducible checkout installs.
   Consumer verification uses `npm install --no-package-lock` in a temporary
   directory and does not need a repository `package-lock.json`.
-- The seven architecture levels of [guide/architecture.md](guide/architecture.md)
+- The contexts, facades and modules of [guide/architecture.md](guide/architecture.md#2-repository-layout)
   are enforced by `bun run deps:check` (dependency-cruiser, type imports
   included). `.dependency-cruiser-known-violations.json` is no longer a debt
   record: it holds only edges someone argued for, one file → file edge per line,
   each with a `why` and a `reviewedOn` date, and the check refuses an entry
   missing either. Three rules govern it: an entry is added only with a new rule,
-  for the existing edges it finds on the day it is declared — a new upward import,
-  a new cycle or a new import against a context's direction is fixed, not
-  recorded; an entry that no longer matches
+  for the existing edges it finds on the day it is declared — a new cycle or a
+  new import against a context's direction is fixed, not recorded; an entry that no longer matches
   a real edge is removed in the same commit that removed the edge, and the check
   fails until it is; when a file moves and an existing edge merely changes path,
   the entry is rewritten by hand and the pull request states the old → new
@@ -110,8 +109,9 @@ beyond that belongs in the code, in a comment, or in the pull request.
   cannot start recording again.
 - The same check compares folder cycles to a second baseline,
   `.dependency-cruiser-known-folder-cycles.json`. It groups the graph by folder
-  — one node per folder directly under `src/`, one per file directly under
-  `src/`, so `src/dsl.ts` and `src/dsl/` are two nodes — and lists every edge
+  — one node per folder directly under a context, one per file directly under a
+  context or under `src/`, so `src/definition/dsl.ts` and `src/definition/dsl/` are
+  two nodes — and lists every edge
   whose two ends sit in one cycle of that grouped graph. That is how it catches
   a pair of folders locking each other while no single file is in a cycle, which
   `no-circular` cannot see. The three rules above hold here too, on a `from` →
@@ -120,8 +120,13 @@ beyond that belongs in the code, in a comment, or in the pull request.
   edited by hand, and the target is an empty file.
 - `deps:check` also enforces the contexts declared in `CONTEXTS`
   (`scripts/layers.cjs`): each file belongs to exactly one, and each yields a
-  `context-<name>-direction` rule limiting the contexts it may import. See
-  [guide/architecture.md](guide/architecture.md#contexts).
+  `context-<name>-direction` rule limiting the contexts it may import. A new file
+  in `shared` has to be named there: the list is closed on purpose. See
+  [guide/architecture.md](guide/architecture.md#2-repository-layout).
+- From another context, only the facade of a context may be imported: its
+  `index.ts`, re-exports only, each name with a caller outside the context
+  (`tests/deps/facades.test.ts`). A new outside import adds its name to the facade.
+  See [guide/architecture.md](guide/architecture.md#facades).
 - `deps:check` also enforces the modules declared in `MODULES`
   (`scripts/layers.cjs`): each yields a `module-<name>-entry-only` rule, so code
   outside a module may import only its entry file, and the check fails when a
@@ -136,15 +141,15 @@ beyond that belongs in the code, in a comment, or in the pull request.
 - Every `.gitleaks.toml` allowlist states why the match is not a secret, who
   owns the decision, and a re-review date. An undated exception is permanent
   blindness.
-- New CLI options are declared in the `FLAGS` registry (`src/model/cli-options.ts`);
-  the parser that reads it lives in `src/cli/parse.ts`.
+- New CLI options are declared in the `FLAGS` registry (`src/entry/cli-options.ts`);
+  the parser that reads it lives in `src/entry/cli/parse.ts`.
   Both help texts are generated from it: `runner --help` through
-  `src/commands/help.ts`, and `lancenuit help` through the `WRAPPER_COMMANDS`
-  registry in `src/commands/wrapper-help.ts`. A new wrapper verb goes in that
+  `src/entry/commands/help.ts`, and `lancenuit help` through the `WRAPPER_COMMANDS`
+  registry in `src/entry/commands/wrapper-help.ts`. A new wrapper verb goes in that
   registry and in the `case` block of `bin/lancenuit`; a test fails when the two
   disagree.
 - New `lancenuit create --template` starting points go in
-  `src/commands/pipeline-templates.ts`. Every template is rendered, typechecked,
+  `src/entry/commands/pipeline-templates.ts`. Every template is rendered, typechecked,
   and loaded by the test suite.
 
 ## Extending the runner

@@ -5,17 +5,17 @@
 
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { loadPipelineConfig, type PipelineConfig } from "../../src/env/config.js";
-import type { WorkItemArtifactStore } from "../../src/model/artifact-ports.js";
-import type { PipelineLot } from "../../src/model/context.js";
-import { createFakeWorkItemGateway } from "../../src/modules/work-item/fake.js";
+import { loadPipelineConfig, type PipelineConfig } from "../../src/shared/env/config.js";
+import type { WorkItemArtifactStore } from "../../src/shared/language/artifact-ports.js";
+import type { PipelineLot } from "../../src/shared/language/context.js";
+import { createFakeWorkItemGateway } from "../../src/work-items/providers/fake.js";
 import {
   createDefaultWorkItemGatewayRegistry,
   createWorkItemGateway,
   KNOWN_WORK_ITEM_PROVIDERS,
   WorkItemGatewayRegistry,
-} from "../../src/modules/work-item/registry.js";
-import { buildPipelineContext, deriveContext } from "../../src/pipeline/context.js";
+} from "../../src/work-items/providers/registry.js";
+import { buildPipelineContext, deriveContext } from "../../src/definition/pipeline/context.js";
 
 /** Real repository config with only the relevant field overridden. The cast is
  *  intentional: `WorkItemConfig.provider` is typed to implemented providers, while

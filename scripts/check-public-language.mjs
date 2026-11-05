@@ -12,7 +12,7 @@ const publicRoots = [
   "guide",
   "examples",
   "tools",
-  "src/engine/backends/claude-code/prompts",
+  "src/agents/backends/claude-code/prompts",
 ];
 const accentedFrench = /[àâäçéèêëîïôöùûüÿœ]/i;
 // Unaccented French tokens that cannot be mistaken for English. Accent

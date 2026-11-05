@@ -5,7 +5,7 @@ two authoring APIs:
 
 - `promptTemplate(name, keys)` is the internal loader for the claude-code
   backend's `fork-relay.md` prompt, kept in
-  `src/engine/backends/claude-code/prompts/`.
+  `src/agents/backends/claude-code/prompts/`.
 - `promptFile(relativePath, keys)` is injected into project pipeline factories and
   resolves a file relative to that pipeline file.
 
@@ -59,7 +59,7 @@ typed, context-dependent values.
 ## Runner-shipped templates
 
 `promptTemplate` reads the runner-shipped backend prompt directory by default
-(currently `src/engine/backends/claude-code/prompts/` in a source checkout) and
+(currently `src/agents/backends/claude-code/prompts/` in a source checkout) and
 validates the declared keys at module load. Its placeholder grammar is the
 narrower `{{word}}` form. It is not a project `pipelines/prompts/` loader; project
 pipelines should use the injected

@@ -9,7 +9,7 @@ callbacks without a runtime import from the plugin.
 A pipeline shared by MULTIPLE projects lives in `~/.lance-nuit/pipelines/<name>.ts`:
 same DSL, same layout, resolved through the chain described above.
 
-The `src/project/dsl-types/install.ts` installer generates declarations in `<kit>/.lance-nuit-types/`
+The `src/definition/project/dsl-types/install.ts` installer generates declarations in `<kit>/.lance-nuit-types/`
 and an alias in `<kit>/tsconfig.json`. The runner thus installs a local types package named
 `@lance-nuit/dsl`; the only `import type` below is used for completion and
 typechecking, then disappears entirely at runtime.

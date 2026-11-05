@@ -1,7 +1,7 @@
 # Built-in pipelines
 
 The package currently ships exactly one built-in pipeline: `default` (the
-definition is `builtins/default.ts`). It is deliberately small and technology
+definition is `definition/builtins/default.ts`). It is deliberately small and technology
 neutral: one Bash step prints a readiness message and it performs no tracker,
 forge, Docker, or agent initialization.
 

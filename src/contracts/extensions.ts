@@ -7,7 +7,7 @@
 // a global registry, and the host alone decides which manifests are loaded.
 //
 // This file is the contract only. Loading, resolution and runtime validation of
-// a manifest belong to the host (`src/boot/extensions.ts` for the CLI).
+// a manifest belong to the host (`src/entry/boot/extensions.ts` for the CLI).
 
 import type { AgentBackendFactory } from "./backends.js";
 import type { WorkItemGatewayRegistration } from "./registry.js";

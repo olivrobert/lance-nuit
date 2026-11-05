@@ -16,7 +16,7 @@ useDefault = true
 # redaction tests move.
 description = "Jira redaction test fixtures (synthetic token shapes)"
 targetRules = ["generic-api-key", "atlassian-api-token"]
-paths = ['''^src/modules/work-item/adapters/jira/diagnostics\.test\.ts$''']
+paths = ['''^src/work-items/providers/adapters/jira/diagnostics\.test\.ts$''']
 
 # --------------------------------------------------------------------------
 # Custom rules. The default ruleset has no pattern for the credentials this

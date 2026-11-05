@@ -49,7 +49,7 @@ test("public lancenuit types install wrapper generates project and user declarat
     const project = runLancenuit(root, "types", "install");
     expect(project.status).toBe(0);
     expect(`${project.stdout}${project.stderr}`).toContain("DSL types installed");
-    expect(existsSync(join(root, ".lance-nuit", ".lance-nuit-types", "project", "dsl.d.ts"))).toBe(true);
+    expect(existsSync(join(root, ".lance-nuit", ".lance-nuit-types", "definition", "project", "dsl.d.ts"))).toBe(true);
 
     mkdirSync(join(root, ".lance-nuit", "pipelines"), { recursive: true });
     writeFileSync(
@@ -74,7 +74,7 @@ export default ({ pipeline, bashStep }: Dsl) => pipeline(metadata.name)
 
     const user = runLancenuit(root, "types", "install", "--user");
     expect(user.status).toBe(0);
-    expect(existsSync(join(root, "shared-kit", ".lance-nuit-types", "project", "dsl.d.ts"))).toBe(true);
+    expect(existsSync(join(root, "shared-kit", ".lance-nuit-types", "definition", "project", "dsl.d.ts"))).toBe(true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

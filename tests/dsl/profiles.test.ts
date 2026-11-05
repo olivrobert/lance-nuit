@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { applyProfileOverrides } from "../../src/dsl/profiles.js";
-import { createProjectBashStep } from "../../src/dsl/dsl-steps.js";
-import { CODEX_MODEL, CODEX_SANDBOX, llmStep, mechanicalFix, pipeline } from "../../src/dsl.js";
-import { parseProfileOverrides } from "../../src/env/config.schema.js";
-import { createDefaultAgentBackendRegistry } from "../../src/engine/default-registry.js";
+import { applyProfileOverrides } from "../../src/definition/dsl/profiles.js";
+import { createProjectBashStep } from "../../src/definition/dsl/dsl-steps.js";
+import { CODEX_MODEL, CODEX_SANDBOX, llmStep, mechanicalFix, pipeline } from "../../src/definition/dsl.js";
+import { parseProfileOverrides } from "../../src/shared/env/config.schema.js";
+import { createDefaultAgentBackendRegistry } from "../../src/agents/default-registry.js";
 
 /** Explicit registry: the DSL no longer falls back to the built-in composition. */
 const REGISTRY = createDefaultAgentBackendRegistry();
@@ -265,7 +265,7 @@ test("fixBackend: the fix profile must have a policy for the named backend", () 
 
 test("mechanicalFix on Codex: the fix inherits the step's sandbox", () => {
   // A Codex fix pass that starts from no options runs `--sandbox read-only`
-  // (engine/backends/codex/args.ts) and every patch it writes is rejected. The
+  // (agents/backends/codex/args.ts) and every patch it writes is rejected. The
   // repair runs on the step's own backend, so it inherits the step's regime.
   const built = pipeline("codex")
     .add(

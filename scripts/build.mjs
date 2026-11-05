@@ -17,7 +17,7 @@ const result = spawnSync(tsc, ["-p", "tsconfig.build.json"], {
 if (result.status !== 0) process.exit(result.status ?? 1);
 
 // The dashboard's `app.js` and `app.css` are build products, not sources: they
-// are bundled from `src/modules/ui/app/` and are absent from a fresh clone. They
+// are bundled from `src/dashboard/ui/app/` and are absent from a fresh clone. They
 // have to exist BEFORE the static directory is copied below, or `dist/` would
 // ship an HTML shell pointing at two files that are not there.
 const ui = spawnSync(process.execPath, [join(root, "scripts/build-ui.mjs")], { cwd: root, stdio: "inherit" });
@@ -37,10 +37,10 @@ const copy = (relativePath, destinationPath = relativePath.replace(/^src\//, "")
 };
 
 for (const [source, destination] of [
-  ["src/builtins", "builtins"],
-  ["src/engine/backends/claude-code/prompts", "engine/backends/claude-code/prompts"],
-  ["src/output/stream-formatter.ts", "output/stream-formatter.ts"],
-  ["src/modules/ui/static", "modules/ui/static"],
+  ["src/definition/builtins", "definition/builtins"],
+  ["src/agents/backends/claude-code/prompts", "agents/backends/claude-code/prompts"],
+  ["src/entry/output/stream-formatter.ts", "entry/output/stream-formatter.ts"],
+  ["src/dashboard/ui/static", "dashboard/ui/static"],
 ]) {
   copy(source, destination);
 }

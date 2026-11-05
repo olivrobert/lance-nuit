@@ -2,7 +2,7 @@
 //
 // Suite preload: pin `$PIPELINE_HOME` to an EMPTY disposable directory.
 //
-// Otherwise kit resolution (env/kit-paths.ts) would read the real `~/.lance-nuit`
+// Otherwise kit resolution (shared/env/kit-paths.ts) would read the real `~/.lance-nuit`
 // on the machine running the tests. A shared contract there could add a family
 // to `discoverFamilies` and break discovery assertions, without reproducing in
 // CI or on another developer's machine.

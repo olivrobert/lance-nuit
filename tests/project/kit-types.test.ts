@@ -6,14 +6,14 @@ import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createProjectPipeline } from "../../src/commands/create-pipeline.ts";
+import { createProjectPipeline } from "../../src/entry/commands/create-pipeline.ts";
 import {
   installKitTypes,
   installUserTypes,
   kitTsconfigPath,
   typecheckProjectPipelines,
   typecheckUserPipelines,
-} from "../../src/project/dsl-types.ts";
+} from "../../src/definition/project/dsl-types.ts";
 
 const originalHome = process.env.PIPELINE_HOME;
 
@@ -76,7 +76,9 @@ test("a kit directory's tsconfig is independent of its location", () => {
     include: string[];
   };
   expect(tsconfig.compilerOptions.baseUrl).toBe(".");
-  expect(tsconfig.compilerOptions.paths["@lance-nuit/dsl"]).toEqual(["./.lance-nuit-types/project/dsl.d.ts"]);
+  expect(tsconfig.compilerOptions.paths["@lance-nuit/dsl"]).toEqual([
+    "./.lance-nuit-types/definition/project/dsl.d.ts",
+  ]);
   expect(tsconfig.include).toEqual(["pipelines/**/*.ts"]);
 });
 

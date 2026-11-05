@@ -1,0 +1,47 @@
+// runner/boot/boot-state.ts
+//
+// The boot port and the state it threads, on their own: `step.ts` imports every
+// boot step to build BOOT, and every boot step needs these types. Keeping them
+// apart is what makes `src/entry/boot/` acyclic.
+
+import type { RunnerArgs } from "../cli-options.js";
+import type { PipelineConfig } from "../../shared/env/config.js";
+import type { WorktreeSpec } from "../env/worktree.js";
+import type { PipelineContext } from "../../shared/language/context.js";
+import type { ComposeRegistries, RunnerRegistries } from "./extensions.js";
+
+export interface BootState {
+  args: RunnerArgs;
+  cwd: string;
+  /** Supplied by the entry point and called once cwd is final, with the
+   *  configuration read there. Boot prepares a run, it never composes one. */
+  composeRegistries: ComposeRegistries;
+  /** Resolved by `pipelinePathStep`; guaranteed after `runBoot`. */
+  pipelinePath?: string;
+  /** Set by `configStep`; guaranteed after `runBoot`. */
+  config?: PipelineConfig;
+  /** Provider registries assembled from built-ins plus the explicit extension module. */
+  registries?: RunnerRegistries;
+  context?: PipelineContext;
+  worktreeMode: boolean;
+  /** Set only by the process that entered the worktree. A child inherits a
+   *  worktree already made ready and must not replay its hooks. */
+  enteredWorktree?: WorktreeSpec;
+}
+
+/** Completed boot state with fields guaranteed by the registry narrowed. */
+export interface BootedState extends BootState {
+  pipelinePath: string;
+  config: PipelineConfig;
+  registries: RunnerRegistries;
+  context: PipelineContext;
+}
+
+export interface BootStep {
+  id: string;
+  /** One-line description used by --help and registry readers. */
+  desc: string;
+  applies(s: BootState): boolean;
+  /** Mutates state and returns control; may exit(1) for usage errors. */
+  run(s: BootState): Partial<BootState> | Promise<Partial<BootState>>;
+}

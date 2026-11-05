@@ -5,8 +5,8 @@
 // binary. They now return their outcome and `runner.ts` owns the single exit.
 
 import { expect, test } from "bun:test";
-import { checkRunArgs, parseArgs, runEarlyCommand } from "../../src/entry/startup.ts";
-import { parseRunnerArgs } from "../../src/cli/parse.ts";
+import { checkRunArgs, parseArgs, runEarlyCommand } from "../../src/entry/composition/startup.ts";
+import { parseRunnerArgs } from "../../src/entry/cli/parse.ts";
 
 test("parseArgs turns a usage error into a reportable message, not a throw", () => {
   const outcome = parseArgs(["--nope"]);
