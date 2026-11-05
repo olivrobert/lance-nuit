@@ -113,7 +113,8 @@ as the levels.
 | `shared` | Primitives and the language every context shares | no other context |
 
 `execution` never imports `agents`: it reaches the backends through the registry
-of `contracts/backends`, and `entry` wires them in.
+of `contracts/backends`, and `entry` wires them in. The allowed directions form
+no cycle, and no import crosses them: the baseline holds no context edge.
 
 Folders do not follow contexts yet: `model/`, `env/`, `exec/` and `runtime/` mix
 files of several contexts. So `CONTEXTS` in `scripts/layers.cjs` classifies single
@@ -179,9 +180,10 @@ for a default registry or chooses a built-in backend:
   fails loudly at the first agent step rather than falling back.
 - **`RunOutput`** — the interface and the composite live in `src/runtime/`, the
   console and live-feed implementations in `src/output/`. The step loop takes one
-  as a required argument; it never picks a default. Step progress travels on it,
-  and so do the execution messages of the sites that hold one, as `runner.message`
-  events carrying their severity as a field. A site with no `RunOutput` in scope —
+  as a required argument; it never picks a default. Step progress travels on it
+  and never on the event bus, which publishers outside a run share; so do the
+  execution messages of the sites that hold one, as `runner.message` events
+  carrying their severity as a field. A site with no `RunOutput` in scope —
   boot and dispatch, but also a few helpers reached from inside a run, such as the
   attempt lifecycle in `step-attempt.ts` — writes to stderr instead and therefore
   never reaches the live feed (see [sessions and tracing](sessions-tracing.md)).
