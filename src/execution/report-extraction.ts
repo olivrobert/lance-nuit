@@ -1,4 +1,3 @@
-// runner/exec/report-extraction.ts
 //
 // Machine reports declared by `.report()` and the error extraction that reads
 // them. Owns three rules: a stale report is removed before a step runs, a report

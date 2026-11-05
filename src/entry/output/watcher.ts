@@ -4,14 +4,9 @@ import { fileURLToPath } from "node:url";
 import { VERDICT_STATUSES } from "../../run/index.js";
 import { log } from "../../shared/runtime/logging.js";
 import type { LiveFeed } from "../../shared/runtime/live-feed.js";
-import { liveFeedFromEnvironment } from "./live-feed.js";
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-function resolveLiveFeed(feed?: LiveFeed): LiveFeed | undefined {
-  return feed ?? liveFeedFromEnvironment();
 }
 
 /** A snapshot carrying one of these statuses was written by a runner that is done:
@@ -36,19 +31,15 @@ export function buildWatcherCommand(live: string, state: string, formatterComman
   ].join("\n");
 }
 
-export function ensureLiveFeed(feed?: LiveFeed): void {
-  const liveFeed = resolveLiveFeed(feed);
-  if (!liveFeed) return;
-
-  liveFeed.ensure();
-  const live = liveFeed.path();
+export function ensureLiveFeed(feed: LiveFeed): void {
+  feed.ensure();
+  const live = feed.path();
   process.env.RUNNER_EVENTS_FILE = live;
   process.env.RUNNER_LIVE_FEED = live;
 }
 
-export function openWatcherPane(feed?: LiveFeed, options: { autoClose?: boolean } = {}): string | undefined {
-  const live = resolveLiveFeed(feed)?.path();
-  if (!live) return undefined;
+export function openWatcherPane(feed: LiveFeed, options: { autoClose?: boolean } = {}): string | undefined {
+  const live = feed.path();
 
   // Resolve formatter relative to this file (works whether run from repo or installed copy).
   const outputDir = dirname(fileURLToPath(import.meta.url));

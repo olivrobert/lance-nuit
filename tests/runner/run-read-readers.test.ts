@@ -11,14 +11,12 @@ import { fileURLToPath } from "node:url";
 import { closeLatestRun } from "../../src/entry/commands/closure.js";
 import { inspectTicket } from "../../src/entry/commands/diagnostics-readers.js";
 import { loadPipelineConfig } from "../../src/shared/env/config.js";
-import {
-  readItem,
-  readRecap,
-  readRunJourney,
-  readStats,
-  readStepDetail,
-  readSteps,
-} from "../../src/dashboard/read-model/index.js";
+import { readItem } from "../../src/dashboard/read-model/items.js";
+import { readRecap } from "../../src/dashboard/read-model/recap.js";
+import { readRunJourney } from "../../src/dashboard/read-model/run-journey.js";
+import { readStats } from "../../src/dashboard/read-model/stats.js";
+import { readStepDetail } from "../../src/dashboard/read-model/step-detail.js";
+import { readSteps } from "../../src/dashboard/read-model/steps.js";
 import {
   cleanupTempDirs,
   DEAD_PID,

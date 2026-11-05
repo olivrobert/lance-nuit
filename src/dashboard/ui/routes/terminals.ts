@@ -1,4 +1,3 @@
-// dashboard/ui/routes/terminals.ts
 //
 // `/api/terminals`: the tmux sessions of the interactive runs. A terminal is a
 // shell, so the router lets these routes run — reads included — only for a

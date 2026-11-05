@@ -349,8 +349,8 @@ Four facts move money, and each has its own entry point there:
 settlement (`settleAttempt` in `src/run/record/attempt-lifecycle.ts`) calls it
 with the figures `closeAttempt` accepted, on every exit of an attempt — a
 returned verdict or a rejected spawn alike — and the gate that decides to stop is
-what journals the stop. The charge is not a middleware: nothing in the optional
-attempt chain can skip it or absorb its failure. Summing two sets of figures is private to the
+what journals the stop. Nothing around the spawn (banner, allowance, session
+rotation) can skip the charge or absorb its failure. Summing two sets of figures is private to the
 module, so there is no way to add spend to a step, an attempt, or the ledger from
 outside it. A run's `total_control` and `total_usage` remain derived values,
 recomputed from the steps when a run is finalized or aborted, restored by a

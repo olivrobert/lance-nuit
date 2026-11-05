@@ -1,4 +1,3 @@
-// shared/lib/stream-values.schema.ts
 //
 // Scalar readers shared by the schemas of formats the runner only reads: the
 // three agent-backend NDJSON streams (`engine/backends/*/events.schema.ts`) and

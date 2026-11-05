@@ -9,12 +9,8 @@ import { loadPipelineConfig, type PipelineConfig } from "../../src/shared/env/co
 import type { WorkItemArtifactStore } from "../../src/shared/language/artifact-ports.js";
 import type { PipelineLot } from "../../src/shared/language/context.js";
 import { createFakeWorkItemGateway } from "../../src/work-items/providers/fake.js";
-import {
-  createDefaultWorkItemGatewayRegistry,
-  createWorkItemGateway,
-  KNOWN_WORK_ITEM_PROVIDERS,
-  WorkItemGatewayRegistry,
-} from "../../src/work-items/providers/registry.js";
+import { WorkItemGatewayRegistry } from "../../src/contracts/registry.js";
+import { createDefaultWorkItemGatewayRegistry } from "../../src/work-items/providers/registry.js";
 import { buildPipelineContext, deriveContext } from "../../src/definition/pipeline/context.js";
 
 /** Real repository config with only the relevant field overridden. The cast is
@@ -71,7 +67,7 @@ test("workItem: an injected registry resolves a custom provider lazily", () => {
 test("workItem reports an unknown provider and lists known providers", () => {
   const ctx = buildPipelineContext({ ...builtInRegistry(), config: configWithProvider("redmine") });
   expect(() => ctx.workItem).toThrow(/redmine/);
-  for (const known of KNOWN_WORK_ITEM_PROVIDERS) {
+  for (const known of createDefaultWorkItemGatewayRegistry().known()) {
     expect(() => ctx.workItem).toThrow(new RegExp(known));
   }
 });
@@ -84,7 +80,9 @@ test("workItem: lazy construction — no gateway created without access", () => 
   const ctx = buildPipelineContext({ ...builtInRegistry(), config, ticket: "PROJ-24" });
   expect(ctx.ticket).toBe("PROJ-24");
   expect(String(ctx.config.workItem.provider)).toBe("provider-qui-nexiste-pas");
-  expect(() => createWorkItemGateway({ workItem: config.workItem, labels: config.labels })).toThrow();
+  expect(() =>
+    createDefaultWorkItemGatewayRegistry().resolve({ workItem: config.workItem, labels: config.labels }),
+  ).toThrow();
   expect(() => ctx.workItem).toThrow();
 });
 

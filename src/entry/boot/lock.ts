@@ -1,4 +1,3 @@
-// runner/boot/lock.ts
 //
 // Boot step lock: only one top-level runner may use a Git tree at a time, avoiding
 // run-state clobbering and cross-run checkouts/commits. Dispatch children use the

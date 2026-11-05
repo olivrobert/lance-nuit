@@ -1,4 +1,3 @@
-// runner/boot/config.ts
 //
 // The worktree is already the cwd here, so configuration and context are frozen
 // once for the whole run, including pipeline loading. Later steps read this state

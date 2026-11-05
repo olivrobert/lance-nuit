@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import type { AgentBackend, AgentBackendFactory, AgentSession } from "../../contracts/backends.ts";
-import { AgentBackendRegistry } from "../../agents/registry.ts";
+import { AgentBackendRegistry } from "../../contracts/backends.ts";
 import type { StepResult } from "../runners.ts";
 import type { PipelineContext } from "../../shared/language/context.ts";
 import type { PipelineStep } from "../../definition/definition.ts";
@@ -41,8 +41,9 @@ import { NULL_RUN_OUTPUT } from "../run-output.ts";
 import { type FixLoopDeps, runFixLoop } from "./fix-loop.ts";
 import { rerunHandler } from "./on-failure.ts";
 import { childLaunchGate } from "./pipeline-orchestration-child.ts";
-import { budgetGateMiddleware, runAttempt, runTrackedAttempt } from "./step-attempt.ts";
-import { admitStep, executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
+import { runAttempt, runTrackedAttempt } from "./step-attempt.ts";
+import { admitStep } from "./step-admission.ts";
+import { executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
 import { resolveOutcome } from "./step-outcome.ts";
 
 // Captured and silenced: the warnings are part of what is pinned.
@@ -105,7 +106,7 @@ test("every attempt the loop closes reaches the ledger and the step total by the
     { ok: true, stats: { duration_ms: 1, total_cost_usd: 0.5 } },
   ]);
 
-  const outcome = await executeRunSteps(run, undefined, undefined, LOOP, deps);
+  const outcome = await executeRunSteps(run, LOOP, deps, buildPipelineContext({}));
 
   expect(outcome.cumulativeCost).toBe(0.875);
   expect(stepSpend(run)).toBe(0.875);
@@ -126,7 +127,7 @@ test("a resumed run seeds its ledger with the spend its steps carry", async () =
   );
   const deps = scriptedDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 0.25 } }]);
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(outcome.budgetExceeded).toBe(true);
   expect(outcome.cumulativeCost).toBe(1);
@@ -143,7 +144,7 @@ test("a materialized run total seeds the ledger in place of the step totals", as
   run.total_control = { duration_ms: 1, total_cost_usd: 0.75 };
   const deps = scriptedDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 0.25 } }]);
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(outcome.budgetExceeded).toBe(true);
   expect(outcome.cumulativeCost).toBe(1);
@@ -167,7 +168,7 @@ test("a signal closes the killed attempt on the step total, not on the ledger, a
     },
   ]);
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(outcome.cumulativeCost).toBe(0.25);
   const killed = run.steps[1]!;
@@ -227,7 +228,7 @@ test("an unpriced attempt latches the run, warns once, and the next gate stops a
     { ok: true, stats: { duration_ms: 1, cost_unknown: true, input_tokens: 100, model: "m-unpriced" } },
   ]);
 
-  const outcome = await executeRunSteps(run, undefined, undefined, LOOP, deps);
+  const outcome = await executeRunSteps(run, LOOP, deps, buildPipelineContext({}));
 
   expect(outcome.costUnaccounted).toBe(true);
   expect(outcome.costUnaccountedStop).toBe(true);
@@ -287,7 +288,12 @@ test("an attempt the runner died in is settled unpriced on resume and does not s
   expect(step.control?.cost_unknown).toBe(true);
 
   const deps = scriptedDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 0.25 } }]);
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: true, replayInterrupted: true }, deps);
+  const outcome = await executeRunSteps(
+    run,
+    { resuming: true, replayInterrupted: true },
+    deps,
+    buildPipelineContext({}),
+  );
 
   expect(outcome.costUnaccounted).toBe(false);
   expect(outcome.cumulativeCost).toBe(0.25);
@@ -777,7 +783,7 @@ test("under any interleaving, spend and allowances in flight stay within the cei
   }
 });
 
-test("two attempts side by side are each allowed their share, through the attempt chain", async () => {
+test("two attempts side by side are each allowed their share, through the attempt lifecycle", async () => {
   const first = agentStep("first", { status: "running" });
   const second = agentStep("second", { status: "running" });
   const run = makeRun([first, second], 8);
@@ -822,16 +828,19 @@ test("an allowance stays held until the spend it covered is on the ledger", asyn
     command: "work",
     context: buildPipelineContext({ cwd: process.cwd() }),
     budget,
-    executeStep: async () => ({ output: "", ok: true, stats: { duration_ms: 1, total_cost_usd: 1 } }) as StepResult,
-    middlewares: [
-      async (ctx, next) => {
-        const record = await next(ctx);
-        // A sibling starting here must not read these dollars as free.
-        whileClosing.push({ cumulative: budget.cumulative, held: held(budget) });
-        return record;
-      },
-      budgetGateMiddleware,
-    ],
+    executeStep: async () =>
+      ({
+        output: "",
+        ok: true,
+        stats: { duration_ms: 1, total_cost_usd: 1 },
+        // The session rotation is the first read of the returned record, between
+        // the spawn and the settlement: a sibling starting there must not read
+        // these dollars as free.
+        get session() {
+          if (whileClosing.length === 0) whileClosing.push({ cumulative: budget.cumulative, held: held(budget) });
+          return undefined;
+        },
+      }) as StepResult,
   });
 
   expect(whileClosing).toEqual([{ cumulative: 0, held: 8 }]);

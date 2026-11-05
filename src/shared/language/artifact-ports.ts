@@ -1,4 +1,3 @@
-// runner/model/artifact-ports.ts
 //
 // Artifact identity and its storage port. Identity is logical: an adapter may
 // keep a local location, but location is never part of the reference.

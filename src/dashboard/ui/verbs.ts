@@ -1,4 +1,3 @@
-// dashboard/ui/verbs.ts
 //
 // The verbs: the closed set of things the dashboard can make the runner do, each
 // one exactly one existing `lancenuit` invocation (spec 5.1).

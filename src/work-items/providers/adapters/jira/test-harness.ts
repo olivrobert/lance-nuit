@@ -1,4 +1,3 @@
-// work-items/providers/adapters/jira/test-harness.ts
 //
 // The Jira adapter runs the same contract suite as the fake against a simulated
 // `acli`. The simulator keeps labels, status, and comments, interprets JQL, and
@@ -9,9 +8,6 @@
 // Jira server. Assumptions about subcommands, JSON, and impossible-transition exit
 // codes are marked HYPOTHESIS and must still be checked against a real server.
 
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { WorkItemGateway, WorkItemNote } from "../../../../contracts/work-items.js";
 import type { PipelineLabels, WorkItemConfig } from "../../../../shared/env/config.js";
 import type { ProcessResult, ProcessRunner } from "../../process/runner.js";
@@ -44,15 +40,6 @@ export const LABELS: PipelineLabels = {
 /** Inverse projections used only by assertions; the adapter projects one way. */
 const QUEUE_OF_LABEL = inverseStringMap(LABELS);
 const STATE_OF_STATUS = inverseStringMap({ todo: WORK_ITEM.todoState, inReview: WORK_ITEM.reviewState });
-
-/** Guaranteed-missing path: the adapter falls back to internal ADF conversion. */
-export const NO_CONVERTER = join(tmpdir(), "pipeline-adf-absent", "adf-to-markdown.py");
-
-/** Fake converter never executed because the simulator intercepts the call. It
- * only needs to exist because the adapter checks for it. */
-const scriptDir = mkdtempSync(join(tmpdir(), "pipeline-jira-test-"));
-export const FAKE_CONVERTER = join(scriptDir, "adf-to-markdown.py");
-writeFileSync(FAKE_CONVERTER, "#!/usr/bin/env python3\n");
 
 export interface SimTicketSeed {
   key: string;
@@ -102,8 +89,6 @@ export interface AcliSim {
   mutations: SimMutation[];
   ticketOf(key: string): SimTicket | undefined;
   armInterrupt(key: string, afterOps: number): void;
-  /** Python converter response, overrideable to test fallback behavior. */
-  python: ProcessResult;
   /** Next search output, overrideable to test parsing. */
   searchOutput?: string;
 }
@@ -154,7 +139,6 @@ export function createAcliSim(seed: SimTicketSeed[] = DEFAULT_SEED): AcliSim {
   const sim: AcliSim = {
     commands: [],
     mutations: [],
-    python: ok("## Contexte\n\nL'export plante en prod.\n"),
     ticketOf: (key) => tickets.get(key),
     armInterrupt: (key, afterOps) => {
       interruptions.arm(key, afterOps);
@@ -272,7 +256,6 @@ export function createAcliSim(seed: SimTicketSeed[] = DEFAULT_SEED): AcliSim {
 
   async function runCommand(cmd: string, args: string[]): Promise<ProcessResult> {
     sim.commands.push([cmd, ...args]);
-    if (cmd === "sh") return sim.python;
     if (cmd !== "acli") return ko(`${cmd}: command not found`, 127);
     const verb = args[2];
     if (verb === "view") return view(args);
@@ -295,7 +278,6 @@ export function jiraFactory(seed: SimTicketSeed[] = DEFAULT_SEED): () => WorkIte
       workItem: WORK_ITEM,
       labels: LABELS,
       run: sim.run,
-      adfConverter: NO_CONVERTER,
     });
     sims.set(gateway, sim);
     return gateway;
@@ -319,11 +301,9 @@ export interface Harness {
   sim: AcliSim;
 }
 
-export function harness(seed: SimTicketSeed[] = DEFAULT_SEED, adfConverter: string = NO_CONVERTER): Harness {
+export function harness(seed: SimTicketSeed[] = DEFAULT_SEED): Harness {
   const sim = createAcliSim(seed);
-  return gatewayHarness(sim, (run) =>
-    createJiraWorkItemGateway({ workItem: WORK_ITEM, labels: LABELS, run, adfConverter }),
-  );
+  return gatewayHarness(sim, (run) => createJiraWorkItemGateway({ workItem: WORK_ITEM, labels: LABELS, run }));
 }
 
 /** Gateway connected to a fixed `acli`; simulator state is irrelevant for error
@@ -332,9 +312,7 @@ export function stubbed(result: ProcessResult | ((cmd: string, args: string[]) =
   gateway: WorkItemGateway;
   commands: string[][];
 } {
-  return stubbedGateway(result, (run) =>
-    createJiraWorkItemGateway({ workItem: WORK_ITEM, labels: LABELS, run, adfConverter: NO_CONVERTER }),
-  );
+  return stubbedGateway(result, (run) => createJiraWorkItemGateway({ workItem: WORK_ITEM, labels: LABELS, run }));
 }
 
 export const commandsMatching = (sim: AcliSim, verb: string): string[][] =>

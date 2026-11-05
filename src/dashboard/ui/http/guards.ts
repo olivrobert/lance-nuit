@@ -1,4 +1,3 @@
-// dashboard/ui/http/guards.ts
 //
 // Request checks that do not depend on a route: where the request comes from,
 // and whether its path can be trusted segment by segment.

@@ -1,4 +1,3 @@
-// runner/step/pipeline-orchestration-types.ts
 //
 // What the orchestration node and the child executor exchange. They call each
 // other — the node drives a child, the child reports back — so the shapes live
@@ -15,10 +14,8 @@ export interface PipelineOrchestrationInput {
   run: RunView;
   step: RunStepView;
   baseCtx: PipelineContext;
-  baseBranch?: string;
   /** Parent run budget; each child posts its reconciled delta here. */
   budget: RunBudget;
-  resuming: boolean;
   /** The parent's abort scope. Every child run executes under it, which is how
    *  an interruption of the process reaches runs that never see `run.aborted`. */
   abort: AbortScope;

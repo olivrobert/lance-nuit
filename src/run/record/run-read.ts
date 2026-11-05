@@ -1,4 +1,3 @@
-// runner/run-record/run-read.ts
 //
 // How code outside the run record reads a run: the snapshot, its steps reconciled
 // with the journal by the projection a resume applies (`projectRunState`), and

@@ -1,4 +1,3 @@
-// runner/commands/lint-config.ts
 //
 // Configuration lint compares the `profiles` and `steps` sections of
 // `.lance-nuit/config.json` with every pipeline. It runs outside a run, so it needs

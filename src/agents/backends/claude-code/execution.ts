@@ -143,8 +143,6 @@ export function createNodeClaudeHost(options: NodeClaudeHostOptions = {}): Claud
     execute: (request) => executeNode(request, options),
     onSpawn: options.onSpawn,
     capabilityRoots: options.capabilityRoots,
-    isForkedSlashCommand: options.isForkedSlashCommand,
-    forkRelayPrompt: options.forkRelayPrompt,
     onEvent: options.onEvent,
     log: options.log,
   };

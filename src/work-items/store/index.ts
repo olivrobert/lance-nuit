@@ -1,4 +1,3 @@
-// runner/work-item-store/index.ts
 //
 // Entry of the work-item store: what the runner keeps next to a ticket, outside
 // any run — the artifacts, the human decisions bound to them, and the provenance

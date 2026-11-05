@@ -1,15 +1,13 @@
 import type { AgentResult } from "../../../contracts/index.js";
 import { verdictFromStructured } from "../../../contracts/index.js";
-import { agentSession, killFields, resolveVerdictOutcome } from "../result-helpers.js";
+import { agentSession, killFields, parseStructuredVerdict, resolveVerdictOutcome } from "../result-helpers.js";
 import { type ParsedOpencodeEvents, parseOpencodeEvents, parseOpencodeLogErrors } from "./events.js";
 import { resolveOpencodeCost } from "./pricing.js";
 import type { RawOpencodeExecutionResult } from "./types.js";
-import { parseStructuredOutput } from "./verdict.js";
 
 export interface OpencodeResultOptions {
   outputFormat?: "text" | "json";
   model?: string;
-  ephemeral?: boolean;
 }
 
 function buildStats(parsed: ParsedOpencodeEvents, durationMs: number, model?: string): AgentResult["stats"] {
@@ -55,7 +53,10 @@ export function mapOpencodeExecutionResult(
   // without it a billing or upstream failure looks like an empty success.
   const logError = parsed.error ? undefined : parseOpencodeLogErrors(raw.logs);
   const error = parsed.error ?? logError;
-  const structured = options.outputFormat === "json" ? parseStructuredOutput(parsed) : {};
+  // No `--output-schema` nor StructuredOutput tool: the verdict comes back inside
+  // the text, read by the shared cascade from the most explicit shape down.
+  const structured =
+    options.outputFormat === "json" ? parseStructuredVerdict(parsed.text, parsed.structuredOutput) : {};
   const verdictDetails = structured.value != null ? verdictFromStructured(structured.value) : undefined;
   const { ok, failReason, failKind, failCause } = resolveVerdictOutcome({
     killed: raw.killed,
@@ -69,7 +70,7 @@ export function mapOpencodeExecutionResult(
     invalidReason: structured.invalidReason ?? verdictDetails?.invalidReason,
     missingVerdictLabel: "no opencode verdict",
   });
-  const session = agentSession("opencode", parsed.sessionId, !options.ephemeral);
+  const session = agentSession("opencode", parsed.sessionId, true);
   return {
     provider: "opencode",
     output: parsed.text,

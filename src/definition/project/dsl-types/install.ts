@@ -1,4 +1,3 @@
-// src/definition/project/dsl-types/install.ts
 //
 // Installation of generated declarations, tsconfig, and gitignore files in kit
 // directories.

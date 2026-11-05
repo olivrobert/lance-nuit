@@ -1,4 +1,3 @@
-// runner/entry/feed.ts
 //
 // Live run feed. It belongs to the composition root rather than to boot: it wires
 // a concrete `FileLiveFeed` into the runtime port, and it depends on

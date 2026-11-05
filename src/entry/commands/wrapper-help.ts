@@ -1,4 +1,3 @@
-// runner/commands/wrapper-help.ts
 //
 // Help text for the `bin/lancenuit` wrapper, generated from registries.
 //
@@ -40,7 +39,7 @@ export const WRAPPER_COMMANDS: readonly WrapperCommand[] = [
   {
     verb: "single",
     usage: "single [<id>]",
-    desc: "Same as run, with multi-work-item dispatch disabled.",
+    desc: "Same as run, but refuses --scan.",
   },
   {
     verb: "approve",

@@ -1,4 +1,3 @@
-// entry/cli/parse.ts
 //
 // PURE parsing of runner CLI arguments. Extracted from the `main()` loop —
 // no side effects: usage errors are raised through `CliError`, which the

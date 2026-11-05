@@ -1,4 +1,3 @@
-// work-items/providers/fake.ts
 //
 // In-memory port implementation used as the test reference.
 //

@@ -1,4 +1,3 @@
-// dashboard/ui/deps.ts
 //
 // The ports the dashboard's routes run against, composed once by the server.
 // A route reads through `readModel`, writes the dashboard's own files through

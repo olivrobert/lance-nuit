@@ -1,18 +1,10 @@
-import { renderMarkdown } from "../../../../contracts/index.js";
-import { errorMessage } from "../../../../shared/lib/errors.js";
-import { nodeProcessRunner, type ProcessResult, type ProcessRunner } from "../../process/runner.js";
 import {
   type AutomationQueue,
-  configuredState,
   type ExecutionKey,
   hasMarker,
-  humanComments,
   type MoveTarget,
   type PipelineLabels,
-  performMove,
-  queueLabel,
-  refValidator,
-  requireValidRef,
+  renderMarkdown,
   type WorkItem,
   type WorkItemConfig,
   type WorkItemGateway,
@@ -20,6 +12,16 @@ import {
   type WorkItemQuery,
   type WorkItemRef,
   type WorkItemState,
+} from "../../../../contracts/index.js";
+import { errorMessage } from "../../../../shared/lib/errors.js";
+import { nodeProcessRunner, type ProcessResult, type ProcessRunner } from "../../process/runner.js";
+import {
+  configuredState,
+  humanComments,
+  performMove,
+  queueLabel,
+  refValidator,
+  requireValidRef,
 } from "../gateway-shared.js";
 import { outputOf } from "./diagnostics.js";
 import {
@@ -30,12 +32,6 @@ import {
   parseGithubPayload,
   stateIsClosed,
 } from "./payload.js";
-
-export type { ProcessResult, ProcessRunner, ProcessRunOptions } from "../../process/runner.js";
-export { nodeProcessRunner } from "../../process/runner.js";
-export { redactProviderOutput } from "./diagnostics.js";
-export type { GithubIssuePayload } from "./payload.js";
-export { commentBodies, labelNames, parseGithubIssueRefs, parseGithubPayload, stateIsClosed } from "./payload.js";
 
 const PROVIDER = "github";
 const REF_NUMBER = /^\d+$/;

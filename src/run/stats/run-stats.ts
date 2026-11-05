@@ -1,5 +1,5 @@
-// Public compatibility facade for the run-stats projection and emission. Calculation
-// lives in run-stats-projector.ts; writing lives in run-stats-sink.ts.
+// Emission of the run-stats projection. Calculation lives in run-stats-projector.ts;
+// writing lives in run-stats-sink.ts.
 
 import { spawnSync } from "node:child_process";
 import { basename, isAbsolute, relative } from "node:path";
@@ -9,18 +9,7 @@ import type { RunView } from "../run.js";
 import { runRefFromRun } from "../storage-ports.js";
 import { FileRunEventStore, FileRunLogStore, findStepLog, logicalAttemptLogPath } from "../record/index.js";
 import { projectRunStatsEntry, type RunStatsEntry } from "./run-stats-projector.js";
-import { FileRunStatsSink, type RunStatsSink } from "./run-stats-sink.js";
-
-export type {
-  PhaseStats,
-  RunStatsEntry,
-  RunStatsProjectionOptions,
-  TokenCounts,
-  UsageStatus,
-} from "./run-stats-projector.js";
-export { projectRunStatsEntry } from "./run-stats-projector.js";
-export type { FileRunStatsSinkOptions, RunStatsSink } from "./run-stats-sink.js";
-export { FileRunStatsSink } from "./run-stats-sink.js";
+import { FileRunStatsSink } from "./run-stats-sink.js";
 
 /**
  * Keep the call signature stable: file adapters are injected here when the caller has
@@ -69,8 +58,6 @@ export function buildRunStatsEntry(run: RunView, context?: PipelineContext): Run
   };
 
   return projectRunStatsEntry(projectedRun, {
-    eventStore,
-    logStore,
     ticketDir,
     logPathForStep,
   });
@@ -109,12 +96,9 @@ function relativeSource(projRoot: string, path: string): string {
 export interface EmitRunStatsOptions {
   projRoot?: string;
   context?: PipelineContext;
-  /** Custom sink; the file sink remains the default. */
-  sink?: RunStatsSink;
 }
 
-/** Emit the projection into central history. The returned path is always the
- * central source path for the default file sink. */
+/** Emit the projection into central history. Returns the central history path. */
 export function emitRunStats(run: RunView, opts: EmitRunStatsOptions = {}): string | null {
   const projRoot = opts.projRoot ?? opts.context?.cwd ?? process.cwd();
   try {
@@ -123,8 +107,7 @@ export function emitRunStats(run: RunView, opts: EmitRunStatsOptions = {}): stri
     entry.branch = headBranch(projRoot);
     entry.sourceRunDir = relativeSource(projRoot, run.run_dir);
 
-    const sink = opts.sink ?? new FileRunStatsSink({ projRoot });
-    return sink.write(entry);
+    return new FileRunStatsSink({ projRoot }).write(entry);
   } catch {
     // Stats emission is best effort and cannot change the run's outcome.
     return null;

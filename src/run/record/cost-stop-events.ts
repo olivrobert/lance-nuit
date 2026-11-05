@@ -1,4 +1,3 @@
-// runner/run-record/cost-stop-events.ts
 //
 // The two run-level cost stops: how a `costDecision` that withholds work, or a
 // live guard's kill, is RECORDED — on the shared ledger, on the run, and in the

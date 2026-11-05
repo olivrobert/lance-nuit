@@ -1,4 +1,3 @@
-// dashboard/read-model/explorer.ts
 //
 // The folder explorer: the tree of a work item as it stands on disk, and a
 // bounded, read-only view of one file inside it.
@@ -299,7 +298,6 @@ export function readTree(
     root,
     pipeline: resolved.run.pipeline,
     runId: resolved.run.state.runId ?? "",
-    runDir,
     children,
     ...(gate ? { gatePath: gate.path } : {}),
     ...(defaultFile ? { defaultPath: defaultFile.path } : {}),

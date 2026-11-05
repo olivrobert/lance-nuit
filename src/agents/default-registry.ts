@@ -18,6 +18,3 @@ export function createDefaultAgentBackendRegistry(): AgentBackendRegistry {
     .register(codexBackendFactory)
     .register(opencodeBackendFactory);
 }
-
-/** Runtime registry used by the standalone runner. */
-export const defaultAgentBackendRegistry = createDefaultAgentBackendRegistry();

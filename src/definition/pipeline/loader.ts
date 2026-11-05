@@ -1,4 +1,3 @@
-// runner/pipeline/loader.ts
 //
 // Validate a pipeline definition and dynamically load its DSL.
 
@@ -39,7 +38,7 @@ import {
   textArtifact,
   withBackend,
 } from "../dsl.js";
-import { configFileLabel } from "../../shared/env/kit-paths.js";
+import { CONFIG_FILE_LABEL } from "../../shared/env/kit-paths.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../../shared/language/context.js";
 import type { Pipeline } from "../definition.js";
 import type { StepOverride } from "../../shared/language/profiles.js";
@@ -56,10 +55,6 @@ import { ParallelGroupValidator } from "../validation/parallel-group.js";
 import { ResumedFixEscalationValidator } from "../validation/resumed-fix-escalation.js";
 import { PipelineStructureValidator } from "../validation/structure.js";
 import { buildPipelineContext } from "./context.js";
-
-// The file named in validation errors is the one the user REALLY edits:
-// `configFileLabel` follows the root actually read, otherwise a
-// project-specific definitions are always resolved from `.lance-nuit/`.
 
 const PIPELINE_VALIDATION_CHAIN = new PipelineValidationChain([
   new PipelineStructureValidator(),
@@ -154,11 +149,7 @@ export async function loadPipelineDefinition(pipelinePath: string, context?: Pip
   }
   const buildContext = context ?? buildPipelineContext();
   const projectDsl = createProjectDsl(buildContext, dirname(abs));
-  // Project factories receive only the DSL. Builtin pipelines use the internal
-  // two-argument signature to keep their context, without exposing it to the
-  // author-facing API.
-  const factory = mod.default as PipelineFactory & ((dsl: Dsl, context: PipelineContext) => Pipeline);
-  const pipeline = factory.length >= 2 ? factory(projectDsl, buildContext) : factory(projectDsl);
+  const pipeline = (mod.default as PipelineFactory)(projectDsl);
   // All consistency validation must precede option materialization: a profile
   // incompatible with the backend must never be silently rendered inert by
   // applyProfileOverrides().
@@ -177,6 +168,6 @@ export async function loadPipelineDefinition(pipelinePath: string, context?: Pip
     (step) => imposedAxes(step, buildContext),
     requireAgentBackendRegistry(buildContext),
   );
-  applyStepOverrides(pipeline, buildContext.config.steps, configFileLabel(buildContext.cwd), buildContext);
+  applyStepOverrides(pipeline, buildContext.config.steps, CONFIG_FILE_LABEL, buildContext);
   return pipeline;
 }

@@ -24,7 +24,6 @@ function item(overrides: Partial<Item> = {}): Item {
     cost: { estimated: false },
     updatedAt: "2026-09-05T08:00:00.000Z",
     worktree: true,
-    effectiveWorkItemDir: "/home/x/.lance-nuit/worktrees/demo-app/DEMO-1/.lance-nuit/work-items/DEMO-1",
     ...overrides,
   };
 }

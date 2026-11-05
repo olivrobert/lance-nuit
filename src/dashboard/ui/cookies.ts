@@ -1,4 +1,3 @@
-// dashboard/ui/cookies.ts
 //
 // `Cookie` parsing and `Set-Cookie` serialization, by hand.
 //

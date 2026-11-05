@@ -37,7 +37,7 @@ test("a code step that throws leaves its message and stack in the output.log the
     steps: [step],
   };
 
-  const outcome = await executeRunSteps(run, ticket, undefined, { resuming: false }, stepLoopDeps(output), context);
+  const outcome = await executeRunSteps(run, { resuming: false }, stepLoopDeps(output), context);
 
   expect(outcome.failed).toBe(true);
   const announced = events

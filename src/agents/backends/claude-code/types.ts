@@ -46,10 +46,6 @@ export interface ClaudeBackendHost {
   execute(options: ClaudeExecutionOptions): Promise<RawClaudeExecutionResult>;
   onSpawn?(event: ClaudeSpawnEvent): void;
   capabilityRoots?(runnerDir: string, cwd: string): readonly string[];
-  findSessionFile?(sessionId: string): string | null;
-  sessionFileSizeKb?(sessionId: string): number;
-  isForkedSlashCommand?(prompt: string, roots: readonly string[]): boolean;
-  forkRelayPrompt?(slash: string): string;
   onEvent?(event: unknown): void;
   log?(message: string): void;
 }
@@ -58,6 +54,4 @@ export interface NodeClaudeHostOptions {
   onEvent?: (event: unknown) => void;
   log?: (message: string) => void;
   capabilityRoots?: (runnerDir: string, cwd: string) => readonly string[];
-  isForkedSlashCommand?: (prompt: string, roots: readonly string[]) => boolean;
-  forkRelayPrompt?: (slash: string) => string;
 }

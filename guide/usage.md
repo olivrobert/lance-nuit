@@ -140,7 +140,7 @@ tracker or a project-specific preset:
 
 ```bash
 lancenuit run PROJ-28                         # the resolved `default` pipeline
-lancenuit single PROJ-28                      # same pipeline, no dispatch loop
+lancenuit single PROJ-28                      # same as run, refuses --scan
 lancenuit run PROJ-28 --pipeline release      # a project/shared pipeline by name
 lancenuit run PROJ-28 --pipeline .lance-nuit/pipelines/release.ts
 ```
@@ -168,7 +168,6 @@ For an explicit definition:
 ```bash
 lancenuit run PROJ-28 --pipeline .lance-nuit/pipelines/release.ts
 bun /path/to/lance-nuit/src/runner.ts PROJ-28 --pipeline .lance-nuit/pipelines/release.ts
-RUNNER_DISABLE_DISPATCH=1 bun /path/to/lance-nuit/src/runner.ts PROJ-28-01
 bun /path/to/lance-nuit/src/runner.ts --scan --pipeline queue
 ```
 

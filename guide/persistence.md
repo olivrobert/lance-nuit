@@ -682,9 +682,7 @@ phase that stopped it. The two are independent, so read both:
 | `finishedAt: null`, `abort: null` | the process died mid-scan; the `running` ticket is the one that was in flight |
 
 Writing the record is best effort, like statistics emission: a failure is
-reported once and the scan continues. Reading is tolerant — a file that is
-unreadable, is not JSON, or does not match the schema is counted as skipped
-rather than hiding every other scan.
+reported once and the scan continues. The runner never reads the records back.
 
 There is no retention policy: `scans/` grows by one small file per scan, and
 `lancenuit clean --logs-only` does not touch it, as it touches nothing else

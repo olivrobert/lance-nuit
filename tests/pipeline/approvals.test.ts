@@ -14,7 +14,6 @@ import {
   decisionActor,
   decisionMatchesArtifact,
   MAX_REJECTION_REASON,
-  markDecisionApplied,
   pendingRejection,
   readDecision,
   readDecisionAt,
@@ -109,8 +108,6 @@ test("a custom subject is approved end to end without knowing split/refactoring"
   expect(onDisk.schemaVersion).toBe(1);
   expect(onDisk.decidedBy).toBe("human");
 
-  expect((await markDecisionApplied(context, "budget", budgetArtifact)).decision).toBe("applied");
-
   // Modifying the artifact expires the approval, custom or not.
   writeFileSync(context.paths.artifact("budget.json"), JSON.stringify({ amountUsd: 13 }));
   expect(await decisionMatchesArtifact(context, "budget", budgetArtifact)).toBe(false);
@@ -180,7 +177,8 @@ test("approving an artifact already approved keeps the first decision", async ()
     expect(again).toEqual({ decision: first.decision, written: false, path: first.path });
 
     // An applied decision stays applied rather than turning pending again.
-    await markDecisionApplied(context, "budget", budgetArtifact);
+    // No runner path writes "applied" any more; a decision file from an older one may still carry it.
+    writeFileSync(first.path, JSON.stringify({ ...first.decision, decision: "applied" }));
     const afterApply = await recordApproval(context, "budget", budgetArtifact);
     expect(afterApply.written).toBe(false);
     expect(afterApply.decision.decision).toBe("applied");

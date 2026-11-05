@@ -1,4 +1,3 @@
-// dashboard/ui/http/respond.ts
 //
 // How the dashboard answers. Its own JSON answers are never cacheable: the
 // morning box is the state of the disk right now.

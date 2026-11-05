@@ -1,4 +1,3 @@
-// runner/commands/lint-config-check.ts
 //
 // `runner --lint-config`: compare `profiles` and `steps` configuration sections with
 // ALL pipelines, and display effective model/effort per step.

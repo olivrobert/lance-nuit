@@ -76,10 +76,7 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
               cache_creation_tokens: cacheCreationTokens,
               output_tokens: outputTokens,
             };
-            const cost =
-              projectPricing === undefined
-                ? resolveOpencodeCost({ costReported, costUsd }, breakdown, options.model)
-                : resolveOpencodeCost({ costReported, costUsd }, breakdown, options.model, projectPricing);
+            const cost = resolveOpencodeCost({ costReported, costUsd }, breakdown, options.model, projectPricing);
             const spent = cost.costUsd;
             options.onLiveCost?.(spent, options.model);
             if (control.killed) return;
@@ -145,7 +142,6 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
             onStdout: (text) => {
               lines.push(text);
               hostOptions.appendLiveOutput?.(text);
-              if (options.stepLogPath) hostOptions.appendAgentMessage?.(text, options.stepLogPath);
             },
             // stderr is kept, not merely forwarded: opencode retries `stream error`
             // silently (~65s backoff, nothing on stdout), so a billing or auth failure

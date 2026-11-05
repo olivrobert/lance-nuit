@@ -1,14 +1,13 @@
 // Pure projection of run facts into the run-stats schema.
 //
-// This module knows neither filesystem nor Git. External facts arrive through
-// RunEventStore/RunLogStore and path metadata through options.
+// This module knows neither filesystem nor Git. External facts arrive through the
+// RunEventStore/RunLogStore attached to the run and path metadata through options.
 
 import { basename } from "node:path";
 import type { AgentSession } from "../../contracts/backends.js";
 import { backendSpecForStep } from "../../contracts/backends.js";
 import type { RunOutcomeState } from "../persisted.js";
 import type { RunStepView, RunView } from "../run.js";
-import type { RunEventStore, RunLogStore } from "../storage-ports.js";
 import { costIsLowerBound, isResumableStatus, recordedVerdict, relativeRunPath } from "../record/index.js";
 import {
   type ProjectionAccumulator,
@@ -21,10 +20,6 @@ import { type RunStatsEntry, zeroTokens } from "./stats-core.js";
 export type { PhaseStats, RunStatsEntry, TokenCounts, UsageStatus } from "./stats-core.js";
 
 export interface RunStatsProjectionOptions {
-  /** Preferred store; otherwise use the store attached to the run. */
-  eventStore?: RunEventStore;
-  /** Preferred store; otherwise use the store attached to the run. */
-  logStore?: RunLogStore;
   /** Resolution supplied by the caller because it may depend on configuration. */
   ticketDir?: string | null;
   /** Resolve the logical outcome log path when no outcome is persisted. */
@@ -64,8 +59,7 @@ function lastFinishedAgentSession(run: RunView): AgentSession | undefined {
 }
 
 export function projectRunStatsEntry(run: RunView, options: RunStatsProjectionOptions = {}): RunStatsEntry {
-  const eventStore = options.eventStore ?? run.eventStore;
-  const logStore = options.logStore ?? run.logStore;
+  const { eventStore, logStore } = run;
   const aggregate: ProjectionAccumulator = {
     phases: {},
     models: {},
@@ -112,7 +106,7 @@ export function projectRunStatsEntry(run: RunView, options: RunStatsProjectionOp
     ...(aggregate.costStatus ? { costStatus: aggregate.costStatus } : {}),
     // The `≥` the dashboard prints for the same run: the run-level latch counts
     // as much as the steps.
-    ...(aggregate.costUnknown || costIsLowerBound(run) ? { costUnknown: true } : {}),
+    ...(costIsLowerBound(run) ? { costUnknown: true } : {}),
     models: aggregate.models,
     profiles: aggregate.profiles,
     // Emission metadata is filled by emitRunStats.

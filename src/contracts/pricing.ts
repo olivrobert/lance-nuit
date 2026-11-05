@@ -1,4 +1,3 @@
-// contracts/pricing.ts
 //
 // Rate table shapes and the pure pricing rules. This module is published as
 // `lance-nuit/contracts` and installed as a DSL declaration: it has no runtime

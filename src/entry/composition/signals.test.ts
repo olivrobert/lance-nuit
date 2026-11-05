@@ -171,8 +171,6 @@ test("a real SIGTERM during a step persists the abort and leaves a resumable run
   const spawned: string[] = [];
   const outcome = await executeRunSteps(
     resumed,
-    "T-9",
-    undefined,
     { resuming: true },
     {
       executeStep: async (step) => {

@@ -1,4 +1,3 @@
-// runner/run-record/run-transitions.ts
 //
 // The owner of run and step transitions during execution: status, failure
 // reason, verdict fields, timestamps, `run.outcome` and the fields that must

@@ -1,10 +1,8 @@
-// runner/env/gitguard.ts
 // Git-state guard at the start of a FRESH top-level run: a dirty tree would carry
 // unrelated changes into sub-US commits (the runner uses bypassPermissions and
 // commits without rereading). Bypass: --allow-dirty, pipeline.allow_dirty (commit,
 // quality — dirty by nature), run resume (the active implementation legitimately
-// leaves the tree dirty), or child runner.
-import { spawnSync } from "node:child_process";
+// leaves the tree dirty).
 import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import { runSupervisedCommand } from "../../shared/process/process-runner.js";
@@ -31,7 +29,7 @@ function isUncommittableUntracked(line: string, cwd: string): boolean {
   }
 }
 
-/** Apply the shared porcelain-status interpretation used by sync and async probes. */
+/** Interpret `git status --porcelain` output. */
 function summarizeWorkingTree(stdout: string, cwd: string): WorkingTreeCheck {
   const lines = stdout
     .split("\n")
@@ -46,29 +44,16 @@ function summarizeWorkingTree(stdout: string, cwd: string): WorkingTreeCheck {
 
 export interface GuardDecision {
   resuming: boolean;
-  subRunner: boolean;
   allowDirty: boolean;
   pipelineAllowsDirty: boolean;
 }
 
 export function shouldGuardCleanTree(d: GuardDecision): boolean {
-  return !d.resuming && !d.subRunner && !d.allowDirty && !d.pipelineAllowsDirty;
+  return !d.resuming && !d.allowDirty && !d.pipelineAllowsDirty;
 }
 
-/** ok=true for a clean tree OR outside a Git repository (guard not applicable, e.g. tests). */
-export function checkWorkingTree(cwd: string): WorkingTreeCheck {
-  const inside = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd, encoding: "utf-8" });
-  if (inside.status !== 0) return { ok: true };
-
-  const status = spawnSync("git", ["status", "--porcelain"], { cwd, encoding: "utf-8" });
-  // Git present but status failed (corrupt repository?): do not block on a false
-  // signal; the run will fail on subsequent git commands anyway.
-  if (status.status !== 0) return { ok: true };
-
-  return summarizeWorkingTree(status.stdout ?? "", cwd);
-}
-
-/** Production variant: Git probes do not block the runner loop. */
+/** ok=true for a clean tree OR outside a Git repository (guard not applicable, e.g. tests).
+ * The probes are asynchronous so they do not block the runner loop. */
 export async function checkWorkingTreeAsync(cwd: string): Promise<WorkingTreeCheck> {
   const inside = await runSupervisedCommand("git", ["rev-parse", "--is-inside-work-tree"], {
     cwd,
@@ -80,6 +65,8 @@ export async function checkWorkingTreeAsync(cwd: string): Promise<WorkingTreeChe
     cwd,
     timeoutMs: 30_000,
   });
+  // Git present but status failed (corrupt repository?): do not block on a false
+  // signal; the run will fail on subsequent git commands anyway.
   if (status.status !== 0) return { ok: true };
 
   return summarizeWorkingTree(status.stdout, cwd);

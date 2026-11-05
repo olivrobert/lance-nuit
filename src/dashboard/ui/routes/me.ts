@@ -1,4 +1,3 @@
-// dashboard/ui/routes/me.ts
 //
 // `/api/me`: who the reader is, and choosing a name.
 

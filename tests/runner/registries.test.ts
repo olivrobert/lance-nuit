@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import { BOOT } from "../../src/entry/boot/step.ts";
 import { COMMANDS } from "../../src/entry/commands/command.ts";
 import { DISPATCH } from "../../src/execution/dispatch/strategy.ts";
-import { AgentBackendRegistry } from "../../src/agents/registry.ts";
+import { AgentBackendRegistry } from "../../src/contracts/backends.ts";
 import { requireAgentBackendRegistry } from "../../src/shared/language/context.ts";
 import { buildPipelineContext } from "../../src/definition/pipeline/context.ts";
 import { FLAGS, flagSpec } from "../../src/entry/cli-options.ts";
@@ -26,10 +26,7 @@ test("BOOT, DISPATCH, and COMMANDS contain no ID collisions", () => {
 });
 
 test("every flag declared by a command or strategy exists in FLAGS", () => {
-  const declared = [
-    ...COMMANDS.map((c) => c.flag),
-    ...DISPATCH.map((s) => s.flag).filter((f): f is string => f != null),
-  ];
+  const declared = [...COMMANDS.map((c) => c.flag), ...DISPATCH.map((s) => s.flag)];
   expect(new Set(declared).size).toBe(declared.length);
   for (const flag of declared) expect(flagSpec(flag)).toBeDefined();
 });
@@ -46,12 +43,6 @@ test("a command key is a boolean field of RunnerArgs", () => {
 test("every registry entry has a non-empty description", () => {
   for (const entry of [...BOOT, ...COMMANDS, ...DISPATCH, ...FLAGS]) {
     expect(entry.desc.length).toBeGreaterThan(0);
-  }
-});
-
-test("a strategy that forbids a positional ticket has its usage message", () => {
-  for (const strategy of DISPATCH) {
-    if (strategy.ticket === "forbidden") expect(strategy.ticketError).toBeTruthy();
   }
 });
 

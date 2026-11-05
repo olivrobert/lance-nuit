@@ -1,18 +1,14 @@
-// runner/step/step-attempt.ts
 //
 // The only loop spawn entry points are `runAttempt` (step command) and
-// `runFixAttempt` (repair pass). Both use the same middleware chain, so rerun and
-// fix loops share bookkeeping without duplication.
-//
-// Middleware lives here rather than in attempt-chain.ts because each middleware is
-// tied to its bookkeeping; the chain itself remains runner-agnostic.
+// `runFixAttempt` (repair pass). Both go through `runTrackedAttempt`, so rerun
+// and fix loops share bookkeeping without duplication.
 //
 // The run record opens and settles the attempt (`openAttempt`, `settleAttempt`):
 // numbering, journal, closure, verdict, ledger, cost stops and snapshots. This
 // file runs the spawn between the two, settles on the returned-record path and on
 // the rejection path alike, and words the cost warning the settlement reports.
-// Middleware observes the attempt (banner, session, remaining budget before
-// spawn); none of it is needed for the accounting to be right.
+// Around the spawn, the attempt writes its banner, holds what it may spend, and
+// rotates the step session (`spawnAttempt`).
 
 import { appendFileSync } from "node:fs";
 import { basename } from "node:path";
@@ -21,14 +17,17 @@ import type {
   AgentBackendRegistry,
   AgentSession,
   ArtifactScope,
+  AttemptStats,
   BackendSpec,
   LiveCostSink,
+  StepFailCause,
+  StepFailKind,
 } from "../../contracts/backends.js";
 import type { executeStep, runWithAgent, StepResult } from "../runners.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import type { PipelineStep } from "../../definition/index.js";
-import type { RunStepView, RunView } from "../../run/index.js";
+import type { RunAttemptView, RunStepView, RunView } from "../../run/index.js";
 import { log } from "../../shared/runtime/logging.js";
 import {
   type AttemptResult,
@@ -56,13 +55,49 @@ import {
   revisedInPlace,
   writeProvenance,
 } from "../../work-items/index.js";
-import {
-  type AttemptContext,
-  type AttemptHandler,
-  type AttemptMiddleware,
-  type AttemptRecord,
-  compose,
-} from "./attempt-chain.js";
+
+/** Common subset of executeStep's StepResult and runWithAgent's result: everything
+ * the lifecycle reads from a completed attempt. It omits the heavy `output`. */
+export interface AttemptRecord {
+  ok: boolean;
+  stats?: AttemptStats;
+  session?: AgentSession;
+  failReason?: string;
+  failKind?: StepFailKind;
+  /** Why repairing this attempt is pointless, when the backend said so. */
+  failCause?: StepFailCause;
+  /** The live cost guard killed this attempt; the settlement raises it to the ledger. */
+  budgetExceeded?: boolean;
+  /** The live accounting guard killed this attempt: its usage was provably
+   *  unpriceable under a ceiling nobody authorized unmetered spend against. The
+   *  settlement raises it to the ledger as uncertainty, never as a budget stop. */
+  costUnaccounted?: boolean;
+}
+
+interface AttemptContext {
+  readonly run: RunView;
+  readonly step: RunStepView;
+  /** The running attempt. Its `status` tells whether another path (signal
+   * handler) already closed it. */
+  readonly attempt: RunAttemptView;
+  /** `step` replays the step command (initial, rerun, or retry after a fix);
+   * `fix` is a backend repair pass, which has no step session and is never a
+   * coder-resume source. */
+  readonly kind: "step" | "fix";
+  /** Resolved step command or fix prompt. */
+  readonly command: string;
+  /** Attempt banner in the step log (`rerun 2/3`). Absent for the initial attempt,
+   * which has no separator. */
+  readonly banner?: string;
+  readonly stepLogPath?: string;
+  readonly budget: RunBudget;
+  /** What this attempt may spend, as `spawnAttempt` reserved it. Absent means no
+   * limit. It belongs to the attempt, not to the shared ledger: another attempt
+   * reading the ledger must never see this figure. */
+  readonly budgetRemaining?: number;
+}
+
+type AttemptHandler<R extends AttemptRecord> = (ctx: AttemptContext) => Promise<R>;
 
 /** Say ONCE per attempt that spend was left at an unknown price, as the
  * settlement reported it. Silence here would read as a free attempt: the ledger
@@ -115,72 +150,29 @@ export function startFreshSession(
   return session;
 }
 
-/** Attempt separator in the step log (`--- rerun 2/3 ---`). This is the only place
- * that formats attempt banners, leaving a natural hook for future events. No
- * banner is written for the initial attempt. */
-export const bannerMiddleware: AttemptMiddleware = async (ctx, next) => {
-  if (ctx.banner && ctx.stepLogPath) {
-    appendFileSync(ctx.stepLogPath, `\n--- ${ctx.banner} ---\n`);
-  }
-  return next(ctx);
-};
-
-/** Rotate sessions for step attempts. Kept separate from
- * cost because session bookkeeping is load-bearing for resume.
- *
- * An attempt already closed by the signal handler keeps the step session as it
- * was: the abort promises a fresh attempt on resume, so a backend draining after
- * the kill must not rotate `step.session` under it. */
-export const sessionMiddleware: AttemptMiddleware = async (ctx, next) => {
-  const record = await next(ctx);
-  if (ctx.kind === "step" && ctx.attempt.status === "running") applyStepSession(ctx.run, ctx.step, record);
-  return record;
-};
-
-/** Hold what this attempt may spend and pass it to spawn. As the innermost
- * middleware, it reads the changing cumulative value at the last moment. Removing
- * it disables max_cost_usd enforcement. `finishAttempt` releases the allowance:
- * releasing here would give it back before the spend reaches the ledger. */
-export const budgetGateMiddleware: AttemptMiddleware = async (ctx, next) => {
-  return next({ ...ctx, budgetRemaining: reserveAllowance(ctx.budget, ctx.run.max_cost_usd, ctx.step.id) });
-};
-
 /** Where the backend of this attempt publishes its live estimate: on the step, so
  *  an interruption charges each attempt in flight with its own figure. */
 function liveCostSink(ctx: AttemptContext): LiveCostSink {
   return (costUsd, model) => reportLiveCost(ctx.run, ctx.step, costUsd, model);
 }
 
-/** Order from outermost to innermost. Removing an entry disables that middleware;
- * budgetGateMiddleware must remain last. The ledger charge is not a middleware:
- * it belongs to the attempt's settlement (`settleAttempt`) and cannot be removed. */
-export const DEFAULT_ATTEMPT_MIDDLEWARES: readonly AttemptMiddleware[] = [
-  bannerMiddleware,
-  sessionMiddleware,
-  budgetGateMiddleware,
-];
-
 /** Spawn options shared by both entry points. `budgetRemaining` is intentionally
- * absent because the chain calculates it at spawn time. */
+ * absent because `spawnAttempt` reserves it at spawn time. */
 interface SpawnOptions {
   cwd?: string;
   runnerDir?: string;
-  timeout?: number;
   role?: string;
   session?: AgentSession;
   resumeSession?: AgentSession;
   agentOptions?: unknown;
   artifactScope?: ArtifactScope;
-  registry?: AgentBackendRegistry;
 }
 
 interface AttemptOptionsBase {
-  /** Run budget mutated by the chain. */
+  /** Run budget the attempt holds its allowance on and is charged to. */
   budget: RunBudget;
   /** Step-log separator label; absent means no banner. */
   banner?: string;
-  /** Chain applied to this attempt; overridden only by tests. */
-  middlewares?: readonly AttemptMiddleware[];
 }
 
 export interface RunTrackedAttemptOptions<R extends AttemptRecord> extends AttemptOptionsBase {
@@ -196,7 +188,7 @@ export interface RunTrackedAttemptOptions<R extends AttemptRecord> extends Attem
 }
 
 /**
- * The one exit of an attempt started by `runTrackedAttempt`, whether the chain
+ * The one exit of an attempt started by `runTrackedAttempt`, whether the spawn
  * returned a record or rejected: the run record settles it, and the warning it
  * reports is said here, where the attempt runs.
  *
@@ -235,7 +227,7 @@ function attemptSession(kind: "step" | "fix", spawn: SpawnOptions | undefined): 
  * Execute one attempt end to end.
  *
  * Every attempt follows the same lifecycle: opening (number, log, start event
- * and snapshot, before spawn), middleware chain, settlement. The facades only
+ * and snapshot, before spawn), `spawnAttempt`, settlement. The facades only
  * provide their invocation; the generic type preserves the exact result,
  * including step output, without exposing it to bookkeeping.
  *
@@ -262,7 +254,7 @@ export async function runTrackedAttempt<R extends AttemptRecord>(options: RunTra
 
   let result: R;
   try {
-    result = await runChain(options, options.invoke, context);
+    result = await spawnAttempt(options.invoke, context);
   } catch (error) {
     const failReason = errorMessage(error);
     try {
@@ -287,7 +279,7 @@ export interface RunAttemptOptions extends AttemptOptionsBase {
   spawn?: SpawnOptions;
 }
 
-/** Execute one step-command attempt through the chain. */
+/** Execute one step-command attempt. */
 export async function runAttempt(run: RunView, step: RunStepView, options: RunAttemptOptions): Promise<StepResult> {
   return runTrackedAttempt({
     run,
@@ -296,7 +288,6 @@ export async function runAttempt(run: RunView, step: RunStepView, options: RunAt
     command: options.command,
     banner: options.banner,
     budget: options.budget,
-    middlewares: options.middlewares,
     spawn: options.spawn,
     invoke: async (ctx) => {
       const declaresInput = (ctx.step.def.sources?.length ?? 0) > 0;
@@ -466,9 +457,9 @@ export interface RunFixAttemptOptions extends AttemptOptionsBase {
   registry: AgentBackendRegistry;
 }
 
-/** Execute one repair pass through the same chain as `runAttempt`. Without this
- * entry point, fix spawns would be invisible to middleware despite representing a
- * major share of run cost. */
+/** Execute one repair pass through the same lifecycle as `runAttempt`. Without
+ * this entry point, fix spawns would escape the allowance and the settlement
+ * despite representing a major share of run cost. */
 export async function runFixAttempt(
   run: RunView,
   step: RunStepView,
@@ -481,7 +472,6 @@ export async function runFixAttempt(
     command: options.prompt,
     banner: options.banner,
     budget: options.budget,
-    middlewares: options.middlewares,
     spawn: options.spawn,
     invoke: (ctx) =>
       options.fixWithAgent(ctx.command, options.backendSpec, options.agentOptions, {
@@ -495,10 +485,39 @@ export async function runFixAttempt(
   });
 }
 
-function runChain<R extends AttemptRecord>(
-  options: AttemptOptionsBase,
-  handler: AttemptHandler<R>,
-  ctx: AttemptContext,
-): Promise<R> {
-  return compose(...(options.middlewares ?? DEFAULT_ATTEMPT_MIDDLEWARES))(handler)(ctx);
+/**
+ * The spawn and what surrounds it, in this order: the step-log banner, the
+ * allowance this attempt may spend (read at the last moment before spawn, so it
+ * sees the latest cumulative), the spawn, then the step session rotation.
+ * `finishAttempt` releases the allowance: releasing here would give it back
+ * before the spend reaches the ledger.
+ */
+async function spawnAttempt<R extends AttemptRecord>(invoke: AttemptHandler<R>, ctx: AttemptContext): Promise<R> {
+  // Each failure around the spawn is swallowed, never thrown: a banner, an
+  // allowance or a session save that fails must not deprive the step of its
+  // attempt. A failed allowance therefore spawns with no `budgetRemaining`, and
+  // a failed session save loses the rotation; whether either should stop the
+  // attempt instead is a separate decision from this structure.
+  try {
+    if (ctx.banner && ctx.stepLogPath) appendFileSync(ctx.stepLogPath, `\n--- ${ctx.banner} ---\n`);
+  } catch {
+    // See above: the attempt still runs.
+  }
+  let budgetRemaining: number | undefined;
+  try {
+    budgetRemaining = reserveAllowance(ctx.budget, ctx.run.max_cost_usd, ctx.step.id);
+  } catch {
+    // See above: the attempt still runs.
+  }
+  const record = await invoke({ ...ctx, budgetRemaining });
+  // An attempt already closed by the signal handler keeps the step session as it
+  // was: the abort promises a fresh attempt on resume, so a backend draining
+  // after the kill must not rotate `step.session` under it. A repair pass never
+  // rotates it: the fix session is not the step session.
+  try {
+    if (ctx.kind === "step" && ctx.attempt.status === "running") applyStepSession(ctx.run, ctx.step, record);
+  } catch {
+    // See above: the record still leaves the attempt.
+  }
+  return record;
 }

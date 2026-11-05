@@ -1,4 +1,3 @@
-// runner/model/source.ts
 //
 // External source: state outside the work-item (the repository tree, a lock
 // file, a remote revision) that a step declares as input so its freshness covers

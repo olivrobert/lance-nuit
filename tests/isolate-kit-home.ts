@@ -1,4 +1,3 @@
-// runner/tests/isolate-kit-home.ts
 //
 // Suite preload: pin `$PIPELINE_HOME` to an EMPTY disposable directory.
 //

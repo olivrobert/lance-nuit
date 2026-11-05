@@ -1,4 +1,3 @@
-// runner/commands/help.ts
 //
 // `--help` is generated from registries: adding an option, strategy, or boot
 // step automatically adds it here.
@@ -33,7 +32,7 @@ export function renderHelp(commands: RunnerCommand[]): string {
     ),
     ...helpSection(
       "Dispatch strategies (exclusive scopes)",
-      DISPATCH.map((s): [string, string] => [s.flag ?? `${s.id} (auto)`, s.desc]),
+      DISPATCH.map((s): [string, string] => [s.flag, s.desc]),
     ),
     ...helpSection(
       "Run preflight, in order",

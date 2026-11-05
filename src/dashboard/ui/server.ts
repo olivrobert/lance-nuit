@@ -1,4 +1,3 @@
-// dashboard/ui/server.ts
 //
 // The dashboard's HTTP surface: `node:http`, no server framework. This file
 // composes the ports the routes run against and binds the socket; the router

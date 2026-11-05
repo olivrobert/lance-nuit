@@ -1,4 +1,3 @@
-// dashboard/ui/markdown.ts
 //
 // Server-side markdown rendering, on top of `markdown-it`.
 //

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fmtAge, fmtClock, fmtCost, fmtDate, fmtDuration, fmtModel, fmtSize, fmtTokens, shortRunId } from "./format.js";
+import { fmtAge, fmtClock, fmtCost, fmtDate, fmtDuration, fmtModel, fmtSize, shortRunId } from "./format.js";
 
 const NOW = Date.parse("2026-01-10T12:00:00.000Z");
 
@@ -79,15 +79,6 @@ describe("fmtDuration", () => {
   test("answers with a dash for an absent or negative duration", () => {
     expect(fmtDuration(undefined)).toBe("—");
     expect(fmtDuration(-1)).toBe("—");
-  });
-});
-
-describe("fmtTokens", () => {
-  test("whole, then thousands, then millions", () => {
-    expect(fmtTokens(566)).toBe("566");
-    expect(fmtTokens(2864)).toBe("2.9 k");
-    expect(fmtTokens(11_841_980)).toBe("11.84 M");
-    expect(fmtTokens(undefined)).toBe("—");
   });
 });
 

@@ -1,4 +1,3 @@
-// dashboard/ui/routes/items.ts
 //
 // `/api/items`: the inbox, one item's detail, the files of its work item, one
 // step of its run, and the run's journey.

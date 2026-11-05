@@ -1,4 +1,3 @@
-// dashboard/read-model/run-journey.ts
 //
 // The whole run in time: every attempt of every step, and the pauses between a
 // stop and the resume that followed it.

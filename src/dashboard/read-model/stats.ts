@@ -1,4 +1,3 @@
-// dashboard/read-model/stats.ts
 //
 // What every ticket cost, across every listed project: one row per ticket,
 // summed over its ROOT runs.

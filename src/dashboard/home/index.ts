@@ -1,4 +1,3 @@
-// dashboard/home/index.ts
 //
 // Public surface of the dashboard's home: the files it owns under
 // `~/.lance-nuit/ui/`. The read model reads them to describe items; the

@@ -43,14 +43,7 @@ test("generic bash pipeline: an arbitrary identifier never accesses the Jira gat
     steps: [step],
   };
 
-  const outcome = await executeRunSteps(
-    run,
-    ticket,
-    undefined,
-    { resuming: false },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const outcome = await executeRunSteps(run, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(run, outcome);
 
   expect(outcome.failed).toBe(false);

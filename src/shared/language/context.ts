@@ -1,4 +1,3 @@
-// runner/model/context.ts
 //
 // Execution context handed to pipeline authors, the accessors of the registries a
 // run attaches to it, and the resolver of its templated values. No I/O: assembling

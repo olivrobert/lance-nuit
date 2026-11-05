@@ -1,4 +1,3 @@
-// runner/project/dsl-types/declarations.ts
 //
 // Generation and specialization of the declaration files installed in a kit.
 

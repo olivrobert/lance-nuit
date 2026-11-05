@@ -31,7 +31,9 @@ import { settleStepFailure } from "./non-blocking.ts";
 import { isPersistedRunResumable, pendingSteps } from "../../run/record/run-predicates.ts";
 import { readRunSnapshot } from "../../run/record/run-snapshot.ts";
 import { makeRunStep, type StepStateInput } from "../../run/record/run-step.ts";
-import { admitStep, buildContext, executeRunSteps, resolveOutcome, type StepLoopDeps } from "./step-loop.ts";
+import { admitStep } from "./step-admission.ts";
+import { executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
+import { resolveOutcome } from "./step-outcome.ts";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import { createAbortScope } from "../abort.js";
 import { humanReview } from "../../definition/builtin-steps/lib/human-review.js";
@@ -88,7 +90,7 @@ test("admitStep: validates the contract", async () => {
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 1 },
     output: NULL_RUN_OUTPUT,
   });
@@ -119,7 +121,7 @@ test("admitStep: an unpriced attempt stops a capped run with its own reason", as
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     // $1 of priced spend under a $5 cap: affordable on the ledger alone, which is
     // exactly why the ceiling cannot be trusted once an attempt went unpriced.
     budget: { cumulative: 1, costUnknown: true },
@@ -150,7 +152,7 @@ test("admitStep: an uncapped run keeps admitting work despite unknown spend", as
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 1, costUnknown: true },
     output: NULL_RUN_OUTPUT,
   });
@@ -172,7 +174,7 @@ test("executeRunSteps: an unpriced attempt recorded in the totals stops the next
   const run = makeRun([done, next], 5);
   const { deps, calls } = fakeDeps();
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(calls.exec).toBe(0);
   expect(outcome.costUnaccounted).toBe(true);
@@ -211,7 +213,7 @@ test("executeRunSteps: a transport failure before the first usage event does not
   ]);
 
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: run.run_dir });
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: false }, deps, ctx);
 
   expect(calls.ids).toEqual(["implement", "implement", "after"]);
   expect(agent.retries).toBe(1);
@@ -234,7 +236,7 @@ test("executeRunSteps: a non-blocking step cannot absorb an accounting stop", as
   const run = makeRun([done, next], 5);
   const { deps, calls } = fakeDeps();
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(calls.exec).toBe(0);
   expect(outcome.costUnaccounted).toBe(true);
@@ -253,7 +255,7 @@ test("executeRunSteps: a completed run is not failed after the fact for unknown 
   const run = makeRun([done], 5);
   const { deps } = fakeDeps();
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(outcome.costUnaccounted).toBe(false);
   expect(outcome.failed).toBe(false);
@@ -269,7 +271,7 @@ test("admitStep: validates the contract", async () => {
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext("PROJ-9", undefined),
+    baseCtx: buildPipelineContext({ ticket: "PROJ-9" }),
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
   });
@@ -289,7 +291,7 @@ test("admitStep: validates the contract", async () => {
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
   });
@@ -311,7 +313,7 @@ test("admitStep: validates the contract", async () => {
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext("PROJ-9", undefined),
+    baseCtx: buildPipelineContext({ ticket: "PROJ-9" }),
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
   });
@@ -340,7 +342,7 @@ test("admitStep: validates the contract", async () => {
     ],
   });
   const run = makeRun([skipped, failed]);
-  const ctx = buildContext(undefined, undefined);
+  const ctx = buildPipelineContext({});
 
   expect(
     (await admitStep({ run, step: skipped, baseCtx: ctx, budget: { cumulative: 0 }, output: NULL_RUN_OUTPUT })).kind,
@@ -370,7 +372,7 @@ test("admitStep: validates the contract", async () => {
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
   });
@@ -392,7 +394,7 @@ test("executeRunSteps: validates the contract", async () => {
   const run = makeRun([boom, jamais]);
   const { deps, calls } = fakeDeps();
 
-  const outcome = await executeRunSteps(run, "PROJ-9", undefined, { resuming: false }, deps);
+  const outcome = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({ ticket: "PROJ-9" }));
 
   expect(outcome.failed).toBe(true);
   expect(calls.exec).toBe(0);
@@ -442,7 +444,7 @@ test("admitStep: validates the contract", async () => {
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
   });
@@ -464,7 +466,7 @@ test("admitStep: validates the contract", async () => {
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
   });
@@ -480,7 +482,7 @@ test("admitStep: validates the contract", async () => {
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
   });
@@ -513,7 +515,7 @@ test("input: validates the contract", async () => {
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
   });
@@ -539,7 +541,7 @@ test("skipUnlessCommand short-circuits composed conditions: validates the contra
   const admission = await admitStep({
     run,
     step,
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
   });
@@ -565,7 +567,7 @@ test("resolveOutcome: validates the contract", async () => {
     run,
     step,
     command: "cmd",
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     abort: createAbortScope(),
     output: NULL_RUN_OUTPUT,
@@ -599,7 +601,7 @@ test("resolveOutcome: a BLOCKED: prefix without the cause no longer stops the ru
     run,
     step,
     command: "cmd",
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     abort: createAbortScope(),
     output: NULL_RUN_OUTPUT,
@@ -624,7 +626,7 @@ test("resolveOutcome: a blocked cause without a reason still gets a readable sto
     run,
     step,
     command: "cmd",
-    baseCtx: buildContext(undefined, undefined),
+    baseCtx: buildPipelineContext({}),
     budget: { cumulative: 0 },
     abort: createAbortScope(),
     output: NULL_RUN_OUTPUT,
@@ -642,7 +644,7 @@ test("run nominal: validates the contract", async () => {
   const steps = [bashStep("a", "echo a"), bashStep("b", "echo b")];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }, { ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(out.stopped).toBe(false);
   expect(steps.every((s) => s.status === "done")).toBe(true);
@@ -667,7 +669,7 @@ test("agent steps preserve provider-aware state: validates the contract", async 
     stats: { duration_ms: 1, provider: "codex", model: CODEX_MODEL.GPT_5_CODEX, input_tokens: 10, output_tokens: 5 },
   });
 
-  const result = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps, agentContext());
+  const result = await executeRunSteps(run, { resuming: false }, deps, agentContext());
 
   expect(result.failed).toBe(false);
   expect(step.session).toEqual({ provider: "codex", id: "thread-1", resumable: true });
@@ -678,7 +680,7 @@ test("input skip: validates the contract", async () => {
   const steps = [bashStep("a", "echo a", { inputs: [skipUnlessCommand("false")] }), bashStep("b", "echo b")];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(steps[0]!.status).toBe("skipped");
   expect(steps[1]!.status).toBe("done");
@@ -704,7 +706,7 @@ test("resume: a failed step its when now skips ends skipped and keeps the spend 
   ];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const out = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(steps[0]!.status).toBe("skipped");
   expect(steps[0]!.control?.total_cost_usd).toBe(5.4);
@@ -731,7 +733,7 @@ test("resume: a failed step its when now skips is not replayed and leaves its ar
   const run = makeRun([plan]);
   const { deps, calls } = fakeDeps();
 
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const out = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(out.failed).toBe(false);
   expect(calls.exec).toBe(0);
@@ -755,7 +757,7 @@ test("resume: a failed step its when now skips is persisted skipped without its 
   const run = makeRun([step]);
   const { deps } = fakeDeps();
 
-  await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   const persisted = readRunSnapshot(join(run.run_dir, "state.json"))!.steps.find((s) => s.id === "plan")!;
   expect(persisted.status).toBe("skipped");
@@ -768,7 +770,7 @@ test("input skip without control: validates the contract", async () => {
   const steps = [bashStep("a", "echo a", { inputs: [skipUnlessCommand("false")] })];
   const run = makeRun(steps);
   const { deps } = fakeDeps([]);
-  await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
   expect(steps[0]!.status).toBe("skipped");
 });
 
@@ -776,7 +778,7 @@ test("input stop: validates the contract", async () => {
   const steps = [bashStep("a", "echo a", { inputs: [stopUnlessCommand("false")] }), bashStep("b", "echo b")];
   const run = makeRun(steps);
   const { deps } = fakeDeps();
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.stopped).toBe(true);
   expect(out.failed).toBe(false);
   expect(run.stopped_reason).toBeTruthy();
@@ -794,7 +796,7 @@ test("input TS skip: validates the contract", async () => {
   ];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(steps[0]!.status).toBe("skipped");
   expect(calls.ids).toEqual(["b"]);
@@ -809,7 +811,7 @@ test("input TS stop: validates the contract", async () => {
   ];
   const run = makeRun(steps);
   const { deps } = fakeDeps();
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.stopped).toBe(true);
   expect(run.stopped_reason).toBe("escalated: cannot reproduce");
 });
@@ -818,7 +820,7 @@ test("input TS true: validates the contract", async () => {
   const steps = [bashStep("a", "echo a", { inputs: [skipUnless(() => true)] })];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(calls.ids).toEqual(["a"]);
 });
@@ -836,7 +838,7 @@ test("input TS that throw: validates the contract", async () => {
   ];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(steps[0]!.status).toBe("skipped");
   expect(calls.ids).toEqual(["b"]);
@@ -846,7 +848,7 @@ test("step-loop: validates the integration contract", async () => {
   const steps = [bashStep("a", "echo a", { inputs: [failUnlessCommand("false")] }), bashStep("b", "echo b")];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps();
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(true);
   expect(steps[0]!.status).toBe("failed");
   expect(calls.exec).toBe(0);
@@ -857,7 +859,7 @@ test("step-loop: validates the integration contract", async () => {
   const run = makeRun(steps);
   // attempt initial KO, first rerun OK.
   const { deps, calls } = fakeDeps([{ ok: false }, { ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(steps[0]!.status).toBe("done");
   expect(steps[0]!.retries).toBe(1);
@@ -868,7 +870,7 @@ test("step-loop: validates the integration contract", async () => {
   const steps = [bashStep("a", "cmd", { on_failure: { max_retries: 2 } })];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: false }, { ok: false }, { ok: false }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(true);
   expect(steps[0]!.status).toBe("failed");
   expect(steps[0]!.retries).toBe(2);
@@ -880,7 +882,7 @@ test("step-loop: validates the integration contract", async () => {
   const run = makeRun(steps, 1);
   // Step a costs 2 -> the budget (1) is exceeded before b.
   const { deps, calls } = fakeDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 2 } }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.budgetExceeded).toBe(true);
   expect(steps[0]!.status).toBe("done");
   expect(steps[1]!.status).toBe("pending");
@@ -902,7 +904,7 @@ test("step-loop: a live guard kill is a durable budget stop, not a replayable fa
       stats: { duration_ms: 1, total_cost_usd: 0.3, cost_estimated: true },
     },
   ]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.budgetExceeded).toBe(true);
   expect(calls.ids).toEqual(["a"]);
   // The stop survives the snapshot: the ledger alone ($0.30 < $1) would not.
@@ -938,7 +940,7 @@ test("step-loop: a live guard kill is a durable budget stop, not a replayable fa
   ];
   const resumed: Run = { ...makeRun(resumedSteps, 1), budget_exceeded: true };
   const second = fakeDeps([{ ok: true }, { ok: true }]);
-  const again = await executeRunSteps(resumed, undefined, undefined, { resuming: true }, second.deps);
+  const again = await executeRunSteps(resumed, { resuming: true }, second.deps, buildPipelineContext({}));
   expect(again.budgetExceeded).toBe(true);
   expect(second.calls.exec).toBe(0);
   expect(resumedSteps[1]!.status).toBe("pending");
@@ -964,7 +966,7 @@ test("step-loop: a non-blocking step killed by the live guard stays failed and r
     },
   ]);
 
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
 
   expect(out.budgetExceeded).toBe(true);
   expect(calls.ids).toEqual(["a"]);
@@ -985,7 +987,7 @@ test("step-loop: a non-blocking step killed by the live guard stays failed and r
   ];
   const resumed = makeRun(resumedSteps, 5);
   const second = fakeDeps([{ ok: true }, { ok: true }]);
-  const again = await executeRunSteps(resumed, undefined, undefined, { resuming: true }, second.deps);
+  const again = await executeRunSteps(resumed, { resuming: true }, second.deps, buildPipelineContext({}));
 
   expect(again.failed).toBe(false);
   expect(again.budgetExceeded).toBe(false);
@@ -1005,7 +1007,7 @@ test("step-loop: a non-blocking step killed for unpriceable usage stays failed a
     },
   ]);
 
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
 
   expect(out.costUnaccountedStop).toBe(true);
   expect(calls.ids).toEqual(["a"]);
@@ -1023,7 +1025,7 @@ test("step-loop: a non-blocking step killed for unpriceable usage stays failed a
   ];
   const resumed: Run = { ...makeRun(resumedSteps, 5), cost_unaccounted: true, allow_unmetered: true };
   const second = fakeDeps([{ ok: true }, { ok: true }]);
-  const again = await executeRunSteps(resumed, undefined, undefined, { resuming: true }, second.deps);
+  const again = await executeRunSteps(resumed, { resuming: true }, second.deps, buildPipelineContext({}));
 
   expect(again.failed).toBe(false);
   expect(second.calls.ids).toEqual(["a", "b"]);
@@ -1038,7 +1040,7 @@ test("resume: validates the contract", async () => {
   ];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }, { ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const out = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(calls.ids).toEqual(["branch", "next"]);
 });
@@ -1052,7 +1054,7 @@ test("step-loop: validates the integration contract", async () => {
     fixCalled = true;
     return { failed: false };
   };
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(fixCalled).toBe(true);
   expect(out.failed).toBe(false);
 });
@@ -1061,7 +1063,7 @@ test("preflight KO: validates the contract", async () => {
   const steps = [bashStep("visual", "cmd", { preflight: "exit 7" }), bashStep("next", "cmd")];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }, { ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(true);
   expect(steps[0]!.status).toBe("failed");
   expect(steps[0]!.errors).toContain("preflight");
@@ -1072,7 +1074,7 @@ test("preflight KO on step non blocking: validates the contract", async () => {
   const steps = [bashStep("visual", "cmd", { preflight: "exit 7", blocking: false }), bashStep("next", "cmd")];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(steps[0]!.status).toBe("done");
   expect(calls.ids).toEqual(["next"]);
@@ -1082,7 +1084,7 @@ test("preflight OK: validates the contract", async () => {
   const steps = [bashStep("visual", "cmd", { preflight: "true" })];
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }]);
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(calls.ids).toEqual(["visual"]);
 });
@@ -1096,7 +1098,7 @@ test("step-loop: validates the integration contract", async () => {
   ];
   const run = makeRun(steps);
   const { deps } = fakeDeps();
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(out.failed).toBe(false);
   expect(steps[0]!.status).toBe("skipped");
 });
@@ -1116,7 +1118,7 @@ test("step-loop: validates the integration contract", async () => {
     return { failed: false };
   };
 
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
 
   expect(fixCalled).toBe(false);
   expect(out.stopped).toBe(true);
@@ -1141,7 +1143,7 @@ test("step-loop: validates the integration contract", async () => {
     return { failed: false };
   };
 
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
 
   expect(fixCalled).toBe(false);
   expect(out.stopped).toBe(false);
@@ -1159,7 +1161,7 @@ test("step-loop: validates the integration contract", async () => {
     return { failed: false };
   };
 
-  await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
 
   expect(fixCalled).toBe(true);
 });
@@ -1170,7 +1172,7 @@ test("step-loop: validates the integration contract", async () => {
   const { deps } = fakeDeps([{ ok: false, output: "fatal tool crash" }]);
   deps.extractErrors = async () => ({ hasErrors: false, errors: "" });
 
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
 
   expect(out.failed).toBe(true);
   expect(steps[0]!.status).toBe("failed");
@@ -1181,7 +1183,7 @@ test("check non blocking: validates the contract", async () => {
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: false, failReason: "lint facultatif" }, { ok: true }]);
 
-  const out = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
 
   expect(out.failed).toBe(false);
   expect(calls.ids).toEqual(["warn", "next"]);
@@ -1210,7 +1212,7 @@ test("step-loop: validates the integration contract", async () => {
     return inner(step, cmd, budget, ctx);
   };
 
-  await executeRunSteps(run, undefined, undefined, { resuming: false }, deps, agentContext());
+  await executeRunSteps(run, { resuming: false }, deps, agentContext());
 
   expect(seen).toEqual([undefined]);
 });
@@ -1258,7 +1260,7 @@ test("resume: a done step with fresh declared inputs is re-admitted at zero cost
   await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.exec).toBe(0);
   expect(step.status).toBe("done");
@@ -1275,7 +1277,7 @@ test("resume: a step requeued by --start-at runs even when its declared outputs 
   await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["spec"]);
 });
@@ -1287,7 +1289,7 @@ test("resume: a done step whose declared input changed is replayed", async () =>
   await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["spec"]);
 });
@@ -1315,7 +1317,7 @@ function absorbedRun(check: Partial<PipelineStep> = {}): { run: Run; check: RunS
 /** First invocation: the check fails and is absorbed, the gate fails the run. */
 async function absorbThenFailGate(run: Run, ctx: PipelineContext, deps?: StepLoopDeps): Promise<void> {
   const first = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: false }, deps ?? first.deps, ctx);
+  await executeRunSteps(run, { resuming: false }, deps ?? first.deps, ctx);
 }
 
 test("executeRunSteps: an absorbed step records its inputs as its fix left them", async () => {
@@ -1346,7 +1348,7 @@ test("resume: an absorbed step whose inputs did not move is not re-run", async (
   expect(gate.status).toBe("failed");
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["gate"]);
   expect(check.status).toBe("done");
@@ -1368,7 +1370,7 @@ test("resume: an absorbed step whose fix rewrote its input is not re-run", async
   await absorbThenFailGate(run, ctx, first.deps);
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["gate"]);
   expect(check.status).toBe("done");
@@ -1394,21 +1396,12 @@ test("resume: an absorbed step whose input an earlier step rewrote runs again", 
     };
   };
   const first = fakeDeps([{ ok: true }, { ok: false, failReason: "audit failed" }, { ok: false }]);
-  await executeRunSteps(
-    run,
-    "PROJ-1",
-    undefined,
-    { resuming: false },
-    writing(first.deps, { make: ["ticket.md", "v1"] }),
-    ctx,
-  );
+  await executeRunSteps(run, { resuming: false }, writing(first.deps, { make: ["ticket.md", "v1"] }), ctx);
   expect(check.absorbed_inputs).toEqual({ "artifacts/ticket.md": sha256Text("v1") });
 
   const { deps, calls } = fakeDeps();
   await executeRunSteps(
     run,
-    "PROJ-1",
-    undefined,
     { resuming: true },
     writing(deps, { make: ["ticket.md", "v2"], check: ["spec.md", "checked"] }),
     ctx,
@@ -1428,7 +1421,7 @@ test("resume: an absorbed step requeued by --start-at runs", async () => {
   check.replay = true;
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["check", "gate"]);
 });
@@ -1442,7 +1435,7 @@ test("resume: an absorbed step without recorded inputs runs as before", async ()
   delete check.absorbed_inputs;
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["check", "gate"]);
 });
@@ -1456,7 +1449,7 @@ test("a step revising an output another step produced is not adopted on its extr
   const run = makeRun([revise]);
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: false }, deps, ctx);
+  await executeRunSteps(run, { resuming: false }, deps, ctx);
 
   expect(calls.ids).toEqual(["plan-revise"]);
 });
@@ -1473,7 +1466,7 @@ test("resume: a step skipped by its own admission is re-admitted, an excluded on
   const run = makeRun([admitted, excluded]);
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   // The outputs are missing, so the re-admitted step runs; the operator exclusion holds.
   expect(calls.ids).toEqual(["spec"]);
@@ -1492,7 +1485,7 @@ test("resume: a when refusal over stale inputs says the outputs were kept", asyn
   await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.exec).toBe(0);
   const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
@@ -1553,7 +1546,7 @@ test("step-loop: an agent step timeout kills the process tree, closes the attemp
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: dir });
   const { deps, fixCalls } = realSpawnDeps();
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: false }, deps, ctx);
 
   // 1. The tree is gone, the grandchild included.
   const descendant = Number(readFileSync(pidFile, "utf8").trim());
@@ -1623,7 +1616,7 @@ test("step-loop: a run resumed after an interruption replays the aborted step an
   const run = makeRun(steps);
   const { deps, calls } = fakeDeps([{ ok: true }, { ok: true }]);
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(outcome.failed).toBe(false);
   // The paid step is neither replayed nor repaid; the interrupted one restarts.
@@ -1648,7 +1641,7 @@ test("executeRunSteps: the persisted authorization feeds the ledger and the latc
   const run: Run = { ...makeRun([done, next], 5), allow_unmetered: true };
   const { deps, calls } = fakeDeps([{ ok: true }]);
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: true }, deps);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(outcome.costUnaccounted).toBe(false);
   expect(calls.ids).toEqual(["next"]);
@@ -1678,7 +1671,7 @@ test("executeRunSteps: a retry withheld for unaccounted spend is journaled once 
   ]);
 
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: run.run_dir });
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: false }, deps, ctx);
 
   expect(calls.ids).toEqual(["implement"]);
   expect(agent.retries).toBe(0);
@@ -1703,7 +1696,7 @@ test("executeRunSteps: a plain technical failure claims no cost stop", async () 
   const run = makeRun(steps, 5);
   const { deps } = fakeDeps([{ ok: false, failReason: "exit 1", stats: { duration_ms: 1, total_cost_usd: 0.2 } }]);
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, deps);
+  const outcome = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
 
   expect(outcome.failed).toBe(true);
   expect(outcome.budgetExceeded).toBe(false);
@@ -1732,8 +1725,8 @@ test("executeRunSteps: an abort requested on one scope leaves a run under anothe
   const { deps: depsB, calls: callsB } = fakeDeps();
 
   const [outcomeA, outcomeB] = await Promise.all([
-    executeRunSteps(runA, undefined, undefined, { resuming: false, abort: scopeA }, depsA),
-    executeRunSteps(runB, undefined, undefined, { resuming: false, abort: scopeB }, depsB),
+    executeRunSteps(runA, { resuming: false, abort: scopeA }, depsA, buildPipelineContext({})),
+    executeRunSteps(runB, { resuming: false, abort: scopeB }, depsB, buildPipelineContext({})),
   ]);
 
   expect(callsA.ids).toEqual(["a1"]);
@@ -1800,7 +1793,7 @@ test("resume: a rejected artifact replays its rework step with the reason, then 
     values.set("plan.md", "v2");
     return { output: "", ok: true, stats: { duration_ms: 1 } };
   };
-  const outcome = await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["write"]);
   expect(commands).toEqual(["rework: split step 2"]);
@@ -1814,7 +1807,7 @@ test("resume: a rework interrupted after its outputs were erased replays, and th
   const run = reworkRun({ status: "done", control: { duration_ms: 1 } });
 
   const failing = fakeDeps([{ ok: false }]);
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, failing.deps, ctx);
+  await executeRunSteps(run, { resuming: true }, failing.deps, ctx);
   expect(values.has("plan.md")).toBe(false);
   expect(run.steps.find((step) => step.id === "plan-gate")?.status).not.toBe("done");
 
@@ -1823,7 +1816,7 @@ test("resume: a rework interrupted after its outputs were erased replays, and th
   const write = run.steps.find((step) => step.id === "write")!;
   write.status = "done";
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);
   expect(calls.ids).toEqual(["write"]);
   expect(outcome.stopped || outcome.failed).toBe(true);
   expect(run.steps.find((step) => step.id === "plan-gate")?.status).not.toBe("done");
@@ -1853,7 +1846,7 @@ test("reconcile: a done step whose deliverable is present is not paid twice, and
   const run = makeRun([step, later]);
 
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  const outcome = await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["later"]);
   expect(step.status).toBe("done");
@@ -1869,7 +1862,7 @@ test("reconcile: a new run does not pay a step whose deliverable is already pres
   const run = makeRun([step]);
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: false }, deps, ctx);
+  await executeRunSteps(reconciled(run), { resuming: false }, deps, ctx);
 
   expect(calls.exec).toBe(0);
   expect(step.status).toBe("skipped");
@@ -1879,7 +1872,7 @@ test("reconcile: a done step whose deliverable was deleted runs again; legacy tr
   const legacy = artifactContext();
   const legacyStep = branchStep({ status: "done", control: { duration_ms: 1 } });
   const first = fakeDeps();
-  await executeRunSteps(makeRun([legacyStep]), "PROJ-1", undefined, { resuming: true }, first.deps, legacy.ctx);
+  await executeRunSteps(makeRun([legacyStep]), { resuming: true }, first.deps, legacy.ctx);
   expect(first.calls.exec).toBe(0);
 
   const { ctx, values } = artifactContext();
@@ -1892,7 +1885,7 @@ test("reconcile: a done step whose deliverable was deleted runs again; legacy tr
       return deps.executeStep(s, command, budget, context);
     },
   };
-  await executeRunSteps(reconciled(makeRun([step])), "PROJ-1", undefined, { resuming: true }, writing, ctx);
+  await executeRunSteps(reconciled(makeRun([step])), { resuming: true }, writing, ctx);
 
   expect(calls.ids).toEqual(["branch"]);
   expect(step.status).toBe("done");
@@ -1918,7 +1911,7 @@ test("reconcile: a step skipped by its own admission is re-admitted, an excluded
       return deps.executeStep(s, command, budget, context);
     },
   };
-  await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, writing, ctx);
+  await executeRunSteps(reconciled(run), { resuming: true }, writing, ctx);
 
   expect(calls.ids).toEqual(["branch"]);
   expect(admitted.status).toBe("done");
@@ -1931,14 +1924,14 @@ test("reconcile: an absorbed failure without input does not run again on every r
   const gate = bashStep("gate", "test -f ok");
   const run = makeRun([check, gate]);
   const first = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
-  await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: false }, first.deps, ctx);
+  await executeRunSteps(reconciled(run), { resuming: false }, first.deps, ctx);
   expect(check.status).toBe("done");
   expect(check.errors).toBe("audit failed");
   // No input to fingerprint: the record is empty, and still vouches for the absorption.
   expect(check.absorbed_inputs).toEqual({});
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["gate"]);
   const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
@@ -1950,7 +1943,7 @@ test("legacy: an absorbed failure without input records nothing, its status alon
   const check = branchStep({}, { blocking: false });
   const run = makeRun([check]);
   const first = fakeDeps([{ ok: false, failReason: "audit failed" }]);
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: false }, first.deps, ctx);
+  await executeRunSteps(run, { resuming: false }, first.deps, ctx);
 
   expect(check.status).toBe("done");
   expect(check.absorbed_inputs).toBeUndefined();
@@ -1979,7 +1972,7 @@ test("reconcile: a materialized orchestration node keeps the authority of its st
   const run = makeRun([node]);
 
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  const outcome = await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
 
   // Re-admitted, the node would relaunch its child pipeline, which does not exist here.
   expect(outcome.failed).toBe(false);
@@ -2005,7 +1998,7 @@ test("reconcile: a skipped orchestration node declaring rerunOnResume stays skip
   const run = makeRun([node]);
 
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, deps, ctx);
+  const outcome = await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
 
   expect(outcome.failed).toBe(false);
   expect(calls.exec).toBe(0);
@@ -2038,7 +2031,7 @@ test("reconcile: a done orchestration node declaring rerunOnResume keeps its sta
   const node = doneNodeRerunOnResume();
   const run = makeRun([node]);
 
-  const outcome = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, fakeDeps().deps, ctx);
+  const outcome = await executeRunSteps(reconciled(run), { resuming: true }, fakeDeps().deps, ctx);
 
   expect(outcome.failed).toBe(false);
   expect(node.status).toBe("done");
@@ -2052,7 +2045,7 @@ test("default mode: a done orchestration node declaring rerunOnResume is re-admi
 
   // Re-admitted, the node starts its orchestration, which then fails to resolve a
   // pipeline file that does not exist here.
-  await expect(executeRunSteps(run, "PROJ-1", undefined, { resuming: true }, fakeDeps().deps, ctx)).rejects.toThrow();
+  await expect(executeRunSteps(run, { resuming: true }, fakeDeps().deps, ctx)).rejects.toThrow();
   expect(node.status).toBe("running");
 });
 
@@ -2076,14 +2069,7 @@ test("reconcile: a done humanReview gate checks its approval again on every invo
   const run = makeRun(built.steps.map((def) => makeRunStep(def, { status: "done", control: { duration_ms: 1 } })));
   const gate = run.steps.find((step) => step.id === "plan-gate")!;
 
-  const approved = await executeRunSteps(
-    reconciled(run),
-    "PROJ-1",
-    undefined,
-    { resuming: true },
-    fakeDeps().deps,
-    ctx,
-  );
+  const approved = await executeRunSteps(reconciled(run), { resuming: true }, fakeDeps().deps, ctx);
   expect(approved.stopped).toBe(false);
   expect(gate.status).toBe("done");
   const attempts = readRunEvents(run.run_dir).filter((event) => event.type === "step.attempt.started");
@@ -2091,7 +2077,7 @@ test("reconcile: a done humanReview gate checks its approval again on every invo
 
   // The plan changed after its approval: the done gate must not wave it through.
   values.set("plan.md", "v2");
-  const stale = await executeRunSteps(reconciled(run), "PROJ-1", undefined, { resuming: true }, fakeDeps().deps, ctx);
+  const stale = await executeRunSteps(reconciled(run), { resuming: true }, fakeDeps().deps, ctx);
   expect(stale.stopped).toBe(true);
   expect(run.outcome?.phase).toBe("plan-gate");
 });
@@ -2120,8 +2106,6 @@ test("reconcile: --skip sets a step aside whatever its status, journals why, and
     const { deps, calls } = fakeDeps();
     const outcome = await executeRunSteps(
       reconciled(run),
-      "PROJ-1",
-      undefined,
       { resuming: true, skipFilter: ["context", "quality"] },
       deps,
       ctx,
@@ -2150,14 +2134,7 @@ test("reconcile: --steps sets aside every step it does not name, prefixes includ
   const run = makeRun([replayable("checks.lint"), replayable("checks.types"), replayable("report")]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(
-      reconciled(run),
-      "PROJ-1",
-      undefined,
-      { resuming: false, stepFilter: ["checks"] },
-      deps,
-      ctx,
-    );
+    const outcome = await executeRunSteps(reconciled(run), { resuming: false, stepFilter: ["checks"] }, deps, ctx);
 
     expect(calls.ids).toEqual(["checks.lint", "checks.types"]);
     expect(outcome.setAside).toEqual(["report"]);
@@ -2175,14 +2152,7 @@ test("reconcile: --start-at sets aside the work still owed before its target, an
   const run = makeRun([done, owed, target]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(
-      reconciled(run),
-      "PROJ-1",
-      undefined,
-      { resuming: true, startAt: "implement" },
-      deps,
-      ctx,
-    );
+    const outcome = await executeRunSteps(reconciled(run), { resuming: true, startAt: "implement" }, deps, ctx);
 
     expect(calls.ids).toEqual(["context", "implement"]);
     expect(outcome.setAside).toEqual(["prepare"]);
@@ -2213,8 +2183,6 @@ test("reconcile: a step left out whose last pass is unfinished keeps its status,
     const { deps, calls } = fakeDeps();
     const outcome = await executeRunSteps(
       reconciled(run),
-      "PROJ-1",
-      undefined,
       { resuming: true, skipFilter: ["quality", "publish"] },
       deps,
       ctx,
@@ -2245,14 +2213,7 @@ test("reconcile: a step left out with an unfinished pass does not turn a failure
   const run = makeRun([failed, replayable("report")]);
   try {
     const { deps } = fakeDeps([{ ok: false }]);
-    const outcome = await executeRunSteps(
-      reconciled(run),
-      "PROJ-1",
-      undefined,
-      { resuming: true, skipFilter: ["quality"] },
-      deps,
-      ctx,
-    );
+    const outcome = await executeRunSteps(reconciled(run), { resuming: true, skipFilter: ["quality"] }, deps, ctx);
 
     expect(outcome.failed).toBe(true);
     expect(outcome.stopped).toBe(false);
@@ -2279,14 +2240,7 @@ test("reconcile: a requeued step whose last attempt was interrupted keeps pendin
   const run = makeRun([requeued, replayable("report")]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(
-      reconciled(run),
-      "PROJ-1",
-      undefined,
-      { resuming: true, skipFilter: ["publish"] },
-      deps,
-      ctx,
-    );
+    const outcome = await executeRunSteps(reconciled(run), { resuming: true, skipFilter: ["publish"] }, deps, ctx);
 
     expect(calls.ids).toEqual(["report"]);
     // Settled as skipped, it would lose the interruption the next admission must see.
@@ -2307,8 +2261,6 @@ test("reconcile: an --until bound left out unfinished is reached, and its stop o
     const { deps, calls } = fakeDeps();
     const outcome = await executeRunSteps(
       reconciled(run),
-      "PROJ-1",
-      undefined,
       { resuming: true, skipFilter: ["plan"], until: "plan" },
       deps,
       ctx,
@@ -2331,8 +2283,6 @@ test("reconcile: a step set aside before the --until bound settles it, later ste
     const { deps, calls } = fakeDeps();
     const outcome = await executeRunSteps(
       reconciled(run),
-      "PROJ-1",
-      undefined,
       { resuming: false, skipFilter: ["plan"], until: "plan" },
       deps,
       ctx,
@@ -2365,14 +2315,7 @@ for (const gate of [
     if (gate.unaccounted) run.cost_unaccounted = true;
     try {
       const { deps, calls } = fakeDeps();
-      const outcome = await executeRunSteps(
-        reconciled(run),
-        "PROJ-1",
-        undefined,
-        { resuming: true, skipFilter: ["quality"] },
-        deps,
-        ctx,
-      );
+      const outcome = await executeRunSteps(reconciled(run), { resuming: true, skipFilter: ["quality"] }, deps, ctx);
 
       expect(calls.ids).toEqual([]);
       expect(outcome.setAside).toEqual(["quality"]);
@@ -2403,8 +2346,6 @@ test("reconcile: an interruption after a step left out unfinished is not turned 
     };
     const outcome = await executeRunSteps(
       reconciled(run),
-      "PROJ-1",
-      undefined,
       { resuming: true, abort, skipFilter: ["quality"] },
       deps,
       ctx,
@@ -2426,8 +2367,6 @@ test("legacy: the loop leaves the selectors to boot, which persisted them as exc
     const { deps, calls } = fakeDeps();
     const outcome = await executeRunSteps(
       run,
-      "PROJ-1",
-      undefined,
       { resuming: false, skipFilter: ["quality"], stepFilter: ["context"] },
       deps,
       ctx,
@@ -2460,7 +2399,7 @@ for (const [label, result] of [
       return executeStep(...args);
     };
 
-    const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false, abort }, deps);
+    const outcome = await executeRunSteps(run, { resuming: false, abort }, deps, buildPipelineContext({}));
 
     expect(calls.ids).toEqual(["a"]);
     expect(step.status).toBe("running");
@@ -2479,7 +2418,7 @@ test("executeRunSteps: an abort requested while the verdict is read does not rep
     return { hasErrors: false, errors: "" };
   };
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false, abort }, deps);
+  const outcome = await executeRunSteps(run, { resuming: false, abort }, deps, buildPipelineContext({}));
 
   expect(calls.ids).toEqual(["a"]);
   expect(outcome.failed).toBe(false);
@@ -2496,7 +2435,7 @@ test("executeRunSteps: an absorbed failure interrupted while its verdict is read
     return { hasErrors: false, errors: "" };
   };
 
-  await executeRunSteps(run, "PROJ-1", undefined, { resuming: false, abort }, deps, ctx);
+  await executeRunSteps(run, { resuming: false, abort }, deps, ctx);
 
   expect(calls.ids).toEqual(["check"]);
   expect(check.status).toBe("done");
@@ -2513,7 +2452,7 @@ test("executeRunSteps: announces each step with its place in the pipeline", asyn
     },
   };
 
-  await executeRunSteps(run, undefined, undefined, { resuming: false }, { ...deps, output });
+  await executeRunSteps(run, { resuming: false }, { ...deps, output }, buildPipelineContext({}));
 
   expect(started).toEqual([
     { id: "a", index: 1, total: 2 },

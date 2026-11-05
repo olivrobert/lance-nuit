@@ -1,4 +1,3 @@
-// runner/lib/ui-defaults.ts
 //
 // The two constants that the CLI registry and the server must agree on, kept in
 // a module with no imports so declaring the `--port` option does not drag the

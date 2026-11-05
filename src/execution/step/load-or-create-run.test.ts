@@ -242,7 +242,7 @@ for (const ending of ["STOPPED", "FAIL"] as const) {
     expect(resumed.stopped_reason).toBeUndefined();
 
     const { deps, spawned } = countingDeps([]);
-    finalizeRun(resumed, await executeRunSteps(resumed, "T-5", undefined, { resuming: true }, deps, ctx));
+    finalizeRun(resumed, await executeRunSteps(resumed, { resuming: true }, deps, ctx));
     expect(spawned).toEqual([]);
     expect(readRunSnapshot(join(dir, "state.json"))!.status).toBe("PASS");
   });
@@ -604,7 +604,7 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
     }
     return spawn(...args);
   };
-  await executeRunSteps(run, "T-6f", undefined, { resuming: false }, deps, ctx);
+  await executeRunSteps(run, { resuming: false }, deps, ctx);
   if (!onDisk) throw new Error("step b never spawned");
   // The runner dies while b's process runs: the disk keeps what it held then.
   writeFileSync(join(dir, "state.json"), onDisk.state);
@@ -641,7 +641,7 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
 
   // Settled as an interrupted pass: the next execution asks before replaying it.
   const next = countingDeps([]);
-  expect((await executeRunSteps(resumed, "T-6f", undefined, { resuming: true }, next.deps, ctx)).stopped).toBe(true);
+  expect((await executeRunSteps(resumed, { resuming: true }, next.deps, ctx)).stopped).toBe(true);
   expect(next.spawned).toEqual([]);
 });
 
@@ -689,7 +689,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
     worktree: false,
   });
   const first = countingDeps([]);
-  const outcome = await executeRunSteps(resumed, "T-6c", undefined, { resuming: true }, first.deps, ctx);
+  const outcome = await executeRunSteps(resumed, { resuming: true }, first.deps, ctx);
   expect(outcome.stopped).toBe(true);
   expect(first.spawned).toEqual([]);
   const snapshot = readRunSnapshot(join(dir, "state.json"))!;
@@ -707,7 +707,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
     worktree: false,
   });
   const second = countingDeps([]);
-  expect((await executeRunSteps(again, "T-6c", undefined, { resuming: true }, second.deps, ctx)).stopped).toBe(true);
+  expect((await executeRunSteps(again, { resuming: true }, second.deps, ctx)).stopped).toBe(true);
   expect(second.spawned).toEqual([]);
 
   const { run: authorized } = await loadOrCreateRun({
@@ -719,14 +719,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
     worktree: false,
   });
   const third = countingDeps([]);
-  const replayed = await executeRunSteps(
-    authorized,
-    "T-6c",
-    undefined,
-    { resuming: true, replayInterrupted: true },
-    third.deps,
-    ctx,
-  );
+  const replayed = await executeRunSteps(authorized, { resuming: true, replayInterrupted: true }, third.deps, ctx);
   expect(replayed.stopped).toBe(false);
   expect(third.spawned).toEqual(["a", "b", "c"]);
   expect(authorized.steps[0]!.status).toBe("done");
@@ -767,7 +760,7 @@ for (const option of ["replayInterrupted", "rerunOnResume"]) {
       worktree: false,
     });
     const loop = countingDeps([]);
-    const outcome = await executeRunSteps(resumed, "T-6d", undefined, { resuming: true }, loop.deps, ctx);
+    const outcome = await executeRunSteps(resumed, { resuming: true }, loop.deps, ctx);
     expect(outcome.stopped).toBe(false);
     expect(loop.spawned).toEqual(["a"]);
     expect(resumed.steps[0]!.status).toBe("done");
@@ -820,7 +813,7 @@ test("resume: a --start-at replay interrupted by a second crash stops the next r
   // The persisted requeue outlives the invocation that asked for it.
   expect(resumed.steps[1]!.replay).toBe(true);
   const loop = countingDeps([]);
-  const outcome = await executeRunSteps(resumed, "T-6e", undefined, { resuming: true }, loop.deps, ctx);
+  const outcome = await executeRunSteps(resumed, { resuming: true }, loop.deps, ctx);
   expect(outcome.stopped).toBe(true);
   expect(loop.spawned).toEqual([]);
 });
@@ -892,7 +885,7 @@ test("resume: a mid-step .maxCost() kill stops the run, and its cost is read bac
       stats: { duration_ms: 1, total_cost_usd: 0.9, cost_estimated: true },
     },
   ]);
-  const outcome = await executeRunSteps(run, "T-8", undefined, { resuming: false }, first.deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: false }, first.deps, ctx);
 
   // A hard stop: nothing after the killed step was launched.
   expect(outcome.budgetExceeded).toBe(true);
@@ -920,7 +913,7 @@ test("resume: a mid-step .maxCost() kill stops the run, and its cost is read bac
   expect(controlForRun(resumed).total_cost_usd).toBe(0.9);
 
   const second = countingDeps([{ ok: true }, { ok: true }, { ok: true }]);
-  const again = await executeRunSteps(resumed, "T-8", undefined, { resuming: true }, second.deps, ctx);
+  const again = await executeRunSteps(resumed, { resuming: true }, second.deps, ctx);
   expect(again.budgetExceeded).toBe(true);
   expect(second.spawned).toEqual([]);
   expect(again.cumulativeCost).toBe(0.9);
@@ -943,7 +936,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
   // Step `a` completes, spends $1 the runner could price, and consumes tokens it
   // could not: the $5 ceiling is no longer enforceable against the remainder.
   const first = countingDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 1, cost_unknown: true } }]);
-  const outcome = await executeRunSteps(run, "T-9", undefined, { resuming: false }, first.deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: false }, first.deps, ctx);
   expect(outcome.costUnaccounted).toBe(true);
   expect(outcome.budgetExceeded).toBe(false);
   expect(first.spawned).toEqual(["a"]);
@@ -965,7 +958,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
   expect(resumed.cost_unaccounted).toBe(true);
   expect(resumed.allow_unmetered).toBeUndefined();
   const second = countingDeps([{ ok: true }, { ok: true }]);
-  const again = await executeRunSteps(resumed, "T-9", undefined, { resuming: true }, second.deps, ctx);
+  const again = await executeRunSteps(resumed, { resuming: true }, second.deps, ctx);
   expect(again.costUnaccounted).toBe(true);
   expect(second.spawned).toEqual([]);
 
@@ -985,7 +978,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
   expect(raised.cost_unaccounted).toBe(true);
   expect(raised.allow_unmetered).toBeUndefined();
   const third = countingDeps([{ ok: true }, { ok: true }]);
-  const withBudget = await executeRunSteps(raised, "T-9", undefined, { resuming: true }, third.deps, ctx);
+  const withBudget = await executeRunSteps(raised, { resuming: true }, third.deps, ctx);
   expect(withBudget.costUnaccounted).toBe(true);
   expect(third.spawned).toEqual([]);
 
@@ -1007,7 +1000,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
   expect(readRunEvents(dir).filter((event) => event.type === "run.unmetered.authorized")).toHaveLength(1);
 
   const fourth = countingDeps([{ ok: true }, { ok: true }]);
-  const allowed = await executeRunSteps(authorized, "T-9", undefined, { resuming: true }, fourth.deps, ctx);
+  const allowed = await executeRunSteps(authorized, { resuming: true }, fourth.deps, ctx);
   expect(allowed.costUnaccounted).toBe(false);
   expect(allowed.failed).toBe(false);
   expect(fourth.spawned).toEqual(["b", "c"]);
@@ -1047,7 +1040,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
     { ok: true, stats: { duration_ms: 1, total_cost_usd: 1, cost_unknown: true } },
     { ok: false, failReason: "step b failed" },
   ]);
-  const outcome = await executeRunSteps(run, "T-12", undefined, { resuming: false }, first.deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: false }, first.deps, ctx);
   expect(outcome.costUnaccounted).toBe(false);
   expect(first.spawned).toEqual(["a", "b"]);
   expect(readRunSnapshot(join(dir, "state.json"))?.cost_unaccounted).toBe(true);
@@ -1069,7 +1062,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
   expect(capped.max_cost_usd).toBe(10);
   expect(capped.cost_unaccounted).toBe(true);
   const second = countingDeps([{ ok: true }, { ok: true }]);
-  const again = await executeRunSteps(capped, "T-12", undefined, { resuming: true }, second.deps, ctx);
+  const again = await executeRunSteps(capped, { resuming: true }, second.deps, ctx);
   expect(again.costUnaccounted).toBe(true);
   expect(again.costUnaccountedStop).toBe(true);
   expect(second.spawned).toEqual([]);
@@ -1085,7 +1078,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
     worktree: false,
   });
   const third = countingDeps([{ ok: true }, { ok: true }]);
-  const allowed = await executeRunSteps(authorized, "T-12", undefined, { resuming: true }, third.deps, ctx);
+  const allowed = await executeRunSteps(authorized, { resuming: true }, third.deps, ctx);
   expect(allowed.costUnaccounted).toBe(false);
   expect(third.spawned).toEqual(["b", "c"]);
 }, 30_000);
@@ -1106,7 +1099,7 @@ test("resume: a fresh run inherits neither the authorization nor the accounting 
   });
   expect(authorized.allow_unmetered).toBe(true);
   const first = countingDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 1, cost_unknown: true } }]);
-  await executeRunSteps(authorized, "T-10", undefined, { resuming: false }, first.deps, ctx);
+  await executeRunSteps(authorized, { resuming: false }, first.deps, ctx);
   expect(readRunSnapshot(join(dir, "state.json"))?.cost_unaccounted).toBe(true);
 
   // `--fresh` is a new run, not a continuation: it starts strict, with no spend
@@ -1144,7 +1137,7 @@ test("resume: an authorized run still stops when the spend it could price reache
   // stop being a fact, so the run reports an exceeded budget, not an accounting
   // stop, and stops all the same.
   const deps = countingDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 2, cost_unknown: true } }]);
-  const outcome = await executeRunSteps(run, "T-11", undefined, { resuming: false }, deps.deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: false }, deps.deps, ctx);
   expect(outcome.budgetExceeded).toBe(true);
   expect(outcome.costUnaccounted).toBe(false);
   expect(deps.spawned).toEqual(["a"]);
@@ -1522,7 +1515,7 @@ test("resume: --start-at requeues the target and every later step, keeping their
   expect(controlForRun(resumed).total_cost_usd).toBe(1);
 
   const deps = countingDeps([{ ok: true }, { ok: true }]);
-  await executeRunSteps(resumed, "T-start", undefined, { resuming: true }, deps.deps, ctx);
+  await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
   expect(deps.spawned).toEqual(["b", "c"]);
   // Settled, the replay mark is gone: a later plain resume treats them as history.
   expect(readRunSnapshot(join(dir, "state.json"))!.steps.map((step) => step.replay)).toEqual([
@@ -1569,7 +1562,7 @@ test("resume: a step requeued by --start-at stays pending when the next invocati
   expect(resumed.steps.map((step) => step.status)).toEqual(["done", "pending", "pending"]);
 
   const deps = countingDeps([{ ok: true }, { ok: true }]);
-  await executeRunSteps(resumed, "T-durable", undefined, { resuming: true }, deps.deps, ctx);
+  await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
   expect(deps.spawned).toEqual(["b", "c"]);
 });
 
@@ -1599,7 +1592,7 @@ test("resume: --start-at replays a target an earlier --start-at excluded", async
     worktree: false,
   });
   expect(skipping.steps[0]).toMatchObject({ status: "skipped", excluded: true });
-  await executeRunSteps(skipping, "T-excl", undefined, { resuming: true }, countingDeps([]).deps, ctx);
+  await executeRunSteps(skipping, { resuming: true }, countingDeps([]).deps, ctx);
 
   // Naming `a` is the newer decision: it supersedes the exclusion.
   const { run: replaying } = await loadOrCreateRun({
@@ -1613,7 +1606,7 @@ test("resume: --start-at replays a target an earlier --start-at excluded", async
   });
   expect(replaying.steps[0]!.excluded).toBeUndefined();
   const deps = countingDeps([{ ok: true }, { ok: true }, { ok: true }]);
-  await executeRunSteps(replaying, "T-excl", undefined, { resuming: true }, deps.deps, ctx);
+  await executeRunSteps(replaying, { resuming: true }, deps.deps, ctx);
   expect(deps.spawned).toEqual(["a", "b", "c"]);
 });
 
@@ -1660,7 +1653,7 @@ test("resume: --start-at on an explicitly selected PASS run replays from the tar
   expect(controlForRun(resumed).total_cost_usd).toBe(3);
 
   const deps = countingDeps([{ ok: true }]);
-  await executeRunSteps(resumed, "T-pass", undefined, { resuming: true }, deps.deps, ctx);
+  await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
   expect(deps.spawned).toEqual(["c"]);
   selection.release();
 });

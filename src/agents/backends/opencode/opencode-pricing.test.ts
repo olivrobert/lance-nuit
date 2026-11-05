@@ -1,16 +1,9 @@
 import { expect, test } from "bun:test";
-import {
-  computeCostUsd,
-  MODEL_PRICING,
-  OPENCODE_MODEL_PRICING,
-  pricingForModel,
-  resolveOpencodeCost,
-} from "./pricing.js";
+import { computeCostUsd, MODEL_PRICING, pricingForModel, resolveOpencodeCost } from "./pricing.js";
 
 test("opencode pricing ships no table of its own: prices come from the provider", () => {
   // The catalog moves every week and spans several providers. A hardcoded rate
   // would be wrong before it is committed; `step_finish.cost` is authoritative.
-  expect(OPENCODE_MODEL_PRICING).toBe(MODEL_PRICING);
   expect(Object.keys(MODEL_PRICING)).toEqual([]);
 });
 

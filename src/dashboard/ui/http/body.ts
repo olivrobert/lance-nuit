@@ -1,4 +1,3 @@
-// dashboard/ui/http/body.ts
 //
 // Request bodies. A JSON body is a name or a path, never a document.
 

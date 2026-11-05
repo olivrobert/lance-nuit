@@ -1,4 +1,3 @@
-// shared/lib/type-assertions.ts
 //
 // Compile-time helpers used by runtime schemas to prove that a schema and a
 // hand-written interface describe the same data. Types only: this module has no

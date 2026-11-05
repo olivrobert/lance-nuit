@@ -1,4 +1,3 @@
-// runner/exec/runners.ts
 //
 // Runner dispatch facade. Implementations are split by responsibility: process
 // supervision, bash, agent backends, and sessions. Machine reports and error
@@ -23,8 +22,6 @@ import type { RunStepView } from "../run/index.js";
 import { DEFAULT_BASH_TIMEOUT_MS, runBashStreaming } from "../shared/process/bash-runner.js";
 import { DEFAULT_PROCESS_TIMEOUT_MS } from "../shared/process/process-runner.js";
 import { discardStaleReports } from "./report-extraction.js";
-
-export { runBashAsync, runBashStreaming } from "../shared/process/bash-runner.js";
 
 export interface StepResult extends RunnerResult {
   stats?: AttemptStats;
@@ -72,8 +69,6 @@ export interface AgentRunBudget {
   strictCostAccounting?: boolean;
   onLiveCost?: LiveCostSink;
   role?: string;
-  /** Default fix intent for attempts passing through this path. */
-  intent?: AgentIntent;
   session?: AgentSession;
   resumeSession?: AgentSession;
   stepLogPath?: string;
@@ -91,7 +86,7 @@ export interface AgentRunBudget {
  */
 export function artifactScopeFor(ctx?: PipelineContext): ArtifactScope | undefined {
   // `paths` is optional at runtime, not in the type: `executeStep` accepts a
-  // partial context (tests, `noop` steps), and an exception here would kill the spawn.
+  // partial context (tests), and an exception here would kill the spawn.
   if (!ctx?.paths?.artifactsDir) return undefined;
   return {
     artifactsDir: ctx.paths.artifactsDir,
@@ -157,7 +152,7 @@ function invokeBackendWithBudget(
   spec: BackendSpec,
   options: unknown,
   budget: AgentRunBudget,
-  overrides: Pick<InvokeBackendInput, "intent" | "outputFormat" | "outputFields"> = {},
+  overrides: Pick<InvokeBackendInput, "intent" | "outputFormat" | "outputFields">,
 ): Promise<AgentResult> {
   return invokeBackend({
     spec,
@@ -165,7 +160,7 @@ function invokeBackendWithBudget(
     cwd: budget.cwd,
     runnerDir: budget.runnerDir,
     role: budget.role,
-    intent: overrides.intent ?? budget.intent,
+    intent: overrides.intent,
     outputFormat: overrides.outputFormat,
     outputFields: overrides.outputFields,
     options,
@@ -185,7 +180,6 @@ export async function executeStep(
   step: RunStepView,
   command: string,
   budget?: {
-    timeout?: number;
     budgetRemaining?: number;
     strictCostAccounting?: boolean;
     onLiveCost?: LiveCostSink;
@@ -196,9 +190,6 @@ export async function executeStep(
   },
   ctx?: PipelineContext,
 ): Promise<StepResult> {
-  if (step.def.runner === "noop") {
-    return { ok: true, output: "", stats: { duration_ms: 0 } };
-  }
   if (step.def.runner === "fn") {
     const start = Date.now();
     try {
@@ -223,7 +214,7 @@ export async function executeStep(
   if (step.def.runner === "bash") {
     const start = Date.now();
     await discardStaleReports(step);
-    const timeoutMs = step.def.timeout ? step.def.timeout * 1000 : (budget?.timeout ?? DEFAULT_BASH_TIMEOUT_MS);
+    const timeoutMs = step.def.timeout ? step.def.timeout * 1000 : DEFAULT_BASH_TIMEOUT_MS;
     const result = await runBashStreaming(command, { timeoutMs, stepLogPath: budget?.stepLogPath });
     return { ...result, stats: { duration_ms: Date.now() - start } };
   }
@@ -239,7 +230,7 @@ export async function executeStep(
   // Override options (for example, an escalated rerun model) take precedence over
   // step options.
   const options = budget?.agentOptions ?? spec.options;
-  const timeoutMs = step.def.timeout ? step.def.timeout * 1000 : (budget?.timeout ?? DEFAULT_PROCESS_TIMEOUT_MS);
+  const timeoutMs = step.def.timeout ? step.def.timeout * 1000 : DEFAULT_PROCESS_TIMEOUT_MS;
   const result = await invokeBackendWithBudget(
     command,
     spec,
@@ -280,7 +271,7 @@ export async function runWithAgent(
   costUnaccounted?: boolean;
 }> {
   const result = await invokeBackendWithBudget(prompt, spec, options, budget, {
-    intent: budget.intent ?? "fix",
+    intent: "fix",
     outputFormat: "text",
   });
   return {

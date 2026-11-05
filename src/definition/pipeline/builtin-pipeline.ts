@@ -1,4 +1,3 @@
-// runner/env/builtin-pipeline.ts
 //
 // Resolve a pipeline by name through the kit chain: project > user > runner
 // builtin. Used by boot (pipeline `default` when --pipeline is absent) AND by

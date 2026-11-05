@@ -1,4 +1,3 @@
-// dashboard/ui/router.ts
 //
 // One request to one route. The router owns every check that does not depend
 // on the resource — path decoding, Host, method, origin — and the operator

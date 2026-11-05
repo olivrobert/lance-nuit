@@ -1,4 +1,3 @@
-// runner/run-record/stores/run-storage.ts
 //
 // Run locations. Each work item has a diagnostic space separated by pipeline:
 //
@@ -32,7 +31,7 @@ import { isLogicalSegment } from "../../../shared/language/artifact-ports.js";
 import type { PipelineContext } from "../../../shared/language/context.js";
 import type { PersistedRun } from "../../persisted.js";
 import { log } from "../../../shared/runtime/logging.js";
-import { isPersistedRunComplete, isPersistedRunResumable } from "../run-predicates.js";
+import { isPersistedRunResumable } from "../run-predicates.js";
 import {
   describeRunSnapshotProblem,
   readRunSnapshot,
@@ -107,10 +106,6 @@ function updateLatestSymlink(pipelineDir: string, target: string): void {
 /** Defensive parse: an unreadable snapshot is neither resumable nor complete. */
 export function readRunFile(runFile: string): PersistedRun | null {
   return readRunSnapshot(runFile);
-}
-
-export function isResumable(runFile: string): boolean {
-  return isPersistedRunResumable(readRunFile(runFile));
 }
 
 function statePath(dir: string): string {
@@ -216,6 +211,15 @@ function parentRunDir(run: RunAncestry, location: RunsLocation): string | null {
   return dir ?? null;
 }
 
+/** Claim result. `acquired` records whether this invocation created the lock, so
+ * a failed selection releases only the lock it took rather than a re-entrant one.
+ * A refusal says why, because the two reasons call for different words: a live
+ * writer is worth waiting for, an unusable lock path is not. */
+export type RunDirClaim =
+  | { ok: true; acquired: boolean }
+  | { ok: false; acquired: false; reason: "held" }
+  | { ok: false; acquired: false; reason: "unusable"; detail: string };
+
 /** Single-writer guard for a run directory. Without it two runner processes can
  *  both resume the same run and interleave snapshot/journal writes. The lock is
  *  a pid marker: a dead holder is reclaimed, so no explicit release is needed.
@@ -228,19 +232,6 @@ function parentRunDir(run: RunAncestry, location: RunsLocation): string | null {
  *  Exported because `--run` selects a run directory outside `resolveRunDir` and
  *  must take the same lock; an unlocked explicit resume is exactly the two-writer
  *  case this guard exists to prevent. */
-export function tryClaimRunDir(dir: string): boolean {
-  return claimRunDir(dir).ok;
-}
-
-/** Claim result. `acquired` records whether this invocation created the lock, so
- * a failed selection releases only the lock it took rather than a re-entrant one.
- * A refusal says why, because the two reasons call for different words: a live
- * writer is worth waiting for, an unusable lock path is not. */
-export type RunDirClaim =
-  | { ok: true; acquired: boolean }
-  | { ok: false; acquired: false; reason: "held" }
-  | { ok: false; acquired: false; reason: "unusable"; detail: string };
-
 export function claimRunDir(dir: string): RunDirClaim {
   try {
     return claimRunDirStrict(dir);
@@ -427,11 +418,6 @@ export function resolveRunDirSelection(
   return { dir, selectedSnapshot: false, acquiredRunLock: false };
 }
 
-/** Run snapshot, always `state.json` regardless of pipeline name. */
-export function runPath(_pipelineName: string, dir: string): string {
-  return statePath(dir);
-}
-
 /** Snapshot path for the latest run of this pipeline and ticket. */
 export function latestRunFile(pipelineName: string, ticket?: string, context?: PipelineContext): string | null {
   const latestLink = join(pipelineRunsDir(pipelineName, ticket, context), "latest");
@@ -442,9 +428,4 @@ export function latestRunFile(pipelineName: string, ticket?: string, context?: P
     // A missing or broken latest link has no usable snapshot to report.
     return null;
   }
-}
-
-/** PASS runs are complete; interrupted, failed, and running runs are not. */
-export function isRunComplete(runFile: string | null): boolean {
-  return runFile ? isPersistedRunComplete(readRunFile(runFile)) : false;
 }

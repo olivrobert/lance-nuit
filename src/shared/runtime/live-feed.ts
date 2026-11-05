@@ -1,4 +1,3 @@
-// runner/runtime/live-feed.ts
 //
 // Port of the append-only live feed, plus the process-wide feed the event bus
 // writes to. The interface lives here rather than next to its file adapter so
@@ -19,8 +18,8 @@ export const LIVE_FEED_ENV_VARS = ["RUNNER_EVENTS_FILE", "RUNNER_LIVE_FEED"] as 
 
 let currentFeed: LiveFeed | undefined;
 
-/** Inject the feed this process writes to. `entry/` calls it twice: once from the
- * environment (child processes), then with the run feed once `run_dir` is known. */
+/** Inject the feed this process writes to. `entry/` calls it with the run feed
+ * once `run_dir` is known. */
 export function setRunnerLiveFeed(feed: LiveFeed | undefined): void {
   currentFeed = feed;
 }
@@ -42,11 +41,6 @@ export function liveFeedPathFromEnvironment(env: NodeJS.ProcessEnv = process.env
 /** Path streaming backends append raw output to. Unlike the event bus, they write
  * to the file directly, so the environment stays a valid source here: the path is
  * all they need, and a child process receives it that way. */
-export function liveFeedFilePath(feed?: Pick<LiveFeed, "path">): string {
-  return (
-    feed?.path() ??
-    configuredLiveFeed()?.path() ??
-    liveFeedPathFromEnvironment() ??
-    `/tmp/runner-live-${process.pid}.jsonl`
-  );
+export function liveFeedFilePath(): string {
+  return configuredLiveFeed()?.path() ?? liveFeedPathFromEnvironment() ?? `/tmp/runner-live-${process.pid}.jsonl`;
 }

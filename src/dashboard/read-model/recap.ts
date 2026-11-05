@@ -1,4 +1,3 @@
-// dashboard/read-model/recap.ts
 //
 // What a run cost, once it is over: time, money, and tokens, run-wide and step
 // by step.

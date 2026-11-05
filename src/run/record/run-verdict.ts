@@ -1,4 +1,3 @@
-// runner/run-record/run-verdict.ts
 //
 // Single derivation of a run verdict from its steps.
 //

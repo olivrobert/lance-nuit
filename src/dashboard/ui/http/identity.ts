@@ -1,4 +1,3 @@
-// dashboard/ui/http/identity.ts
 //
 // Who sent a request: the name the identity cookie carries, checked against
 // `users.json` on every request, so removing a name takes effect at once.

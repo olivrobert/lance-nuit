@@ -1,4 +1,3 @@
-// runner/run-record/run-step.ts
 //
 // Build a RunStep from a frozen definition and initial state. Hydration, new-run
 // creation, and tests all use this boundary, so def/state shape has one definition.

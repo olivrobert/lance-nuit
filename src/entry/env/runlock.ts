@@ -1,4 +1,3 @@
-// runner/env/runlock.ts
 // Execution lock per project cwd: prevents concurrent runners from clobbering the
 // same run JSON and, more importantly, from interfering on the shared git tree
 // (scan checkout, fix/ branches, sub-US commits).

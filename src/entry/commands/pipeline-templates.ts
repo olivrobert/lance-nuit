@@ -1,4 +1,3 @@
-// runner/commands/pipeline-templates.ts
 //
 // Starting points offered by `lancenuit create --template <id>`.
 //

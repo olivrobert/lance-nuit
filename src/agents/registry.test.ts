@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AgentBackendRegistry } from "./registry.js";
+import { AgentBackendRegistry } from "../contracts/backends.js";
 
 describe("AgentBackendRegistry", () => {
   test("resolves a registered backend without a provider union in the core", async () => {

@@ -1,4 +1,3 @@
-// runner/commands/runner-command.ts
 //
 // The command port on its own, so the handlers do not import the registry that
 // assembles them: `command.ts` imports every handler, and every handler needs

@@ -69,7 +69,7 @@ query language ignores it and keeps its projection.
 3. **Register** — add one line to `createDefaultWorkItemGatewayRegistry()` in
    `registry.ts`. No dynamic discovery or import-time registration: a registry
    readable at a glance is one whose contents are known.
-   `KNOWN_WORK_ITEM_PROVIDERS` follows from it and feeds the unknown-provider
+   The registry's `known()` list follows from it and feeds the unknown-provider
    error.
 4. **Configure** — extend the configuration parser/type to accept the provider,
    then set `workItem.provider: "<provider>"` in `.lance-nuit/config.json`. The

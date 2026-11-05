@@ -1,4 +1,3 @@
-// runner/step/step-pass.ts
 //
 // What happens to a step once admission has answered: a refusal becomes the stop it
 // asks of the loop, and an admitted step gets its pass (the transition to `running`,
@@ -76,11 +75,9 @@ export function admissionStop(admission: Exclude<StepAdmission, { kind: "skip" |
 export interface StepPassEnv {
   run: RunView;
   baseCtx: PipelineContext;
-  baseBranch: string | undefined;
   /** The one ledger of this execution. */
   budget: RunBudget;
   abort: AbortScope;
-  resuming: boolean;
   /** The mode as boot read it from the definition the steps come from. */
   reconcile: boolean;
   replayInterrupted?: boolean;
@@ -103,10 +100,10 @@ function emitPipelineStep(run: RunView, step: RunStepView, index: number, total:
 
 /**
  * Initial step attempt: create a fresh session when the backend provides one, then
- * pass once through middleware. The backend owns context-window management,
+ * run the attempt once. The backend owns context-window management,
  * including compaction; the runner does not kill or recreate a session for it.
  *
- * `budgetRemaining` is not set here; the chain calculates it at spawn time, as it
+ * `budgetRemaining` is not set here; the attempt reserves it at spawn time, as it
  * does for retries and fixes.
  */
 async function runInitialAttempt(input: {
@@ -161,9 +158,7 @@ export async function runStepPass(
       run,
       step,
       baseCtx,
-      baseBranch: env.baseBranch,
       budget,
-      resuming: env.resuming,
       abort,
       replayInterrupted: env.replayInterrupted,
       output: deps.output,

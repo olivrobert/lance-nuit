@@ -5,7 +5,6 @@ import { CODEX_SANDBOX, type CodexOptions } from "./types.js";
 export interface CodexArgsOptions {
   readonly outputFormat?: "text" | "json";
   readonly cwd?: string;
-  readonly sessionId?: string;
   readonly resumeSessionId?: string;
   readonly schemaPath?: string;
   readonly artifactScope?: ArtifactScope;

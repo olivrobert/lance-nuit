@@ -1,4 +1,3 @@
-// agents/backends/codex/events.schema.ts
 //
 // Shape of ONE line of the `codex exec --json` NDJSON stream.
 //

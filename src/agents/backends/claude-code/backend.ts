@@ -58,11 +58,9 @@ export class ClaudeBackend implements AgentBackend {
 
   readonly resumeHint = (s: AgentSession) => `claude --resume ${s.id}`;
 
-  readonly sessionLocation = (s: AgentSession) => this.host.findSessionFile?.(s.id) ?? findSessionFile(s.id);
+  readonly sessionLocation = (s: AgentSession) => findSessionFile(s.id);
 
-  private readonly locateSession = (id: string) => this.host.findSessionFile?.(id) ?? findSessionFile(id);
-
-  readonly sessionSizeKb = (s: AgentSession) => this.host.sessionFileSizeKb?.(s.id) ?? sessionFileSizeKb(s.id);
+  readonly sessionSizeKb = (s: AgentSession) => sessionFileSizeKb(s.id);
 
   constructor(
     private readonly defaults: ClaudeOptions | undefined = undefined,
@@ -87,8 +85,6 @@ export class ClaudeBackend implements AgentBackend {
       artifactScope: request.artifactScope,
       sessionId: requested?.id,
       resumeSessionId: resume?.id,
-      forkResolver: this.host.isForkedSlashCommand,
-      forkRelay: this.host.forkRelayPrompt,
     });
     const bin = process.env.CLAUDE_BIN ?? "claude";
     this.host.onSpawn?.({
@@ -113,8 +109,8 @@ export class ClaudeBackend implements AgentBackend {
       undefined,
       // A first attempt may have created the session on disk before the overload:
       // retrying with the same --session-id would be rejected by the CLI.
-      (id) => this.locateSession(id) != null,
-      (id) => readSessionCostBaseline(id, this.locateSession),
+      (id) => findSessionFile(id) != null,
+      (id) => readSessionCostBaseline(id, findSessionFile),
       defaultRateLimitWait(this.host.log),
     );
     return mapClaudeExecutionResult(raw, {

@@ -41,6 +41,5 @@ export interface CodexBackendHost {
 
 export interface NodeCodexHostOptions {
   appendLiveOutput?: (text: string) => void;
-  appendAgentMessage?: (text: string, stepLogPath?: string) => void;
   onSpawn?: (event: CodexSpawnEvent) => void;
 }

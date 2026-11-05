@@ -42,5 +42,5 @@ Typechecking has one safeguard:
   explicit “no project pipelines” result, never a success-like “0 files checked”.
 
 The injected DSL exposes `humanReview`, work-item delivery with an inferred
-queue, `requireCapabilitiesStep`, and `promptFile`. Package built-ins may use
-internal imports; project pipelines should use the generated public declarations.
+queue, `requireCapabilitiesStep`, and `promptFile`. Project pipelines should use
+the generated public declarations.

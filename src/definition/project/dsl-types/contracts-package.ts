@@ -1,4 +1,3 @@
-// src/definition/project/dsl-types/contracts-package.ts
 //
 // The `lance-nuit/contracts` package vendored into a kit directory.
 //

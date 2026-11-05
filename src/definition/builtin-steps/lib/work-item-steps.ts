@@ -1,4 +1,3 @@
-// pipelines/lib/work-item-steps.ts
 //
 // Deterministic tracker-control steps. They replaced escalation and delivery
 // prompts run by a haiku agent: same effect, but decided by code, so replayable and

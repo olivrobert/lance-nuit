@@ -1,12 +1,10 @@
-// runner/step/step-admission.ts
 //
 // Step admission before any spawn: budget, inputs, and preflight. This module does
 // not know sessions or on_failure strategies; it decides whether execution may run.
 
 import { join } from "node:path";
 import type { InputAction, InputDecision, StepInputCondition } from "../../definition/index.js";
-import { stripStderrMarker } from "../../shared/process/bash-runner.js";
-import { runBashAsync } from "../runners.js";
+import { runBashAsync, stripStderrMarker } from "../../shared/process/bash-runner.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import { truncate } from "../../shared/lib/truncate.js";
 import type { PipelineContext } from "../../shared/language/context.js";

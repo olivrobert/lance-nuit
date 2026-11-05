@@ -91,7 +91,7 @@ propagated only when the child cannot derive it from its environment.
 | Option | Propagated? | Why |
 |---|---|---|
 | `--fresh`, `--allow-dirty`, `--base-branch` | yes | parent decisions, invisible to the child |
-| `--worktree` | no | the dispatch child inherits the cwd (`chdir`) and `RUNNER_IN_WORKTREE`; it is rejected with `--scan` |
+| `--worktree` | no | rejected with `--scan`, so a dispatch child never runs in a worktree |
 | `--watch` | no | scans do not propagate it to children |
 | `--steps`, `--skip` | yes | the operator's selection applies to every scanned ticket. In reconcile mode it lasts that invocation of each child only, but a child that passed is complete, so a later scan skips its ticket and does not reconcile the steps the selection left out: run that ticket on its own to do so |
 | `--until` | yes | the bound of a sweep (a night of triage only) applies to every scanned ticket; a child stopped at it is counted on the scan's `Until` line, not as a failure |

@@ -1,4 +1,3 @@
-// runner/run-record/run.ts
 //
 // The mutable run: the persisted schema (`run/persisted.ts`) merged with the
 // frozen step definitions and runtime-only dependencies. It is internal to the

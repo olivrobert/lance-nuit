@@ -1,4 +1,3 @@
-// runner/model/scan-record.ts
 //
 // Durable outcome of one `--scan` dispatch. Shapes only: writing and reading are
 // `execution/dispatch/file-scan-store.ts`, and the transitions are recorded by

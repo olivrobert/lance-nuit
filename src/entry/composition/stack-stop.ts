@@ -1,4 +1,3 @@
-// runner/entry/stack-stop.ts
 //
 // Stop the worktree's project services when a run ends without PASS, through
 // the optional `worktree-stop.sh` hook. Resume starts them again through the
@@ -14,7 +13,7 @@
 // run's children to be gone first, so services never stop under a live agent.
 
 import { runStopHookAsync, type WorktreeSpec } from "../env/worktree.js";
-import { ProcessScope, shutdownAllChildren } from "../../shared/process/process-supervision.js";
+import { defaultScope, ProcessScope } from "../../shared/process/process-supervision.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { RunStatus } from "../../run/index.js";
 import { isCompleted } from "../../run/index.js";
@@ -43,7 +42,7 @@ export interface StackStopDeps {
 /** `spec` is the worktree this process entered; without one, nothing to stop. */
 export function createStackStop(
   spec: WorktreeSpec | undefined,
-  deps: StackStopDeps = { shutdown: shutdownAllChildren, runHook: runStopHookAsync },
+  deps: StackStopDeps = { shutdown: () => defaultScope().shutdown(), runHook: runStopHookAsync },
 ): StackStop {
   if (!spec) return NO_STACK_STOP;
   const scope = new ProcessScope();

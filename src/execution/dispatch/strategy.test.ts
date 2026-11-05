@@ -19,24 +19,17 @@ function ctxFor(root: string, ticket?: string) {
 
 test("--scan selects the scan strategy", () => {
   const root = mkdtempSync(join(tmpdir(), "dispatch-select-"));
-  expect(selectDispatch(parseRunnerArgs(["--scan"]), def, ctxFor(root), {})).toBe(scanStrategy);
+  expect(selectDispatch(parseRunnerArgs(["--scan"]), def, ctxFor(root))).toBe(scanStrategy);
 });
 
 test("a single ticket dispatches nothing: run executes in place", () => {
   const root = mkdtempSync(join(tmpdir(), "dispatch-select-"));
-  expect(selectDispatch(parseRunnerArgs(["PROJ-1"]), def, ctxFor(root, "PROJ-1"), {})).toBeNull();
+  expect(selectDispatch(parseRunnerArgs(["PROJ-1"]), def, ctxFor(root, "PROJ-1"))).toBeNull();
 });
 
 test("without ticket or --scan: nothing to dispatch", () => {
   const root = mkdtempSync(join(tmpdir(), "dispatch-select-"));
-  expect(selectDispatch(parseRunnerArgs([]), def, ctxFor(root), {})).toBeNull();
-});
-
-test("RUNNER_DISABLE_DISPATCH disables ALL dispatch — child recursion guard", () => {
-  const root = mkdtempSync(join(tmpdir(), "dispatch-select-"));
-  const env = { RUNNER_DISABLE_DISPATCH: "1" };
-  expect(selectDispatch(parseRunnerArgs(["PROJ-1"]), def, ctxFor(root, "PROJ-1"), env)).toBeNull();
-  expect(selectDispatch(parseRunnerArgs(["--scan"]), def, ctxFor(root), env)).toBeNull();
+  expect(selectDispatch(parseRunnerArgs([]), def, ctxFor(root))).toBeNull();
 });
 
 test("ticket forbidden: --scan with positional argument rejected before side effects", () => {

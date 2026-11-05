@@ -1,4 +1,3 @@
-// runner/run-record/run-repository.ts
 //
 // Run snapshot repository: project memory state and write atomically. Transitions
 // and resume logic live in their own modules.

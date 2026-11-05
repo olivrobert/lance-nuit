@@ -1,16 +1,14 @@
-// runner/dispatch/loop.ts
 //
 // The dispatch loop lives in one place as a shared skeleton:
 //
 //   tickets → skip complete runs → selfSpawnRunner → between-ticket hook → aggregate
 //
-// Strategy parameters cover ticket discovery, between-ticket work, failure policy,
-// finalization, and reporting.
+// Strategy parameters cover ticket discovery, between-ticket work and reporting.
 //
 // The parent never runs a step: it spawns children, aggregates results, and exits.
 // Children never see `DispatchStrategy`, so dispatch stays decoupled from step-loop.ts.
 
-import { DISPATCH_CHILD_ENV, selfSpawnRunner } from "../../shared/process/self-spawn.js";
+import { selfSpawnRunner } from "../../shared/process/self-spawn.js";
 import type { PersistedRun } from "../../run/index.js";
 import { UNTIL_STOP_EXIT_CODE } from "../../shared/language/run-stop.js";
 import { log } from "../../shared/runtime/logging.js";
@@ -47,7 +45,7 @@ const defaultDeps: DispatchDeps = {
     const run = latestRunFor(env, ticket);
     return { outcome: classifyPersistedRunOutcome(exitCode, run), runId: run?.runId ?? null };
   },
-  spawn: (args) => selfSpawnRunner(args, { ...DISPATCH_CHILD_ENV }),
+  spawn: (args) => selfSpawnRunner(args),
 };
 
 function latestRunFor(env: DispatchEnv, ticket: string): PersistedRun | null {
@@ -85,9 +83,6 @@ export async function runDispatch(
 
   const childArgs = [...env.passthrough, ...strategy.childArgs(env)];
   const outcomes: DispatchOutcome[] = [];
-  /** Whether `betweenTickets` requested a stop in continue mode. */
-  let halted = false;
-
   for (const ticket of tickets) {
     log(strategy.banner(ticket));
 
@@ -108,24 +103,12 @@ export async function runDispatch(
       const outcome = outcomeOf(ticket, deps.classify(ticket, code, env));
       outcomes.push(outcome);
       await strategy.onTicketFinished?.(outcome, env);
-      // A child stopped where `--until` asked did what the sweep wanted.
-      if (code !== 0 && code !== UNTIL_STOP_EXIT_CODE) {
-        strategy.onTicketFailed?.(ticket, code, env);
-        if (strategy.onFailure === "stop") return code;
-      }
     }
 
     if (strategy.betweenTickets && !(await strategy.betweenTickets(ticket, env, { skipped }))) {
       await strategy.onHalted?.(`betweenTickets refused to continue after ${ticket}`, env);
-      if (strategy.onFailure === "stop") return 1;
-      halted = true;
       break;
     }
-  }
-
-  if (!halted && strategy.after) {
-    const code = await strategy.after(env);
-    if (code !== 0) return code;
   }
 
   strategy.report(outcomes, tickets, env);

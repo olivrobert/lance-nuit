@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPipelineConfig } from "./config.ts";
 import {
-  configFileLabel,
   enclosingKitProjectRoot,
   kitFileLayers,
   kitRoots,
@@ -114,16 +113,6 @@ test("listKitFiles: missing or non-directory root yields zero files", () => {
   const project = dir("project");
   writeFileSync(join(project, ".lance-nuit"), "not a directory");
   expect(listKitFiles("fixtures", ".yml", { cwd: project })).toEqual([]);
-});
-
-test("configFileLabel: names the file actually read", () => {
-  userRoot();
-  const absent = dir("project");
-  expect(configFileLabel(absent)).toBe(".lance-nuit/config.json");
-
-  const migrated = dir("project");
-  write(migrated, ".lance-nuit/config.json", "{}");
-  expect(configFileLabel(migrated)).toBe(".lance-nuit/config.json");
 });
 
 test("loadPipelineConfig: user config supplies defaults, project decides", () => {

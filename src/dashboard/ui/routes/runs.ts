@@ -1,4 +1,3 @@
-// dashboard/ui/routes/runs.ts
 //
 // `POST /api/runs`: start an interactive run in a new tmux session.
 

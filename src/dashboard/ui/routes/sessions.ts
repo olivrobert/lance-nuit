@@ -1,4 +1,3 @@
-// dashboard/ui/routes/sessions.ts
 //
 // `POST /api/sessions`: reopen an agent session of an item's run in a new tmux
 // session — the coder's, or with `step` and `attempt` the one that attempt left.

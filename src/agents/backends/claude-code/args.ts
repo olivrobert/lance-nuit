@@ -2,14 +2,11 @@ import { promptTemplate } from "./prompt.js";
 import type { ArtifactScope, JsonSchema } from "../../../contracts/index.js";
 import { capabilityAxes, isForked } from "../../../shared/env/capability-frontmatter.js";
 import { artifactScopeDirsOutside, artifactScopeInstruction } from "../artifact-scope.js";
-import { JSON_VERDICT_INSTRUCTION, verdictInstruction, verdictSchema } from "../verdict-instruction.js";
+import { verdictInstruction, verdictSchema } from "../verdict-instruction.js";
 import type { ClaudeOptions } from "./types.js";
 
-export { artifactScopeInstruction, JSON_VERDICT_INSTRUCTION };
+const relay = promptTemplate("fork-relay", ["slash"]);
 
-/** Bare verdict schema, shared with Codex through `verdictSchema()`. The one sent
- *  as `--json-schema` is `verdictSchema(options.outputFields)`. */
-export const VERDICT_SCHEMA = verdictSchema();
 export type VerdictMode = "schema" | "text";
 export type Environment = Readonly<Record<string, string | undefined>>;
 export function resolveVerdictMode(env: Environment = process.env): VerdictMode {
@@ -18,12 +15,7 @@ export function resolveVerdictMode(env: Environment = process.env): VerdictMode 
 export function isSlashCommandPrompt(prompt: string): boolean {
   return /^\/[A-Za-z0-9]/.test(prompt.trimStart());
 }
-export function isForkedSlashCommand(
-  prompt: string,
-  roots: readonly string[],
-  resolver?: (prompt: string, roots: readonly string[]) => boolean,
-): boolean {
-  if (resolver) return resolver(prompt, roots);
+export function isForkedSlashCommand(prompt: string, roots: readonly string[]): boolean {
   const match = prompt.trimStart().match(/^\/([\w:-]+)/);
   if (!match) return false;
   const name = match[1]!;
@@ -41,8 +33,6 @@ export interface ClaudeArgsOptions {
   artifactScope?: ArtifactScope;
   /** Captured fields, declared in the schema or in the text instruction. */
   outputFields?: Readonly<Record<string, JsonSchema>>;
-  forkResolver?: (prompt: string, roots: readonly string[]) => boolean;
-  forkRelay?: (slash: string) => string;
 }
 export function buildClaudeArgs(prompt: string, options: ClaudeArgsOptions = {}): string[] {
   const args: string[] = [];
@@ -51,10 +41,9 @@ export function buildClaudeArgs(prompt: string, options: ClaudeArgsOptions = {})
   const schemaMode = (options.verdictMode ?? resolveVerdictMode()) === "schema";
   const needsVerdict = options.outputFormat === "json" && (schemaMode || !prompt.includes("json:verdict"));
   const slash = prompt.trimStart().match(/^\/[\w:-]+/)?.[0];
-  const relay = promptTemplate("fork-relay", ["slash"]);
   const forkRelay =
-    slash && options.capabilityRoots && isForkedSlashCommand(prompt, options.capabilityRoots, options.forkResolver)
-      ? (options.forkRelay ?? ((value: string) => relay({ slash: value })))(slash)
+    slash && options.capabilityRoots && isForkedSlashCommand(prompt, options.capabilityRoots)
+      ? relay({ slash })
       : undefined;
   const verdictInSystemPrompt = needsVerdict && !schemaMode && (Boolean(forkRelay) || isSlashCommandPrompt(prompt));
   const instruction = verdictInstruction(options.outputFields);

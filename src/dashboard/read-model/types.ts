@@ -1,4 +1,3 @@
-// dashboard/read-model/types.ts
 //
 // Shapes the dashboard reads. They are deliberately independent from the
 // persisted shapes of `src/run/record`: the read model translates run state
@@ -31,7 +30,7 @@ export type ItemFailKind = "judgment" | "incident";
 export type ItemFailCause = "blocked";
 
 /** Where the decision that lifts the pending gate stands, in the words of the
- *  runner's `GateDecisionState`, so the dashboard and `--inspect` name each case
+ *  runner's `GateDecisionStatus`, so the dashboard and `--inspect` name each case
  *  alike. `absent` also covers "not required": the two are indistinguishable on
  *  disk. `rejected` is a rejection the rework has not answered yet; `reworked`,
  *  one it has, so the gate waits on a new decision. */
@@ -107,8 +106,8 @@ export interface Item {
   key: string;
   project: ItemProject;
   ticket: string;
-  /** Ticket title: the first `# ` heading of `artifacts/ticket.md` in
-   *  `effectiveWorkItemDir`, after its optional front matter. Absent when that
+  /** Ticket title: the first `# ` heading of `artifacts/ticket.md` in the
+   *  main clone's work-item directory, after its optional front matter. Absent when that
    *  file is missing, unreadable, or has no heading (a pipeline without a
    *  work-item source step, or one writing `ticket.md` elsewhere): the list then
    *  shows the ticket key instead. Never fetched from the provider. */
@@ -147,9 +146,6 @@ export interface Item {
   branch?: string;
   /** True when the run executed inside a worktree. */
   worktree: boolean;
-  /** Directory whose `artifacts/` and `decisions/` this run reads: always the
-   *  main clone's, which a worktree only links to. */
-  effectiveWorkItemDir: string;
   /** Latest dashboard launch for this item, when one exists. An alive launch puts
    *  the item in the `running` group whatever `state.json` still says. */
   launch?: Launch;
@@ -197,8 +193,6 @@ export interface WorkItemTree {
   root: string;
   pipeline: string;
   runId: string;
-  /** Absolute directory of the run this tree points at. */
-  runDir: string;
   children: TreeNode[];
   /** Relative path of the gate artifact, when one was identified. */
   gatePath?: string;
@@ -264,8 +258,6 @@ export interface RunEventView {
 export interface RunStepsView {
   pipeline: string;
   runId: string;
-  /** Absolute run directory. */
-  runDir: string;
   status: ItemStatus;
   steps: RunStepView[];
   /** Present only while the run is RUNNING: the snapshot is behind, the journal

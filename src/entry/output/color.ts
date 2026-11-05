@@ -1,4 +1,3 @@
-// entry/output/color.ts
 //
 // ANSI styling for every console surface.
 //

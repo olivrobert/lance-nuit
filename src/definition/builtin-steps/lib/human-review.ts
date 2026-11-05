@@ -47,8 +47,7 @@ import { workItemEscalateStep } from "./work-item-steps.js";
  *  - `needs-info`     material is missing (document, unsettled decision). Providing
  *                     it is enough: the run resumes automatically. This promise
  *                     holds because derived artifacts are invalidated when material
- *                     changes (see `lib/derived.ts` for specs, `inputs-gate` for
- *                     documents). A `needs-info` point invalidating nothing would lie.
+ *                     changes. A `needs-info` point invalidating nothing would lie.
  *  - `needs-decision` material exists; the runner's proposal awaits arbitration
  *                     (`--approve <subject>`).
  *  - `needs-human`    the ticket leaves auto-dev and will not return.

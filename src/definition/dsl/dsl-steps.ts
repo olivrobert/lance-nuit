@@ -11,7 +11,6 @@ import { sourceDeclarationError, type StepInput } from "../../work-items/index.j
 import type { Artifact } from "./artifact.js";
 import type {
   ActionStepOptions,
-  BackendOptionsFor,
   BashStepOptions,
   CaptureSpec,
   Escalate,
@@ -405,7 +404,7 @@ export class AgentStepBuilder extends StepBuilder {
     id: string,
     name: string,
     private readonly promptBaseDir: string | undefined,
-    private readonly backendRegistry: AgentBackendRegistry,
+    backendRegistry: AgentBackendRegistry,
   ) {
     super(id, name, "agent", backendRegistry);
     this.step.output_format = "json";
@@ -435,18 +434,6 @@ export class AgentStepBuilder extends StepBuilder {
     if (!spec.id.trim()) throw new Error(`Step "${this.step.id}": backend ID must be non-empty`);
     this.step.backend = spec;
     return this;
-  }
-
-  private backend(id: string, options?: unknown): this {
-    return this.using(withBackend(id, options, this.backendRegistry));
-  }
-
-  codex(options?: BackendOptionsFor<"codex">): this {
-    return this.backend("codex", options);
-  }
-
-  claude(options?: BackendOptionsFor<"claude">): this {
-    return this.backend("claude", options);
   }
 
   profile(name: StepProfileName): this {

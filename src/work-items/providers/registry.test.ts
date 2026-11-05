@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createFakeWorkItemGateway } from "./fake.js";
-import { createDefaultWorkItemGatewayRegistry, WorkItemGatewayRegistry } from "./registry.js";
+import { WorkItemGatewayRegistry } from "../../contracts/registry.js";
+import { createDefaultWorkItemGatewayRegistry } from "./registry.js";
 
 const config = {
   workItem: {

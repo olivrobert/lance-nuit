@@ -1,4 +1,3 @@
-// dashboard/read-model/projects.ts
 //
 // The dashboard's projects: the paths listed in `~/.lance-nuit/ui/projects.json`
 // (owned by `dashboard-home/`), each described from the project itself, so the

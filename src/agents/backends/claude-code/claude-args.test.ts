@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clearCapabilityCache } from "../../../shared/env/capability-frontmatter.js";
-import { verdictInstruction, verdictSchema } from "../verdict-instruction.js";
-import { buildClaudeArgs, isForkedSlashCommand, JSON_VERDICT_INSTRUCTION, VERDICT_SCHEMA } from "./args.js";
+import { JSON_VERDICT_INSTRUCTION, VERDICT_SCHEMA, verdictInstruction, verdictSchema } from "../verdict-instruction.js";
+import { buildClaudeArgs, isForkedSlashCommand } from "./args.js";
 
 function capabilityRoot(context = "fork"): string {
   const root = mkdtempSync(join(tmpdir(), "claude-args-capability-"));

@@ -22,11 +22,10 @@
   "exclude": [
     "src/dashboard/ui/app",
     "**/*.test.ts",
-    // Test doubles imported only by *.test.ts files: they must not ship in dist.
+    // Test doubles are matched by name, not listed: `deps:check` refuses any
+    // production import of them (`no-test-doubles-in-production`).
+    "**/test-harness*.ts",
     "src/work-items/providers/fake.ts",
-    "src/work-items/providers/adapters/jira/test-harness.ts",
-    "src/work-items/providers/adapters/github/test-harness.ts",
-    "src/dashboard/read-model/test-harness.ts",
     "tests/**",
     "examples/**",
     "scripts/**",

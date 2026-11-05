@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentBackend, AgentBackendFactory, AgentSession } from "../../contracts/backends.ts";
-import { AgentBackendRegistry } from "../../agents/registry.ts";
+import { AgentBackendRegistry } from "../../contracts/backends.ts";
 import type { StepResult } from "../runners.ts";
 import type { PipelineContext } from "../../shared/language/context.ts";
 import type { PipelineStep, StepFailure } from "../../definition/definition.ts";
@@ -656,7 +656,7 @@ test("a fix policy with retries: 1 records step, fix, step and one retry", async
     output: NULL_RUN_OUTPUT,
   };
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, loopDeps);
+  const outcome = await executeRunSteps(run, { resuming: false }, loopDeps, buildPipelineContext({}));
 
   expect(outcome.failed).toBe(false);
   expect(step.attempts?.map((attempt) => attempt.kind)).toEqual(["step", "fix", "step"]);
@@ -921,7 +921,7 @@ test("a non-blocking step with a fix policy killed by the live guard replays and
     output: NULL_RUN_OUTPUT,
   };
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false }, killedDeps);
+  const outcome = await executeRunSteps(run, { resuming: false }, killedDeps, buildPipelineContext({}));
 
   expect(outcome.budgetExceeded).toBe(true);
   expect(step.status).toBe("failed");
@@ -949,7 +949,7 @@ test("a non-blocking step with a fix policy killed by the live guard replays and
     output,
   };
 
-  const again = await executeRunSteps(resumed, undefined, undefined, { resuming: true }, resumedDeps);
+  const again = await executeRunSteps(resumed, { resuming: true }, resumedDeps, buildPipelineContext({}));
 
   expect(again.failed).toBe(false);
   expect(again.budgetExceeded).toBe(false);

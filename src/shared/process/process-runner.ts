@@ -1,4 +1,3 @@
-// runner/exec/process-runner.ts
 //
 // Low-level supervision shared by backends that launch detached CLIs.
 
@@ -15,14 +14,12 @@ export interface SupervisedSpawnOptions extends Omit<SpawnOptions, "signal"> {
   signal?: AbortSignal;
   /** Optional isolated scope for a subsystem or test. */
   scope?: ProcessScope;
-  killGraceMs?: number;
 }
 
 export interface SupervisedProcess {
   readonly child: ChildProcess;
   readonly killed: boolean;
   readonly killReason: string;
-  readonly killPromise: Promise<void> | undefined;
   isAlive(): boolean;
   kill(reason: string): void;
   waitForKill(): Promise<void>;
@@ -55,13 +52,7 @@ export function spawnSupervisedProcess(
   args: readonly string[],
   options: SupervisedSpawnOptions = {},
 ): SupervisedProcess {
-  const {
-    timeoutMs = DEFAULT_PROCESS_TIMEOUT_MS,
-    signal,
-    scope = defaultScope(),
-    killGraceMs,
-    ...spawnOptions
-  } = options;
+  const { timeoutMs = DEFAULT_PROCESS_TIMEOUT_MS, signal, scope = defaultScope(), ...spawnOptions } = options;
   const child = spawn(command, [...args], spawnOptions);
   const group = spawnOptions.detached === true;
   scope.track(child, { group });
@@ -73,7 +64,7 @@ export function spawnSupervisedProcess(
     if (killed) return;
     killed = true;
     killReason = reason;
-    killPromise = scope.gracefulKill(child, { group, graceMs: killGraceMs });
+    killPromise = scope.gracefulKill(child, { group });
   };
   const timer =
     timeoutMs == null
@@ -96,9 +87,6 @@ export function spawnSupervisedProcess(
     },
     get killReason() {
       return killReason;
-    },
-    get killPromise() {
-      return killPromise;
     },
     isAlive() {
       return scope.isLive(child);

@@ -1,4 +1,3 @@
-// dashboard/ui/terminals.ts
 //
 // Interactive runs: a tmux session the dashboard created in a project's main
 // clone, in which the operator agent is asked to start one `lancenuit run`, and

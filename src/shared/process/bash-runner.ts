@@ -1,4 +1,3 @@
-// runner/exec/bash-runner.ts
 //
 // Bash execution, progress-bar filtering, and live streaming.
 
@@ -8,13 +7,7 @@ import type { RunnerResult } from "../../contracts/backends.js";
 import { liveFeedFilePath } from "../runtime/live-feed.js";
 import { spawnSupervisedProcess } from "./process-runner.js";
 import { withoutRunnerInternalEnv } from "./self-spawn.js";
-import {
-  captureProcessOutput,
-  gracefulKill,
-  isProcessAlive,
-  trackChild,
-  whenProcessSettled,
-} from "./process-supervision.js";
+import { captureProcessOutput, defaultScope, isProcessAlive, whenProcessSettled } from "./process-supervision.js";
 
 /** Documented default timeout for Bash steps. */
 export const DEFAULT_BASH_TIMEOUT_MS = 600_000;
@@ -53,7 +46,6 @@ export function exitCodeFailReason(code: number | null, stderr: string): string 
 
 export interface AsyncBashOptions {
   timeoutMs?: number;
-  signal?: AbortSignal;
 }
 
 /**
@@ -66,7 +58,6 @@ export function runBashAsync(command: string, opts: AsyncBashOptions = {}): Prom
     env: withoutRunnerInternalEnv(process.env),
     detached: true,
     timeoutMs: opts.timeoutMs,
-    signal: opts.signal,
   });
   const child = supervised.child;
 
@@ -170,7 +161,7 @@ export function runBashStreaming(
       env: withoutRunnerInternalEnv(process.env),
       detached: true,
     });
-    trackChild(child, { group: true });
+    defaultScope().track(child, { group: true });
 
     let output = "";
     let killed = false;
@@ -189,7 +180,7 @@ export function runBashStreaming(
           killed = true;
           timedOut = true;
           killReason = `timeout (${Math.round(timeoutMs / 1000)}s)`;
-          killPromise = gracefulKill(child, { group: true });
+          killPromise = defaultScope().gracefulKill(child, { group: true });
         }, timeoutMs)
       : undefined;
     timer?.unref();
@@ -259,7 +250,7 @@ export function runBashStreaming(
       if (!killed && child.pid != null && isProcessAlive(child.pid, true)) {
         killedForCleanup = true;
         killReason = "child exited with live descendants";
-        killPromise = gracefulKill(child, { group: true });
+        killPromise = defaultScope().gracefulKill(child, { group: true });
       }
       if (timer) clearTimeout(timer);
       // A timeout does not return until kill escalation has finished: a

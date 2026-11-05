@@ -1,14 +1,9 @@
-// runner/entry/signals.ts
 //
 // Signal handling for the entry point. Extracted from `runner.ts` so the
 // orchestration in `main()` reads as a sequence of phases rather than as
 // bookkeeping interleaved with a 70-line handler.
 
-import {
-  forceKillAllChildren,
-  killAllChildren,
-  shutdownAllChildren,
-} from "../../shared/process/process-supervision.js";
+import { defaultScope } from "../../shared/process/process-supervision.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { RunView } from "../../run/index.js";
 import type { AbortScope } from "../../execution/index.js";
@@ -42,7 +37,7 @@ export function installChildKillHandlers(
 ): void {
   // `exit` cannot await a promise; this synchronous fallback immediately kills
   // groups that are still visible.
-  process.on("exit", () => killAllChildren("SIGKILL"));
+  process.on("exit", () => defaultScope().killAllChildren("SIGKILL"));
   let shutdownPromise: Promise<void> | undefined;
   let abortPersisted = false;
   // A stop started after the report never sets `shutdownPromise`, so its
@@ -95,13 +90,15 @@ export function installChildKillHandlers(
       // A second signal during the grace period escalates immediately without
       // creating another promise or competing exit.
       if (shutdownPromise) {
-        forceKillAllChildren();
+        defaultScope().forceKillAll();
         // The stop hook lives in its own scope, out of reach of the line above.
         stackStop.skip();
         return;
       }
 
-      shutdownPromise = shutdownAllChildren().then(() => stackStop.run());
+      shutdownPromise = defaultScope()
+        .shutdown()
+        .then(() => stackStop.run());
       void shutdownPromise.then(
         () => process.exit(exitCode),
         () => process.exit(exitCode),

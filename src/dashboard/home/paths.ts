@@ -1,4 +1,3 @@
-// dashboard/home/paths.ts
 //
 // Where the dashboard's own files live: `~/.lance-nuit/ui/`. This is the one
 // place that knows the layout, so `PIPELINE_HOME` moves the read model (which

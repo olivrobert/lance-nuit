@@ -63,7 +63,7 @@ test("projectRunStatsEntry reads facts from the event store: validates the contr
     },
   };
 
-  const entry = projectRunStatsEntry(runWithStores(), { eventStore, logStore, ticketDir: "PROJ-42" });
+  const entry = projectRunStatsEntry(runWithStores(eventStore, logStore), { ticketDir: "PROJ-42" });
 
   expect(eventReads).toEqual(["run-pure-projector", "run-pure-projector", "run-pure-projector"]);
   expect(logReads).toEqual(["run-pure-projector:quality.tests:1"]);
@@ -98,8 +98,8 @@ test("run-stats-projector: an abort event carrying costUsd and usage changes not
   // Phase figures come from the step totals; the journal only tells that an attempt
   // was aborted. Enriching the abort event must not be read as extra spend, nor
   // must the absence of those fields be what marks the phase as partial.
-  const abortedRun = (): Run => {
-    const run = runWithStores();
+  const abortedRun = (eventStore: RunEventStore): Run => {
+    const run = runWithStores(eventStore);
     run.status = "ABORTED";
     const step = run.steps[0]!;
     step.status = "aborted";
@@ -123,11 +123,11 @@ test("run-stats-projector: an abort event carrying costUsd and usage changes not
   ];
   const storeOf = (list: RunJournalEvent[]): RunEventStore => ({ append: () => undefined, read: () => list });
 
-  const bare = projectRunStatsEntry(abortedRun(), { eventStore: storeOf(events({})), ticketDir: "PROJ-42" });
-  const enriched = projectRunStatsEntry(abortedRun(), {
-    eventStore: storeOf(events({ costUsd: 0.4, usage: { input_tokens: 3, output_tokens: 7 }, provider: "claude" })),
-    ticketDir: "PROJ-42",
-  });
+  const bare = projectRunStatsEntry(abortedRun(storeOf(events({}))), { ticketDir: "PROJ-42" });
+  const enriched = projectRunStatsEntry(
+    abortedRun(storeOf(events({ costUsd: 0.4, usage: { input_tokens: 3, output_tokens: 7 }, provider: "claude" }))),
+    { ticketDir: "PROJ-42" },
+  );
 
   expect(enriched).toEqual(bare);
   expect(bare.phases["quality.tests"]).toMatchObject({ costUsd: 0.4, usageStatus: "partial", costStatus: "partial" });

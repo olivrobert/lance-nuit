@@ -1,4 +1,4 @@
-// A group of `parallelize`, through the real step loop and the real attempt chain,
+// A group of `parallelize`, through the real step loop and the real attempt lifecycle,
 // against a real git tree. Only the agent is fake: it answers when the test says so,
 // which is what lets a test hold two members in flight at the same time.
 
@@ -112,8 +112,6 @@ function barrier(count: number): () => Promise<void> {
 function run_(run: Run, deps: StepLoopDeps, cwd: string, options: { resuming?: boolean; replay?: boolean } = {}) {
   return executeRunSteps(
     run,
-    undefined,
-    undefined,
     { resuming: options.resuming ?? false, replayInterrupted: options.replay },
     deps,
     buildPipelineContext({ ...builtinRegistries(), cwd }),
@@ -296,8 +294,6 @@ test("an abort requested on the scope alone reports an interruption and checks n
 
   const outcome = await executeRunSteps(
     run,
-    undefined,
-    undefined,
     { resuming: false, abort },
     deps,
     buildPipelineContext({ ...builtinRegistries(), cwd: root }),
@@ -329,7 +325,7 @@ test("an abort while the group reads the tree back reports an interruption, not 
     configurable: true,
   });
 
-  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false, abort }, deps, context);
+  const outcome = await executeRunSteps(run, { resuming: false, abort }, deps, context);
 
   expect(reads).toBeGreaterThan(1);
   expect(outcome).toMatchObject({ failed: false, stopped: false });
@@ -351,8 +347,6 @@ test("an abort during a later member's admission launches nothing, not even the 
 
   await executeRunSteps(
     run,
-    undefined,
-    undefined,
     { resuming: false, abort },
     deps,
     buildPipelineContext({ ...builtinRegistries(), cwd: root }),
@@ -377,7 +371,7 @@ test("a signal before the launch spawns nothing", async () => {
     configurable: true,
   });
 
-  await executeRunSteps(run, undefined, undefined, { resuming: false, abort }, deps, context);
+  await executeRunSteps(run, { resuming: false, abort }, deps, context);
 
   expect(deps.spawned).toEqual([]);
   expect(statuses(run)["audits.a"]).toBe("pending");
@@ -664,7 +658,7 @@ test("the work item directory is not a write", async () => {
     return {};
   });
 
-  const outcome = await executeRunSteps(run, "T-1", undefined, { resuming: false }, deps, context);
+  const outcome = await executeRunSteps(run, { resuming: false }, deps, context);
 
   expect(outcome.stopped).toBe(false);
 });

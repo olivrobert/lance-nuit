@@ -1,4 +1,3 @@
-// runner/runtime/run-output.ts
 //
 // Port of the structured run output, its step events, and the destinations that
 // only depend on the runtime itself. Presentation destinations (console, live feed,

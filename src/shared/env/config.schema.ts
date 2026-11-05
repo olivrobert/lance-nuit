@@ -1,4 +1,3 @@
-// shared/env/config.schema.ts
 //
 // Shape of a `config.json` layer (`~/.lance-nuit/config.json`, `.lance-nuit/config.json`).
 //

@@ -25,6 +25,8 @@ const {
 // makes the "no platform access" guarantee transitive.
 const PURE_FILES = "^src/contracts/|^src/shared/lib/(truncate|type-assertions)\\.ts$";
 
+const TEST_DOUBLES = "/test-harness[^/]*\\.ts$|^src/work-items/providers/fake\\.ts$";
+
 // One rule per level of `shared`: nothing may import from a level above its own.
 // The top level has nothing above it, so it yields no rule.
 const layerRules = LAYERS.flatMap((layer) => {
@@ -131,20 +133,12 @@ module.exports = {
       },
     },
     {
-      name: "no-types-barrel",
+      name: "no-test-doubles-in-production",
       severity: "error",
       comment:
-        "`src/types.ts` was a barrel re-exporting four layers at once; it is gone. Import the owning module instead.",
-      from: {},
-      to: { path: "^src/types\\.ts$" },
-    },
-    {
-      name: "no-persistence-barrel",
-      severity: "error",
-      comment:
-        "A storage barrel, `stores/persistence.ts`, hid pipeline loading; it is gone. Import the owning module instead.",
-      from: {},
-      to: { path: "^src/run/record/stores/persistence\\.ts$" },
+        "Test doubles are excluded from dist by name (`tsconfig.build.json`); a production import would ship a missing module.",
+      from: { pathNot: TEST_DOUBLES },
+      to: { path: TEST_DOUBLES },
     },
   ],
   options: {

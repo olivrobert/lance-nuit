@@ -1,4 +1,3 @@
-// runner/step/non-blocking.ts
 //
 // Keep `blocking: false` handling in one place, so every guard absorbs a step
 // failure into `step.errors` the same way regardless of which one caught it.

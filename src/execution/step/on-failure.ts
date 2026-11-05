@@ -1,7 +1,6 @@
-// runner/step/on-failure.ts
 //
 // `on_failure` handlers. A policy without `fix_prompt` replays the command; with one,
-// it repairs then replays. Both share step-attempt.ts's middleware chain, so
+// it repairs then replays. Both share step-attempt.ts's attempt lifecycle, so
 // step-loop only picks the branch.
 
 import { backendSpecForStep } from "../../contracts/backends.js";
@@ -87,7 +86,7 @@ interface RetryLoopState {
 
 /**
  * Replay the step command until quota exhaustion, using a fresh session each time.
- * Shared mechanics—budget guard, escalation latch, counter, snapshot, middleware
+ * Shared mechanics—budget guard, escalation latch, counter, snapshot, tracked
  * spawn, and verdict reporting—live here; strategies provide only their epilogue.
  */
 async function retryStepCommand(ctx: OnFailureContext, spec: RetryLoopSpec): Promise<RetryLoopState> {

@@ -1,4 +1,3 @@
-// dashboard/ui/launcher.ts
 //
 // Spawning the runner for one verb.
 //

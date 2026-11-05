@@ -22,7 +22,7 @@ export interface TokenCounts {
 
 /** Keep counters numeric so persisted stats stay comparable. The status distinguishes a
  * real zero from a backend interrupted before its usage event. */
-export type UsageStatus = "complete" | "partial" | "unavailable";
+export type UsageStatus = "partial" | "unavailable";
 
 export interface PhaseStats {
   agents: number;

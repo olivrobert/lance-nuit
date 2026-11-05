@@ -1,4 +1,3 @@
-// runner/commands/worktree-clean.ts
 //
 // Removing a ticket worktree is a human decision taken after the MR, never a side
 // effect of a PASS. Like the other commands it takes neither the project lock nor

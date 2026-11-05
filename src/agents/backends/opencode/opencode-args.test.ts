@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { verdictInstruction } from "../verdict-instruction.js";
-import { buildOpencodeArgs, buildOpencodeEnv, JSON_VERDICT_INSTRUCTION, variantForEffort } from "./args.js";
+import { JSON_VERDICT_INSTRUCTION } from "../verdict-instruction.js";
+import { buildOpencodeArgs, buildOpencodeEnv, variantForEffort } from "./args.js";
 import { OPENCODE_AGENT, OPENCODE_LOG_LEVEL, OPENCODE_MODEL, OPENCODE_VARIANT } from "./types.js";
 
 test("buildOpencodeArgs: JSON format, model, variant, agent and directory are explicit", () => {

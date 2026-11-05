@@ -1,4 +1,3 @@
-// shared/env/pricing.ts
 //
 // Kit-side resolution of the optional project rate table. `contracts/pricing.ts`
 // owns the shapes and the pure rules; this module owns what needs the platform:

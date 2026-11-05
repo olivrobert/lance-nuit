@@ -1,4 +1,3 @@
-// src/definition/project/dsl-types/layout.ts
 //
 // Paths and discovery for the generated TypeScript surface installed in a kit
 // directory. A kit can be the canonical project `.lance-nuit/` directory or the
@@ -60,10 +59,6 @@ export function kitContractsPackageDir(kitDir: string): string {
 /** Project kit directory that carries canonical declarations. */
 export function projectTypesDirectory(projectRoot: string): string {
   return kitTypesDirectory(projectKitDir(projectRoot));
-}
-
-export function projectTsconfigPath(projectRoot: string): string {
-  return kitTsconfigPath(projectKitDir(projectRoot));
 }
 
 /**

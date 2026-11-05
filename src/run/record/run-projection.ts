@@ -1,4 +1,3 @@
-// runner/run-record/run-projection.ts
 //
 // Project a persisted run onto the state a resume starts from: per step, the
 // snapshot state reconciled with the journal and the attempts read from it.

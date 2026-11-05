@@ -1,4 +1,3 @@
-// dashboard/read-model/items.ts
 //
 // The morning box: one item per work item, across every listed project.
 //
@@ -381,8 +380,7 @@ async function buildItem(project: ProjectEntry, ticket: string, cache: RequestCa
   // A runner the dashboard just spawned is running before it has written
   // anything: the launch, not the snapshot, is what knows that. A closed run
   // waits on nobody, whatever its status says.
-  const effectiveWorkItemDir = workItemDirOf(project, ticket);
-  const ticketHead = readTicketHead(effectiveWorkItemDir);
+  const ticketHead = readTicketHead(workItemDirOf(project, ticket));
   const title = ticketHead === undefined ? undefined : titleOfTicketMarkdown(ticketHead, ticket);
   const group: ItemGroup = launch?.alive ? "running" : closed ? "done" : groupOf(status);
 
@@ -415,7 +413,6 @@ async function buildItem(project: ProjectEntry, ticket: string, cache: RequestCa
     updatedAt: state.updatedAt ?? state.createdAt ?? "",
     ...(branch ? { branch } : {}),
     worktree: state.worktree === true,
-    effectiveWorkItemDir,
     ...(launch ? { launch } : {}),
     ...(closed ? { closed } : {}),
     ...(interrupted ? { interrupted: true } : {}),

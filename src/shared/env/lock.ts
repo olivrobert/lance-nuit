@@ -1,4 +1,3 @@
-// runner/env/lock.ts
 // Stale-safe single-instance lock, generic over the payload (pid required): a
 // dead owner (or corrupted lock) is reclaimed. Used by the runner
 // (runlock.ts, one lock per project cwd) and by the run-directory guard.

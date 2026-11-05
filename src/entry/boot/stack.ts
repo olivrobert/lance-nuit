@@ -1,4 +1,3 @@
-// runner/boot/stack.ts
 //
 // Docker stack preflight: ensure required services are healthy before the first
 // step.
