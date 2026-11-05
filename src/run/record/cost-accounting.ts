@@ -407,12 +407,9 @@ export function openRunLedger(runView: RunView): RunBudget {
 // Allowances. What an attempt in flight may spend; nothing here is a charge.
 // ---------------------------------------------------------------------------
 
-/**
- * These steps are about to run side by side: each must find its share when its
- * first attempt asks for it, however late that attempt starts. Replaces the
- * previous announcement, so an empty list ends one and a step that never reached
- * its attempt does not shrink the shares of the steps after it.
- */
+/** These steps are about to run side by side: each must find its share when its
+ *  first attempt asks for it, however late that attempt starts. Each takes itself
+ *  off the list then, so a group leaves nothing behind for the steps after it. */
 export function expectAllowances(budget: RunBudget, stepIds: readonly string[]): void {
   budget.awaitingAllowance = new Set(stepIds);
 }
