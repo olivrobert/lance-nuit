@@ -3,7 +3,6 @@ import { withoutRunnerInternalEnv } from "../../../shared/process/self-spawn.js"
 import { asFiniteNumber as num, asRecord as rec } from "../../../shared/lib/json-values.js";
 import { toolLabel } from "../../../shared/lib/tool-label.js";
 import { activityEvent, contextEvent, contextTokensFromUsage } from "../../../shared/runtime/context.js";
-import { clearLiveAttemptCost, reportLiveAttemptCost } from "../../../shared/runtime/live-cost.js";
 import { budgetExceededReason, lineSplitter, liveMessageSink } from "../host-helpers.js";
 import { netCumulative } from "./cost-state.js";
 import { addUsage, estimateCostUsd, newUsageTotals, SYNTHETIC_MODEL, textFromAssistantEvent } from "./events.js";
@@ -28,8 +27,7 @@ async function executeNode(
   // restored baseline out keeps the guard measuring THIS attempt: otherwise it
   // kills a cheap fix pass for the coder session it merely inherited.
   const costBaseline = options.sessionCostBaselineUsd ?? 0;
-  if (priorCost > 0) reportLiveAttemptCost(priorCost);
-  else clearLiveAttemptCost();
+  options.onLiveCost?.(priorCost > 0 ? priorCost : undefined);
   const env = withoutRunnerInternalEnv(process.env);
   delete env.CLAUDECODE;
   // Supervised spawn: tracked for shutdown, SIGTERM→SIGKILL escalation on
@@ -115,7 +113,7 @@ async function executeNode(
           // killed attempt's spend into the budget ledger. The budget gate below
           // stays on this attempt alone: the transport already deducted the
           // discarded attempts from `budgetRemaining`.
-          reportLiveAttemptCost(priorCost + estimated, streamModel ?? options.claudeOptions?.model);
+          options.onLiveCost?.(priorCost + estimated, streamModel ?? options.claudeOptions?.model);
           // No accounting guard here, unlike codex and opencode: `pricingForModel`
           // always resolves — an unlisted Claude model falls back to the opus rate
           // — so this backend can never prove a live attempt unpriceable. Its

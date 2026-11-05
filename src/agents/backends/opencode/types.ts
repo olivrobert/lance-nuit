@@ -1,3 +1,4 @@
+import type { LiveCostSink } from "../../../contracts/backends.js";
 import type { ProjectPricing } from "../../../contracts/index.js";
 import type { BackendSpawnEvent } from "../spawn-event.js";
 
@@ -32,6 +33,7 @@ export interface OpencodeExecutionOptions {
   /** A ceiling governs this attempt and unmetered spend is not authorized: the
    *  guard stops the process as soon as it can prove the usage unpriceable. */
   strictCostAccounting?: boolean;
+  onLiveCost?: LiveCostSink;
   stepLogPath?: string;
 }
 

@@ -12,7 +12,6 @@ import {
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { RunView } from "../../run/index.js";
 import type { AbortScope } from "../../execution/index.js";
-import { liveAttemptCost, liveAttemptModel } from "../../shared/runtime/live-cost.js";
 import { log } from "../../shared/runtime/logging.js";
 import { emitRunStats, abortRun, hasVerdict } from "../../run/index.js";
 import { NO_STACK_STOP, type StackStop } from "./stack-stop.js";
@@ -84,10 +83,7 @@ export function installChildKillHandlers(
               // A run that already carries its verdict was finished before the
               // signal: an interruption has nothing left to record on it.
               if (hasVerdict(active.status)) continue;
-              // Only the leaf with an active attempt receives the process-wide
-              // live estimate. Parent orchestration nodes have no attempt of
-              // their own and must not duplicate their child's spend.
-              abortRun(active, sig, { estimatedCostUsd: liveAttemptCost(), model: liveAttemptModel() });
+              abortRun(active, sig);
               if (active === run) emitRunStats(active, { projRoot: process.cwd() });
             }
           } catch (error) {

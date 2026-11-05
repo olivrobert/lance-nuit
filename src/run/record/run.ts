@@ -28,6 +28,12 @@ export interface RunStep extends PersistedStepState {
   attempts: PersistedAttempt[];
 }
 
+/** The last cost figures a backend published for the attempt a step has in flight. */
+export interface LiveCostEstimate {
+  costUsd?: number;
+  model?: string;
+}
+
 /** In-memory run: merged definition and state.
  *
  *  Every persisted field is inherited from `PersistedRun`: a field added there is
@@ -44,11 +50,11 @@ export interface Run extends Omit<PersistedRun, "pipeline_path" | "steps"> {
    *  the step loop cannot disagree on the mode. Runtime-only: the mode belongs to
    *  the pipeline, never to the snapshot. */
   reconcile?: boolean;
-  /** The step whose pass this process started and has not ended, written by
-   *  `updateStep` alone and read by `abortRun`. Runtime-only: a step left
-   *  `running` by a runner that died is not executing, and only this process
-   *  knows which one is. */
-  executingStepId?: string;
+  /** The steps whose pass this process started and has not ended, by id, each with
+   *  the live estimate of its attempt. `updateStep` alone decides who is in, and
+   *  `abortRun` reads it. Runtime-only: a step left `running` by a runner that died
+   *  is not executing, and only this process knows which ones are. */
+  executing?: Map<string, LiveCostEstimate>;
   /** Runtime-only dependency; never included in PersistedRun. */
   stateStore?: RunStateStore;
   /** Runtime-only dependency; never included in PersistedRun. */

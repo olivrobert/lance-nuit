@@ -73,12 +73,14 @@ test("runners: validates the integration contract", async () => {
   });
   const stepOptions = { source: "step-override", effort: "high" };
   const stepResume: AgentSession = { provider: backendId, id: "step-resume", resumable: false };
+  const stepLiveCost = () => {};
   const stepResult = await executeStep(
     step,
     "step prompt",
     {
       timeout: 120,
       budgetRemaining: 456,
+      onLiveCost: stepLiveCost,
       session: { provider: "other", id: "wrong-provider", resumable: true },
       resumeSession: stepResume,
       stepLogPath: "/tmp/step.log",
@@ -96,6 +98,7 @@ test("runners: validates the integration contract", async () => {
     options: stepOptions,
     timeoutMs: 120,
     budgetRemaining: 456,
+    onLiveCost: stepLiveCost,
     // A session minted by another provider never reaches this backend.
     session: undefined,
     resumeSession: stepResume,
@@ -115,6 +118,7 @@ test("runners: validates the integration contract", async () => {
     role: "reviewer",
     timeout: 240,
     budgetRemaining: 789,
+    onLiveCost: stepLiveCost,
     session: runSession,
     resumeSession: { provider: "other", id: "wrong-resume-provider", resumable: true },
     stepLogPath: "/tmp/fix.log",

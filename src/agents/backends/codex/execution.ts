@@ -1,7 +1,6 @@
 import { runSupervisedStream, supervisorTimeout } from "../../../shared/process/process-runner.js";
 import { withoutRunnerInternalEnv } from "../../../shared/process/self-spawn.js";
 import { jsonRecords } from "../../../shared/lib/json-values.js";
-import { clearLiveAttemptCost, reportLiveAttemptCost } from "../../../shared/runtime/live-cost.js";
 import { budgetExceededReason, costUnaccountedReason, lineSplitter, liveMessageSink } from "../host-helpers.js";
 import { accumulateCodexUsage, agentMessageFromEvent, newCodexUsageTotals } from "./events.js";
 import { parseCodexEvent } from "./events.schema.js";
@@ -48,7 +47,6 @@ function stderrForwarder(): { push(text: string): void; flush(): void } {
 export function createNodeCodexHost(hostOptions: NodeCodexHostOptions = {}): CodexBackendHost {
   return {
     async execute(options: CodexExecutionOptions): Promise<RawCodexExecutionResult> {
-      clearLiveAttemptCost();
       const { killedForCleanup, ...result } = await runSupervisedStream(
         options.bin,
         options.args,
@@ -76,7 +74,7 @@ export function createNodeCodexHost(hostOptions: NodeCodexHostOptions = {}): Cod
               },
               totals.model,
             );
-            reportLiveAttemptCost(estimated ?? undefined, totals.model);
+            options.onLiveCost?.(estimated ?? undefined, totals.model);
             if (control.killed) return;
             // Proof, not suspicion: this attempt HAS consumed tokens and no rate
             // covers its model, so its spend can never be compared to the ceiling.

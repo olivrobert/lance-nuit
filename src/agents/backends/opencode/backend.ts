@@ -122,6 +122,7 @@ export class OpencodeBackend implements AgentBackend {
         firstEventTimeoutMs: options.firstEventTimeoutMs ?? DEFAULT_FIRST_EVENT_TIMEOUT_MS,
         ...(request.budgetRemaining != null ? { budgetRemaining: request.budgetRemaining } : {}),
         ...(request.strictCostAccounting === true ? { strictCostAccounting: true } : {}),
+        ...(request.onLiveCost ? { onLiveCost: request.onLiveCost } : {}),
         ...(request.stepLogPath ? { stepLogPath: request.stepLogPath } : {}),
       },
       this.host,

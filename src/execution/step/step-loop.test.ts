@@ -2440,3 +2440,65 @@ test("legacy: the loop leaves the selectors to boot, which persisted them as exc
     rmSync(run.run_dir, { recursive: true, force: true });
   }
 });
+
+// The signal handler persists the abort only on the runs it can reach, so a run can
+// see the request on its scope while `run.aborted` is still false. These tests hold
+// it there: `resolveOutcome` reads `run.aborted` alone, so only the loop's own
+// re-checks stand between a late result and a verdict on an interrupted run.
+for (const [label, result] of [
+  ["success", { ok: true }],
+  ["failure", { ok: false, failReason: "killed by the signal" }],
+] as const) {
+  test(`executeRunSteps: a ${label} returned after the abort request is not read as a verdict`, async () => {
+    const step = bashStep("a", "cmd");
+    const run = makeRun([step, bashStep("b", "cmd")]);
+    const abort = createAbortScope();
+    const { deps, calls } = fakeDeps([result]);
+    const executeStep = deps.executeStep;
+    deps.executeStep = async (...args) => {
+      abort.requestAbort("SIGINT");
+      return executeStep(...args);
+    };
+
+    const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false, abort }, deps);
+
+    expect(calls.ids).toEqual(["a"]);
+    expect(step.status).toBe("running");
+    expect(outcome.failed).toBe(false);
+    expect(outcome.stopped).toBe(false);
+  });
+}
+
+test("executeRunSteps: an abort requested while the verdict is read does not report a failure", async () => {
+  const step = bashStep("a", "cmd", { error_extractor: "x" });
+  const run = makeRun([step, bashStep("b", "cmd")]);
+  const abort = createAbortScope();
+  const { deps, calls } = fakeDeps([{ ok: false, failReason: "boom" }]);
+  deps.extractErrors = async () => {
+    abort.requestAbort("SIGINT");
+    return { hasErrors: false, errors: "" };
+  };
+
+  const outcome = await executeRunSteps(run, undefined, undefined, { resuming: false, abort }, deps);
+
+  expect(calls.ids).toEqual(["a"]);
+  expect(outcome.failed).toBe(false);
+  expect(outcome.stopped).toBe(false);
+});
+
+test("executeRunSteps: an absorbed failure interrupted while its verdict is read records no inputs", async () => {
+  const { ctx } = artifactContext({ "ticket.md": "v1" });
+  const { run, check } = absorbedRun({ error_extractor: "x" });
+  const abort = createAbortScope();
+  const { deps, calls } = fakeDeps([{ ok: false, failReason: "audit failed" }]);
+  deps.extractErrors = async () => {
+    abort.requestAbort("SIGINT");
+    return { hasErrors: false, errors: "" };
+  };
+
+  await executeRunSteps(run, "PROJ-1", undefined, { resuming: false, abort }, deps, ctx);
+
+  expect(calls.ids).toEqual(["check"]);
+  expect(check.status).toBe("done");
+  expect(check.absorbed_inputs).toBeUndefined();
+});

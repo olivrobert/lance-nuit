@@ -2,17 +2,20 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "./run.js";
+import type { Run, RunStep } from "./run.js";
 import { ConsoleRunReporter } from "../../entry/output/console-reporter.js";
 import { buildRunReport } from "../../entry/output/run-report.js";
 import { readRunEvents } from "./run-journal.js";
 import { makeRunStep } from "./run-step.js";
+import { openAttempt } from "./attempt-lifecycle.js";
 import {
   abortRun,
   absorbStepFailure,
+  clearLiveCost,
   finalizeRun,
   recordAbsorbedInputs,
   recordStepVerdict,
+  reportLiveCost,
   type RunOutcome,
   stopRun,
   updateStep,
@@ -693,4 +696,81 @@ test("finalizeRun: a failed step the selection set aside is not named as the cau
   // Without the selection, the failed step is the cause, as before.
   finalizeRun(stopped, { stopped: true });
   expect(stopped.outcome?.phase).toBe("old");
+});
+
+test("reportLiveCost: a tick without a model keeps the model an earlier tick reported", () => {
+  const run = twoStepRun("transitions-live-model-");
+  const step = run.steps[1]!;
+  updateStep(run, step, "running");
+
+  reportLiveCost(run, step, 0.1, "claude-opus-5-5");
+  reportLiveCost(run, step, 0.2);
+
+  expect(run.executing?.get(step.id)).toEqual({ costUsd: 0.2, model: "claude-opus-5-5" });
+});
+
+test("clearLiveCost: forgets the model with the estimate, and leaves the step executing", () => {
+  const run = twoStepRun("transitions-live-clear-");
+  const step = run.steps[1]!;
+  updateStep(run, step, "running");
+  reportLiveCost(run, step, 0.1, "claude-opus-5-5");
+
+  clearLiveCost(run, step);
+
+  expect(run.executing?.get(step.id)).toEqual({});
+});
+
+test("reportLiveCost: a step this process is not executing has nothing to charge it to", () => {
+  const run = twoStepRun("transitions-live-idle-");
+  const step = run.steps[1]!;
+
+  reportLiveCost(run, step, 0.1);
+  clearLiveCost(run, step);
+  expect(run.executing).toBeUndefined();
+
+  updateStep(run, step, "running");
+  updateStep(run, step, "done");
+  reportLiveCost(run, step, 0.1);
+  expect(run.executing?.has(step.id)).toBe(false);
+});
+
+test("abortRun: every step in flight closes on its own estimate, and the outcome names the first", () => {
+  const run = twoStepRun("transitions-abort-two-");
+  const [first, second] = run.steps as [RunStep, RunStep];
+  // Started in the reverse of pipeline order: each estimate must follow its step,
+  // and the outcome the pipeline order, whichever started first.
+  updateStep(run, second, "running");
+  updateStep(run, first, "running");
+  openAttempt(run, first, { kind: "step", command: "x" });
+  openAttempt(run, second, { kind: "step", command: "x" });
+  reportLiveCost(run, first, 0.1, "model-a");
+  reportLiveCost(run, second, 0.2, "model-b");
+
+  abortRun(run, "SIGINT");
+
+  expect(first.status).toBe("aborted");
+  expect(second.status).toBe("aborted");
+  expect(first.attempts[0]?.control).toMatchObject({ total_cost_usd: 0.1, model: "model-a", cost_estimated: true });
+  expect(second.attempts[0]?.control).toMatchObject({ total_cost_usd: 0.2, model: "model-b", cost_estimated: true });
+  expect(run.total_control?.total_cost_usd).toBeCloseTo(0.3);
+  expect(run.outcome?.phase).toBe("a");
+  expect(run.outcome?.logPath).toBe(first.attempts[0]?.log_path);
+  expect(run.executing?.size).toBe(0);
+  const events = readRunEvents(run.run_dir);
+  const aborted = events.filter((event) => event.type === "step.status.changed" && event.status === "aborted");
+  expect(aborted.map((event) => (event as { stepId: string }).stepId)).toEqual(["a", "b"]);
+  expect(events.filter((event) => event.type === "run.aborted")).toHaveLength(1);
+});
+
+test("abortRun: a step left running by a dead runner is not one this process is executing", () => {
+  const run = twoStepRun("transitions-abort-dead-");
+  const [dead, live] = run.steps as [RunStep, RunStep];
+  dead.status = "running";
+  updateStep(run, live, "running");
+
+  abortRun(run, "SIGINT");
+
+  expect(dead.status).toBe("running");
+  expect(live.status).toBe("aborted");
+  expect(run.outcome?.phase).toBe("b");
 });

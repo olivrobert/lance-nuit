@@ -23,7 +23,7 @@ import { readRunEvents } from "../../run/record/run-journal.ts";
 import { readRunSnapshot } from "../../run/record/run-snapshot.ts";
 import { attemptLogPath } from "../../run/record/run-timeline.ts";
 import { allocateAttempt } from "../../run/record/attempt-lifecycle.ts";
-import { abortRun } from "../../run/record/run-transitions.ts";
+import { abortRun, reportLiveCost } from "../../run/record/run-transitions.ts";
 import { makeRunStep, type StepStateInput } from "../../run/record/run-step.ts";
 import { applyStepSession, runAttempt, runFixAttempt } from "./step-attempt.ts";
 
@@ -84,7 +84,7 @@ function makeRun(step: RunStep, maxCost?: number): Run {
     run_dir: dir,
     max_cost_usd: maxCost,
     // As the step loop's `updateStep(running)` records it before the attempt.
-    executingStepId: step.status === "running" ? step.id : undefined,
+    executing: step.status === "running" ? new Map([[step.id, {}]]) : undefined,
     steps: [step],
   };
 }
@@ -143,7 +143,9 @@ test("an attempt settling after abort is not charged twice", async () => {
   const pending = runAttempt(run, step, { command: "make test", context: baseCtx, budget, executeStep });
   await started;
 
-  abortRun(run, "SIGINT", { estimatedCostUsd: 0.4 });
+  reportLiveCost(run, step, 0.4);
+
+  abortRun(run, "SIGINT");
   release({ ok: false, output: "killed", stats: { duration_ms: 10, total_cost_usd: 0.5 } });
   await pending;
 
@@ -176,7 +178,9 @@ test("a fix pass settling after abort is not charged twice either", async () => 
   });
   await started;
 
-  abortRun(run, "SIGINT", { estimatedCostUsd: 0.4 });
+  reportLiveCost(run, step, 0.4);
+
+  abortRun(run, "SIGINT");
   release({ ok: false, stats: { duration_ms: 10, total_cost_usd: 0.5 } });
   await pending;
 
@@ -195,7 +199,9 @@ test("abort on a step without totals yet: the step total is the aborted attempt 
   const run = makeRun(step, 10);
   allocateAttempt(run, step, "step").logPath;
 
-  abortRun(run, "SIGINT", { estimatedCostUsd: 0.4 });
+  reportLiveCost(run, step, 0.4);
+
+  abortRun(run, "SIGINT");
 
   const attempt = step.attempts[0]!;
   expect(attempt.status).toBe("aborted");
@@ -210,7 +216,9 @@ test("abort keeps the model the killed attempt reported when the step recorded n
   const run = makeRun(step, 10);
   allocateAttempt(run, step, "fix").logPath;
 
-  abortRun(run, "SIGINT", { estimatedCostUsd: 0.4, model: "claude-opus-5-5" });
+  reportLiveCost(run, step, 0.4, "claude-opus-5-5");
+
+  abortRun(run, "SIGINT");
 
   expect(step.attempts[0]?.control?.model).toBe("claude-opus-5-5");
   expect(step.control?.model).toBe("claude-opus-5-5");
@@ -224,7 +232,9 @@ test("abort on a step already charged: the estimate is added and the total flagg
   const run = makeRun(step, 10);
   allocateAttempt(run, step, "step").logPath;
 
-  abortRun(run, "SIGINT", { estimatedCostUsd: 0.4 });
+  reportLiveCost(run, step, 0.4);
+
+  abortRun(run, "SIGINT");
 
   expect(step.attempts[0]?.control).toMatchObject({ total_cost_usd: 0.4, model: "m", provider: "claude" });
   expect(step.control).toMatchObject({ total_cost_usd: 1.4, model: "m", provider: "claude", cost_estimated: true });
@@ -297,7 +307,9 @@ test("a backend resolving after abort does not rotate the step session nor rewri
   const pending = runAttempt(run, step, { command: "do it", context: baseCtx, budget: { cumulative: 0 }, executeStep });
   await started;
 
-  abortRun(run, "SIGINT", { estimatedCostUsd: 0.1 });
+  reportLiveCost(run, step, 0.1);
+
+  abortRun(run, "SIGINT");
   const snapshotAfterAbort = readFileSync(join(run.run_dir, "state.json"), "utf-8");
   // Cross the millisecond boundary: a snapshot rewritten by the late result
   // would differ by its `updatedAt` alone, which a same-millisecond resolve hides.
@@ -758,6 +770,7 @@ test("runFixAttempt: validates the contract", async () => {
       budgetRemaining: undefined,
       // No ceiling on this run, so nothing for a live accounting guard to enforce.
       strictCostAccounting: false,
+      onLiveCost: expect.any(Function),
       registry: REGISTRY,
     },
   });
@@ -1517,4 +1530,69 @@ test("invariant: after several attempts, the step total, the ledger and the jour
   const journaled = readRunEvents(run.run_dir).filter((event) => event.type === "step.attempt.finished");
   expect(journaled.map((event) => event.control?.total_cost_usd)).toEqual(costs);
   expect(journaled.map((event) => event.usage?.input_tokens)).toEqual(tokens);
+});
+
+test("two attempts in flight: a signal charges each its own estimate, and neither result arriving after it", async () => {
+  const first = makeStep({ id: "first" });
+  const second = makeStep({ id: "second" });
+  const run = makeRun(first, 10);
+  run.steps.push(second);
+  run.executing?.set(second.id, {});
+  const releases = new Map<string, (value: Awaited<ReturnType<ExecuteStep>>) => void>();
+  const sinks = new Map<string, NonNullable<NonNullable<Parameters<ExecuteStep>[2]>["onLiveCost"]>>();
+  const announce = new Map<string, () => void>();
+  const startedOf = (id: string) => new Promise<void>((resolve) => announce.set(id, resolve));
+  const executeStep: ExecuteStep = async (step, _command, spawn) => {
+    if (spawn?.onLiveCost) sinks.set(step.id, spawn.onLiveCost);
+    announce.get(step.id)?.();
+    return new Promise((resolve) => releases.set(step.id, resolve));
+  };
+  const budget = { cumulative: 0 };
+
+  const firstStarted = startedOf("first");
+  const pendingFirst = runAttempt(run, first, { command: "x", context: baseCtx, budget, executeStep });
+  await firstStarted;
+  sinks.get("first")?.(0.1, "model-a");
+  // The second attempt opens while the first runs: its own reset must not reach
+  // the estimate of the first.
+  const secondStarted = startedOf("second");
+  const pendingSecond = runAttempt(run, second, { command: "x", context: baseCtx, budget, executeStep });
+  await secondStarted;
+  sinks.get("second")?.(0.2, "model-b");
+
+  abortRun(run, "SIGINT");
+  for (const release of releases.values()) {
+    release({ ok: false, output: "killed", stats: { duration_ms: 1, total_cost_usd: 5 } });
+  }
+  await Promise.all([pendingFirst, pendingSecond]);
+
+  expect(first.control).toMatchObject({ total_cost_usd: 0.1, model: "model-a", cost_estimated: true });
+  expect(second.control).toMatchObject({ total_cost_usd: 0.2, model: "model-b", cost_estimated: true });
+  expect(first.attempts[0]?.status).toBe("aborted");
+  expect(second.attempts[0]?.status).toBe("aborted");
+  // The signal closes on the step totals, and the late results reach no ledger.
+  expect(budget.cumulative).toBe(0);
+});
+
+test("a retry interrupted before its first tick is not charged the estimate of the attempt before it", async () => {
+  const step = makeStep({ runner: "agent", backend: { id: "claude" } });
+  const run = makeRun(step, 10);
+  let calls = 0;
+  const executeStep: ExecuteStep = async (_step, _command, spawn) => {
+    calls += 1;
+    if (calls === 1) {
+      spawn?.onLiveCost?.(0.3);
+      return { ok: false, output: "", stats: { duration_ms: 1, total_cost_usd: 0.3 } };
+    }
+    abortRun(run, "SIGINT");
+    return { ok: false, output: "killed", stats: { duration_ms: 1 } };
+  };
+  const options = { command: "x", context: baseCtx, budget: { cumulative: 0 }, executeStep };
+
+  await runAttempt(run, step, options);
+  await runAttempt(run, step, options);
+
+  expect(step.attempts[1]?.status).toBe("aborted");
+  expect(step.attempts[1]?.control?.total_cost_usd).toBeUndefined();
+  expect(step.attempts[1]?.control?.cost_unknown).toBe(true);
 });

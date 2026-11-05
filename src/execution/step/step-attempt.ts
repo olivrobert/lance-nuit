@@ -22,22 +22,24 @@ import type {
   AgentSession,
   ArtifactScope,
   BackendSpec,
+  LiveCostSink,
 } from "../../contracts/backends.js";
 import type { executeStep, runWithAgent, StepResult } from "../runners.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import type { PipelineStep } from "../../definition/index.js";
 import type { RunStepView, RunView } from "../../run/index.js";
-import { clearLiveAttemptCost } from "../../shared/runtime/live-cost.js";
 import { log } from "../../shared/runtime/logging.js";
 import {
   type AttemptResult,
   bindSession,
+  clearLiveCost,
   type CostWarning,
   type OpenedAttempt,
   openAttempt,
   recordUnavailableSource,
   remainingBudget,
+  reportLiveCost,
   type RunBudget,
   settleAttempt,
   strictCostAccountingFor,
@@ -138,9 +140,14 @@ export const sessionMiddleware: AttemptMiddleware = async (ctx, next) => {
  * the changing cumulative value at the last moment. Removing it disables
  * max_cost_usd enforcement. */
 export const budgetGateMiddleware: AttemptMiddleware = async (ctx, next) => {
-  ctx.budget.remaining = remainingBudget(ctx.run.max_cost_usd, ctx.budget.cumulative);
-  return next(ctx);
+  return next({ ...ctx, budgetRemaining: remainingBudget(ctx.run.max_cost_usd, ctx.budget.cumulative) });
 };
+
+/** Where the backend of this attempt publishes its live estimate: on the step, so
+ *  an interruption charges each attempt in flight with its own figure. */
+function liveCostSink(ctx: AttemptContext): LiveCostSink {
+  return (costUsd, model) => reportLiveCost(ctx.run, ctx.step, costUsd, model);
+}
 
 /** Order from outermost to innermost. Removing an entry disables that middleware;
  * budgetGateMiddleware must remain last. The ledger charge is not a middleware:
@@ -228,9 +235,9 @@ function attemptSession(kind: "step" | "fix", spawn: SpawnOptions | undefined): 
  */
 export async function runTrackedAttempt<R extends AttemptRecord>(options: RunTrackedAttemptOptions<R>): Promise<R> {
   const { run, step, kind, command, spawn } = options;
-  // The complete attempt lifecycle owns the live-cost slot. A transport can exit
-  // before output validation and durable bookkeeping have completed.
-  clearLiveAttemptCost();
+  // A signal charges the estimate to the attempt in flight, so this one must not
+  // start with the figure the previous attempt of the step left.
+  clearLiveCost(run, step);
   const opened = openAttempt(run, step, { kind, command, session: attemptSession(kind, spawn) });
 
   const context: AttemptContext = {
@@ -257,12 +264,10 @@ export async function runTrackedAttempt<R extends AttemptRecord>(options: RunTra
       // Never mask the spawn error with a finalization persistence error; the
       // public API must continue to rethrow it.
     }
-    clearLiveAttemptCost();
     throw error;
   }
 
   finishAttempt(run, step, opened, options.budget, result);
-  clearLiveAttemptCost();
   return result;
 }
 
@@ -316,8 +321,9 @@ export async function runAttempt(run: RunView, step: RunStepView, options: RunAt
         {
           ...options.spawn,
           stepLogPath: ctx.stepLogPath,
-          budgetRemaining: ctx.budget.remaining,
+          budgetRemaining: ctx.budgetRemaining,
           strictCostAccounting: strictCostAccountingFor(ctx.run.max_cost_usd, ctx.budget.allowUnmetered),
+          onLiveCost: liveCostSink(ctx),
         },
         options.context,
       );
@@ -472,8 +478,9 @@ export async function runFixAttempt(
       options.fixWithAgent(ctx.command, options.backendSpec, options.agentOptions, {
         ...options.spawn,
         stepLogPath: ctx.stepLogPath,
-        budgetRemaining: ctx.budget.remaining,
+        budgetRemaining: ctx.budgetRemaining,
         strictCostAccounting: strictCostAccountingFor(ctx.run.max_cost_usd, ctx.budget.allowUnmetered),
+        onLiveCost: liveCostSink(ctx),
         registry: options.registry,
       }),
   });

@@ -7,7 +7,6 @@ import {
   asString as stringValue,
 } from "../../../shared/lib/json-values.js";
 import { activityEvent, contextEvent } from "../../../shared/runtime/context.js";
-import { clearLiveAttemptCost, reportLiveAttemptCost } from "../../../shared/runtime/live-cost.js";
 import { budgetExceededReason, costUnaccountedReason, lineSplitter, liveMessageSink } from "../host-helpers.js";
 import { opencodeToolLabel, textFromEvent } from "./events.js";
 import { resolveOpencodeCost } from "./pricing.js";
@@ -22,7 +21,6 @@ import type {
 export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}): OpencodeBackendHost {
   return {
     async execute(options: OpencodeExecutionOptions): Promise<RawOpencodeExecutionResult> {
-      clearLiveAttemptCost();
       let logs = "";
       const { killedForCleanup, ...result } = await runSupervisedStream(
         options.bin,
@@ -83,7 +81,7 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
                 ? resolveOpencodeCost({ costReported, costUsd }, breakdown, options.model)
                 : resolveOpencodeCost({ costReported, costUsd }, breakdown, options.model, projectPricing);
             const spent = cost.costUsd;
-            reportLiveAttemptCost(spent, options.model);
+            options.onLiveCost?.(spent, options.model);
             if (control.killed) return;
             // `unknown` is opencode's own verdict on this usage: tokens were spent
             // and neither the provider figure nor the project table could price

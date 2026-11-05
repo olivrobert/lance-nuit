@@ -184,6 +184,8 @@ a signal before any live estimate reached the runner, is recorded with
 `cost_unknown`. The ledger then holds a lower bound: the console report warns
 that spend is under-counted, the run's history entry carries `costUnknown`, and
 `lancenuit stats` prefixes such totals with `≥` and counts the affected runs.
+A backend publishes that estimate through `AgentRequest.onLiveCost`; an extension
+backend that never calls it leaves its interrupted attempts recorded this way.
 A Claude transport retry after an overload carries the discarded attempts' cost
 into the live estimate, so an interruption during the retry charges the whole
 spawn. When the final attempt itself ends without a usage event, the spawn's

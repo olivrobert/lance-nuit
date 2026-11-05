@@ -463,9 +463,10 @@ and each rule they read has one owner:
 Two run facts beside the decision are runtime-only and never persisted
 (`run/record/run.ts`): `Run.reconcile`, set by boot from the definition it loads the
 steps from and read by the step loop, so boot and the loop cannot disagree on
-the mode; and `Run.executingStepId`, written by `updateStep` alone and read by
-`abortRun`, so that a signal interrupts the step this process is running and
-never one a dead runner left `running`. What the run record still decides in
+the mode; and `Run.executing`, whose members `updateStep` alone decides and which
+`abortRun` reads, so that a signal interrupts the steps this process is running,
+each charged its own live estimate, and never one a dead runner left `running`.
+What the run record still decides in
 reconcile mode, and what the deliverables decide instead, is tabled in
 [persistence](persistence.md#the-run-record-and-the-deliverables).
 

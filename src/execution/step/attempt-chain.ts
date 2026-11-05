@@ -57,6 +57,10 @@ export interface AttemptContext {
   readonly banner?: string;
   readonly stepLogPath?: string;
   readonly budget: AttemptBudget;
+  /** What this attempt may spend, as `budgetGateMiddleware` computed it for the
+   * handler. Absent means no limit. It belongs to the attempt, not to the shared
+   * ledger: another attempt reading the ledger must never see this figure. */
+  readonly budgetRemaining?: number;
 }
 
 export type AttemptHandler<R extends AttemptRecord> = (ctx: AttemptContext) => Promise<R>;

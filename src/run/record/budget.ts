@@ -15,8 +15,9 @@
  * passes `cumulativeCost` back and forth, and each phase can update the value it
  * changed without rewriting the whole budget.
  *
- * `remaining` is recalculated as close to spawn as possible (`budgetGateMiddleware`), never
- * captured before spawn: `cumulative` changes between attempts of the same step.
+ * What an attempt may still spend is not here: `budgetGateMiddleware` computes it
+ * as close to spawn as possible and keeps it on that attempt's context, because
+ * `cumulative` changes between attempts of the same step.
  */
 export interface RunBudget {
   /** Cumulative run cost, in dollars: what the steps carried when the ledger was
@@ -29,8 +30,6 @@ export interface RunBudget {
    * report reads the larger of the two for that run, and the next execution
    * seeds from the step totals. */
   cumulative: number;
-  /** Budget remaining passed to spawn; `undefined` = no limit defined. */
-  remaining?: number;
   /** At least one attempt PROVED unpriceable consumption (`isUnpricedSpend`):
    * tokens or an amount were measured and no usable price covers them.
    * `cumulative` is a LOWER BOUND from then on, and any ceiling built on it is
@@ -49,7 +48,7 @@ export interface RunBudget {
    * a composed launch after admission), and the journal must carry one fact per
    * stop, not one per observer. Owned by `run/record/cost-stop-events.ts`. */
   unaccountedJournaled?: boolean;
-  /** A live cost guard killed an attempt mid-flight for crossing `remaining`.
+  /** A live cost guard killed an attempt mid-flight for crossing what it may spend.
    * `cumulative` may still sit under the ceiling — the guard fires on an estimate
    * the provider never confirmed — so this flag, not the ledger, is what stops the
    * retry loops and what makes the report read "Budget exceeded". It is mirrored
