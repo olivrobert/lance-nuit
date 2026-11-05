@@ -71,6 +71,8 @@ export {
   costIsLowerBound,
   measuredRunCost,
   openRunLedger,
+  releaseAllowance,
+  reserveAllowance,
   runProvesUnpricedSpend,
 } from "./cost-accounting.js";
 export { costGate, inheritChildBudgetStop, ledgerStops } from "./cost-stop-events.js";

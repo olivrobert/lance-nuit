@@ -6,7 +6,7 @@
 // equality below states an accounting rule, not a rounding accident.
 
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
@@ -20,12 +20,16 @@ import type { Run, RunStep } from "../../run/record/run.ts";
 import type { RunStepView } from "../../run/run.ts";
 import { buildRunReport } from "../../entry/output/run-report.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
-import type { RunBudget } from "../../run/record/budget.ts";
+import { costDecision, type RunBudget } from "../../run/record/budget.ts";
 import {
   aggregateControl,
+  chargeAttemptToLedger,
   chargeChildReconciliation,
   controlForRun,
   costIsLowerBound,
+  expectAllowances,
+  releaseAllowance,
+  reserveAllowance,
 } from "../../run/record/cost-accounting.ts";
 import { readRunEvents } from "../../run/record/run-journal.ts";
 import { settleCrashedAttempts } from "../../run/record/run-projection.ts";
@@ -37,7 +41,7 @@ import { NULL_RUN_OUTPUT } from "../run-output.ts";
 import { type FixLoopDeps, runFixLoop } from "./fix-loop.ts";
 import { rerunHandler } from "./on-failure.ts";
 import { childLaunchGate } from "./pipeline-orchestration-child.ts";
-import { runAttempt, runTrackedAttempt } from "./step-attempt.ts";
+import { budgetGateMiddleware, runAttempt, runTrackedAttempt } from "./step-attempt.ts";
 import { admitStep, executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
 import { resolveOutcome } from "./step-outcome.ts";
 
@@ -254,8 +258,8 @@ test("a metered attempt that failed before reporting a figure is a lower bound, 
   });
 
   expect(step.control?.cost_unknown).toBe(true);
-  // Nothing charged and nothing latched.
-  expect(budget).toEqual({ cumulative: 0 });
+  // Nothing charged, nothing latched, nothing still held.
+  expect(budget).toEqual({ cumulative: 0, allowances: new Map() });
   expect(run.cost_unaccounted).toBeUndefined();
   expect(costIsLowerBound(run)).toBe(true);
   expect(warnings()).toHaveLength(1);
@@ -651,4 +655,255 @@ test("a stop is journaled once per generation, however many gates observe it", a
   await admitStep({ run, step, baseCtx: context(), budget, output: NULL_RUN_OUTPUT });
 
   expect(stopRecord(run, budget)).toEqual(expectedRecord("unaccounted"));
+});
+
+/* ------------------------------------------------------------------------- *
+ * Allowances: what attempts in flight may spend, held against the ceiling.
+ * ------------------------------------------------------------------------- */
+
+const held = (budget: RunBudget): number => [...(budget.allowances?.values() ?? [])].reduce((a, b) => a + b, 0);
+
+test("one attempt at a time is allowed what is left of the ceiling, and holds nothing once closed", async () => {
+  const step = agentStep("a", { status: "running" });
+  const run = makeRun([step], 8);
+  const budget: RunBudget = { cumulative: 0 };
+  const seen: Array<number | undefined> = [];
+  const attempt = () =>
+    runAttempt(run, step, {
+      command: "work",
+      context: buildPipelineContext({ cwd: process.cwd() }),
+      budget,
+      executeStep: async (_step, _command, spawn) => {
+        seen.push(spawn?.budgetRemaining);
+        return { output: "", ok: true, stats: { duration_ms: 1, total_cost_usd: 0.5 } } as StepResult;
+      },
+    });
+
+  await attempt();
+  await attempt();
+
+  expect(seen).toEqual([8, 7.5]);
+  expect(budget.cumulative).toBe(1);
+  expect(held(budget)).toBe(0);
+});
+
+test("without a ceiling there is nothing to share and nothing is held", () => {
+  const budget: RunBudget = { cumulative: 3 };
+  expectAllowances(budget, ["a", "b"]);
+
+  expect(reserveAllowance(budget, undefined, "a")).toBeUndefined();
+  expect(held(budget)).toBe(0);
+});
+
+test("announced steps each get an equal share, whatever order their attempts start in", () => {
+  const budget: RunBudget = { cumulative: 2 };
+  expectAllowances(budget, ["a", "b", "c", "d"]);
+
+  expect(["c", "a", "d", "b"].map((id) => reserveAllowance(budget, 10, id))).toEqual([2, 2, 2, 2]);
+  expect(budget.cumulative + held(budget)).toBe(10);
+});
+
+test("a retry finds what is left and leaves a late sibling its share", () => {
+  const budget: RunBudget = { cumulative: 0 };
+  expectAllowances(budget, ["a", "b", "c"]);
+  const run = { cost_unaccounted: undefined } as Run;
+
+  expect(reserveAllowance(budget, 12, "a")).toBe(4);
+  expect(reserveAllowance(budget, 12, "b")).toBe(4);
+  chargeAttemptToLedger(run, budget, { duration_ms: 1, total_cost_usd: 1 }, undefined);
+  releaseAllowance(budget, "a");
+
+  // 12 spent or held: 1 on the ledger, 4 for b, and "c" still has to come.
+  expect(reserveAllowance(budget, 12, "a")).toBe(3.5);
+  expect(reserveAllowance(budget, 12, "c")).toBe(3.5);
+  expect(budget.cumulative + held(budget)).toBe(12);
+});
+
+test("an announcement that ended leaves no share aside for a step that never started", () => {
+  const budget: RunBudget = { cumulative: 0 };
+  expectAllowances(budget, ["a", "never-started"]);
+  expect(reserveAllowance(budget, 8, "a")).toBe(4);
+  releaseAllowance(budget, "a");
+
+  expectAllowances(budget, []);
+
+  expect(reserveAllowance(budget, 8, "next")).toBe(8);
+});
+
+test("held is not spent: with nothing left to give, the allowance is zero and no gate stops", () => {
+  const budget: RunBudget = { cumulative: 0 };
+  const run = { cost_unaccounted: undefined } as Run;
+  expectAllowances(budget, ["a", "b"]);
+  reserveAllowance(budget, 4, "a");
+  reserveAllowance(budget, 4, "b");
+  // The guard reacts after the usage arrives, so an attempt can land past its share.
+  chargeAttemptToLedger(run, budget, { duration_ms: 1, total_cost_usd: 3 }, undefined);
+  releaseAllowance(budget, "a");
+
+  expect(reserveAllowance(budget, 4, "a")).toBe(0);
+  expect(costDecision(4, budget)).toBe("continue");
+});
+
+/** Deterministic, so a failing interleaving can be replayed from its seed. */
+function randomFrom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1664525 + 1013904223) % 4294967296;
+    return state / 4294967296;
+  };
+}
+
+test("under any interleaving, spend and allowances in flight stay within the ceiling", () => {
+  const ceiling = 10;
+  // Shares like 10 / 3 do not add up exactly; the invariant is on dollars, not bits.
+  const rounding = 1e-9;
+  const run = { cost_unaccounted: undefined } as Run;
+  for (let seed = 1; seed <= 300; seed++) {
+    const random = randomFrom(seed);
+    const members = ["a", "b", "c", "d"].slice(0, 2 + Math.floor(random() * 3));
+    const attemptsLeft = new Map(members.map((id) => [id, 1 + Math.floor(random() * 3)]));
+    const inFlight = new Map<string, number>();
+    const budget: RunBudget = { cumulative: 0 };
+    expectAllowances(budget, members);
+
+    while ([...attemptsLeft.values()].some((left) => left > 0) || inFlight.size > 0) {
+      const idle = members.filter((id) => !inFlight.has(id) && (attemptsLeft.get(id) ?? 0) > 0);
+      const running = [...inFlight.keys()];
+      const pool = [...idle.map((id) => ["start", id]), ...running.map((id) => ["close", id])];
+      const [action, id] = pool[Math.floor(random() * pool.length)] as [string, string];
+      if (action === "start") {
+        const allowance = reserveAllowance(budget, ceiling, id) as number;
+        expect(allowance).toBeGreaterThanOrEqual(0);
+        inFlight.set(id, allowance);
+        attemptsLeft.set(id, (attemptsLeft.get(id) ?? 0) - 1);
+      } else {
+        const allowance = inFlight.get(id) as number;
+        chargeAttemptToLedger(run, budget, { duration_ms: 1, total_cost_usd: allowance * random() }, undefined);
+        releaseAllowance(budget, id);
+        inFlight.delete(id);
+      }
+      expect(budget.cumulative + held(budget)).toBeLessThanOrEqual(ceiling + rounding);
+    }
+    expect(held(budget)).toBe(0);
+  }
+});
+
+test("two attempts side by side are each allowed their share, through the attempt chain", async () => {
+  const first = agentStep("first", { status: "running" });
+  const second = agentStep("second", { status: "running" });
+  const run = makeRun([first, second], 8);
+  const budget: RunBudget = { cumulative: 0 };
+  const context = buildPipelineContext({ cwd: process.cwd() });
+  expectAllowances(budget, ["first", "second"]);
+  const seen = new Map<string, number | undefined>();
+  const finish = new Map<string, () => void>();
+  const executeStep = (async (step: RunStepView, _command: string, spawn: { budgetRemaining?: number }) => {
+    seen.set(step.id, spawn.budgetRemaining);
+    await new Promise<void>((resolve) => finish.set(step.id, resolve));
+    return { output: "", ok: true, stats: { duration_ms: 1, total_cost_usd: 1 } } as StepResult;
+  }) as unknown as Parameters<typeof runAttempt>[2]["executeStep"];
+
+  const attempts = [
+    runAttempt(run, first, { command: "work", context, budget, executeStep }),
+    runAttempt(run, second, { command: "work", context, budget, executeStep }),
+  ];
+  while (finish.size < 2) await Bun.sleep(1);
+  expect(Object.fromEntries(seen)).toEqual({ first: 4, second: 4 });
+  expect(held(budget)).toBe(8);
+
+  finish.get("first")?.();
+  await attempts[0];
+  // The first closed: its spend is on the ledger and only the second is held.
+  expect(budget.cumulative).toBe(1);
+  expect(held(budget)).toBe(4);
+
+  finish.get("second")?.();
+  await attempts[1];
+  expect(budget.cumulative).toBe(2);
+  expect(held(budget)).toBe(0);
+});
+
+test("an allowance stays held until the spend it covered is on the ledger", async () => {
+  const step = agentStep("a", { status: "running" });
+  const run = makeRun([step], 8);
+  const budget: RunBudget = { cumulative: 0 };
+  const whileClosing: Array<{ cumulative: number; held: number }> = [];
+
+  await runAttempt(run, step, {
+    command: "work",
+    context: buildPipelineContext({ cwd: process.cwd() }),
+    budget,
+    executeStep: async () => ({ output: "", ok: true, stats: { duration_ms: 1, total_cost_usd: 1 } }) as StepResult,
+    middlewares: [
+      async (ctx, next) => {
+        const record = await next(ctx);
+        // A sibling starting here must not read these dollars as free.
+        whileClosing.push({ cumulative: budget.cumulative, held: held(budget) });
+        return record;
+      },
+      budgetGateMiddleware,
+    ],
+  });
+
+  expect(whileClosing).toEqual([{ cumulative: 0, held: 8 }]);
+  expect(budget.cumulative).toBe(1);
+  expect(held(budget)).toBe(0);
+});
+
+test("an attempt that rejects gives its allowance back", async () => {
+  const step = agentStep("a", { status: "running" });
+  const budget: RunBudget = { cumulative: 0 };
+
+  await expect(
+    runAttempt(makeRun([step], 8), step, {
+      command: "work",
+      context: buildPipelineContext({ cwd: process.cwd() }),
+      budget,
+      executeStep: async () => {
+        throw new Error("spawn failed");
+      },
+    }),
+  ).rejects.toThrow("spawn failed");
+
+  expect(held(budget)).toBe(0);
+});
+
+test("an attempt the signal handler closed gives its allowance back without charging the ledger", async () => {
+  const step = agentStep("a", { status: "running" });
+  const run: Run = { ...makeRun([step], 8), executing: new Map([[step.id, {}]]) };
+  const budget: RunBudget = { cumulative: 0 };
+
+  await runAttempt(run, step, {
+    command: "work",
+    context: buildPipelineContext({ cwd: process.cwd() }),
+    budget,
+    executeStep: async () => {
+      abortRun(run, "SIGINT");
+      return { output: "", ok: false, stats: { duration_ms: 1, total_cost_usd: 1 } } as StepResult;
+    },
+  });
+
+  expect(budget.cumulative).toBe(0);
+  expect(held(budget)).toBe(0);
+});
+
+test("a settlement that cannot save still gives the allowance back", async () => {
+  const step = agentStep("a", { status: "running" });
+  const run = makeRun([step], 8);
+  const budget: RunBudget = { cumulative: 0 };
+
+  await expect(
+    runAttempt(run, step, {
+      command: "work",
+      context: buildPipelineContext({ cwd: process.cwd() }),
+      budget,
+      executeStep: async () => {
+        rmSync(run.run_dir, { recursive: true });
+        writeFileSync(run.run_dir, "");
+        return { output: "", ok: true, stats: { duration_ms: 1, total_cost_usd: 1 } } as StepResult;
+      },
+    }),
+  ).rejects.toThrow();
+
+  expect(held(budget)).toBe(0);
 });

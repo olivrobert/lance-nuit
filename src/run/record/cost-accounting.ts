@@ -27,6 +27,10 @@
 //    was accounted for when the attempt closed, and charging it again would
 //    double it.
 //
+// `reserveAllowance` / `releaseAllowance` move no money: they hold part of what is
+// left of the ceiling for an attempt in flight. They live here because what an
+// attempt may spend is the other side of what the ledger says was spent.
+//
 // The run's `total_control` / `total_usage` are DERIVED: `finalizeRun` and
 // `abortRun` materialize them from the step totals, a resume trusts them only on
 // a terminal snapshot (`restoreRunTotals`), and every charge that reaches the run
@@ -59,7 +63,7 @@ import type { PersistedAttempt, PersistedRun, PersistedStepState } from "../pers
 import type { ChildRefView, DeepReadonly, RunStepView, RunView } from "../run.js";
 import type { Run } from "./run.js";
 import { writable } from "./run.js";
-import type { RunBudget } from "./budget.js";
+import { type RunBudget, remainingBudget } from "./budget.js";
 import { appendRunEvent } from "./run-journal.js";
 import { usageDelta } from "./cost-figures.js";
 
@@ -397,6 +401,55 @@ export function openRunLedger(runView: RunView): RunBudget {
   // the durable latch, so nothing has to re-derive it from the attempt history.
   if (ledger.costUnknown === true) run.cost_unaccounted = true;
   return ledger;
+}
+
+// ---------------------------------------------------------------------------
+// Allowances. What an attempt in flight may spend; nothing here is a charge.
+// ---------------------------------------------------------------------------
+
+/**
+ * These steps are about to run side by side: each must find its share when its
+ * first attempt asks for it, however late that attempt starts. Replaces the
+ * previous announcement, so an empty list ends one and a step that never reached
+ * its attempt does not shrink the shares of the steps after it.
+ */
+export function expectAllowances(budget: RunBudget, stepIds: readonly string[]): void {
+  budget.awaitingAllowance = new Set(stepIds);
+}
+
+/**
+ * Hold what this step's attempt may spend, and return the figure its live guard
+ * compares to. Undefined without a ceiling, where there is nothing to share.
+ *
+ * Holds `cumulative + allowances in flight <= ceiling`, the invariant that makes
+ * the ceiling mean the same thing whether attempts overlap or not:
+ *
+ *   available = ceiling - cumulative - allowances in flight
+ *   allowance = available / (steps still awaiting theirs + 1)
+ *
+ * With one attempt at a time this is what is left of the ceiling. A retry finds
+ * what its own first attempt and its siblings left. A share is fixed once given, so
+ * a sibling's savings do not reach an attempt already running: an expensive one can
+ * be killed at its share with the ceiling still out of reach, which stops the run
+ * like any guard kill.
+ */
+export function reserveAllowance(budget: RunBudget, maxCost: number | undefined, stepId: string): number | undefined {
+  budget.awaitingAllowance?.delete(stepId);
+  let held = 0;
+  for (const allowance of budget.allowances?.values() ?? []) held += allowance;
+  const available = remainingBudget(maxCost, budget.cumulative + held);
+  if (available === undefined) return undefined;
+  const allowance = available / ((budget.awaitingAllowance?.size ?? 0) + 1);
+  budget.allowances ??= new Map();
+  budget.allowances.set(stepId, allowance);
+  return allowance;
+}
+
+/** The attempt is over: what it was allowed goes back to the pot, and what it spent
+ *  is on the ledger. Safe when nothing is held, which a chain without the budget
+ *  gate leaves. */
+export function releaseAllowance(budget: RunBudget, stepId: string): void {
+  budget.allowances?.delete(stepId);
 }
 
 export interface ChildReconciliation {
