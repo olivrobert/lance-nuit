@@ -2,17 +2,17 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bashStep, llmStep, pipeline } from "../../src/dsl.js";
-import type { Run, RunStep } from "../../src/run-record/run.js";
-import { isPersistedRunResumable, pendingSteps } from "../../src/run-record/run-predicates.js";
-import { readRunSnapshot } from "../../src/run-record/run-snapshot.js";
-import { deriveRunStatus } from "../../src/run-record/run-verdict.js";
-import { stopRun } from "../../src/run-record/run-transitions.js";
-import { validatePipeline } from "../../src/pipeline/loader.js";
-import { makeRunStep } from "../../src/run-record/run-step.js";
+import { bashStep, llmStep, pipeline } from "../../src/definition/dsl.js";
+import type { Run, RunStep } from "../../src/run/record/run.js";
+import { isPersistedRunResumable, pendingSteps } from "../../src/run/record/run-predicates.js";
+import { readRunSnapshot } from "../../src/run/record/run-snapshot.js";
+import { deriveRunStatus } from "../../src/run/record/run-verdict.js";
+import { stopRun } from "../../src/run/record/run-transitions.js";
+import { validatePipeline } from "../../src/definition/pipeline/loader.js";
+import { makeRunStep } from "../../src/run/record/run-step.js";
 import { builtinRegistries } from "../builtin-registries.ts";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
-import { createDefaultAgentBackendRegistry } from "../../src/engine/default-registry.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
+import { createDefaultAgentBackendRegistry } from "../../src/agents/default-registry.js";
 
 /** Explicit registry: the DSL no longer falls back to the built-in composition. */
 const REGISTRY = createDefaultAgentBackendRegistry();

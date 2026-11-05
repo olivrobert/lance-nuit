@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { installKitTypes } from "../src/project/dsl-types.js";
+import { installKitTypes } from "../src/definition/project/dsl-types.js";
 
 const RUNNER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../src");
 const OUTPUT = join(RUNNER_DIR, "..", "docs", "DSL-API.md");
@@ -21,7 +21,11 @@ interface Section {
 const SECTIONS: Section[] = [
   {
     title: "Builders and injected facade",
-    file: ["project/dsl.d.ts", "dsl/dsl-steps.d.ts", "dsl/dsl-orchestration-step.d.ts"],
+    file: [
+      "definition/project/dsl.d.ts",
+      "definition/dsl/dsl-steps.d.ts",
+      "definition/dsl/dsl-orchestration-step.d.ts",
+    ],
     names: [
       // `gateStep` is intentionally absent: admissions use `when`.
       "Dsl",
@@ -44,7 +48,7 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Step options",
-    file: "project/dsl.d.ts",
+    file: "definition/project/dsl.d.ts",
     names: [
       "ClaudeStepOptions",
       "ClaudeBackendOptions",
@@ -67,7 +71,7 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Orchestration",
-    file: "project/dsl.d.ts",
+    file: "definition/project/dsl.d.ts",
     names: ["RunPipelineOptions", "ForEachPipelineOptions", "PipelineAfterOptions", "ForEachWorkItemOptions"],
   },
   {
@@ -75,7 +79,7 @@ const SECTIONS: Section[] = [
     // incomplete table looks exhaustive and suggests a field does not exist.
     // The list therefore comes from the type, including `config` and `paths`.
     title: "Context",
-    file: ["model/context.d.ts", "model/profiles.d.ts", "model/artifact-ports.d.ts"],
+    file: ["shared/language/context.d.ts", "shared/language/profiles.d.ts", "shared/language/artifact-ports.d.ts"],
     names: [
       "PipelineContext",
       "PipelinePaths",
@@ -93,7 +97,12 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Configuration available from context",
-    file: ["model/config.d.ts", "model/profiles.d.ts", "contracts/config.d.ts", "contracts/work-items.d.ts"],
+    file: [
+      "shared/language/config.d.ts",
+      "shared/language/profiles.d.ts",
+      "contracts/config.d.ts",
+      "contracts/work-items.d.ts",
+    ],
     names: [
       "PipelineConfig",
       "ExtensionsConfig",
@@ -108,7 +117,7 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Admissions and profiles",
-    file: "dsl/input.d.ts",
+    file: "definition/dsl/input.d.ts",
     names: [
       "InputAction",
       "WhenOutcome",
@@ -122,7 +131,7 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Admission helpers",
-    file: "dsl/input.d.ts",
+    file: "definition/dsl/input.d.ts",
     names: [
       "skip",
       "fail",
@@ -143,39 +152,43 @@ const SECTIONS: Section[] = [
     // Reachable from `InputPredicateResult`: an admission that stops the run
     // describes its stop there, so the shape belongs in this reference.
     title: "Stop cause",
-    file: "model/run-stop.d.ts",
+    file: "shared/language/run-stop.d.ts",
     names: ["RunStopKind", "RunStopState"],
     note: "Persisted in `state.json` under `outcome.stop`; not importable from `@lance-nuit/dsl`.",
   },
   {
     title: "Profile × backend compatibility",
-    file: "dsl/profiles.d.ts",
+    file: "definition/dsl/profiles.d.ts",
     names: ["StepProfileName", "BackendFor"],
   },
   {
     title: "Artifacts",
-    file: "dsl/artifact.d.ts",
+    file: "definition/dsl/artifact.d.ts",
     names: ["ArtifactParser", "Artifact", "artifact", "textArtifact", "SourceOptions", "source"],
   },
   {
     title: "External sources",
-    file: "model/source.d.ts",
+    file: "work-items/source.d.ts",
     names: ["Source", "StepInput"],
   },
   {
     title: "Prompt files",
-    file: "project/dsl.d.ts",
+    file: "definition/project/dsl.d.ts",
     names: ["PromptRenderer", "PromptFileFactory"],
     note: "`promptFile` is injected through `Dsl`; these types describe its typed placeholder renderer.",
   },
   {
     title: "Capability preflight",
-    file: "project/dsl.d.ts",
+    file: "definition/project/dsl.d.ts",
     names: ["CapabilityPreflightOptions", "requireCapabilitiesStep"],
   },
   {
     title: "Work-item composites",
-    file: ["project/dsl.d.ts", "builtin-steps/lib/public-work-item.d.ts", "builtin-steps/lib/work-item-steps.d.ts"],
+    file: [
+      "definition/project/dsl.d.ts",
+      "definition/builtin-steps/lib/public-work-item.d.ts",
+      "definition/builtin-steps/lib/work-item-steps.d.ts",
+    ],
     names: [
       "ProjectEscalation",
       "ProjectEscalationBase",
@@ -211,7 +224,7 @@ const SECTIONS: Section[] = [
     // The dashboard renders `artifacts/report.json` against this shape; a
     // pipeline's report step typechecks against it. See guide/work-item-layout.md.
     title: "Run report",
-    file: "model/run-report.d.ts",
+    file: "definition/run-report.d.ts",
     names: [
       "RUN_REPORT_FILE",
       "RunReport",
@@ -228,12 +241,12 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Human review",
-    file: "builtin-steps/lib/human-review.d.ts",
+    file: "definition/builtin-steps/lib/human-review.d.ts",
     names: ["ReviewKind", "ReviewApproval", "ReviewApprovalChoice", "HumanReviewOptions", "humanReview"],
   },
   {
     title: "Provider-neutral authoring",
-    file: ["project/dsl.d.ts", "project/sdk.d.ts"],
+    file: ["definition/project/dsl.d.ts", "definition/project/sdk.d.ts"],
     names: [
       "ExtensionOptions",
       "AuthoringContext",
@@ -250,7 +263,7 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Injected-only helpers",
-    file: ["dsl/preconditions.d.ts", "work-item-store/decisions.d.ts", "work-item-store/provenance.d.ts"],
+    file: ["definition/dsl/preconditions.d.ts", "work-items/store/decisions.d.ts", "work-items/store/provenance.d.ts"],
     names: ["reject", "decisionMatchesArtifact", "pendingRejection", "ArtifactFreshness", "freshness"],
     note: "These helpers are available on `Dsl` but are not importable from `@lance-nuit/dsl`.",
   },
@@ -401,7 +414,9 @@ function publicExportNames(file: string): Set<string> {
 
 function assertPublicExportsDocumented(typesDir: string): void {
   const documented = new Set(SECTIONS.flatMap((section) => section.names));
-  const missing = [...publicExportNames(join(typesDir, "project/dsl.d.ts"))].filter((name) => !documented.has(name));
+  const missing = [...publicExportNames(join(typesDir, "definition/project/dsl.d.ts"))].filter(
+    (name) => !documented.has(name),
+  );
   if (missing.length > 0) {
     throw new Error(`Public DSL exports missing from the generated reference: ${missing.join(", ")}`);
   }

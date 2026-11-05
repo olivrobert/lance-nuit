@@ -13,7 +13,7 @@
       // Examples import the same alias a generated kit uses, so they stay
       // copy-pasteable into .lance-nuit/pipelines/. Here it resolves to the
       // facade whose declarations `lancenuit types install` generates.
-      "@lance-nuit/dsl": ["./src/project/dsl.ts"]
+      "@lance-nuit/dsl": ["./src/definition/project/dsl.ts"]
     }
   },
   // The dashboard front end compiles for a browser, not for Node: it has its
@@ -22,5 +22,5 @@
   // would pick those `.tsx` files up and typecheck them without a DOM. `dist` is
   // named for the same reason: a stale `.ts` left in the build output would
   // otherwise be typechecked as a source.
-  "exclude": ["node_modules", "dist", "src/modules/ui/app"]
+  "exclude": ["node_modules", "dist", "src/dashboard/ui/app"]
 }

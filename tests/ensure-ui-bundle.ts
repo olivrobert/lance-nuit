@@ -2,9 +2,9 @@
 //
 // Suite preload: make sure the dashboard bundle exists and is not stale.
 //
-// `src/modules/ui/static/app.js` and `app.css` are build products of
+// `src/dashboard/ui/static/app.js` and `app.css` are build products of
 // `scripts/build-ui.mjs`, git-ignored, and therefore absent from a fresh clone.
-// `src/modules/ui/server.test.ts` asserts that the static handler serves both,
+// `src/dashboard/ui/server.test.ts` asserts that the static handler serves both,
 // so without them the suite fails on a clone for a reason that has nothing to do
 // with the code under test.
 //
@@ -15,7 +15,7 @@
 // only place the guarantee actually holds.
 //
 // The build runs only when it would change something — the bundle is missing, or
-// a source under `src/modules/ui/app/` is newer than it. A suite run on an
+// a source under `src/dashboard/ui/app/` is newer than it. A suite run on an
 // up-to-date tree pays one directory walk and nothing else.
 
 import { spawnSync } from "node:child_process";
@@ -24,8 +24,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const sources = join(root, "src/modules/ui/app");
-const outputs = ["app.js", "app.css"].map((name) => join(root, "src/modules/ui/static", name));
+const sources = join(root, "src/dashboard/ui/app");
+const outputs = ["app.js", "app.css"].map((name) => join(root, "src/dashboard/ui/static", name));
 
 /** Most recent modification under a directory, or `Infinity` when it cannot be
  *  read — an unreadable source tree must not silently skip the build. */

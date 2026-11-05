@@ -32,10 +32,10 @@ fi
 # it still resolves to the compiled entry point.
 if [[ -f "$RUNNER_DIR/src/runner.ts" ]]; then
   RUNNER_ENTRY="$RUNNER_DIR/src/runner.ts"
-  BUILTINS_DIR="$RUNNER_DIR/src/builtins"
+  BUILTINS_DIR="$RUNNER_DIR/src/definition/builtins"
 else
   RUNNER_ENTRY="$RUNNER_DIR/dist/runner.js"
-  BUILTINS_DIR="$RUNNER_DIR/dist/builtins"
+  BUILTINS_DIR="$RUNNER_DIR/dist/definition/builtins"
 fi
 
 if [[ -z "$RUNNER_BIN" ]]; then

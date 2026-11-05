@@ -9,14 +9,14 @@ adapters. The registry and configuration still name the selected provider
 deliberately—there is no implicit provider fallback.
 
 ```
-src/builtin-steps/lib/work-item-steps.ts  deterministic actionSteps
+src/definition/builtin-steps/lib/work-item-steps.ts  deterministic actionSteps
   forEachWorkItem      → source scan + ticket.md (blocking: downstream spec source)
   workItemEscalateStep → note + queue       (blocking(false): tracker outage ≠ failed run)
   workItemDeliveryStep → merge-request note + queue + state
         │
-        │  ctx.workItem  (LAZY memoized getter — src/pipeline/context.ts)
+        │  ctx.workItem  (LAZY memoized getter — src/definition/pipeline/context.ts)
         ▼
-┌─ src/modules/work-item ──────────────────────────────────────────────────────┐
+┌─ src/work-items/providers ──────────────────────────────────────────────────────┐
 │  contracts/work-items.ts  the port: 4 operations, logical vocabulary         │
 │  registry.ts  provider → factory, the explicit extension point               │
 │  note.ts      structured notes + idempotence marker (markerFor)              │
@@ -53,11 +53,11 @@ query language ignores it and keeps its projection.
 
 ## Add a provider (Redmine, GitHub Issues...)
 
-1. **Write the adapter** — `src/modules/work-item/adapters/<provider>/index.ts`, exporting a
+1. **Write the adapter** — `src/work-items/providers/adapters/<provider>/index.ts`, exporting a
    `(deps: WorkItemGatewayDeps) => WorkItemGateway` factory. `deps` contains only
    `{ workItem, labels }`; if the adapter needs anything else from runner config,
    the boundary is in the wrong place. Every binary call goes through
-`src/modules/work-item/process/runner.ts`, never a direct `spawn`.
+`src/work-items/providers/process/runner.ts`, never a direct `spawn`.
 2. **Replay the contract suite** — in `<provider>.test.ts`, call
    `runWorkItemGatewayContract("<provider>", factory, opts)`. It is **exported as a
    function** specifically to be replayed unchanged: this is the only mechanical
@@ -120,7 +120,7 @@ gateway while building the context would make the entire runner depend on valid
 provider configuration.
 
 Consequence: **never derive a context with `{ ...context }`**, which reads the getter
-and creates the gateway. Use `deriveContext(base, overrides)` (`src/pipeline/context.ts`),
+and creates the gateway. Use `deriveContext(base, overrides)` (`src/definition/pipeline/context.ts`),
 which copies the property's *descriptor* instead of evaluating it. This is harmless
 until an adapter validates its configuration during construction; then every spread
 would fail for a tracker nobody needed. `tests/pipeline/pipeline-context.test.ts` and

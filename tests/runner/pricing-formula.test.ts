@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mapCodexExecutionResult } from "../../src/engine/backends/codex/result.js";
-import { CODEX_MODEL } from "../../src/engine/backends/codex/types.js";
-import { costOf } from "../../src/run-stats/stats-core.js";
+import { mapCodexExecutionResult } from "../../src/agents/backends/codex/result.js";
+import { CODEX_MODEL } from "../../src/agents/backends/codex/types.js";
+import { costOf } from "../../src/run/stats/stats-core.js";
 
 const SRC = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "src");
 

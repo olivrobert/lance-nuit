@@ -60,89 +60,113 @@ Internal integrations depend on core contracts, but they are not separately
 published packages. See [core contract and extensions](packages-and-extensions.md)
 for third-party adapters.
 
-Everything under `src/` belongs to exactly one of seven levels. A folder belongs
-to a single level, a file is never classified apart from its folder, and a level
-may only import from its own level or below. Inside a level, imports are free;
-cycles are forbidden at every level.
+Everything under `src/` belongs to exactly one context: one folder per question
+the code answers. Each context declares the contexts it may import, and each is a
+`context-<name>-direction` rule. Cycles are forbidden everywhere.
 
-| Level | Folders | May import |
-| --- | --- | --- |
-| L0 `lib` | `src/lib/` — runner utilities | `node:` built-ins only |
-| L1 `contracts` | `src/contracts/` — public extension contracts only | L0. Types and pure functions; no `node:fs`, no `process.*`, no `zod` |
-| L2 `model` | `src/model/` — data shapes and ports | up to L1, no I/O |
-| L3 `infra` | `src/env/` (config, paths, locks, worktrees, capabilities), `src/exec/` (process execution and supervision), `src/runtime/` (context, logging, events, the abort scope, and the `RunOutput` and `LiveFeed` ports) | up to L2 |
-| L4 `core` | `src/validation/`, `src/pipeline/` (context assembly and definition loading), `src/dsl/` and `src/dsl.ts` (authoring primitives, internal authoring surface), `src/builtin-steps/`, `src/extractors/`, `src/engine/` (backend registry and built-in agent integrations), `src/step/` (attempts, retries, fixes, escalation), `src/dispatch/`, `src/boot/`, `src/run-record/` (the run record: snapshot, journal, attempt logs, transitions, cost ledger and budget), `src/work-item-store/` (artifacts, human decisions and provenance kept beside a ticket), `src/run-stats/` (the cross-run history: one summary per finished run, and its readers), `src/project/` (public DSL and project typechecking), `src/builtins/` | up to L3 |
-| L5 `adapters` | `src/output/` (console reports, live feed, watchers), `src/modules/` (domain modules such as the Jira adapter), `src/commands/` | up to L4 |
-| L6 `entry` | `src/entry/` (composition root), `src/cli/` (argument parsing), `src/runner.ts` — process entry point | everything |
-
-`bun run deps:check` is the authority, not this table: it validates
-`.dependency-cruiser.cjs` against the tree, proves that every file under `src/`
-is claimed by exactly one level, and compares the remaining violations to
-`.dependency-cruiser-known-violations.json`. That file is not a debt record any
-more; it holds only edges someone argued for, each with a `why` and a review
-date. A new upward import or a new cycle fails the lint; a listed edge that no
-longer exists fails it too.
-
-The same check also groups the graph by folder — one node per folder directly
-under `src/`, plus one per file directly under `src/`, so `src/dsl.ts` and
-`src/dsl/` stay apart — and reports every edge caught in a cycle of that grouped
-graph. Two folders lock each other as soon as one file of each imports a file of
-the other, which the file-level `no-circular` rule never sees. Those edges are
-listed in `.dependency-cruiser-known-folder-cycles.json`, under the same rules as
-the file baseline plus a `removedBy` naming the cut meant to retire the entry.
-That baseline is now empty: `src/` holds no folder cycle at all, and
-`bun run deps:check` defends the state by failing on the first cyclic folder
-edge it finds.
-
-### Contexts
-
-Levels say how technical a file is, and most of the code sits in L4. Contexts add
-the business axis: each one answers a single question and declares the contexts
-it may import. Each is a `context-<name>-direction` rule, under the same baseline
-as the levels.
-
-| Context | Question it answers | May import |
-| --- | --- | --- |
-| `entry` | What does the operator ask for, and how is everything assembled? | everything |
-| `dashboard` | What does the human read? | `run`, `work-items`, `definition`, `shared` |
-| `execution` | Which step runs, and what happens with its outcome? | `definition`, `run`, `work-items`, `shared` |
-| `agents` | How do we talk to each agent CLI? | `shared` |
-| `definition` | What is a pipeline, and is it valid? | `work-items`, `shared` |
-| `run` | What happened during a run, and what did it cost? | `definition`, `shared` |
-| `work-items` | Which ticket, which artifacts, which provenance? | `shared` |
-| `shared` | Primitives and the language every context shares | no other context |
+| Context | Question it answers | Holds | May import |
+| --- | --- | --- | --- |
+| `entry` | What does the operator ask for, and how is everything assembled? | `src/runner.ts` (process entry point), `composition/` (composition root), `cli/`, `commands/`, `boot/`, `output/` (console reports, live feed, watchers), `env/` (worktrees, git guard, run lock, Docker stack) | everything |
+| `dashboard` | What does the human read? | `ui/`, `read-model/`, `home/` | `run`, `work-items`, `definition`, `shared` |
+| `execution` | Which step runs, and what happens with its outcome? | `step/` (attempts, retries, fixes, escalation), `dispatch/`, step runners, report extraction, the abort scope, the `RunOutput` port | `definition`, `run`, `work-items`, `shared` |
+| `agents` | How do we talk to each agent CLI? | the backend registry and the built-in backends | `shared` |
+| `definition` | What is a pipeline, and is it valid? | `dsl/` and `dsl.ts` (authoring primitives, internal authoring surface), `project/` (public DSL and project typechecking), `builtin-steps/`, `builtins/`, `validation/`, `extractors/`, `pipeline/` (context assembly and definition loading) | `work-items`, `shared` |
+| `run` | What happened during a run, and what did it cost? | `record/` (snapshot, journal, attempt logs, transitions, cost ledger and budget), `stats/` (the cross-run history), the persisted shapes and storage ports | `definition`, `shared` |
+| `work-items` | Which ticket, which artifacts, which provenance? | `store/` (artifacts, human decisions and provenance kept beside a ticket), `providers/` (tracker adapters) | `shared` |
+| `shared` | Primitives and the language every context shares | `src/contracts/` (the published extension contracts), `lib/`, `language/`, `env/`, `process/`, `runtime/` | no other context |
 
 `execution` never imports `agents`: it reaches the backends through the registry
 of `contracts/backends`, and `entry` wires them in. The allowed directions form
-no cycle, and no import crosses them: the baseline holds no context edge.
+no cycle.
 
-Folders do not follow contexts yet: `model/`, `env/`, `exec/` and `runtime/` mix
-files of several contexts. So `CONTEXTS` in `scripts/layers.cjs` classifies single
-files, unlike the levels, and `bun run deps:check` fails on a file that no context
-or several contexts claim.
+`src/contracts/` stays at the root of `src/` although it belongs to `shared`: it
+is the published surface, `lance-nuit/contracts`, and its path is part of the
+package layout.
+
+A context has no internal layers: no `domain/`, `application/` or
+`infrastructure/`. Nothing therefore enforces that the business rules of a context
+stay free of I/O; a facade bounds what a context exposes, not what it does.
+
+`shared` is a closed list. `CONTEXTS` in `scripts/layers.cjs` names its files one
+by one, apart from `contracts/` and `lib/`, because the base every context imports
+is where a coupling hides best: `bun run deps:check` fails on a new file there
+until it is named. Its inside is ordered by levels, the only ones left, and a level
+may import only from its own level or below:
+
+| Level | Folder | May import |
+| --- | --- | --- |
+| L0 `lib` | `src/shared/lib/` — runner utilities | `node:` built-ins only |
+| L1 `contracts` | `src/contracts/` — public extension contracts only | L0. Types and pure functions; no `node:fs`, no `process.*`, no `zod` |
+| L2 `language` | `src/shared/language/` — data shapes and ports | up to L1, no I/O |
+| L3 `infra` | `src/shared/env/` (config, paths, locks, capabilities), `src/shared/process/` (process execution and supervision), `src/shared/runtime/` (context, logging, events, the `LiveFeed` port) | up to L2 |
+
+`bun run deps:check` is the authority, not these tables: it validates
+`.dependency-cruiser.cjs` against the tree, proves that every file under `src/`
+is claimed by exactly one context, and compares the remaining violations to
+`.dependency-cruiser-known-violations.json`. That file is not a debt record any
+more; it holds only edges someone argued for, each with a `why` and a review
+date. A new import against a direction or a new cycle fails the lint; a listed edge
+that no longer exists fails it too.
+
+The same check also groups the graph by folder — one node per folder directly
+under a context, plus one per file directly under a context or under `src/`, so
+`src/definition/dsl.ts` and `src/definition/dsl/` stay apart — and reports every
+edge caught in a cycle of that grouped graph. Two folders lock each other as soon
+as one file of each imports a file of the other, which the file-level
+`no-circular` rule never sees. Between contexts a cycle already breaks a direction;
+this is what still sees one inside a context. Those edges are listed in
+`.dependency-cruiser-known-folder-cycles.json`, under the same rules as the file
+baseline plus a `removedBy` naming the cut meant to retire the entry. That baseline
+is empty, and `bun run deps:check` defends the state by failing on the first cyclic
+folder edge it finds.
+
+### Facades
+
+Direction says which contexts may be imported, not how much of them. So each context
+has one door: from another context, only its `index.ts` may be imported, and it holds
+named re-exports and nothing else.
+
+| Context | Facade | Note |
+| --- | --- | --- |
+| `agents` | `index.ts` | Exposes the default registry only, which is composition: `entry` alone may import it. |
+| `dashboard` | `index.ts` | |
+| `definition` | `index.ts` | `src/definition/dsl.ts` stays out: `root-dsl-barrel` limits who imports it. |
+| `execution` | `index.ts` | |
+| `run` | `index.ts` | |
+| `work-items` | `index.ts`, `composition.ts` | `composition.ts` exposes the adapter registry, for `entry` alone: in `index.ts`, every context could reach it. |
+
+`entry` has no facade because nothing imports it, and `shared` has none because it
+is imported file by file. Three things hold the rule. `FACADES` in
+`scripts/layers.cjs` yields a `module-<context>-entry-only` rule, with no baseline,
+and a `context-<context>-no-own-facade` rule, because a file importing the facade of
+its own context would be a cycle through it. `tests/deps/facades.test.ts` fails on a
+facade holding anything but re-exports, and on a name with no caller outside the
+context: an unused name is a door left open for the next import.
+
+Tests are not cruised: they import the files they exercise directly. One import
+escapes the graph on purpose: `src/execution/report-extraction.ts` loads an extractor
+by a computed path, the name having been validated against the extractor registry
+when the definition loaded.
 
 ### Modules
 
-Levels say which way an import may go. Modules add another, independent axis:
-encapsulation, that is, through which file an import may enter. A module is a
-folder with a single entry file; from outside the folder, only that entry may be
-imported, while the files inside import each other freely. A module still sits
-in exactly one level, and the level rules apply to it unchanged.
+Facades bound a context; modules do the same inside one. A module is a folder with
+a single entry file; from outside the folder, only that entry may be imported, while
+the files inside import each other freely.
 
-| Module | Level | Entry | Owns |
-| --- | --- | --- | --- |
-| `src/run-record/` | L4 | `index.ts` | A run: its snapshot (`state.json`), journal (`events.jsonl`), attempt logs and closure file; the meaning of a run status; every write to a run (transitions, named writes, opening and restoring); the cost ledger, budget and cost gate. Outside it a run is a read-only `RunView` (§7). |
-| `src/work-item-store/` | L4 | `index.ts` | What the runner keeps beside a ticket, outside any run: artifacts, the human decisions bound to them and the gate status they give, provenance and freshness, and the work-item layout. |
-| `src/run-stats/` | L4 | `index.ts` | The cross-run history (`pipeline-history/runs.jsonl`): one summary per finished run, its readers, and the cost they estimate with the runner's rate lookup. |
-| `src/step/` | L4 | `step-loop.ts` | Loading the definition and selection a run opens with; executing a step: admission, attempts, retries, verdicts, repairs, composed children. |
-| `src/engine/` | L4 | `default-registry.ts` | The agent backends and their registry. |
-| `src/extractors/` | L4 | `registry.ts` | Error extractors and their discovery. |
-| `src/modules/work-item/` | L5 | `registry.ts` | The tracker adapters (Jira, GitHub, …) behind the work-item contract. |
-| `src/modules/read-model/` | L5 | `index.ts` | The dashboard's read model: a read-only view over runs, work items and history. |
-| `src/modules/dashboard-home/` | L5 | `index.ts` | The dashboard's own files under `~/.lance-nuit/ui/`. |
-| `src/modules/ui/` | L5 | `index.ts` | The dashboard server and its browser bundle. |
+| Module | Entry | Owns |
+| --- | --- | --- |
+| `src/run/record/` | `index.ts` | A run: its snapshot (`state.json`), journal (`events.jsonl`), attempt logs and closure file; the meaning of a run status; every write to a run (transitions, named writes, opening and restoring); the cost ledger, budget and cost gate. Outside it a run is a read-only `RunView` (§7). |
+| `src/run/stats/` | `index.ts` | The cross-run history (`pipeline-history/runs.jsonl`): one summary per finished run, its readers, and the cost they estimate with the runner's rate lookup. |
+| `src/work-items/store/` | `index.ts` | What the runner keeps beside a ticket, outside any run: artifacts, the human decisions bound to them and the gate status they give, provenance and freshness, and the work-item layout. |
+| `src/work-items/providers/` | `registry.ts` | The tracker adapters (Jira, GitHub, …) behind the work-item contract. |
+| `src/execution/step/` | `step-loop.ts` | Loading the definition and selection a run opens with; executing a step: admission, attempts, retries, verdicts, repairs, composed children. |
+| `src/definition/extractors/` | `registry.ts` | Error extractors and their discovery. |
+| `src/dashboard/read-model/` | `index.ts` | The dashboard's read model: a read-only view over runs, work items and history. |
+| `src/dashboard/home/` | `index.ts` | The dashboard's own files under `~/.lance-nuit/ui/`. |
+| `src/dashboard/ui/` | `index.ts` | The dashboard server and its browser bundle. |
 
-`scripts/layers.cjs` declares them in `MODULES`, next to the levels.
+`scripts/layers.cjs` declares them in `MODULES`, facades included.
 `.dependency-cruiser.cjs` turns each one into a `module-<name>-entry-only` rule,
 and `bun run deps:check` also fails when a declared entry no longer exists.
 Test files are not cruised, so a test may still reach a module's internals.
@@ -157,7 +181,7 @@ module, without any further rule.
 
 ### The composition root
 
-`src/entry/` is the only composition root. `entry/registries.ts` holds the one
+`src/entry/composition/` is the only composition root. `entry/composition/registries.ts` holds the one
 function that composes the provider registries, `composeRunnerRegistries`: the
 built-in providers extended with the extension manifest the project
 configuration names. The entry point hands that function to boot and to every
@@ -166,9 +190,9 @@ names a built-in provider. Nothing in the execution or state layers reaches back
 for a default registry or chooses a built-in backend:
 
 - **registries** — `composeRunnerRegistries` (typed `ComposeRegistries` in
-  `boot/extensions.ts`, which owns loading the manifest) is the single
-  composition. The built-in provider lists live in `engine/default-registry.ts`
-  and `modules/work-item/registry.ts`. Boot calls it once cwd is final, with the
+  `entry/boot/extensions.ts`, which owns loading the manifest) is the single
+  composition. The built-in provider lists live in `agents/default-registry.ts`
+  and `work-items/providers/registry.ts`. Boot calls it once cwd is final, with the
   configuration it froze; a command that loads a pipeline calls it with its own
   project's configuration, so `--lint-pipeline`, `--lint-config` and
   `--approve-only` resolve exactly the backends and providers a run would. The
@@ -178,8 +202,8 @@ for a default registry or chooses a built-in backend:
   Everything downstream reads the registries from the pipeline context
   (`agentBackendRegistryOf`, `workItemRegistryOf`). A context without a registry
   fails loudly at the first agent step rather than falling back.
-- **`RunOutput`** — the interface and the composite live in `src/runtime/`, the
-  console and live-feed implementations in `src/output/`. The step loop takes one
+- **`RunOutput`** — the interface and the composite live in `src/execution/run-output.ts`, the
+  console and live-feed implementations in `src/entry/output/`. The step loop takes one
   as a required argument; it never picks a default. Step progress travels on it
   and never on the event bus, which publishers outside a run share; so do the
   execution messages of the sites that hold one, as `runner.message` events
@@ -187,14 +211,14 @@ for a default registry or chooses a built-in backend:
   boot and dispatch, but also a few helpers reached from inside a run, such as the
   attempt lifecycle in `step-attempt.ts` — writes to stderr instead and therefore
   never reaches the live feed (see [sessions and tracing](sessions-tracing.md)).
-- **`LiveFeed`** — same split: the port and `setRunnerLiveFeed` in `src/runtime/`,
-  `FileLiveFeed` and its construction from the environment in `src/output/`. The
+- **`LiveFeed`** — same split: the port and `setRunnerLiveFeed` in `src/shared/runtime/`,
+  `FileLiveFeed` and its construction from the environment in `src/entry/output/`. The
   event bus writes to the feed it was given, so a child process inherits the
   parent's feed because the entry point wired it, not because the bus looked it up.
-- **Abort scope** — `createAbortScope()` in `src/runtime/abort.ts` holds the
+- **Abort scope** — `createAbortScope()` in `src/execution/abort.ts` holds the
   interruption state of one execution tree: whether a signal was received, which
   one, and the runs currently executing steps. `runner.ts` creates one per
-  process; the signal handler (`entry/signals.ts`) requests the abort on it and
+  process; the signal handler (`entry/composition/signals.ts`) requests the abort on it and
   persists every active run; the step loop registers each run it executes and
   reads the scope before every spawn, as do the rerun and repair loops; a
   composed child runs under its parent's scope, which is how the interruption
@@ -202,7 +226,7 @@ for a default registry or chooses a built-in backend:
   process-wide flag: two scopes never observe each other, so a test can drive an
   interruption in-process.
 
-The event bus (`runtime/events.ts`) and the configured live feed stay process-wide
+The event bus (`shared/runtime/events.ts`) and the configured live feed stay process-wide
 on purpose: an in-process child run must write to the same feed as its parent,
 and every process has exactly one. Tests reset them (`resetRunnerEventBus`,
 `setRunnerLiveFeed(undefined)`) rather than scope them.
@@ -216,16 +240,16 @@ bin/lancenuit   verb-oriented wrapper
 
 ### The dashboard
 
-`src/modules/ui/` is the only part of the repository that ships code for a
+`src/dashboard/ui/` is the only part of the repository that ships code for a
 browser, so it is the only one with a build of its own. Its server side runs
 against explicit ports and never reads `env` past its composition root:
 
 ```text
-src/modules/dashboard-home/  the files under ~/.lance-nuit/ui/, one owner each:
+src/dashboard/home/  the files under ~/.lance-nuit/ui/, one owner each:
                              FileUserList, FileProjectList, FileLaunchStore
                              (openDashboardHome binds the three to one home)
-src/modules/read-model/      every dashboard read, bound once as the ReadModel port
-src/modules/ui/              server side
+src/dashboard/read-model/      every dashboard read, bound once as the ReadModel port
+src/dashboard/ui/              server side
   server.ts                  composition root: builds UiDeps, starts node:http
   deps.ts                    UiDeps — readModel, home, launcher, terminals, workItems
   router.ts                  host, method and same-origin checks, then the ROUTES table
@@ -236,7 +260,7 @@ src/modules/ui/              server side
   tmux.ts, terminals.ts,
   terminal-viewers.ts        the embedded terminals
   static-files.ts, markdown.ts, cookies.ts
-src/modules/ui/app/          React 19 + TypeScript sources of the front end
+src/dashboard/ui/app/          React 19 + TypeScript sources of the front end
   index.tsx                  entry point: QueryClientProvider + RouterProvider into #app
   router.tsx                 TanStack Router route tree on the hash; search params
                              validated by pure functions of lib/
@@ -255,7 +279,7 @@ src/modules/ui/app/          React 19 + TypeScript sources of the front end
                              unit-tested
   components/                one folder or file per zone of the screen
   styles/tokens.css          the only global stylesheet; everything else is a CSS Module
-src/modules/ui/static/       index.html, plus the built app.js and app.css
+src/dashboard/ui/static/       index.html, plus the built app.js and app.css
 ```
 
 The server is authoritative for actions. Each item it serves carries `busy`
@@ -267,9 +291,9 @@ only through `home` or `readModel` and a process only through `launcher` or
 The front end imports server types only as `import type`: nothing from the
 server side enters the bundle.
 
-The server side reads work items only through `src/modules/read-model/`
+The server side reads work items only through `src/dashboard/read-model/`
 (`index.ts` is its public surface, and the only module allowed to import
-`src/run-record/`, `src/work-item-store/` and `src/run-stats/`; a Semgrep rule enforces the
+`src/run/record/`, `src/work-items/store/` and `src/run/stats/`; a Semgrep rule enforces the
 direction). It projects snapshots into the DTO the front end renders. It takes
 the work-item paths from `workItemLayout` and a stopped gate's decision from
 `gateDecisionStatus`, both in `work-item-store`, the rule the runner's gate and
@@ -315,7 +339,7 @@ component (`.mute`, `.small`, `.tag`, `.proj`).
 Top-level integration and public-surface tests are grouped under `tests/` by domain:
 `tests/dsl/`, `tests/pipeline/`, `tests/project/`, and `tests/runner/`. Tests that are
 tightly coupled to a lower-level module remain beside that module (for example under
-`src/boot/`, `src/engine/`, or `src/run-record/`). The public DSL is exposed through generated project
+`src/entry/boot/`, `src/agents/`, or `src/run/record/`). The public DSL is exposed through generated project
 declarations rather than by making every internal runner type public.
 
 ## 3. How a pipeline is assembled
@@ -431,13 +455,13 @@ and each rule they read has one owner:
 
 | Decision | Owner |
 | --- | --- |
-| **Re-admission**: whether a settled step goes through admission again, and, in reconcile mode, whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). `step/load-or-create-run.ts` decides the selection a resume applies to the snapshot — the selectors in the default mode only, and in both modes the requeue of the `--start-at` target and the steps after it — and `openRun` applies it |
-| **Admission**: budget, `when`, a pending rejection, the freshness or presence of the outputs, the interruption guard, then the environment guard | `step/step-admission.ts` (`admitStep`; `answersToOutputs` says whether the outputs decide, `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished) |
-| **Standing of an output**: `missing`, `unfinished`, `unknown`, `stale`, `fresh` or adoptable, and the doubt `unguaranteed` carries | `work-item-store/provenance.ts`, the only writer of `artifacts/.provenance/`. `standingOf` is the one reading rule for a record: admission (`stepFreshness`), the public `freshness()` and the dashboard all read it there. The attempt (`step/step-attempt.ts`) only chooses when to write: the in-flight mark before each attempt (`markInFlight`), the record after a success |
-| **Reconcile classification**: which steps the mode re-admits (those declaring `output` or `rerunOnResume`), the build error for a step declaring neither, and the orchestration nodes that keep the authority of their status | `model/definition.ts` (`deliversOutputs`, `reconcilable`, `stepsWithoutDeliverable`), shared by the build (`.reconcile()`), the loader's validation (`validation/structure.ts`), admission and the loop; `rerunsOnResume`, which leaves a node's `rerunOnResume` without effect in this mode, is used by `reconcilable`, the loop and the resume header |
+| **Re-admission**: whether a settled step goes through admission again, and, in reconcile mode, whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `execution/step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). `execution/step/load-or-create-run.ts` decides the selection a resume applies to the snapshot — the selectors in the default mode only, and in both modes the requeue of the `--start-at` target and the steps after it — and `openRun` applies it |
+| **Admission**: budget, `when`, a pending rejection, the freshness or presence of the outputs, the interruption guard, then the environment guard | `execution/step/step-admission.ts` (`admitStep`; `answersToOutputs` says whether the outputs decide, `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished) |
+| **Standing of an output**: `missing`, `unfinished`, `unknown`, `stale`, `fresh` or adoptable, and the doubt `unguaranteed` carries | `work-items/store/provenance.ts`, the only writer of `artifacts/.provenance/`. `standingOf` is the one reading rule for a record: admission (`stepFreshness`), the public `freshness()` and the dashboard all read it there. The attempt (`execution/step/step-attempt.ts`) only chooses when to write: the in-flight mark before each attempt (`markInFlight`), the record after a success |
+| **Reconcile classification**: which steps the mode re-admits (those declaring `output` or `rerunOnResume`), the build error for a step declaring neither, and the orchestration nodes that keep the authority of their status | `definition/definition.ts` (`deliversOutputs`, `reconcilable`, `stepsWithoutDeliverable`), shared by the build (`.reconcile()`), the loader's validation (`definition/validation/structure.ts`), admission and the loop; `rerunsOnResume`, which leaves a node's `rerunOnResume` without effect in this mode, is used by `reconcilable`, the loop and the resume header |
 
 Two run facts beside the decision are runtime-only and never persisted
-(`run-record/run.ts`): `Run.reconcile`, set by boot from the definition it loads the
+(`run/record/run.ts`): `Run.reconcile`, set by boot from the definition it loads the
 steps from and read by the step loop, so boot and the loop cannot disagree on
 the mode; and `Run.executingStepId`, written by `updateStep` alone and read by
 `abortRun`, so that a signal interrupts the step this process is running and
@@ -485,8 +509,8 @@ A run keeps operational state close to its work item:
 ```
 
 Persisted formats (`state.json`, `events.jsonl`) and configuration files
-(`config.json`) are read through runtime schemas (`run-record/schema.ts`,
-`run-record/journal-schema.ts`, `env/config.schema.ts`). Two rules keep that boundary
+(`config.json`) are read through runtime schemas (`run/record/schema.ts`,
+`run/record/journal-schema.ts`, `shared/env/config.schema.ts`). Two rules keep that boundary
 honest:
 
 - The types stay hand-written interfaces (`PersistedRun`, `PersistedStepState`,
@@ -500,12 +524,12 @@ honest:
   (`diagnoseRunSnapshot`), while execution refuses to select that run or fall
   back to a new one; a line
   of the central history (`pipeline-history/runs.jsonl`,
-  `run-stats/history-schema.ts`) that fails its schema is skipped so one
+  `run/stats/history-schema.ts`) that fails its schema is skipped so one
   truncated write never costs the whole file (`diagnoseHistoryEntry`); a
   malformed `pricing.json` is reported once by name and treated as absent
-  (`env/pricing.schema.ts`), because pricing is optional and statistics readers
+  (`shared/env/pricing.schema.ts`), because pricing is optional and statistics readers
   must keep working without it; **no line of the run journal (`events.jsonl`,
-  `run-record/journal-schema.ts`) is ever discarded** — the file doubles as the live
+  `run/record/journal-schema.ts`) is ever discarded** — the file doubles as the live
   feed, so a reader classifies every line as `known`, `unknown` (a type outside
   the contract, which is most of a real journal), `invalid` (a contracted type
   whose payload was refused, kept with its reason) or `skipped` (not an event at
@@ -517,7 +541,7 @@ honest:
 
 The same two rules cover the formats the runner only reads. The NDJSON event
 stream of each agent backend (`engine/backends/*/events.schema.ts`) and the
-output of `docker compose ps` (`env/docker-stack.schema.ts`) come from tools the
+output of `docker compose ps` (`entry/env/docker-stack.schema.ts`) come from tools the
 runner does not version, so their schemas never reject: an unknown event type
 falls through a fallback branch and is ignored, a field of the wrong kind reads
 as absent, and an unreadable `docker compose ps` entry is skipped — a required
@@ -533,9 +557,9 @@ phase, model, profile, token, cost, and outcome facts without reading provider s
 Pricing is optional; exact provider-reported cost wins over token estimation.
 
 The run record — snapshot, journal, attempt logs, transitions, cost ledger and
-budget — is the `src/run-record/` module: code outside it imports
-`run-record/index.ts` only, and the files named below are its internals.
-Run and step transitions during execution have one owner, `run-record/run-transitions.ts`:
+budget — is the `src/run/record/` module: code outside it imports
+`run/record/index.ts` only, and the files named below are its internals.
+Run and step transitions during execution have one owner, `run/record/run-transitions.ts`:
 the step status with its timestamps and reason (`updateStep`), the verdict an
 attempt established (`recordStepVerdict`), an absorbed non-blocking failure
 (`absorbStepFailure`) and the inputs it settled at (`recordAbsorbedInputs`),
@@ -543,7 +567,7 @@ a clean stop (`stopRun`), a manual interruption
 (`abortRun`), and the final verdict, outcome, totals and `run.finished` event
 (`finalizeRun`). Each operation writes the fields that must change together and
 the journal event that records them. What a status means has one owner too,
-`run-record/run-status.ts`: the status a reader shows (`effectiveStatus`, with
+`run/record/run-status.ts`: the status a reader shows (`effectiveStatus`, with
 whether a live process holds the run as a parameter, which `isRunHeld` in
 `stores/run-storage.ts` answers), what each status says (a verdict, completed, a
 failure, waiting on somebody, resumable), the `≥` of a partial total
@@ -553,7 +577,7 @@ headline and the entry point its exit code. The dashboard, `--inspect`,
 `lancenuit close`, `clean --keep-failed`, the statistics, the stack stop, the
 signal handler and a composing parent all ask it instead of comparing statuses
 (`tests/runner/run-status-readers.test.ts` refuses a copy). Reading a run has
-one owner as well, `run-record/run-read.ts`: `readRun` returns the snapshot, its
+one owner as well, `run/record/run-read.ts`: `readRun` returns the snapshot, its
 steps reconciled with the journal when the runner died before writing what the
 journal holds, and the status a reader shows; `readRunHistory` returns the
 attempts and events only the journal records. The journal is parsed only for an
@@ -567,16 +591,16 @@ loop and `--run` read through it, and a run is opened for execution by
 (`tests/runner/run-read-readers.test.ts` lists each exception). After an interruption only `finalizeRun`
 still moves the run: it keeps `ABORTED` and completes the outcome, the totals
 and the snapshot, while the other transitions change neither memory nor
-snapshot. Attempt closure (`run-record/attempt-closure.ts`), cost figures
-(`run-record/cost-accounting.ts`) and budget stops (`run-record/cost-stop-events.ts`) keep
+snapshot. Attempt closure (`run/record/attempt-closure.ts`), cost figures
+(`run/record/cost-accounting.ts`) and budget stops (`run/record/cost-stop-events.ts`) keep
 their own owners. The step layer reaches them through three operations of the
-entry: `openAttempt` and `settleAttempt` (`run-record/attempt-lifecycle.ts`)
+entry: `openAttempt` and `settleAttempt` (`run/record/attempt-lifecycle.ts`)
 number, journal and persist an attempt before spawn, then close it, record its
 verdict, charge the ledger, record a live guard's stops and persist it; every
 site about to spend asks `costGate`, which decides and records the stop; and
 `openRunLedger` opens the ledger an execution spends against. The other fields
 the step layer and the entry point move during execution have named operations
-too (`run-record/step-bookkeeping.ts`), each of which writes its field, the
+too (`run/record/step-bookkeeping.ts`), each of which writes its field, the
 journal event that already recorded it, and the snapshot: a retry quota spent or
 given back (`consumeRetry`, `refundRetry`), the session a step continues
 (`bindSession`), a source it could not read (`recordUnavailableSource`, journal
@@ -585,7 +609,7 @@ code in `step/` or `entry/` calls `saveRun`. The persisted child reference of a 
 `runPipeline` or `forEachPipeline` node keeps in the parent snapshot for each
 child call — and the node state that holds them (`openOrchestration`, which
 also records the run's lineage in the snapshot that opens the node, and
-`freezeOrchestrationItems`) move through `run-record/child-transitions.ts` only: declared
+`freezeOrchestrationItems`) move through `run/record/child-transitions.ts` only: declared
 `pending`, committed and bound to a child run id, skipped, failed at launch, or
 settled from the child's own verdict with the `pipeline.child.started` and
 `pipeline.child.finished` events. The composition code
@@ -594,25 +618,25 @@ execution, reconciliation, settlement — and calls those operations, cost
 accounting for the child's spend and `finalizeRun` for its verdict, without
 restating their rules. Restoration
 on resume rebuilds state and is not a transition. Opening a run is one
-operation of the entry, `openRun` (`run-record/run-opening.ts`): it selects the
+operation of the entry, `openRun` (`run/record/run-opening.ts`): it selects the
 run directory, reads the snapshot, projects it with the journal
-(`run-record/run-projection.ts`), merges it with the definition, settles the
+(`run/record/run-projection.ts`), merges it with the definition, settles the
 attempts a crash left open, records this invocation's location and a new
 unmetered authorization, and journals `run.resumed`, or creates the run and
 journals `run.started`; it returns whether it resumed, which the step loop
-reads instead of deriving it again. `step/load-or-create-run.ts` keeps the policy:
+reads instead of deriving it again. `execution/step/load-or-create-run.ts` keeps the policy:
 the definition a snapshot runs against and the selection, which `openRun`
 calls at the point where each applies; it reads the steps and says which to
 exclude or requeue, and `openRun` writes them. Admission journals its skips and the
 unfinished outputs it found through `recordSkip` and `recordUnfinishedOutputs`
-(`run-record/step-bookkeeping.ts`), so nothing outside the module saves the run
+(`run/record/step-bookkeeping.ts`), so nothing outside the module saves the run
 or appends to its journal: neither `saveRun` nor `appendRunEvent` is exported. Which of the snapshot and
 the journal is believed for each concept, and what each crash window leaves behind, is tabled in
 [persistence](persistence.md#which-record-is-authoritative).
 
 Only the module writes a run. The mutable `Run` and `RunStep` are its internals
-(`run-record/run.ts`); everything outside holds a `RunView` and `RunStepView`
-(`model/run.ts`), read-only at every depth — fields, nested records such as the
+(`run/record/run.ts`); everything outside holds a `RunView` and `RunStepView`
+(`run/run.ts`), read-only at every depth — fields, nested records such as the
 outcome, an attempt or a child reference, and lists — and defined from the
 persisted shape rather than from the mutable one. `openRun`, `openAttempt`,
 `openOrchestration` and `declareChild` hand views out; each operation of the
@@ -637,7 +661,7 @@ Three checks hold the rule, and each covers what the one before cannot:
   mutable part of an executing run, nor of a value it carries; the copies a
   reader returns and what a store is given to serialize are listed there, each
   with its reason. And every write in production code outside the module (`src/`
-  without `src/run-record/` and tests) is scanned with the checker: a write whose
+  without `src/run/record/` and tests) is scanned with the checker: a write whose
   object, or any object it was read from, has a run shape — a persisted record,
   a view, a control, a usage, a session, a lineage entry — fails the test, seen
   through casts and through `Object.assign`, `Object.defineProperty` and

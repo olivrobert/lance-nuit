@@ -47,12 +47,12 @@ temp/
 dist/
 *.tgz
 
-# The dashboard front end is bundled from src/modules/ui/app/ by
+# The dashboard front end is bundled from src/dashboard/ui/app/ by
 # `bun run ui:build`; these two files are its output, never a source.
-src/modules/ui/static/app.js
-src/modules/ui/static/app.css
-src/modules/ui/static/app.js.map
-src/modules/ui/static/app.css.map
+src/dashboard/ui/static/app.js
+src/dashboard/ui/static/app.css
+src/dashboard/ui/static/app.js.map
+src/dashboard/ui/static/app.css.map
 
 # Scratch notes (local only)
 .scratch/

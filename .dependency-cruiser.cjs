@@ -1,4 +1,4 @@
-// Executable form of the layering and modules described in guide/architecture.md.
+// Executable form of the contexts, levels and modules described in guide/architecture.md.
 // `bun run deps:check` validates this config, cruises `src/`, then compares the
 // violations to `.dependency-cruiser-known-violations.json` (scripts/check-deps.mjs).
 //
@@ -11,6 +11,7 @@ const {
   LAYERS,
   CONTEXTS,
   MODULES,
+  FACADES,
   moduleRuleName,
   modulePathPattern,
   moduleEntryPattern,
@@ -22,10 +23,10 @@ const {
 // files are whitelisted so a published contract may reuse them. The list is
 // closed, and both files are held to `contracts-no-platform` too, which is what
 // makes the "no platform access" guarantee transitive.
-const PURE_FILES = "^src/contracts/|^src/lib/(truncate|type-assertions)\\.ts$";
+const PURE_FILES = "^src/contracts/|^src/shared/lib/(truncate|type-assertions)\\.ts$";
 
-// One rule per layer: nothing may import from a layer above its own. The top
-// layer (`entry`) has nothing above it, so it yields no rule.
+// One rule per level of `shared`: nothing may import from a level above its own.
+// The top level has nothing above it, so it yields no rule.
 const layerRules = LAYERS.flatMap((layer) => {
   const above = pathAboveLevel(layer.level);
 
@@ -76,6 +77,15 @@ const moduleRules = MODULES.map((module) => {
   };
 });
 
+// A file importing the facade of its own context would be a cycle through it.
+const ownFacadeRules = FACADES.map((facade) => ({
+  name: `context-${facade.name}-no-own-facade`,
+  severity: "error",
+  comment: `${facade.path}/ imports its own files directly; its facade is for other contexts.`,
+  from: { path: modulePathPattern(facade) },
+  to: { path: moduleEntryPattern(facade) },
+}));
+
 module.exports = {
   forbidden: [
     {
@@ -88,6 +98,7 @@ module.exports = {
     ...layerRules,
     ...contextRules,
     ...moduleRules,
+    ...ownFacadeRules,
     {
       name: "contracts-pure",
       severity: "error",
@@ -105,17 +116,19 @@ module.exports = {
     {
       name: "root-dsl-barrel",
       severity: "error",
-      comment: "`src/dsl.ts` is the authoring surface, not an internal barrel.",
-      from: { pathNot: "^src/(project|builtins)/|^src/pipeline/loader\\.ts$" },
-      to: { path: "^src/dsl\\.ts$" },
+      comment: "`src/definition/dsl.ts` is the authoring surface, not an internal barrel.",
+      from: { pathNot: "^src/definition/(project|builtins)/|^src/definition/pipeline/loader\\.ts$" },
+      to: { path: "^src/definition/dsl\\.ts$" },
     },
     {
       name: "composition-only-from-entry",
       severity: "error",
       comment:
         "Default registries are composition: they are wired at the entry point, not imported by the code they serve.",
-      from: { pathNot: "^src/(entry|commands)/" },
-      to: { path: "^src/engine/default-registry\\.ts$|^src/modules/work-item/registry\\.ts$" },
+      from: { pathNot: "^src/entry/|^src/runner\\.ts$|^src/agents/index\\.ts$|^src/work-items/composition\\.ts$" },
+      to: {
+        path: "^src/agents/index\\.ts$|^src/agents/default-registry\\.ts$|^src/work-items/composition\\.ts$|^src/work-items/providers/registry\\.ts$",
+      },
     },
     {
       name: "no-types-barrel",
@@ -131,7 +144,7 @@ module.exports = {
       comment:
         "A storage barrel, `stores/persistence.ts`, hid pipeline loading; it is gone. Import the owning module instead.",
       from: {},
-      to: { path: "^src/run-record/stores/persistence\\.ts$" },
+      to: { path: "^src/run/record/stores/persistence\\.ts$" },
     },
   ],
   options: {
@@ -143,9 +156,9 @@ module.exports = {
       path: [
         "\\.test\\.tsx?$",
         // The dashboard front end has its own build and shares nothing with
-        // the runner; `src/modules/ui/static/app.js` is a build product.
-        "^src/modules/ui/static/",
-        "^src/modules/ui/app/",
+        // the runner; `src/dashboard/ui/static/app.js` is a build product.
+        "^src/dashboard/ui/static/",
+        "^src/dashboard/ui/app/",
       ],
     },
     doNotFollow: { path: "node_modules" },

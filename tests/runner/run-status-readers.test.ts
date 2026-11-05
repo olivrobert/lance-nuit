@@ -1,17 +1,17 @@
 // Every reader of a run status gives the same answer, and none of them keeps its
 // own copy of the rule: what a status means lives in
-// `src/run-record/run-status.ts`, and the `≥` of a partial total in
+// `src/run/record/run-status.ts`, and the `≥` of a partial total in
 // `costIsLowerBound`.
 
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { closeLatestRun } from "../../src/commands/closure.js";
-import { cleanLogs, inspectTicket } from "../../src/commands/diagnostics-readers.js";
-import { loadPipelineConfig } from "../../src/env/config.js";
-import type { PersistedRun } from "../../src/model/persisted.js";
-import { readItem, readRecap, readStats, readSteps } from "../../src/modules/read-model/index.js";
+import { closeLatestRun } from "../../src/entry/commands/closure.js";
+import { cleanLogs, inspectTicket } from "../../src/entry/commands/diagnostics-readers.js";
+import { loadPipelineConfig } from "../../src/shared/env/config.js";
+import type { PersistedRun } from "../../src/run/persisted.js";
+import { readItem, readRecap, readStats, readSteps } from "../../src/dashboard/read-model/index.js";
 import {
   cleanupTempDirs,
   DEAD_PID,
@@ -21,8 +21,8 @@ import {
   writeProjectsFile,
   writeRun,
   writeRunLock,
-} from "../../src/modules/read-model/test-harness.js";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
+} from "../../src/dashboard/read-model/test-harness.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
 
 afterEach(() => cleanupTempDirs());
 
@@ -260,27 +260,27 @@ const COPIES: readonly RegExp[] = [
 
 /** Places that spell statuses without deciding anything with them. */
 const EXCLUDED: ReadonlyArray<[string, string]> = [
-  ["run-record/", "the owner of the rule"],
-  ["model/persisted.ts", "the type that enumerates the statuses"],
+  ["run/record/", "the owner of the rule"],
+  ["run/persisted.ts", "the type that enumerates the statuses"],
   // The browser bundle may import nothing but types from the server: it renders
   // the statuses and the booleans the read model serves.
-  ["modules/ui/app/", "the browser bundle"],
+  ["dashboard/ui/app/", "the browser bundle"],
 ];
 
 /** Lists of statuses that enumerate without classifying, one snippet each. */
 const ALLOWED: ReadonlyArray<{ file: string; snippet: string; reason: string }> = [
   {
-    file: "run-stats/history-schema.ts",
+    file: "run/stats/history-schema.ts",
     snippet: `const RUN_STATS_STATUSES = [\n  "PASS",\n  "FAIL",\n  "STOPPED",\n  "ABORTED",\n  "UNKNOWN",\n]`,
     reason: "the values the history schema accepts",
   },
   {
-    file: "run-stats/stats-core.ts",
+    file: "run/stats/stats-core.ts",
     snippet: `const STATUS_BADGES: Readonly<Record<string, string>> = {\n  PASS: "✅ PASS",\n  FAIL: "❌ FAIL",\n  STOPPED: "⏹ STOPPED",\n  ABORTED: "🛑 ABORTED",\n};`,
     reason: "the console label of each status",
   },
   {
-    file: "commands/stats.ts",
+    file: "entry/commands/stats.ts",
     snippet: `const order = ["PASS", "FAIL", "STOPPED", "ABORTED", "UNKNOWN"];`,
     reason: "the order `stats` prints its counts in",
   },

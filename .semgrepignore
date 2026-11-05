@@ -6,5 +6,5 @@ node_modules/
 # Lockfiles.
 bun.lock
 
-# The dashboard bundle, emitted from src/modules/ui/app/ by `bun run ui:build`.
-src/modules/ui/static/app.js
+# The dashboard bundle, emitted from src/dashboard/ui/app/ by `bun run ui:build`.
+src/dashboard/ui/static/app.js

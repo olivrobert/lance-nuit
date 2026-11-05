@@ -3,9 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
-import { loadPipelineDefinition } from "../../src/pipeline/loader.js";
-import { installProjectTypes, projectTypesDirectory, typecheckProjectPipelines } from "../../src/project/dsl-types.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
+import { loadPipelineDefinition } from "../../src/definition/pipeline/loader.js";
+import {
+  installProjectTypes,
+  projectTypesDirectory,
+  typecheckProjectPipelines,
+} from "../../src/definition/project/dsl-types.js";
 import { builtinRegistries } from "../builtin-registries.ts";
 
 const RUNNER_DIR = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
@@ -58,8 +62,8 @@ test("DSL installation: relative declarations and idempotent reinstall", () => {
 
   expect(second).toBe(first);
   expect(existsSync(join(root, ".lance-nuit", "tsconfig.json"))).toBe(true);
-  expect(first).toContain("project/dsl.d.ts");
-  expect(readFileSync(join(typesDir, "package.json"), "utf8")).toContain('"types": "./project/dsl.d.ts"');
+  expect(first).toContain("definition/project/dsl.d.ts");
+  expect(readFileSync(join(typesDir, "package.json"), "utf8")).toContain('"types": "./definition/project/dsl.d.ts"');
   expect(first).not.toMatch(/\/home\/|\.claude\/plugins\/cache/);
 });
 
@@ -72,9 +76,9 @@ test("DSL installation: only the public declaration graph is installed", () => {
     .filter((entry) => entry.endsWith(".d.ts"))
     .map((entry) => entry.split(sep).join("/"));
 
-  expect(installed).toContain("project/dsl.d.ts");
+  expect(installed).toContain("definition/project/dsl.d.ts");
   // Specialized in place after the copy: pruning must never drop it.
-  expect(installed).toContain("dsl/profiles.d.ts");
+  expect(installed).toContain("definition/dsl/profiles.d.ts");
 
   // Runtime-only subsystems: reachable in the compiled program, absent from the
   // declaration graph. Installing them shipped the runner's internals to every
@@ -164,9 +168,9 @@ test("project typecheck: backend × profile = builtin union project overrides", 
   `,
   );
   expect(typecheckProjectPipelines(configuredRoot)).toMatchObject({ ok: true });
-  expect(readFileSync(join(projectTypesDirectory(configuredRoot), "dsl", "profiles.d.ts"), "utf8")).toContain(
-    'readonly "codex": true',
-  );
+  expect(
+    readFileSync(join(projectTypesDirectory(configuredRoot), "definition", "dsl", "profiles.d.ts"), "utf8"),
+  ).toContain('readonly "codex": true');
 
   const builtinOnlyRoot = project();
   installProjectTypes(builtinOnlyRoot);
@@ -221,7 +225,7 @@ test("project typecheck: a third backend reaches ProjectProfileBackends", async 
   `,
   );
   expect(typecheckProjectPipelines(root)).toMatchObject({ ok: true });
-  const declaration = readFileSync(join(projectTypesDirectory(root), "dsl", "profiles.d.ts"), "utf8");
+  const declaration = readFileSync(join(projectTypesDirectory(root), "definition", "dsl", "profiles.d.ts"), "utf8");
   expect(declaration).toContain('readonly "codex": true');
   expect(declaration).toContain('readonly "opencode": true');
 });
@@ -249,7 +253,7 @@ test("project typecheck: removed profile override invalidates installed declarat
   expect(typecheckProjectPipelines(root)).toMatchObject({ ok: true });
 
   // Public sources did not change: only a hash covering the config can detect that
-  // dsl/profiles.d.ts no longer describes the project's configuration.
+  // definition/dsl/profiles.d.ts no longer describes the project's configuration.
   writeFileSync(configPath, JSON.stringify({ profiles: {} }));
   const stale = typecheckProjectPipelines(root);
   expect(stale.ok).toBe(false);

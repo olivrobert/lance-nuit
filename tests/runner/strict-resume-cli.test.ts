@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { processStartToken } from "../../src/env/lock.ts";
+import { processStartToken } from "../../src/shared/env/lock.ts";
 
 const runnerEntry = resolve(import.meta.dir, "../../src/runner.ts");
 setDefaultTimeout(30_000);

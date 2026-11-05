@@ -22,5 +22,5 @@
     "verbatimModuleSyntax": true,
     "types": ["node", "bun"]
   },
-  "include": ["src/modules/ui/app/**/*.ts", "src/modules/ui/app/**/*.tsx", "src/modules/ui/app/**/*.d.ts"]
+  "include": ["src/dashboard/ui/app/**/*.ts", "src/dashboard/ui/app/**/*.tsx", "src/dashboard/ui/app/**/*.d.ts"]
 }

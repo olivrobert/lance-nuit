@@ -1,16 +1,16 @@
 // Every reader of a run takes it from the run record (`readRun`, `readRunHistory`):
 // a runner that died after its journal recorded a step finished, and before its
 // snapshot did, leaves the same steps and the same attempts in every view, and
-// no code outside `src/run-record/` reads the snapshot or the journal by another
+// no code outside `src/run/record/` reads the snapshot or the journal by another
 // path.
 
 import { afterEach, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { closeLatestRun } from "../../src/commands/closure.js";
-import { inspectTicket } from "../../src/commands/diagnostics-readers.js";
-import { loadPipelineConfig } from "../../src/env/config.js";
+import { closeLatestRun } from "../../src/entry/commands/closure.js";
+import { inspectTicket } from "../../src/entry/commands/diagnostics-readers.js";
+import { loadPipelineConfig } from "../../src/shared/env/config.js";
 import {
   readItem,
   readRecap,
@@ -18,7 +18,7 @@ import {
   readStats,
   readStepDetail,
   readSteps,
-} from "../../src/modules/read-model/index.js";
+} from "../../src/dashboard/read-model/index.js";
 import {
   cleanupTempDirs,
   DEAD_PID,
@@ -29,8 +29,8 @@ import {
   writeRun,
   writeRunEvents,
   writeRunLock,
-} from "../../src/modules/read-model/test-harness.js";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
+} from "../../src/dashboard/read-model/test-harness.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
 
 afterEach(() => cleanupTempDirs());
 
@@ -175,25 +175,25 @@ const RAW_READS =
  * Opening a run to execute it is the run record's (`openRun`): boot names none.
  */
 const ALLOWED: Record<string, string[]> = {
-  "entry/startup.ts": ["FileRunStateStore", "resolveLatestRunSnapshot"],
-  "step/pipeline-orchestration-child.ts": ["FileRunStateStore", '"state.json"'],
+  "entry/composition/startup.ts": ["FileRunStateStore", "resolveLatestRunSnapshot"],
+  "execution/step/pipeline-orchestration-child.ts": ["FileRunStateStore", '"state.json"'],
   // The journal of the run this process just executed, handed to the statistics
   // projection as its event store.
-  "run-stats/run-stats.ts": ["FileRunEventStore"],
+  "run/stats/run-stats.ts": ["FileRunEventStore"],
   // The default store `--inspect`, `--logs` and `clean` list snapshots from;
   // each listed snapshot is then read through `readListedRun`.
-  "commands/diagnostics-readers.ts": ["FileRunStateStore"],
-  "commands/diagnostics.ts": ["FileRunStateStore"],
+  "entry/commands/diagnostics-readers.ts": ["FileRunStateStore"],
+  "entry/commands/diagnostics.ts": ["FileRunStateStore"],
   // The tmux watcher greps the verdict out of the file to close its pane.
-  "output/watcher.ts": ['"state.json"'],
+  "entry/output/watcher.ts": ['"state.json"'],
   // The console report prints where the journal is, for a human to open.
-  "output/run-report.ts": ['"events.jsonl"'],
+  "entry/output/run-report.ts": ['"events.jsonl"'],
 };
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
-    if (entry.isDirectory()) return entry.name === "run-record" && dir === SRC ? [] : sourceFiles(path);
+    if (entry.isDirectory()) return path === join(SRC, "run", "record") ? [] : sourceFiles(path);
     return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
   });
 }
@@ -207,8 +207,10 @@ test("no code outside the run record reads a snapshot or a journal by another pa
   const found: Record<string, string[]> = {};
   for (const file of sourceFiles(SRC)) {
     const name = relative(SRC, file);
+    // A facade re-exports the readers; it reads nothing.
+    if (name === "run/index.ts") continue;
     // Fixture writers for the read model's tests, never loaded by the runner.
-    if (name === "modules/read-model/test-harness.ts") continue;
+    if (name === "dashboard/read-model/test-harness.ts") continue;
     const reads = [...new Set(code(readFileSync(file, "utf-8")).match(RAW_READS) ?? [])].sort();
     if (reads.length > 0) found[name] = reads;
   }

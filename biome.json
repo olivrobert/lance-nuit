@@ -10,8 +10,8 @@
       "!!.claude",
       "!!.scratch",
       "!!.ia",
-      "!!src/modules/ui/static/app.js",
-      "!!src/modules/ui/static/app.css",
+      "!!src/dashboard/ui/static/app.js",
+      "!!src/dashboard/ui/static/app.css",
       "!!.dependency-cruiser-known-violations.json",
       "!!.dependency-cruiser-known-folder-cycles.json"
     ]

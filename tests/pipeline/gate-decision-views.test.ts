@@ -4,10 +4,10 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
-import { inspectTicket } from "../../src/commands/diagnostics-readers.js";
-import { textArtifact } from "../../src/dsl/artifact.js";
-import type { ApprovalState } from "../../src/modules/read-model/index.js";
-import { listItems } from "../../src/modules/read-model/index.js";
+import { inspectTicket } from "../../src/entry/commands/diagnostics-readers.js";
+import { textArtifact } from "../../src/definition/dsl/artifact.js";
+import type { ApprovalState } from "../../src/dashboard/read-model/index.js";
+import { listItems } from "../../src/dashboard/read-model/index.js";
 import {
   cleanupTempDirs,
   makeProject,
@@ -16,9 +16,9 @@ import {
   writeArtifact,
   writeProjectsFile,
   writeRun,
-} from "../../src/modules/read-model/test-harness.js";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
-import { recordApproval, recordRejection } from "../../src/work-item-store/index.js";
+} from "../../src/dashboard/read-model/test-harness.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
+import { recordApproval, recordRejection } from "../../src/work-items/store/index.js";
 
 const originalHome = process.env.PIPELINE_HOME;
 

@@ -9,7 +9,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 
 export default [
   {
-    // `src/modules/ui/static/app.js` is the emitted dashboard bundle, not a
+    // `src/dashboard/ui/static/app.js` is the emitted dashboard bundle, not a
     // source: it is built by `bun run ui:build` and is git-ignored.
     ignores: [
       "dist/**",
@@ -18,7 +18,7 @@ export default [
       ".scratch/**",
       ".ia/**",
       "node_modules/**",
-      "src/modules/ui/static/app.js",
+      "src/dashboard/ui/static/app.js",
     ],
   },
   {
@@ -42,18 +42,18 @@ export default [
     // family — no ref read during render, no state set in an effect body, no
     // impure call during render — which are the mistakes a growing UI makes.
     ...reactHooks.configs.flat["recommended-latest"],
-    files: ["src/modules/ui/app/**/*.ts", "src/modules/ui/app/**/*.tsx"],
+    files: ["src/dashboard/ui/app/**/*.ts", "src/dashboard/ui/app/**/*.tsx"],
   },
   {
-    // Only the run record writes a run. Outside `src/run-record/` a run is a
-    // `RunView`, read-only at every depth (`model/run.ts`), and `tsc` refuses a
+    // Only the run record writes a run. Outside `src/run/record/` a run is a
+    // `RunView`, read-only at every depth (`run/run.ts`), and `tsc` refuses a
     // write through it. An assertion back to a mutable run or record would turn
     // the view writable, so it is refused here; the writes `tsc` still accepts
     // (a view given to a mutable value type, `Object.assign`) are refused by the
     // scan of `tests/runner/run-view-readonly.test.ts`. Tests set fixtures up
-    // through the module's internals instead (`run-record/run.ts`, `writable`).
+    // through the module's internals instead (`run/record/run.ts`, `writable`).
     files: ["src/**/*.ts", "src/**/*.tsx"],
-    ignores: ["src/run-record/**", "**/*.test.ts", "**/*.test.tsx"],
+    ignores: ["src/run/record/**", "**/*.test.ts", "**/*.test.tsx"],
     rules: {
       "no-restricted-syntax": [
         "error",
@@ -61,7 +61,7 @@ export default [
           ["", "TSArrayType > "].map((array) => ({
             selector: `${assertion} > ${array}TSTypeReference > Identifier.typeName[name=/^(Run|RunStep|PersistedRun|PersistedStepState|PersistedAttempt|PersistedPipelineChildRef|PersistedPipelineOrchestrationState)$/]`,
             message:
-              "only src/run-record/ writes a run: keep the RunView and hand it to a run-record operation instead of asserting it mutable",
+              "only src/run/record/ writes a run: keep the RunView and hand it to a run-record operation instead of asserting it mutable",
           })),
         ),
       ],
@@ -75,7 +75,7 @@ export default [
     // computed specifier no import graph can follow. The two `lib/` files are
     // the closed whitelist of `contracts-pure`, held to the same bar so that the
     // guarantee stays transitive.
-    files: ["src/contracts/**/*.ts", "src/lib/truncate.ts", "src/lib/type-assertions.ts"],
+    files: ["src/contracts/**/*.ts", "src/shared/lib/truncate.ts", "src/shared/lib/type-assertions.ts"],
     rules: {
       "no-restricted-globals": [
         "error",

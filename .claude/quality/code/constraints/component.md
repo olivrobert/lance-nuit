@@ -1,13 +1,13 @@
 ---
 paths:
-  - "src/modules/ui/app/**/*.tsx"
+  - "src/dashboard/ui/app/**/*.tsx"
 exclude:
-  - "src/modules/ui/app/index.tsx"
+  - "src/dashboard/ui/app/index.tsx"
 ---
 
 # Constraints — Dashboard React components
 
-Scope: `src/modules/ui/app/**/*.tsx` matching `React function component returning JSX, typed `JSX.Element`, rendering read-model shapes in the local dashboard.`.
+Scope: `src/dashboard/ui/app/**/*.tsx` matching `React function component returning JSX, typed `JSX.Element`, rendering read-model shapes in the local dashboard.`.
 
 Tooling checked: `biome.json`, `eslint.config.mjs`, `tsconfig.ui.json`, `package.json`. None of the rules below are covered by this tooling.
 

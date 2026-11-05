@@ -1,0 +1,406 @@
+import { afterEach, expect, test } from "bun:test";
+import { join } from "node:path";
+import { createDefaultWorkItemGatewayRegistry } from "../../work-items/providers/registry.ts";
+import { cleanupTempDirs, makeProject } from "../read-model/test-harness.js";
+import type { CoderSessionRead, Item, ProjectEntry } from "../read-model/index.js";
+import { ViewerRegistry } from "./terminal-viewers.js";
+import {
+  hasClaudeCli,
+  isSessionId,
+  listTerminals,
+  type OpenSessionDeps,
+  openCoderSession,
+  operatorCommand,
+  type PaneCommandBuilder,
+  paneShell,
+  resumeCoderCommand,
+  type SessionCommandBuilder,
+  sessionName,
+  shellJoin,
+  shellQuote,
+  type StartRunDeps,
+  startRun,
+  ticketForProject,
+} from "./terminals.js";
+import { FakeAttach, FakeTmuxServer } from "./test-harness.js";
+
+afterEach(() => cleanupTempDirs());
+
+const echoCommand: PaneCommandBuilder = (run) => ({ ok: true, words: ["echo", `run ${run.ticket}`] });
+
+function project(): ProjectEntry {
+  const cwd = makeProject("demo-app");
+  return { name: "demo-app", cwd, provider: "jira", key: "PROJ", specPath: ".lance-nuit/work-items", found: true };
+}
+
+function deps(server: FakeTmuxServer, overrides: Partial<StartRunDeps> = {}): StartRunDeps {
+  return {
+    tmux: server.tmux(),
+    workItems: createDefaultWorkItemGatewayRegistry(),
+    listPipelines: () => ["default", "feature"],
+    findItem: async () => undefined,
+    paneCommand: echoCommand,
+    shell: "/bin/bash",
+    now: () => new Date("2026-09-24T08:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+const request = (entry: ProjectEntry, overrides: Record<string, unknown> = {}) => ({
+  project: entry,
+  ticket: "PROJ-12",
+  pipeline: "feature",
+  worktree: true,
+  by: "Olivier",
+  ...overrides,
+});
+
+test("naming: a session name keeps only tmux-safe characters, and ids are checked", () => {
+  expect(sessionName("demo.app", "PROJ-12")).toBe("ln-demo_app-PROJ-12");
+  expect(isSessionId("ln-demo_app-PROJ-12")).toBe(true);
+  expect(isSessionId("ln-a:b")).toBe(false);
+  expect(isSessionId("other")).toBe(false);
+});
+
+test("quoting: a word with shell syntax stays one word", () => {
+  expect(shellQuote("it's")).toBe(`'it'\\''s'`);
+  expect(shellJoin(["claude", "--agent", "x", "a b; rm -rf /"])).toBe(`claude --agent x 'a b; rm -rf /'`);
+});
+
+test("shell: $SHELL when it is a plain absolute path, bash otherwise", () => {
+  expect(paneShell({ SHELL: "/usr/bin/zsh" })).toBe("/usr/bin/zsh");
+  expect(paneShell({ SHELL: "zsh" })).toBe("/bin/bash");
+  expect(paneShell({ SHELL: "/bin/sh -c evil" })).toBe("/bin/bash");
+  expect(paneShell({})).toBe("/bin/bash");
+});
+
+test("operator: the claude CLI is looked up on PATH, and the prompt names the run", () => {
+  expect(hasClaudeCli(() => null)).toBe(false);
+  expect(hasClaudeCli(() => "/usr/local/bin/claude")).toBe(true);
+
+  const built = operatorCommand({ ticket: "PROJ-12", pipeline: "feature", worktree: true });
+  if (!hasClaudeCli()) {
+    expect(built).toEqual({ ok: false, status: 503, reason: "claude CLI not found" });
+    return;
+  }
+  expect(built).toEqual({
+    ok: true,
+    words: [
+      "claude",
+      "--agent",
+      "lancenuit-operator",
+      "Lance la pipeline : lancenuit run PROJ-12 --pipeline feature --worktree",
+    ],
+  });
+});
+
+test("start: the session runs the shell in the project, then the command is typed and entered", async () => {
+  const server = new FakeTmuxServer();
+  const entry = project();
+  const started = await startRun(request(entry), deps(server));
+
+  expect(started).toEqual({
+    ok: true,
+    terminal: {
+      id: "ln-demo-app-PROJ-12",
+      kind: "run",
+      project: "demo-app",
+      ticket: "PROJ-12",
+      pipeline: "feature",
+      worktree: true,
+      by: "Olivier",
+      createdAt: "2026-09-24T08:00:00.000Z",
+      command: "echo 'run PROJ-12'",
+      attach: "tmux -L fake attach -t ln-demo-app-PROJ-12",
+    },
+  });
+  const session = server.sessions.get("ln-demo-app-PROJ-12");
+  expect(session?.cwd).toBe(entry.cwd);
+  expect(session?.shell).toBe("/bin/bash");
+  expect(session?.env).toEqual({ LANCENUIT_ACTOR: "Olivier" });
+  expect(session?.typed).toEqual(["echo 'run PROJ-12'", "<Enter>"]);
+  // Every target is exact, so `ln-demo` never acts on `ln-demo-2`.
+  const targets = server.calls.flatMap((call) => call.filter((_, i) => call[i - 1] === "-t"));
+  expect(targets.every((value) => value.startsWith("="))).toBe(true);
+
+  const listed = await listTerminals(server.tmux());
+  expect(listed).toEqual([started.ok ? started.terminal : (undefined as never)]);
+});
+
+test("ref prefix: a ticket of another project is refused, the prefix's case is the tracker's", () => {
+  expect(ticketForProject("PROJ", "proj-12")).toBe("PROJ-12");
+  expect(ticketForProject("PROJ", "PROJ-12")).toBe("PROJ-12");
+  expect(ticketForProject("PROJ", "FOOD-12")).toBeUndefined();
+  expect(ticketForProject("PROJ", "PROJECT-12")).toBeUndefined();
+  expect(ticketForProject(undefined, "anything-1")).toBe("anything-1");
+});
+
+test("start: a GitHub project takes a bare issue number, not its owner/repo as a prefix", async () => {
+  const cwd = makeProject("gh-app", { provider: "github", project: "owner/repo" });
+  const entry: ProjectEntry = {
+    name: "gh-app",
+    cwd,
+    provider: "github",
+    key: "owner/repo",
+    specPath: ".lance-nuit/work-items",
+    found: true,
+  };
+  const server = new FakeTmuxServer();
+  const started = await startRun(request(entry, { ticket: "123" }), deps(server));
+  expect(started.ok && started.terminal.ticket).toBe("123");
+  const refused = await startRun(request(entry, { ticket: "PROJ-12" }), deps(new FakeTmuxServer()));
+  expect(refused.ok).toBe(false);
+});
+
+test("start: a ticket typed in lowercase starts the run on the tracker's spelling", async () => {
+  const server = new FakeTmuxServer();
+  const result = await startRun(request(project(), { ticket: "proj-7" }), deps(server));
+  expect(result.ok && result.terminal.ticket).toBe("PROJ-7");
+});
+
+test("start: refusals come before any session exists", async () => {
+  const entry = project();
+  const cases: Array<[Record<string, unknown>, Partial<StartRunDeps>, number]> = [
+    [{ ticket: "../x" }, {}, 400],
+    [{ ticket: "PROJ" }, {}, 400],
+    [{ ticket: "FOOD-1" }, {}, 400],
+    [{ pipeline: "Nope/x" }, {}, 400],
+    [{ pipeline: "deploy" }, {}, 400],
+    [{}, { paneCommand: () => ({ ok: false, status: 503, reason: "claude CLI not found" }) }, 503],
+    [{}, { findItem: async () => ({ status: "RUNNING" }) as Item }, 409],
+  ];
+  for (const [overrides, depOverrides, status] of cases) {
+    const server = new FakeTmuxServer();
+    const result = await startRun(request(entry, overrides), deps(server, depOverrides));
+    expect(result.ok ? 0 : result.status).toBe(status);
+    expect(server.sessions.size).toBe(0);
+  }
+});
+
+test("start: no tmux is 503, and an open session is 409 with that terminal", async () => {
+  const entry = project();
+  const absent = new FakeTmuxServer();
+  absent.missing = true;
+  expect(await startRun(request(entry), deps(absent))).toEqual({
+    ok: false,
+    status: 503,
+    reason: "tmux is not installed",
+  });
+
+  const server = new FakeTmuxServer();
+  const first = await startRun(request(entry), deps(server));
+  const second = await startRun(request(entry, { pipeline: "default" }), deps(server));
+  expect(second.ok).toBe(false);
+  if (second.ok || !first.ok) throw new Error("unexpected");
+  expect(second.status).toBe(409);
+  expect(second.terminal).toEqual(first.terminal);
+});
+
+test("start: a session left half-made by a failing tmux call is removed", async () => {
+  const server = new FakeTmuxServer();
+  server.failOn = "send-keys";
+  const result = await startRun(request(project()), deps(server));
+  expect(result.ok ? 0 : result.status).toBe(500);
+  expect(server.sessions.size).toBe(0);
+});
+
+test("list: sessions without our metadata are not terminals", async () => {
+  const server = new FakeTmuxServer();
+  server.addForeignSession("ln-hand-made");
+  expect(await listTerminals(server.tmux())).toEqual([]);
+  expect(await listTerminals(new FakeTmuxServer().tmux())).toEqual([]);
+});
+
+test("viewers: input and resize need the token of a viewer of that terminal", () => {
+  const attach = new FakeAttach();
+  const registry = new ViewerRegistry(attach.spawner);
+  const exits: string[] = [];
+  const opened = registry.open({
+    terminal: "ln-a",
+    argv: ["tmux", "attach"],
+    cols: 80,
+    rows: 24,
+    onData: () => {},
+    onExit: () => exits.push("a"),
+  });
+
+  expect(opened.viewer).toMatch(/^[A-Za-z0-9_-]{32}$/);
+  expect(registry.input("ln-a", opened.viewer, "ls\r")).toBe(true);
+  expect(registry.input("ln-b", opened.viewer, "ls\r")).toBe(false);
+  expect(registry.input("ln-a", "guess", "ls\r")).toBe(false);
+  expect(registry.resize("ln-a", opened.viewer, 120, 40)).toBe(true);
+  expect(attach.clients[0]?.written).toEqual(["ls\r"]);
+  expect(attach.clients[0]?.sizes).toEqual([
+    [80, 24],
+    [120, 40],
+  ]);
+
+  opened.close();
+  expect(attach.clients[0]?.closed).toBe(true);
+  expect(exits).toEqual(["a"]);
+  expect(registry.size).toBe(0);
+  expect(registry.input("ln-a", opened.viewer, "x")).toBe(false);
+});
+
+test("viewers: a client that ends on its own leaves the registry, and closeAll detaches the rest", () => {
+  const attach = new FakeAttach();
+  const registry = new ViewerRegistry(attach.spawner);
+  const open = () =>
+    registry.open({ terminal: "ln-a", argv: [], cols: 1, rows: 1, onData: () => {}, onExit: () => {} });
+  open();
+  open();
+  attach.clients[0]?.exit();
+  expect(registry.size).toBe(1);
+  registry.closeAll();
+  expect(registry.size).toBe(0);
+  expect(attach.clients[1]?.closed).toBe(true);
+});
+
+const echoSession: SessionCommandBuilder = (session, { readOnly }) => ({
+  ok: true,
+  words: ["echo", `resume ${session.sessionId}${readOnly ? " read-only" : ""}`],
+});
+
+function coderSession(cwd: string, overrides: Partial<CoderSessionRead> = {}): CoderSessionRead {
+  return {
+    pipeline: "feature",
+    runId: "r-1",
+    status: "FAIL",
+    stepId: "code",
+    provider: "claude",
+    sessionId: "0b5f7c3e-1111-4222-8333-444455556666",
+    cwd,
+    worktree: true,
+    ...overrides,
+  };
+}
+
+function sessionDeps(server: FakeTmuxServer, overrides: Partial<OpenSessionDeps> = {}): OpenSessionDeps {
+  return {
+    tmux: server.tmux(),
+    findSession: (entry) => coderSession(entry.cwd),
+    findStepSession: (entry, _ticket, { stepId }) => coderSession(entry.cwd, { stepId }),
+    findItem: async () => undefined,
+    sessionCommand: echoSession,
+    shell: "/bin/bash",
+    now: () => new Date("2026-09-24T08:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+test("session: the coder session opens in the run's directory, beside the run terminal", async () => {
+  const server = new FakeTmuxServer();
+  const entry = project();
+  await startRun(request(entry), deps(server));
+  const opened = await openCoderSession({ project: entry, ticket: "PROJ-12", by: "Olivier" }, sessionDeps(server));
+
+  expect(opened).toEqual({
+    ok: true,
+    terminal: {
+      id: "ln-demo-app-PROJ-12__coder",
+      kind: "session",
+      project: "demo-app",
+      ticket: "PROJ-12",
+      pipeline: "feature",
+      worktree: true,
+      by: "Olivier",
+      createdAt: "2026-09-24T08:00:00.000Z",
+      command: "echo 'resume 0b5f7c3e-1111-4222-8333-444455556666'",
+      attach: "tmux -L fake attach -t ln-demo-app-PROJ-12__coder",
+    },
+  });
+  expect(server.sessions.get("ln-demo-app-PROJ-12__coder")?.cwd).toBe(entry.cwd);
+  const kinds = (await listTerminals(server.tmux()))?.map((terminal) => [terminal.id, terminal.kind]);
+  expect(kinds).toEqual([
+    ["ln-demo-app-PROJ-12", "run"],
+    ["ln-demo-app-PROJ-12__coder", "session"],
+  ]);
+
+  const again = await openCoderSession({ project: entry, ticket: "PROJ-12", by: "Olivier" }, sessionDeps(server));
+  expect(again.ok ? undefined : again.status).toBe(409);
+  expect(again.ok ? undefined : again.terminal?.id).toBe("ln-demo-app-PROJ-12__coder");
+});
+
+test("session: refused without a session, while the run runs, and once its directory is gone", async () => {
+  const server = new FakeTmuxServer();
+  const entry = project();
+  const open = (overrides: Partial<OpenSessionDeps>) =>
+    openCoderSession({ project: entry, ticket: "PROJ-12", by: "Olivier" }, sessionDeps(server, overrides));
+  const statusOf = (result: Awaited<ReturnType<typeof open>>) => (result.ok ? 201 : result.status);
+
+  expect(statusOf(await openCoderSession({ project: entry, ticket: "", by: "Olivier" }, sessionDeps(server)))).toBe(
+    400,
+  );
+  expect(statusOf(await open({ findSession: () => undefined }))).toBe(404);
+  expect(statusOf(await open({ findSession: () => coderSession(entry.cwd, { status: "RUNNING" }) }))).toBe(409);
+  const launched = { status: "FAIL", launch: { alive: true } } as unknown as Item;
+  expect(statusOf(await open({ findItem: async () => launched }))).toBe(409);
+  const gone = await open({ findSession: () => coderSession(join(entry.cwd, "removed-worktree")) });
+  expect(gone.ok ? "" : gone.reason).toContain("no longer exists");
+  expect(statusOf(await open({ sessionCommand: () => ({ ok: false, status: 503, reason: "no claude" }) }))).toBe(503);
+  expect(server.sessions.size).toBe(0);
+});
+
+test("session: a step attempt's session opens in a terminal of its own, read-only while the run runs", async () => {
+  const server = new FakeTmuxServer();
+  const entry = project();
+  const asked: unknown[] = [];
+  const running = sessionDeps(server, {
+    findStepSession: (where, ticket, target) => {
+      asked.push([ticket, target]);
+      return coderSession(where.cwd, { status: "RUNNING", stepId: target.stepId });
+    },
+  });
+  const opened = await openCoderSession(
+    { project: entry, ticket: "PROJ-12", step: "review", attempt: 2, by: "Olivier" },
+    running,
+  );
+
+  expect(asked).toEqual([["PROJ-12", { stepId: "review", attempt: 2 }]]);
+  expect(opened.ok ? opened.terminal : undefined).toMatchObject({
+    id: "ln-demo-app-PROJ-12__review-2",
+    kind: "session",
+    command: "echo 'resume 0b5f7c3e-1111-4222-8333-444455556666 read-only'",
+  });
+
+  const stopped = await openCoderSession(
+    { project: entry, ticket: "PROJ-12", step: "review", attempt: 1, by: "Olivier" },
+    sessionDeps(server),
+  );
+  expect(stopped.ok ? stopped.terminal.command : "").toBe("echo 'resume 0b5f7c3e-1111-4222-8333-444455556666'");
+});
+
+test("session: a step attempt that is malformed or left no session is refused", async () => {
+  const server = new FakeTmuxServer();
+  const entry = project();
+  const open = (step: unknown, attempt: unknown, overrides: Partial<OpenSessionDeps> = {}) =>
+    openCoderSession(
+      { project: entry, ticket: "PROJ-12", step, attempt, by: "Olivier" },
+      sessionDeps(server, overrides),
+    );
+  const statusOf = (result: Awaited<ReturnType<typeof open>>) => (result.ok ? 201 : result.status);
+
+  expect(statusOf(await open("review", undefined))).toBe(400);
+  expect(statusOf(await open("review", 0))).toBe(400);
+  expect(statusOf(await open("", 1))).toBe(400);
+  const none = await open("review", 1, { findStepSession: () => undefined });
+  expect(none.ok ? "" : none.reason).toBe("attempt 1 of step review has no agent session to reopen");
+  expect(server.sessions.size).toBe(0);
+});
+
+test("session command: a forked Claude resume, and nothing for another provider or a bad id", () => {
+  const id = "0b5f7c3e-1111-4222-8333-444455556666";
+  const writable = { readOnly: false };
+  expect(resumeCoderCommand({ provider: "codex", sessionId: id }, writable)).toMatchObject({ ok: false, status: 409 });
+  expect(resumeCoderCommand({ provider: "claude", sessionId: "x; rm -rf /" }, writable)).toMatchObject({ ok: false });
+  const built = resumeCoderCommand({ provider: "claude", sessionId: id }, writable);
+  if (!hasClaudeCli()) {
+    expect(built).toEqual({ ok: false, status: 503, reason: "claude CLI not found" });
+    return;
+  }
+  expect(built).toEqual({ ok: true, words: ["claude", "--resume", id, "--fork-session"] });
+  expect(resumeCoderCommand({ provider: "claude", sessionId: id }, { readOnly: true })).toEqual({
+    ok: true,
+    words: ["claude", "--resume", id, "--fork-session", "--permission-mode", "plan"],
+  });
+});

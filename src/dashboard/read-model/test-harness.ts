@@ -1,0 +1,154 @@
+// Fixture builder shared by the read-model tests: a disposable kit home, a
+// project tree, and work items whose runs are written exactly as the runner
+// writes them (`runs/<pipeline>/<runId>/state.json` plus the `latest` link).
+
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import type { PersistedRun } from "../../run/index.js";
+
+export const SPEC_PATH = ".lance-nuit/work-items";
+
+const created: string[] = [];
+
+export function makeTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  created.push(dir);
+  return dir;
+}
+
+export function cleanupTempDirs(): void {
+  for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
+}
+
+function writeJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/** `~/.lance-nuit/ui/projects.json` as the dashboard writes it. */
+export function writeProjectsFile(home: string, paths: string[]): void {
+  writeJson(join(home, "ui", "projects.json"), { projects: paths.map((path) => ({ path })) });
+}
+
+export interface ProjectConfigOptions {
+  provider?: string;
+  project?: string;
+  baseUrl?: string;
+}
+
+export function makeProject(name: string, config: ProjectConfigOptions = {}): string {
+  const root = join(makeTempDir("read-model-project-"), name);
+  mkdirSync(root, { recursive: true });
+  writeJson(join(root, ".lance-nuit", "config.json"), {
+    workItem: {
+      provider: config.provider ?? "jira",
+      project: config.project ?? "PROJ",
+      ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
+    },
+  });
+  return root;
+}
+
+export function workItemDir(root: string, ticket: string): string {
+  return join(root, SPEC_PATH, ticket);
+}
+
+/** A worktree as `--worktree` provisions it: its work item is a link to the main
+ *  clone's, never a copy (`entry/env/worktree.ts`). Returns the worktree path. */
+export function linkWorktree(root: string, ticket: string): string {
+  const worktree = join(makeTempDir("read-model-worktree-"), "demo-app");
+  const shared = workItemDir(root, ticket);
+  mkdirSync(shared, { recursive: true });
+  const link = workItemDir(worktree, ticket);
+  mkdirSync(dirname(link), { recursive: true });
+  symlinkSync(shared, link);
+  return worktree;
+}
+
+export interface RunFixture extends Partial<PersistedRun> {
+  runId: string;
+}
+
+/** Write one run and point `latest` at it. Writing two runs for the same
+ *  pipeline moves the link, exactly as a resume or a `--fresh` run does. */
+export function writeRun(root: string, ticket: string, pipeline: string, run: RunFixture): string {
+  const pipelineDir = join(workItemDir(root, ticket), "runs", pipeline);
+  const runDir = join(pipelineDir, run.runId);
+  mkdirSync(runDir, { recursive: true });
+  const state: PersistedRun = {
+    schemaVersion: 1,
+    name: pipeline,
+    pipeline,
+    ticket,
+    steps: [],
+    ...run,
+  };
+  writeJson(join(runDir, "state.json"), state);
+  const link = join(pipelineDir, "latest");
+  rmSync(link, { force: true });
+  symlinkSync(run.runId, link);
+  return runDir;
+}
+
+export function writeArtifact(root: string, ticket: string, name: string, body: string): void {
+  writeWorkItemFile(root, ticket, join("artifacts", name), body);
+}
+
+/** Any file of a work item, addressed the way the explorer addresses it. Returns
+ *  its absolute path. */
+export function writeWorkItemFile(root: string, ticket: string, relativePath: string, body: string): string {
+  const path = join(workItemDir(root, ticket), relativePath);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, body);
+  return path;
+}
+
+/** The run journal, one JSON object per line, as the runner appends it. */
+export function writeRunEvents(runDir: string, events: Record<string, unknown>[]): void {
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+}
+
+/** A pid no process can hold: a just-exited child would do too, until the
+ *  kernel recycles its pid for an unrelated process. */
+export const DEAD_PID = 2147483646;
+
+/** `runner.lock` as the runner claims it, pid only so liveness is a pid probe.
+ *  A live holder must be `process.ppid`: the runner reads its own pid as "ours"
+ *  and never as a foreign holder. */
+export function writeRunLock(runDir: string, pid: number): void {
+  writeJson(join(runDir, "runner.lock"), { pid });
+}
+
+/** An approval decision locked to `body`; pass the body the artifact had when it
+ *  was approved to build a stale one. The hash is computed here, not borrowed
+ *  from the runner: the fixture states the file format, the code under test
+ *  must read it. */
+export function writeDecision(
+  root: string,
+  ticket: string,
+  subject: string,
+  artifact: string,
+  body: string,
+  rejection?: { reason: string; round: number },
+): void {
+  writeJson(join(workItemDir(root, ticket), "decisions", `${subject}.json`), {
+    schemaVersion: 1,
+    decision: rejection ? "rejected" : "approved",
+    subject,
+    artifact: `artifacts/${artifact}`,
+    artifactSha256: createHash("sha256").update(body).digest("hex"),
+    decidedAt: "2026-09-05T08:00:00.000Z",
+    decidedBy: "Olivier",
+    ...(rejection ?? {}),
+  });
+}
+
+/** One line of the central history, reduced to the fields the read model uses. */
+export function writeHistory(root: string, entries: Record<string, unknown>[]): void {
+  const path = join(root, ".lance-nuit", "pipeline-history", "runs.jsonl");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+}

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { MAX_ERROR_CHARS, MAX_STEP_OUTPUT_CHARS, truncate, truncateMiddle } from "../../src/lib/truncate.js";
+import { MAX_ERROR_CHARS, MAX_STEP_OUTPUT_CHARS, truncate, truncateMiddle } from "../../src/shared/lib/truncate.js";
 
 test("truncate: short text unchanged", () => {
   expect(truncate("court")).toBe("court");

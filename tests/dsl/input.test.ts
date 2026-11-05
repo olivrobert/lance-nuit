@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { artifact } from "../../src/dsl/artifact.js";
+import { artifact } from "../../src/definition/dsl/artifact.js";
 import {
   fail,
   failIf,
@@ -13,10 +13,10 @@ import {
   stopIf,
   stopUnless,
   stopUnlessCommand,
-} from "../../src/dsl/input.js";
-import { bashStep } from "../../src/dsl.js";
-import type { ArtifactRef, WorkItemArtifactStore } from "../../src/model/artifact-ports.js";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
+} from "../../src/definition/dsl/input.js";
+import { bashStep } from "../../src/definition/dsl.js";
+import type { ArtifactRef, WorkItemArtifactStore } from "../../src/shared/language/artifact-ports.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
 
 const ctx = buildPipelineContext();
 

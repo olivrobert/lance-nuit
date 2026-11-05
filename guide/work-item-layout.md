@@ -39,7 +39,7 @@ In TypeScript pipelines, `ctx.ticketDir` is the resolved path and `ctx.ticket` i
 the original identifier. `ctx.paths.artifactsDir`, `reportsDir`, and
 `decisionsDir` are the canonical subdirectories; use artifact descriptors or
 `ctx.artifacts` instead of assembling artifact paths manually. Inside the
-runner, `workItemLayout` (`src/work-item-store/layout.ts`) is the one place these
+runner, `workItemLayout` (`src/work-items/store/layout.ts`) is the one place these
 names are spelled: the context and the dashboard both derive them from it. The
 relative reference a decision, a provenance record or a gate stop persists for
 an artifact (`artifacts/<name>`) is spelled once too, by `artifactKey` beside it.

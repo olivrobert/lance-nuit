@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { artifact, textArtifact } from "../../src/dsl/artifact.js";
-import { bashStep } from "../../src/dsl.js";
-import type { WorkItemArtifactStore } from "../../src/model/artifact-ports.js";
-import type { PipelineContext } from "../../src/model/context.js";
+import { artifact, textArtifact } from "../../src/definition/dsl/artifact.js";
+import { bashStep } from "../../src/definition/dsl.js";
+import type { WorkItemArtifactStore } from "../../src/shared/language/artifact-ports.js";
+import type { PipelineContext } from "../../src/shared/language/context.js";
 
 function fixture(initial?: unknown) {
   let value = initial === undefined ? undefined : JSON.stringify(initial);

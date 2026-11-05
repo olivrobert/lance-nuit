@@ -1,5 +1,5 @@
-// The installed DSL declarations are compiled transitively from `project/dsl.ts`.
-// The runtime schemas (`run-record/schema.ts`, `env/config.schema.ts`) import zod; a
+// The installed DSL declarations are compiled transitively from `definition/project/dsl.ts`.
+// The runtime schemas (`run/record/schema.ts`, `shared/env/config.schema.ts`) import zod; a
 // public type written as `z.infer<...>` would drag `import "zod"` into a project
 // that never installed it. The interfaces stay hand-written, and this test is the
 // contract: no declaration reachable from the DSL entry point mentions zod.
@@ -7,12 +7,12 @@
 // The emitted tree also holds declarations nothing public reaches (the schema
 // modules themselves, for one). They are inert: the kit tsconfig only includes
 // `pipelines/**`, so a file enters a project's typecheck through an import chain
-// from `project/dsl.d.ts` or not at all. The walk below follows that chain.
+// from `definition/project/dsl.d.ts` or not at all. The walk below follows that chain.
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { DECLARATIONS_ENTRY, generateDslDeclarations } from "../../src/project/dsl-types/declarations.ts";
+import { DECLARATIONS_ENTRY, generateDslDeclarations } from "../../src/definition/project/dsl-types/declarations.ts";
 
 setDefaultTimeout(30_000);
 
@@ -68,13 +68,13 @@ test("declarations reachable from the DSL entry point never name ambient node ty
   expect(offenders).toEqual([]);
 });
 
-// The kit typecheck sees `llmStep` options through the installed `dsl/dsl-types.d.ts`,
+// The kit typecheck sees `llmStep` options through the installed `definition/dsl/dsl-types.d.ts`,
 // and `LlmStepOptions` is an intersection whose non-variant members must carry
 // every author-facing field. A field present in the source but absent here is
 // exactly what a project pipeline reports as TS2353 "'capture' does not exist".
 test("the installed LlmStepOptions declaration carries its author-facing fields", () => {
   const surface = publicSurface("dsl-declarations-llm-options-");
-  const options = surface.get(join("dsl", "dsl-types.d.ts"));
+  const options = surface.get(join("definition", "dsl", "dsl-types.d.ts"));
   expect(options).toBeDefined();
   const declaration = options!.slice(options!.indexOf("export type LlmStepOptions<"));
   for (const field of [

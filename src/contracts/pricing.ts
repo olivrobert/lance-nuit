@@ -3,8 +3,8 @@
 // Rate table shapes and the pure pricing rules. This module is published as
 // `lance-nuit/contracts` and installed as a DSL declaration: it has no runtime
 // dependency and performs no I/O. Reading the kit chain and caching the result
-// live in `env/pricing.ts`, which passes the layers back in through
-// `mergePricingLayers`; the shape check lives in `env/pricing.schema.ts`, so
+// live in `shared/env/pricing.ts`, which passes the layers back in through
+// `mergePricingLayers`; the shape check lives in `shared/env/pricing.schema.ts`, so
 // that no `import "zod"` reaches a project that never installed it. `bun run
 // lint` enforces both (`contracts-pure`, `contracts-no-platform`).
 import type { ModelPricing } from "./backends.js";

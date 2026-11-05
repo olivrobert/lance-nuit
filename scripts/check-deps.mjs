@@ -3,12 +3,13 @@
 // Architecture gate, run by `bun run deps:check`.
 //
 // Four things, in order:
-//   1. every source file is classified in exactly one layer and one context, and
-//      every declared module entry exists (scripts/layers.cjs);
+//   1. every source file is classified in exactly one context, every file of
+//      `shared` in one level, and every declared module entry exists
+//      (scripts/layers.cjs);
 //   2. the dependency-cruiser violations match the known-violations baseline,
 //      entry for entry — a violation missing from the baseline is new debt, a
 //      baseline entry with no matching edge is stale and must be removed;
-//   3. the folders directly under `src/` match the known-folder-cycles baseline
+//   3. the folders of each context match the known-folder-cycles baseline
 //      the same way: an edge between two folders of one cycle must be listed,
 //      and an entry that no longer names such an edge is stale;
 //   4. the remaining debt is printed per rule, cycles apart.
@@ -19,9 +20,11 @@
 // The folder check exists because `no-circular` cannot see a folder cycle: two
 // folders lock each other as soon as `a/x` imports `b/x` and `b/y` imports
 // `a/y`, and no file of that pair sits in a file cycle. So the graph is grouped
-// first — one node per folder directly under `src/`, plus one node per file
-// directly under `src/`, `src/dsl.ts` being a different node from `src/dsl/` —
-// and the cycles are read off its strongly connected components.
+// first — one node per folder directly under a context, plus one node per file
+// directly under a context, `src/definition/dsl.ts` being a different node from
+// `src/definition/dsl/` — and the cycles are read off its strongly connected
+// components. Between contexts a cycle already breaks a direction rule; this
+// grouping is what still sees one inside a context.
 //
 // The file baseline is a list of file to file edges, never a folder, and it is
 // edited by hand: `--write-baseline` only exists to bootstrap it and to print
@@ -49,7 +52,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { MODULES, contextsOf, layersOf, moduleRuleName } = require("./layers.cjs");
+const { MODULES, contextsOf, layersOf, moduleEntries, moduleRuleName } = require("./layers.cjs");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_BASELINE = ".dependency-cruiser-known-violations.json";
@@ -59,8 +62,8 @@ const MODULE_RULES = new Set(MODULES.map(moduleRuleName));
 
 // Kept in sync with `options.exclude.path` of the dependency-cruiser config:
 // the cruise never reports these files, so the classification must not demand
-// a layer for them either.
-const UNCLASSIFIED_BY_DESIGN = [/\.test\.tsx?$/, /^src\/modules\/ui\/static\//, /^src\/modules\/ui\/app\//];
+// a context for them either.
+const UNCLASSIFIED_BY_DESIGN = [/\.test\.tsx?$/, /^src\/dashboard\/ui\/static\//, /^src\/dashboard\/ui\/app\//];
 
 function parseArgs(argv) {
   const options = {
@@ -108,17 +111,16 @@ function checkClassification() {
 
     if (UNCLASSIFIED_BY_DESIGN.some((pattern) => pattern.test(relativePath))) continue;
 
-    const matches = layersOf(relativePath);
-
-    if (matches.length === 0) {
-      problems.push(`unclassified file: ${relativePath}`);
-    } else if (matches.length > 1) {
-      const names = matches.map((layer) => `L${layer.level} ${layer.name}`).join(", ");
-
-      problems.push(`file classified in several layers (${names}): ${relativePath}`);
-    }
-
     const contexts = contextsOf(relativePath);
+    const levels = layersOf(relativePath);
+
+    if (levels.length > 1) {
+      const names = levels.map((layer) => `L${layer.level} ${layer.name}`).join(", ");
+
+      problems.push(`file classified in several levels (${names}): ${relativePath}`);
+    } else if (levels.length === 0 && contexts.some((context) => context.name === "shared")) {
+      problems.push(`file of shared in no level: ${relativePath}`);
+    }
 
     if (contexts.length === 0) {
       problems.push(`file in no context: ${relativePath}`);
@@ -140,8 +142,10 @@ function checkClassification() {
  * can show the check failing.
  */
 function checkModuleEntries(root) {
-  return MODULES.filter((module) => !existsSync(join(root, module.path, module.entry))).map(
-    (module) => `module ${module.name}: entry ${module.path}/${module.entry} does not exist`,
+  return MODULES.flatMap((module) =>
+    moduleEntries(module)
+      .filter((entry) => !existsSync(join(root, module.path, entry)))
+      .map((entry) => `module ${module.name}: entry ${module.path}/${entry} does not exist`),
   );
 }
 
@@ -187,14 +191,14 @@ function keyOf(entry) {
 
 /**
  * The node a source file belongs to in the folder graph: the folder directly
- * under `src/`, or the file name itself when the file sits at the root of
- * `src/`. Anything outside `src/` — a package, a build product — has no node
+ * under its context, or the file itself when it sits at the root of a context or
+ * of `src/`. Anything outside `src/` — a package, a build product — has no node
  * and is left out of the graph.
  *
  * @param {string} path
  */
 function moduleOf(path) {
-  const match = /^src\/([^/]+)(?:\/|$)/.exec(path.split("\\").join("/"));
+  const match = /^src\/([^/]+(?:\/[^/]+)?)(?:\/|$)/.exec(path.split("\\").join("/"));
 
   return match === null ? null : match[1];
 }
@@ -531,7 +535,7 @@ function main() {
   const classification = checkClassification();
 
   if (classification.length > 0) {
-    console.error("Every file under src/ must belong to exactly one layer and one context (scripts/layers.cjs).");
+    console.error("Every file under src/ must belong to exactly one context (scripts/layers.cjs).");
 
     for (const problem of classification) console.error(`  ${problem}`);
 

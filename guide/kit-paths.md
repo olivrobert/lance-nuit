@@ -25,7 +25,7 @@ Both are ignored and rewritten by the CLI; a worktree shares the main clone's.
 up in the worktree first, then in the main clone; see
 [Worktrees](usage.md#worktrees) for when each one runs.
 
-**Resolution chain** (`env/kit-paths.ts`), from highest to lowest priority:
+**Resolution chain** (`shared/env/kit-paths.ts`), from highest to lowest priority:
 
 ```text
 <project>/.lance-nuit/  >  ~/.lance-nuit/  >  kit builtin

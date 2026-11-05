@@ -2,12 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "../../src/run-record/run.js";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
-import { finalizeRun } from "../../src/run-record/run-transitions.js";
-import { makeRunStep } from "../../src/run-record/run-step.js";
-import { NULL_RUN_OUTPUT } from "../../src/runtime/run-output.js";
-import { executeRunSteps, stepLoopDeps } from "../../src/step/step-loop.js";
+import type { Run } from "../../src/run/record/run.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
+import { finalizeRun } from "../../src/run/record/run-transitions.js";
+import { makeRunStep } from "../../src/run/record/run-step.js";
+import { NULL_RUN_OUTPUT } from "../../src/execution/run-output.js";
+import { executeRunSteps, stepLoopDeps } from "../../src/execution/step/step-loop.js";
 
 test("generic bash pipeline: an arbitrary identifier never accesses the Jira gateway", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pipeline-phase5-generic-"));

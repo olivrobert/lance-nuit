@@ -104,7 +104,7 @@ Type-only imports work the same way: the kit's `tsconfig.json` resolves
 `lance-nuit/contracts` through the vendored declarations, so `lancenuit
 typecheck` and an editor see the same surface the runtime loads.
 
-The standalone CLI composes its providers in one place, `entry/registries.ts`:
+The standalone CLI composes its providers in one place, `entry/composition/registries.ts`:
 the default registry factories supply the built-in providers, and the manifest
 extends them. A run and the commands that load a pipeline outside one —
 `lancenuit lint`, `--lint-config`, `lancenuit approve` and `reject` — receive

@@ -1,6 +1,6 @@
-// Only the run record writes a run. Code outside `src/run-record/` holds a
-// `RunView` (`model/run.ts`), read-only at every depth, and hands it back to the
-// operations of the entry; the mutable run (`run-record/run.ts`) is internal.
+// Only the run record writes a run. Code outside `src/run/record/` holds a
+// `RunView` (`run/run.ts`), read-only at every depth, and hands it back to the
+// operations of the entry; the mutable run (`run/record/run.ts`) is internal.
 //
 // Three tests hold that guarantee, each for what the one before cannot see:
 //  - the compiler refuses a write through a view (assignment, `delete`, `++`,
@@ -16,18 +16,18 @@ import { join, relative, resolve } from "node:path";
 import ts from "typescript";
 
 const ROOT = resolve(import.meta.dir, "../..");
-const ENTRY = join(ROOT, "src/run-record/index.ts");
-const INTERNAL_RUN = join(ROOT, "src/run-record/run.ts");
-const PERSISTED = join(ROOT, "src/model/persisted.ts");
-const RUN_STOP = join(ROOT, "src/model/run-stop.ts");
-const VIEWS = join(ROOT, "src/model/run.ts");
+const ENTRY = join(ROOT, "src/run/record/index.ts");
+const INTERNAL_RUN = join(ROOT, "src/run/record/run.ts");
+const PERSISTED = join(ROOT, "src/run/persisted.ts");
+const RUN_STOP = join(ROOT, "src/shared/language/run-stop.ts");
+const VIEWS = join(ROOT, "src/run/run.ts");
 const BACKENDS = join(ROOT, "src/contracts/backends.ts");
-const STORAGE_PORTS = join(ROOT, "src/model/storage-ports.ts");
+const STORAGE_PORTS = join(ROOT, "src/run/storage-ports.ts");
 // A module of the step layer that does not exist on disk: what any code outside
 // the run record can write against the types it is given.
-const PROBE = join(ROOT, "src/step/readonly-probe.ts");
+const PROBE = join(ROOT, "src/execution/step/readonly-probe.ts");
 // Another such module, with the writes the compiler accepts: the scan must see them.
-const ALIAS_PROBE = join(ROOT, "src/step/aliased-write-probe.ts");
+const ALIAS_PROBE = join(ROOT, "src/execution/step/aliased-write-probe.ts");
 
 // Each line writes an executing run through what code outside the module holds;
 // each must be refused. The read on the last line must compile.
@@ -56,14 +56,14 @@ const WRITES = [
 ];
 
 const PROBE_SOURCE = `
-import type { RunStepView, RunView } from "../model/run.js";
+import type { RunStepView, RunView } from "../../run/run.js";
 import {
   aggregateUsage,
   type declareChild,
   type OpenedAttempt,
   type OpenedRun,
   type openOrchestration,
-} from "../run-record/index.js";
+} from "../../run/record/index.js";
 
 export function probe(
   run: RunView,
@@ -97,9 +97,9 @@ const ALIASED_WRITES = [
 ];
 
 const ALIAS_PROBE_SOURCE = `
-import type { AttemptStats, StepControl } from "../contracts/backends.js";
-import type { PipelineLineageEntry, RunOutcomeState } from "../model/persisted.js";
-import type { RunStepView, RunView } from "../model/run.js";
+import type { AttemptStats, StepControl } from "../../contracts/backends.js";
+import type { PipelineLineageEntry, RunOutcomeState } from "../../run/persisted.js";
+import type { RunStepView, RunView } from "../../run/run.js";
 
 export function probe(run: RunView, step: RunStepView): void {
 ${ALIASED_WRITES.map((line) => `  ${line}`).join("\n")}
@@ -329,7 +329,7 @@ test(
     const portSymbols = new Set(ports.map(([symbol]) => symbol));
     const entry = built.getSourceFile(ENTRY);
     const module = entry && checker.getSymbolAtLocation(entry);
-    if (!module) throw new Error("run-record/index.ts is not in the program");
+    if (!module) throw new Error("run/record/index.ts is not in the program");
     const handedOut: Record<string, string[]> = {};
     const namesRun: string[] = [];
     for (const exported of checker.getExportsOfModule(module)) {
@@ -477,7 +477,7 @@ const NOT_A_RUN: Record<string, string[]> = {
   // The figures a Claude Code backend parses from its own output, adjusted before
   // the backend returns them. They reach a run only through `settleAttempt`,
   // which copies them (`splitAttemptStats`), so no write here reaches a run.
-  "src/engine/backends/claude-code/result.ts": [
+  "src/agents/backends/claude-code/result.ts": [
     "parsed.stats.duration_ms = raw.durationMs",
     "parsed.stats.duration_ms += raw.priorAttemptsDurationMs",
     "parsed.stats.total_cost_usd = netCumulative(parsed.stats.total_cost_usd, baseline.costUsd)",
@@ -511,7 +511,7 @@ test(
     const found: Record<string, string[]> = {};
     for (const source of built.getSourceFiles()) {
       const file = relative(ROOT, source.fileName);
-      if (!file.startsWith("src/") || file.startsWith("src/run-record/") || /\.test\.tsx?$/.test(file)) continue;
+      if (!file.startsWith("src/") || file.startsWith("src/run/record/") || /\.test\.tsx?$/.test(file)) continue;
       if (resolve(source.fileName) in VIRTUAL) continue;
       const writes = runWrites(checker, source).map(({ text }) => text);
       if (writes.length > 0) found[file] = writes;

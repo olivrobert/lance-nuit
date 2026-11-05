@@ -6,10 +6,10 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveApprovableArtifact, resolveApprovalArtifact } from "../../src/commands/approval-subject.js";
-import { artifact, textArtifact } from "../../src/dsl/artifact.js";
-import { bashStep, humanReview, pipeline } from "../../src/dsl.js";
-import { buildPipelineContext } from "../../src/pipeline/context.js";
+import { resolveApprovableArtifact, resolveApprovalArtifact } from "../../src/entry/commands/approval-subject.js";
+import { artifact, textArtifact } from "../../src/definition/dsl/artifact.js";
+import { bashStep, humanReview, pipeline } from "../../src/definition/dsl.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
 import {
   decisionActor,
   decisionMatchesArtifact,
@@ -21,7 +21,7 @@ import {
   recordApproval,
   recordRejection,
   rejectionPending,
-} from "../../src/work-item-store/decisions.js";
+} from "../../src/work-items/store/decisions.js";
 
 const step = () => bashStep({ id: "noop", name: "Noop", command: "true" });
 

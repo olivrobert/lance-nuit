@@ -138,7 +138,7 @@ function verifyRuntimeDependencies() {
   const installedRoot = join(packageRoot, "node_modules", "lance-nuit");
   for (const file of [
     "dist/runner.js",
-    "dist/project/dsl.d.ts",
+    "dist/definition/project/dsl.d.ts",
     // Public contracts surface: lance-nuit/contracts.
     "dist/contracts/index.js",
     "dist/contracts/index.d.ts",
@@ -165,7 +165,7 @@ function verifyInstalledTypesCommand() {
   const consumerEnv = { ...npmEnv, PIPELINE_HOME: isolatedHome };
 
   checked(bin, ["types", "install"], { cwd: project, env: consumerEnv });
-  const projectTypes = join(project, ".lance-nuit", ".lance-nuit-types", "project", "dsl.d.ts");
+  const projectTypes = join(project, ".lance-nuit", ".lance-nuit-types", "definition", "project", "dsl.d.ts");
   const projectTsconfig = join(project, ".lance-nuit", "tsconfig.json");
   assert(existsSync(projectTypes), `lancenuit types install did not generate ${projectTypes}`);
   assert(existsSync(projectTsconfig), `lancenuit types install did not generate ${projectTsconfig}`);
@@ -184,7 +184,7 @@ export default ({ pipeline, bashStep }: Dsl) => pipeline("minimal")
   checked(bin, ["typecheck"], { cwd: project, env: consumerEnv });
 
   checked(bin, ["types", "install", "--user"], { cwd: project, env: consumerEnv });
-  const userTypes = join(isolatedHome, ".lance-nuit-types", "project", "dsl.d.ts");
+  const userTypes = join(isolatedHome, ".lance-nuit-types", "definition", "project", "dsl.d.ts");
   const userTsconfig = join(isolatedHome, "tsconfig.json");
   assert(existsSync(userTypes), `lancenuit types install --user did not generate ${userTypes}`);
   assert(existsSync(userTsconfig), `lancenuit types install --user did not generate ${userTsconfig}`);

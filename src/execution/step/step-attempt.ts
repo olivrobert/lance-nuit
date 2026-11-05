@@ -1,0 +1,488 @@
+// runner/step/step-attempt.ts
+//
+// The only loop spawn entry points are `runAttempt` (step command) and
+// `runFixAttempt` (repair pass). Both use the same middleware chain, so rerun and
+// fix loops share bookkeeping without duplication.
+//
+// Middleware lives here rather than in attempt-chain.ts because each middleware is
+// tied to its bookkeeping; the chain itself remains runner-agnostic.
+//
+// The run record opens and settles the attempt (`openAttempt`, `settleAttempt`):
+// numbering, journal, closure, verdict, ledger, cost stops and snapshots. This
+// file runs the spawn between the two, settles on the returned-record path and on
+// the rejection path alike, and words the cost warning the settlement reports.
+// Middleware observes the attempt (banner, session, remaining budget before
+// spawn); none of it is needed for the accounting to be right.
+
+import { appendFileSync } from "node:fs";
+import { basename } from "node:path";
+import type {
+  AgentBackend,
+  AgentBackendRegistry,
+  AgentSession,
+  ArtifactScope,
+  BackendSpec,
+} from "../../contracts/backends.js";
+import type { executeStep, runWithAgent, StepResult } from "../runners.js";
+import { errorMessage } from "../../shared/lib/errors.js";
+import type { PipelineContext } from "../../shared/language/context.js";
+import type { PipelineStep } from "../../definition/index.js";
+import type { RunStepView, RunView } from "../../run/index.js";
+import { clearLiveAttemptCost } from "../../shared/runtime/live-cost.js";
+import { log } from "../../shared/runtime/logging.js";
+import {
+  type AttemptResult,
+  bindSession,
+  type CostWarning,
+  type OpenedAttempt,
+  openAttempt,
+  recordUnavailableSource,
+  remainingBudget,
+  type RunBudget,
+  settleAttempt,
+  strictCostAccountingFor,
+} from "../../run/index.js";
+import {
+  fingerprintInputs,
+  type InputFingerprint,
+  inputsReadAfterAttempt,
+  inputsReadBeforeAttempt,
+  markInFlight,
+  mergeProvenance,
+  readInputs,
+  revisedInPlace,
+  writeProvenance,
+} from "../../work-items/index.js";
+import {
+  type AttemptContext,
+  type AttemptHandler,
+  type AttemptMiddleware,
+  type AttemptRecord,
+  compose,
+} from "./attempt-chain.js";
+
+/** Say ONCE per attempt that spend was left at an unknown price, as the
+ * settlement reported it. Silence here would read as a free attempt: the ledger
+ * stops advancing, so `max_cost_usd` can never be reached and the run spends
+ * without a ceiling. The settlement reports the uncertainty itself, not the
+ * strict stop, so this also fires for an attempt that died before reporting any
+ * figure — whose total is a lower bound even though the run keeps going. */
+function warnUnaccountedCost(run: RunView, warning: CostWarning): void {
+  const model = warning.model ?? "unknown model";
+  // Name the uncertainty the figures actually show. "no pricing entry" over an
+  // attempt that reported no usage at all (a 400 before the first token, a
+  // transport break) sent an operator to fix a rate table that was complete.
+  const cause = warning.cause === "unpriced" ? "no pricing entry" : "no usage reported by the attempt";
+  // `log.warn` and not `runner.message`: this warning is raised from the attempt
+  // lifecycle (`runTrackedAttempt`), which carries no `RunOutput`. Threading the
+  // port through every attempt entry point is the way to move it onto the bus;
+  // until then it takes the direct stderr path, like the sites in boot/ and
+  // dispatch/.
+  log.warn(
+    `  Cost not computable (${model}: ${cause}) — spend is not counted toward the budget` +
+      (run.max_cost_usd != null ? `; the $${run.max_cost_usd} ceiling is no longer guaranteed` : ""),
+  );
+}
+
+/**
+ * Session bookkeeping for an attempt that executes the step (initial, rerun, or
+ * retry after a fix): a backend that minted or rotated the session reports it,
+ * and the step remembers that one.
+ *
+ * Never apply it to a repair pass: the fix session is not the step session and
+ * must not overwrite `step.session`. The fix loop's `resumeSession` mode
+ * writes its forked session back to the resumed step itself.
+ */
+export function applyStepSession(run: RunView, step: RunStepView, result: AttemptRecord): void {
+  if (result.session) bindSession(run, step, result.session);
+}
+
+/**
+ * Open a fresh session for an attempt that must not continue the previous one
+ * (initial attempt, rerun, retry after a fix). Backends that mint their session
+ * lazily return nothing, and the step keeps whatever the attempt reports later.
+ */
+export function startFreshSession(
+  run: RunView,
+  step: RunStepView,
+  backend: AgentBackend | undefined,
+): AgentSession | undefined {
+  const session = backend?.createSession?.();
+  if (session) bindSession(run, step, session);
+  return session;
+}
+
+/** Attempt separator in the step log (`--- rerun 2/3 ---`). This is the only place
+ * that formats attempt banners, leaving a natural hook for future events. No
+ * banner is written for the initial attempt. */
+export const bannerMiddleware: AttemptMiddleware = async (ctx, next) => {
+  if (ctx.banner && ctx.stepLogPath) {
+    appendFileSync(ctx.stepLogPath, `\n--- ${ctx.banner} ---\n`);
+  }
+  return next(ctx);
+};
+
+/** Rotate sessions for step attempts. Kept separate from
+ * cost because session bookkeeping is load-bearing for resume.
+ *
+ * An attempt already closed by the signal handler keeps the step session as it
+ * was: the abort promises a fresh attempt on resume, so a backend draining after
+ * the kill must not rotate `step.session` under it. */
+export const sessionMiddleware: AttemptMiddleware = async (ctx, next) => {
+  const record = await next(ctx);
+  if (ctx.kind === "step" && ctx.attempt.status === "running") applyStepSession(ctx.run, ctx.step, record);
+  return record;
+};
+
+/** Pass the remaining cost budget to spawn. As the innermost middleware, it reads
+ * the changing cumulative value at the last moment. Removing it disables
+ * max_cost_usd enforcement. */
+export const budgetGateMiddleware: AttemptMiddleware = async (ctx, next) => {
+  ctx.budget.remaining = remainingBudget(ctx.run.max_cost_usd, ctx.budget.cumulative);
+  return next(ctx);
+};
+
+/** Order from outermost to innermost. Removing an entry disables that middleware;
+ * budgetGateMiddleware must remain last. The ledger charge is not a middleware:
+ * it belongs to the attempt's settlement (`settleAttempt`) and cannot be removed. */
+export const DEFAULT_ATTEMPT_MIDDLEWARES: readonly AttemptMiddleware[] = [
+  bannerMiddleware,
+  sessionMiddleware,
+  budgetGateMiddleware,
+];
+
+/** Spawn options shared by both entry points. `budgetRemaining` is intentionally
+ * absent because the chain calculates it at spawn time. */
+interface SpawnOptions {
+  cwd?: string;
+  runnerDir?: string;
+  timeout?: number;
+  role?: string;
+  session?: AgentSession;
+  resumeSession?: AgentSession;
+  agentOptions?: unknown;
+  artifactScope?: ArtifactScope;
+  registry?: AgentBackendRegistry;
+}
+
+interface AttemptOptionsBase {
+  /** Run budget mutated by the chain. */
+  budget: RunBudget;
+  /** Step-log separator label; absent means no banner. */
+  banner?: string;
+  /** Chain applied to this attempt; overridden only by tests. */
+  middlewares?: readonly AttemptMiddleware[];
+}
+
+export interface RunTrackedAttemptOptions<R extends AttemptRecord> extends AttemptOptionsBase {
+  run: RunView;
+  step: RunStepView;
+  kind: "step" | "fix";
+  /** Resolved step command or repair prompt. */
+  command: string;
+  /** Common spawn options; the invocation may extend them. */
+  spawn?: SpawnOptions;
+  /** Facades provide only behavior specific to the attempt kind. */
+  invoke: AttemptHandler<R>;
+}
+
+/**
+ * The one exit of an attempt started by `runTrackedAttempt`, whether the chain
+ * returned a record or rejected: the run record settles it, and the warning it
+ * reports is said here, where the attempt runs.
+ *
+ * An attempt the signal handler already closed and charged from live telemetry
+ * is not settled again, so a backend resolving while its process drains cannot
+ * charge the same work twice, cannot rewrite `fail_kind`/`fail_cause` from a
+ * result the resumed step will not give — and the run keeps the step session as
+ * it was, since the abort promises a fresh attempt on resume.
+ */
+function finishAttempt(
+  run: RunView,
+  step: RunStepView,
+  opened: OpenedAttempt,
+  budget: RunBudget,
+  result: AttemptResult,
+): void {
+  const { costWarning } = settleAttempt(run, step, opened, result, budget);
+  if (costWarning) warnUnaccountedCost(run, costWarning);
+}
+
+/** The session an attempt runs in, as its start event names it: a step attempt
+ *  runs in the session it was given or resumes, a repair pass only in a session it
+ *  resumes — a fresh fix session is not the step's. */
+function attemptSession(kind: "step" | "fix", spawn: SpawnOptions | undefined): AgentSession | undefined {
+  return kind === "step" ? (spawn?.session ?? spawn?.resumeSession) : spawn?.resumeSession;
+}
+
+/**
+ * Execute one attempt end to end.
+ *
+ * Every attempt follows the same lifecycle: opening (number, log, start event
+ * and snapshot, before spawn), middleware chain, settlement. The facades only
+ * provide their invocation; the generic type preserves the exact result,
+ * including step output, without exposing it to bookkeeping.
+ *
+ * Spawn errors remain visible to callers, but close the attempt as failed before
+ * rethrowing so a snapshot never leaves an interrupted attempt as `running`.
+ */
+export async function runTrackedAttempt<R extends AttemptRecord>(options: RunTrackedAttemptOptions<R>): Promise<R> {
+  const { run, step, kind, command, spawn } = options;
+  // The complete attempt lifecycle owns the live-cost slot. A transport can exit
+  // before output validation and durable bookkeeping have completed.
+  clearLiveAttemptCost();
+  const opened = openAttempt(run, step, { kind, command, session: attemptSession(kind, spawn) });
+
+  const context: AttemptContext = {
+    run,
+    step,
+    attempt: opened.attempt,
+    kind,
+    command,
+    banner: options.banner,
+    stepLogPath: opened.logPath,
+    budget: options.budget,
+  };
+
+  let result: R;
+  try {
+    result = await runChain(options, options.invoke, context);
+  } catch (error) {
+    const failReason = errorMessage(error);
+    try {
+      // The same exit as a returned record: an attempt that rejected still closed,
+      // still reached the ledger, and still invalidated the materialized totals.
+      finishAttempt(run, step, opened, options.budget, { ok: false, failReason });
+    } catch {
+      // Never mask the spawn error with a finalization persistence error; the
+      // public API must continue to rethrow it.
+    }
+    clearLiveAttemptCost();
+    throw error;
+  }
+
+  finishAttempt(run, step, opened, options.budget, result);
+  clearLiveAttemptCost();
+  return result;
+}
+
+export interface RunAttemptOptions extends AttemptOptionsBase {
+  command: string;
+  context: PipelineContext;
+  executeStep: typeof executeStep;
+  spawn?: SpawnOptions;
+}
+
+/** Execute one step-command attempt through the chain. */
+export async function runAttempt(run: RunView, step: RunStepView, options: RunAttemptOptions): Promise<StepResult> {
+  return runTrackedAttempt({
+    run,
+    step,
+    kind: "step",
+    command: options.command,
+    banner: options.banner,
+    budget: options.budget,
+    middlewares: options.middlewares,
+    spawn: options.spawn,
+    invoke: async (ctx) => {
+      const declaresInput = (ctx.step.def.sources?.length ?? 0) > 0;
+      const revised = declaresInput ? revisedInPlace(ctx.step.def) : new Set<string>();
+      // Read the artifacts BEFORE the attempt: the fingerprints must describe
+      // what the step was given, not what a later step may have rewritten.
+      const given = declaresInput
+        ? await fingerprintInputs(options.context, inputsReadBeforeAttempt(ctx.step.def))
+        : undefined;
+
+      // Marked before anything is erased or spawned: whatever this attempt leaves
+      // of an output it produces from scratch stays `unfinished` until it
+      // succeeds, whichever run reads it next.
+      await markInFlight(options.context, ctx.step.def, {
+        // A run's directory is named after its id; an old snapshot may lack the field.
+        runId: ctx.run.runId ?? basename(ctx.run.run_dir),
+        stepId: ctx.step.id,
+        attempt: ctx.attempt.attempt,
+        startedAt: ctx.attempt.started_at,
+      });
+      // A declared output proves this attempt completed; its previous version was
+      // removed before spawn, like report_paths. An output the step also declares
+      // as input is revised in place, so it survives the erasure.
+      for (const output of ctx.step.def.outputs ?? []) {
+        if (!revised.has(output.name)) await output.remove(options.context);
+      }
+
+      const result = await options.executeStep(
+        ctx.step,
+        ctx.command,
+        {
+          ...options.spawn,
+          stepLogPath: ctx.stepLogPath,
+          budgetRemaining: ctx.budget.remaining,
+          strictCostAccounting: strictCostAccountingFor(ctx.run.max_cost_usd, ctx.budget.allowUnmetered),
+        },
+        options.context,
+      );
+
+      // Transport, timeout, and negative verdicts retain diagnostic priority.
+      if (!result.ok) return result;
+      // A refused capture is a failure of its own kind: the command succeeded and
+      // the agent answered, but the object it returned does not satisfy the
+      // artifact's contract. The outcome phase may ask the same session for a
+      // corrected object, so the refusal is told apart from a missing `require`
+      // (nothing to re-ask for) and from a write error (nothing the agent can fix).
+      let captured: CapturedValue[];
+      try {
+        captured = readCaptures(ctx.step.def, result.structuredOutput);
+      } catch (error) {
+        const failReason = errorMessage(error);
+        // The step log only carries the assistant's prose; the structured output
+        // travels through a tool call the log never sees. Without this entry, a
+        // refusal leaves no trace of what was refused.
+        if (ctx.stepLogPath) appendFileSync(ctx.stepLogPath, refusedCaptureEntry(failReason, result.structuredOutput));
+        return { ...result, ok: false, failReason, captureRefused: true };
+      }
+      try {
+        // Captured fields are written BEFORE the outputs are verified: a captured
+        // artifact is an output, and `require` below is what proves it landed.
+        for (const { capture, value } of captured) await capture.artifact.write(options.context, value);
+        for (const output of ctx.step.def.outputs ?? []) await output.require(options.context);
+      } catch (error) {
+        const failReason = errorMessage(error);
+        return { ...result, ok: false, failReason };
+      }
+      // Only here is "command succeeded and outputs verified" true, so only here
+      // may a fingerprint be recorded.
+      let fingerprints: Record<string, InputFingerprint> = {};
+      if (given) {
+        const after = await readInputs(options.context, inputsReadAfterAttempt(ctx.step.def));
+        // The record then says `null`, which re-runs the step next time; the
+        // journal is where a diagnosis learns why.
+        for (const unavailable of after.unavailable) recordUnavailableSource(ctx.run, ctx.step, unavailable);
+        fingerprints = { ...given, ...after.fingerprints };
+      }
+      // A step without input records an empty fingerprint: the record still names
+      // it as the producer, which a later revision of the output keeps.
+      for (const output of ctx.step.def.outputs ?? []) {
+        const record = revised.has(output.name) ? mergeProvenance : writeProvenance;
+        await record(options.context, output, ctx.step.id, fingerprints);
+      }
+      return result;
+    },
+  });
+}
+
+/** One `capture` of a step and the value the agent returned for it, accepted by
+ * the artifact's parser and ready to be written. */
+interface CapturedValue {
+  capture: NonNullable<PipelineStep["captures"]>[number];
+  value: unknown;
+}
+
+/**
+ * Read every `capture` of a step from the agent's structured output. The agent
+ * RETURNS the value; the runner persists it — the only deterministic way to get a
+ * short artifact out of an agent, since each backend writes files its own way
+ * (and a toolless role cannot write at all). A missing or `null` field is a
+ * failure of the attempt, never a silent absence: the verdict said success, the
+ * contract says the field is required.
+ *
+ * Every capture is validated BEFORE any is written: a fix pass erases nothing, so
+ * an artifact written by a failed attempt would otherwise reach the repair agent
+ * as if it were good. Validation goes through the descriptor's own parser, on the
+ * bytes `write` will produce, so a value the artifact refuses fails here with
+ * nothing on disk. Throws on the first refusal; the caller writes what it returns.
+ */
+function readCaptures(def: PipelineStep, structuredOutput: unknown): CapturedValue[] {
+  const captures = def.captures ?? [];
+  if (captures.length === 0) return [];
+  const source =
+    structuredOutput !== null && typeof structuredOutput === "object" && !Array.isArray(structuredOutput)
+      ? (structuredOutput as Record<string, unknown>)
+      : undefined;
+  const values: CapturedValue[] = [];
+  for (const capture of captures) {
+    const value = source?.[capture.field];
+    if (value === undefined || value === null) {
+      throw new Error(`capture "${capture.field}": absent from the agent's structured output`);
+    }
+    if (capture.text) {
+      if (typeof value !== "string") {
+        throw new Error(
+          `capture "${capture.field}": text artifact "${capture.artifact.name}" expects a string, received ${describeValue(value)}`,
+        );
+      }
+      capture.artifact.validate(value);
+    } else {
+      const json = JSON.stringify(value);
+      if (json === undefined) throw new TypeError(`capture "${capture.field}": value cannot be serialized as JSON`);
+      capture.artifact.validate(json);
+    }
+    values.push({ capture, value });
+  }
+  return values;
+}
+
+/** Step-log entry for a refused structured output: the reason, then the object
+ * as the backend parsed it, so the refusal can be read after the fact. Formatted
+ * like an attempt banner, which is the only other separator the log carries. */
+function refusedCaptureEntry(failReason: string, structuredOutput: unknown): string {
+  const payload =
+    structuredOutput === undefined
+      ? "(no structured output)"
+      : (JSON.stringify(structuredOutput, null, 2) ?? String(structuredOutput));
+  return `\n--- capture refused: ${failReason} ---\n${payload}\n`;
+}
+
+function describeValue(value: unknown): string {
+  return Array.isArray(value) ? "an array" : value === null ? "null" : `a ${typeof value}`;
+}
+
+export type FixResult = Awaited<ReturnType<typeof runWithAgent>>;
+
+export interface RunFixAttemptOptions extends AttemptOptionsBase {
+  /** Resolved repair prompt. */
+  prompt: string;
+  fixWithAgent: typeof runWithAgent;
+  /** Repair backend, always resolved by the caller. A step without its own backend
+   * (bash) uses the registry default. */
+  backendSpec: BackendSpec;
+  agentOptions?: unknown;
+  spawn?: SpawnOptions;
+  /** Registry the fix spawn runs on; it travels with the run, never resolved here. */
+  registry: AgentBackendRegistry;
+}
+
+/** Execute one repair pass through the same chain as `runAttempt`. Without this
+ * entry point, fix spawns would be invisible to middleware despite representing a
+ * major share of run cost. */
+export async function runFixAttempt(
+  run: RunView,
+  step: RunStepView,
+  options: RunFixAttemptOptions,
+): Promise<FixResult> {
+  return runTrackedAttempt({
+    run,
+    step,
+    kind: "fix",
+    command: options.prompt,
+    banner: options.banner,
+    budget: options.budget,
+    middlewares: options.middlewares,
+    spawn: options.spawn,
+    invoke: (ctx) =>
+      options.fixWithAgent(ctx.command, options.backendSpec, options.agentOptions, {
+        ...options.spawn,
+        stepLogPath: ctx.stepLogPath,
+        budgetRemaining: ctx.budget.remaining,
+        strictCostAccounting: strictCostAccountingFor(ctx.run.max_cost_usd, ctx.budget.allowUnmetered),
+        registry: options.registry,
+      }),
+  });
+}
+
+function runChain<R extends AttemptRecord>(
+  options: AttemptOptionsBase,
+  handler: AttemptHandler<R>,
+  ctx: AttemptContext,
+): Promise<R> {
+  return compose(...(options.middlewares ?? DEFAULT_ATTEMPT_MIDDLEWARES))(handler)(ctx);
+}

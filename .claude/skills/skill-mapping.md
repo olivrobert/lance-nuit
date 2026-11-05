@@ -6,13 +6,13 @@ invoke when a plan creates or modifies such a file.
 | File type | Glob | Skill |
 |---|---|---|
 | Public contract — published extension surface under `src/contracts/` (exported types, ports, registries) | `src/contracts/**/*.ts` | `quality-contract` |
-| CLI command — module exporting a `RunnerCommand` (id, flag, key, desc, run) wired into `COMMANDS` | `src/commands/*.ts` | `quality-command` |
-| File-backed store — `File*Store` / `File*Catalog` class implementing a persistence port | `src/run-record/stores/file-*.ts`, `src/dispatch/file-scan-store.ts`, `src/work-item-store/file-*.ts` | `quality-store` |
-| Dashboard read model — read-only composer over the runner's state internals | `src/modules/read-model/*.ts` | `quality-read-model` |
-| Step execution — module driving one stage of the step loop (admission, attempt, verdict, failure policy, fix loop, nested pipeline) | `src/step/*.ts` | `quality-step` |
+| CLI command — module exporting a `RunnerCommand` (id, flag, key, desc, run) wired into `COMMANDS` | `src/entry/commands/*.ts` | `quality-command` |
+| File-backed store — `File*Store` / `File*Catalog` class implementing a persistence port | `src/run/record/stores/file-*.ts`, `src/execution/dispatch/file-scan-store.ts`, `src/work-items/store/file-*.ts` | `quality-store` |
+| Dashboard read model — read-only composer over the runner's state internals | `src/dashboard/read-model/*.ts` | `quality-read-model` |
+| Step execution — module driving one stage of the step loop (admission, attempt, verdict, failure policy, fix loop, nested pipeline) | `src/execution/step/*.ts` | `quality-step` |
 
 ## Arbitration with generic skills
 
-- `react-expert` is generic React guidance. Inside `src/modules/ui/app/**/*.tsx`,
+- `react-expert` is generic React guidance. Inside `src/dashboard/ui/app/**/*.tsx`,
   `quality-component` wins: its constraints are derived from this codebase and are the
   only normative source. Use `react-expert` only outside that glob.

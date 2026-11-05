@@ -33,7 +33,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       # The dashboard's `app.js` and `app.css` are bundled from
-      # `src/modules/ui/app/` and are not committed, so they have to exist before
+      # `src/dashboard/ui/app/` and are not committed, so they have to exist before
       # anything asserts that the server serves them.
       - name: Build the dashboard front end
         run: bun run ui:build

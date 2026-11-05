@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 const runnerEntry = resolve(import.meta.dir, "../../src/runner.ts");
-const fakeWorkItems = resolve(import.meta.dir, "../../src/modules/work-item/fake.ts");
+const fakeWorkItems = resolve(import.meta.dir, "../../src/work-items/providers/fake.ts");
 const RUN_TIMEOUT_MS = 25_000;
 const KILL_WAIT_TIMEOUT_MS = 15_000;
 
@@ -34,7 +34,7 @@ export interface RouteOptions {
    * Tickets a `--scan` discovers. The steps then sit inside
    * `forEachWorkItem({ queue: "bugTodo", scan })`, whose source step writes each
    * ticket's `ticket.md`, and the tracker is the in-memory gateway of the
-   * `--scan` unit tests (`modules/work-item/fake.ts`), registered through an
+   * `--scan` unit tests (`work-items/providers/fake.ts`), registered through an
    * extension module.
    */
   scan?: readonly string[];
