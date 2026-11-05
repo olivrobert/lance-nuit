@@ -1023,6 +1023,9 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   // The child spends its own $1 cap on step "a" and stops with "rerun with --budget".
   const first = await executeParent(parentPath, root, "P", runDir, true, context);
   expect(first.outcome.budgetExceeded).toBe(true);
+  // Durable on the parent too: its own ledger reads $1 of $5, and a resume would
+  // otherwise launch the child again.
+  expect(first.run.budget_exceeded).toBe(true);
   expect(first.run.steps[0]!.control?.total_cost_usd).toBeCloseTo(1, 10);
 
   // A resume without approval keeps the child pinned to its own cap.
@@ -1140,6 +1143,45 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
   });
   return { parentPath, context };
 }
+
+test("pipeline-orchestration: a child stopped at its own accounting gate is the stop of an uncapped parent", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pipeline-compose-child-unaccounted-"));
+  const childPath = writePipeline(
+    root,
+    "child",
+    `
+export default ({ pipeline, llmStep }) => pipeline("child")
+  .maxCost(5)
+  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "a" }))
+  .add(llmStep({ id: "b", name: "b", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "b" }))
+  .build();
+`,
+  );
+  const parentPath = writePipeline(
+    root,
+    "parent",
+    `
+export default ({ pipeline, runPipeline }) => pipeline("parent")
+  .add(runPipeline({ id: "child", name: "child", pipeline: "./${childPath.slice(root.length + 1)}" }))
+  .build();
+`,
+  );
+  const base = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
+  const context = buildPipelineContext({
+    cwd: root,
+    ticket: "P",
+    agentBackendRegistry: REGISTRY,
+    config: { ...base.config, profiles: { ...base.config.profiles, coder: { backends: { [UNPRICED_BACKEND]: {} } } } },
+  });
+
+  const { outcome } = await executeParent(parentPath, root, "P", join(root, "parent-run"), true, context);
+
+  // No ceiling here, so the parent's own ledger decides nothing: only the child's
+  // report says why the run ended.
+  expect(outcome.costUnaccounted).toBe(true);
+  expect(outcome.costUnaccountedStop).toBe(true);
+  expect(outcome.budgetExceeded).toBe(false);
+});
 
 test("pipeline-orchestration: a fan-out stops spawning children once its ceiling is unenforceable", async () => {
   const root = mkdtempSync(join(tmpdir(), "pipeline-compose-fanout-strict-"));

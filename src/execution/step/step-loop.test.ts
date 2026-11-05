@@ -2502,3 +2502,21 @@ test("executeRunSteps: an absorbed failure interrupted while its verdict is read
   expect(check.status).toBe("done");
   expect(check.absorbed_inputs).toBeUndefined();
 });
+
+test("executeRunSteps: announces each step with its place in the pipeline", async () => {
+  const run = makeRun([bashStep("a", "cmd"), bashStep("b", "cmd")]);
+  const { deps } = fakeDeps();
+  const started: Array<{ id: string; index: number; total: number }> = [];
+  const output: StepLoopDeps["output"] = {
+    emit: (event) => {
+      if (event.type === "step.started") started.push({ id: event.step.id, index: event.index, total: event.total });
+    },
+  };
+
+  await executeRunSteps(run, undefined, undefined, { resuming: false }, { ...deps, output });
+
+  expect(started).toEqual([
+    { id: "a", index: 1, total: 2 },
+    { id: "b", index: 2, total: 2 },
+  ]);
+});

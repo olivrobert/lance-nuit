@@ -38,8 +38,9 @@ import {
   type OpenedAttempt,
   openAttempt,
   recordUnavailableSource,
-  remainingBudget,
+  releaseAllowance,
   reportLiveCost,
+  reserveAllowance,
   type RunBudget,
   settleAttempt,
   strictCostAccountingFor,
@@ -136,11 +137,12 @@ export const sessionMiddleware: AttemptMiddleware = async (ctx, next) => {
   return record;
 };
 
-/** Pass the remaining cost budget to spawn. As the innermost middleware, it reads
- * the changing cumulative value at the last moment. Removing it disables
- * max_cost_usd enforcement. */
+/** Hold what this attempt may spend and pass it to spawn. As the innermost
+ * middleware, it reads the changing cumulative value at the last moment. Removing
+ * it disables max_cost_usd enforcement. `finishAttempt` releases the allowance:
+ * releasing here would give it back before the spend reaches the ledger. */
 export const budgetGateMiddleware: AttemptMiddleware = async (ctx, next) => {
-  return next({ ...ctx, budgetRemaining: remainingBudget(ctx.run.max_cost_usd, ctx.budget.cumulative) });
+  return next({ ...ctx, budgetRemaining: reserveAllowance(ctx.budget, ctx.run.max_cost_usd, ctx.step.id) });
 };
 
 /** Where the backend of this attempt publishes its live estimate: on the step, so
@@ -211,8 +213,15 @@ function finishAttempt(
   budget: RunBudget,
   result: AttemptResult,
 ): void {
-  const { costWarning } = settleAttempt(run, step, opened, result, budget);
-  if (costWarning) warnUnaccountedCost(run, costWarning);
+  try {
+    const { costWarning } = settleAttempt(run, step, opened, result, budget);
+    if (costWarning) warnUnaccountedCost(run, costWarning);
+  } finally {
+    // In the same tick as the charge: an attempt starting beside this one sees
+    // either the allowance or the spend, never neither. Also when the settlement
+    // charged nothing or could not save.
+    releaseAllowance(budget, step.id);
+  }
 }
 
 /** The session an attempt runs in, as its start event names it: a step attempt

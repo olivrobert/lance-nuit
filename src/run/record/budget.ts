@@ -15,9 +15,11 @@
  * passes `cumulativeCost` back and forth, and each phase can update the value it
  * changed without rewriting the whole budget.
  *
- * What an attempt may still spend is not here: `budgetGateMiddleware` computes it
- * as close to spawn as possible and keeps it on that attempt's context, because
- * `cumulative` changes between attempts of the same step.
+ * What an attempt may still spend reaches its backend through that attempt's
+ * context, computed by `reserveAllowance` as close to spawn as possible, because
+ * `cumulative` changes between attempts of the same step. The ledger only keeps
+ * what is held for the attempts in flight (`allowances`), so that attempts running
+ * side by side cannot each be promised the same dollars.
  */
 export interface RunBudget {
   /** Cumulative run cost, in dollars: what the steps carried when the ledger was
@@ -65,6 +67,15 @@ export interface RunBudget {
    * ceiling, and no unknown marker is cleared. Fed by the CLI and the persisted
    * run-level authorization; `undefined` means strict. */
   allowUnmetered?: boolean;
+  /** What each attempt in flight may spend, by step id: a step runs one attempt at
+   * a time. Held, not spent: `cumulative` is the only spend figure, this is never
+   * persisted, and a resume starts with nothing in flight. Written by
+   * `run/record/cost-accounting.ts` only. */
+  allowances?: Map<string, number>;
+  /** Steps about to run side by side whose first attempt has not asked for its
+   * share yet, so that the attempts already started leave them something. Written
+   * by `run/record/cost-accounting.ts` only. */
+  awaitingAllowance?: Set<string>;
 }
 
 /**
