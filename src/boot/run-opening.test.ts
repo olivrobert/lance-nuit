@@ -23,7 +23,7 @@ import { FileRunStateStore } from "../run-record/stores/file-run-state-store.js"
 import { pipelineRunsDir, resolveRunDir } from "../run-record/stores/run-storage.js";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { executeRunSteps, stepLoopDeps } from "../step/step-loop.js";
-import { loadOrCreateRun } from "./resume.js";
+import { loadOrCreateRun } from "../step/load-or-create-run.js";
 import { writable } from "../run-record/run.js";
 
 /** Every snapshot and journal write a store receives, interleaved. */

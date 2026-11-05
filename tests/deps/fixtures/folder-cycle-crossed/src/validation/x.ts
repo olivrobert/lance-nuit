@@ -2,6 +2,6 @@
 // disjoint file edges. No file is part of a cycle, so `no-circular` stays
 // silent and only the folder-level check can see `dispatch` and `boot` locked
 // together.
-import { x } from "../boot/x.js";
+import { x } from "../pipeline/x.js";
 
 export const dispatchX = x;

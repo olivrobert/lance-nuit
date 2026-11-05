@@ -7,7 +7,7 @@ import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { projectStepAttempts } from "./attempt-projection.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
-import { loadOrCreateRun } from "../boot/resume.js";
+import { loadOrCreateRun } from "../step/load-or-create-run.js";
 import { saveRun } from "./run-repository.js";
 import { allocateAttempt } from "./attempt-lifecycle.js";
 import { writable } from "./run.js";

@@ -32,8 +32,7 @@ import {
   wouldResumeLatest,
 } from "../run-record/index.js";
 import { emitRunStats } from "../run-stats/index.js";
-import { loadOrCreateRun } from "../boot/resume.js";
-import type { RunOutcome } from "../step/step-loop.js";
+import { loadOrCreateRun, type RunOutcome } from "../step/step-loop.js";
 import type { ReadyRun } from "./startup.js";
 
 export type PreparedRun =

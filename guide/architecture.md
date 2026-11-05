@@ -94,9 +94,35 @@ That baseline is now empty: `src/` holds no folder cycle at all, and
 `bun run deps:check` defends the state by failing on the first cyclic folder
 edge it finds.
 
+### Contexts
+
+Levels say how technical a file is, and most of the code sits in L4. Contexts add
+the business axis: each one answers a single question and declares the contexts
+it may import. Each is a `context-<name>-direction` rule, under the same baseline
+as the levels.
+
+| Context | Question it answers | May import |
+| --- | --- | --- |
+| `entry` | What does the operator ask for, and how is everything assembled? | everything |
+| `dashboard` | What does the human read? | `run`, `work-items`, `definition`, `shared` |
+| `execution` | Which step runs, and what happens with its outcome? | `definition`, `run`, `work-items`, `shared` |
+| `agents` | How do we talk to each agent CLI? | `shared` |
+| `definition` | What is a pipeline, and is it valid? | `work-items`, `shared` |
+| `run` | What happened during a run, and what did it cost? | `definition`, `shared` |
+| `work-items` | Which ticket, which artifacts, which provenance? | `shared` |
+| `shared` | Primitives and the language every context shares | no other context |
+
+`execution` never imports `agents`: it reaches the backends through the registry
+of `contracts/backends`, and `entry` wires them in.
+
+Folders do not follow contexts yet: `model/`, `env/`, `exec/` and `runtime/` mix
+files of several contexts. So `CONTEXTS` in `scripts/layers.cjs` classifies single
+files, unlike the levels, and `bun run deps:check` fails on a file that no context
+or several contexts claim.
+
 ### Modules
 
-Levels say which way an import may go. Modules add a second, independent axis:
+Levels say which way an import may go. Modules add another, independent axis:
 encapsulation, that is, through which file an import may enter. A module is a
 folder with a single entry file; from outside the folder, only that entry may be
 imported, while the files inside import each other freely. A module still sits
@@ -107,7 +133,7 @@ in exactly one level, and the level rules apply to it unchanged.
 | `src/run-record/` | L4 | `index.ts` | A run: its snapshot (`state.json`), journal (`events.jsonl`), attempt logs and closure file; the meaning of a run status; every write to a run (transitions, named writes, opening and restoring); the cost ledger, budget and cost gate. Outside it a run is a read-only `RunView` (§7). |
 | `src/work-item-store/` | L4 | `index.ts` | What the runner keeps beside a ticket, outside any run: artifacts, the human decisions bound to them and the gate status they give, provenance and freshness, and the work-item layout. |
 | `src/run-stats/` | L4 | `index.ts` | The cross-run history (`pipeline-history/runs.jsonl`): one summary per finished run, its readers, and the cost they estimate with the runner's rate lookup. |
-| `src/step/` | L4 | `step-loop.ts` | Executing a step: admission, attempts, retries, verdicts, repairs, composed children. |
+| `src/step/` | L4 | `step-loop.ts` | Loading the definition and selection a run opens with; executing a step: admission, attempts, retries, verdicts, repairs, composed children. |
 | `src/engine/` | L4 | `default-registry.ts` | The agent backends and their registry. |
 | `src/extractors/` | L4 | `registry.ts` | Error extractors and their discovery. |
 | `src/modules/work-item/` | L5 | `registry.ts` | The tracker adapters (Jira, GitHub, …) behind the work-item contract. |
@@ -403,7 +429,7 @@ and each rule they read has one owner:
 
 | Decision | Owner |
 | --- | --- |
-| **Re-admission**: whether a settled step goes through admission again, and, in reconcile mode, whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). Boot (`boot/resume.ts`) decides the selection a resume applies to the snapshot — the selectors in the default mode only, and in both modes the requeue of the `--start-at` target and the steps after it — and `openRun` applies it |
+| **Re-admission**: whether a settled step goes through admission again, and, in reconcile mode, whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). `step/load-or-create-run.ts` decides the selection a resume applies to the snapshot — the selectors in the default mode only, and in both modes the requeue of the `--start-at` target and the steps after it — and `openRun` applies it |
 | **Admission**: budget, `when`, a pending rejection, the freshness or presence of the outputs, the interruption guard, then the environment guard | `step/step-admission.ts` (`admitStep`; `answersToOutputs` says whether the outputs decide, `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished) |
 | **Standing of an output**: `missing`, `unfinished`, `unknown`, `stale`, `fresh` or adoptable, and the doubt `unguaranteed` carries | `work-item-store/provenance.ts`, the only writer of `artifacts/.provenance/`. `standingOf` is the one reading rule for a record: admission (`stepFreshness`), the public `freshness()` and the dashboard all read it there. The attempt (`step/step-attempt.ts`) only chooses when to write: the in-flight mark before each attempt (`markInFlight`), the record after a success |
 | **Reconcile classification**: which steps the mode re-admits (those declaring `output` or `rerunOnResume`), the build error for a step declaring neither, and the orchestration nodes that keep the authority of their status | `model/definition.ts` (`deliversOutputs`, `reconcilable`, `stepsWithoutDeliverable`), shared by the build (`.reconcile()`), the loader's validation (`validation/structure.ts`), admission and the loop; `rerunsOnResume`, which leaves a node's `rerunOnResume` without effect in this mode, is used by `reconcilable`, the loop and the resume header |
@@ -572,9 +598,9 @@ run directory, reads the snapshot, projects it with the journal
 attempts a crash left open, records this invocation's location and a new
 unmetered authorization, and journals `run.resumed`, or creates the run and
 journals `run.started`; it returns whether it resumed, which the step loop
-reads instead of deriving it again. Boot (`boot/resume.ts`) keeps the policy:
+reads instead of deriving it again. `step/load-or-create-run.ts` keeps the policy:
 the definition a snapshot runs against and the selection, which `openRun`
-calls at the point where each applies; boot reads the steps and says which to
+calls at the point where each applies; it reads the steps and says which to
 exclude or requeue, and `openRun` writes them. Admission journals its skips and the
 unfinished outputs it found through `recordSkip` and `recordUnfinishedOutputs`
 (`run-record/step-bookkeeping.ts`), so nothing outside the module saves the run

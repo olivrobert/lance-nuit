@@ -1,10 +1,13 @@
-// runner/boot/resume.ts
+// runner/step/load-or-create-run.ts
 //
 // Build or resume a run: load the definition, validate `--start-at`, and decide
 // this invocation's selection. Opening the run itself — selecting its directory,
 // restoring or creating it, applying the selection, and every write that does —
-// is `run-record`'s (`openRun`); boot hands it the definition and the selection
-// as a policy, and only reads the steps it decides on.
+// is `run-record`'s (`openRun`); this file hands it the definition and the
+// selection as a policy, and only reads the steps it decides on.
+//
+// It lives with the step loop because a composed child opens its run here too:
+// from `boot/`, execution would have to reach back into startup.
 
 import { DEFAULT_SPEC_PATH } from "../env/tickets.js";
 import { agentBackendRegistryOf, type PipelineContext, workItemRegistryOf } from "../model/context.js";

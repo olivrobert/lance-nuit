@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { loadOrCreateRun } from "../boot/resume.ts";
+import { loadOrCreateRun } from "../step/load-or-create-run.ts";
 import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.ts";
@@ -45,7 +45,7 @@ function pipelineFile(root: string): string {
 function childSource(root: string, runDir: string, pipelinePath: string, stopSource?: string): string {
   const module = (path: string) => JSON.stringify(join(REPO_ROOT, path));
   return [
-    `import { loadOrCreateRun } from ${module("src/boot/resume.ts")};`,
+    `import { loadOrCreateRun } from ${module("src/step/load-or-create-run.ts")};`,
     `import { builtinRegistries } from ${module("tests/builtin-registries.ts")};`,
     `import { buildPipelineContext } from ${module("src/pipeline/context.ts")};`,
     `import { appendRunEvent } from ${module("src/run-record/run-journal.ts")};`,

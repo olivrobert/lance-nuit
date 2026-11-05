@@ -7,8 +7,7 @@
 // typed, reconcilable `push` and `create-merge-request`. Until then, isolate the
 // only call tracker steps need, so `glab` has one contact point and one replacement.
 
-import { STDERR_MARKER } from "../../exec/bash-runner.js";
-import { runBashAsync } from "../../exec/runners.js";
+import { runBashAsync, STDERR_MARKER } from "../../exec/bash-runner.js";
 import { errorMessage } from "../../lib/errors.js";
 import { log } from "../../runtime/logging.js";
 

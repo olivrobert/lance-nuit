@@ -11,7 +11,7 @@ import type {
   When,
   WhenOutcome,
 } from "../model/input.js";
-import type { RunStopState } from "../model/persisted.js";
+import type { RunStopState } from "../model/run-stop.js";
 
 export type {
   CommandInputCondition,

@@ -19,6 +19,7 @@ const ROOT = resolve(import.meta.dir, "../..");
 const ENTRY = join(ROOT, "src/run-record/index.ts");
 const INTERNAL_RUN = join(ROOT, "src/run-record/run.ts");
 const PERSISTED = join(ROOT, "src/model/persisted.ts");
+const RUN_STOP = join(ROOT, "src/model/run-stop.ts");
 const VIEWS = join(ROOT, "src/model/run.ts");
 const BACKENDS = join(ROOT, "src/contracts/backends.ts");
 const STORAGE_PORTS = join(ROOT, "src/model/storage-ports.ts");
@@ -179,8 +180,8 @@ function mutableShapes(checker: ts.TypeChecker, built: ts.Program): Map<ts.Symbo
     // The values a run carries: written in place, each would rewrite the run.
     "PipelineLineageEntry",
     "RunOutcomeState",
-    "RunStopState",
   ]);
+  declared(RUN_STOP, ["RunStopState"]);
   declared(BACKENDS, ["AgentSession", "AttemptStats", "StepControl", "StepUsage"]);
   return shapes;
 }
@@ -360,7 +361,7 @@ test(
 
 /** Files whose every type is a run shape: the persisted records, the views, the
  *  mutable run. */
-const SHAPE_FILES = [PERSISTED, VIEWS, INTERNAL_RUN];
+const SHAPE_FILES = [PERSISTED, RUN_STOP, VIEWS, INTERNAL_RUN];
 /** The values a run carries, declared with the backend contract. `AttemptStats`
  *  is among them: every field of a control or a usage is optional in it but one,
  *  so a step's control fits it. */

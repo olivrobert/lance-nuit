@@ -6,7 +6,7 @@
 // create it. Every snapshot and journal write of the opening happens here, and
 // the caller learns whether it resumed instead of deriving it again.
 //
-// What the invocation asks for stays with its caller (`boot/resume.ts`): the
+// What the invocation asks for stays with its caller (`step/load-or-create-run.ts`): the
 // definition a snapshot runs against, and the selection (`--steps`, `--skip`,
 // `--start-at`) to apply to the steps. They come in as a policy, called at the
 // one point of the opening where each applies; the caller reads the steps and

@@ -8,7 +8,7 @@ import type { PipelineContext } from "../model/context.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { appendRunEvent, readRunEvents } from "../run-record/run-journal.js";
 import { abortRun, finalizeRun } from "../run-record/run-transitions.js";
-import { loadOrCreateRun } from "../boot/resume.js";
+import { loadOrCreateRun } from "./load-or-create-run.js";
 import { saveRun } from "../run-record/run-repository.js";
 import { updateStep } from "../run-record/run-transitions.js";
 import { readRunSnapshot } from "../run-record/run-snapshot.js";

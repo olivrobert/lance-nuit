@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { appendRunEvent, readRunEvents } from "../run-record/run-journal.js";
-import { type LoadOrCreateRunOptions, loadOrCreateRun } from "./resume.js";
+import { type LoadOrCreateRunOptions, loadOrCreateRun } from "./load-or-create-run.js";
 import { pendingSteps, resumeDecision } from "../run-record/run-predicates.js";
 import { saveRun } from "../run-record/run-repository.js";
 import { readRunSnapshot } from "../run-record/run-snapshot.js";

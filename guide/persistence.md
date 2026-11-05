@@ -272,8 +272,8 @@ The run record opens the run (`openRun`, `run-record/run-opening.ts`): it
 selects the directory, reads the snapshot, projects the persisted state with
 the journal, and assembles the in-memory run from the definition and the
 projected steps, or creates a new run; every snapshot write and journal event of
-the opening is its own, and it tells its caller whether it resumed. Boot
-(`boot/resume.ts`) supplies the policy: it loads the definition — again, for a
+the opening is its own, and it tells its caller whether it resumed.
+`step/load-or-create-run.ts` supplies the policy: it loads the definition — again, for a
 resume, under the snapshot's spec path and lot — validates `--start-at`, and
 decides what the `--steps`/`--skip`/`--start-at` selectors do to the projected
 steps, which `openRun` hands it read-only before hydration and then applies:

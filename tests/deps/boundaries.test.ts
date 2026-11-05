@@ -12,9 +12,10 @@
 // `module-entry-only` fixture, and the entry-existence check on a temporary root
 // (`--modules-root`) holding every declared entry but one.
 //
-// Since the real config declares modules (scripts/layers.cjs), a fixture that
-// imports across folders uses folders no module claims, such as `dispatch/`:
-// otherwise an entry-only rule would fire on top of the guarantee under test.
+// Since the real config declares modules and contexts (scripts/layers.cjs), a
+// fixture that imports across folders uses folders of one context that no module
+// claims, such as `validation/` and `pipeline/`: otherwise an entry-only or a
+// direction rule would fire on top of the guarantee under test.
 
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -87,13 +88,36 @@ function folderEdge(from: string, to: string): Record<string, string> {
 const UPWARD_EDGE = {
   rule: "layer-0-no-upward",
   from: "src/lib/a.ts",
-  to: "src/env/b.ts",
+  to: "src/env/config.ts",
   why: "fixture",
   reviewedOn: "2026-09-06",
 };
 
 test("a module importing a higher layer raises its layer rule", () => {
   expect(rulesRaisedIn("upward")).toContain("layer-0-no-upward");
+});
+
+test("an import against the declared direction raises its context rule", () => {
+  expect(violationsIn("context-direction")).toContainEqual({
+    rule: "context-definition-direction",
+    from: "src/validation/upstream.ts",
+  });
+});
+
+test("an import in the declared direction raises nothing", () => {
+  const raisedByDownstream = violationsIn("context-direction").filter(
+    (violation) => violation.from === "src/dispatch/downstream.ts",
+  );
+
+  expect(raisedByDownstream).toEqual([]);
+});
+
+test("a new file in a folder that mixes contexts must be claimed, though its layer is known", () => {
+  const result = checkDeps("context-unclassified", []);
+
+  expect(result.status).not.toBe(0);
+  expect(result.output).toContain("file in no context: src/env/a.ts");
+  expect(result.output).not.toContain("unclassified file");
 });
 
 test("an import past a module's entry raises its entry-only rule", () => {
@@ -235,16 +259,16 @@ test("a folder cycle absent from the folder baseline fails, both edges named", (
 
   expect(result.status).not.toBe(0);
   expect(result.output).toContain("New folder cycle");
-  expect(result.output).toContain('"from":"dispatch","to":"boot"');
-  expect(result.output).toContain('"from":"boot","to":"dispatch"');
+  expect(result.output).toContain('"from":"validation","to":"pipeline"');
+  expect(result.output).toContain('"from":"pipeline","to":"validation"');
 });
 
-test("a folder baseline matching the cyclic edges exactly passes, the edge inside `dispatch/` aside", () => {
+test("a folder baseline matching the cyclic edges exactly passes, the edge inside `validation/` aside", () => {
   const result = checkDeps(
     "folder-cycle-crossed",
     [],
     [],
-    [folderEdge("dispatch", "boot"), folderEdge("boot", "dispatch")],
+    [folderEdge("validation", "pipeline"), folderEdge("pipeline", "validation")],
   );
 
   expect(result.status).toBe(0);
@@ -256,17 +280,17 @@ test("a folder baseline entry matching no cyclic edge fails as stale", () => {
     "folder-cycle-crossed",
     [],
     [],
-    [folderEdge("dispatch", "boot"), folderEdge("boot", "dispatch"), folderEdge("pipeline", "dispatch")],
+    [folderEdge("validation", "pipeline"), folderEdge("pipeline", "validation"), folderEdge("project", "validation")],
   );
 
   expect(result.status).not.toBe(0);
   expect(result.output).toContain("Stale folder baseline");
-  expect(result.output).toContain('"from":"pipeline","to":"dispatch"');
+  expect(result.output).toContain('"from":"project","to":"validation"');
 });
 
 test("a folder-cycle entry without a reason or a review date is refused", () => {
-  const { why: _why, ...unjustified } = folderEdge("dispatch", "boot");
-  const result = checkDeps("folder-cycle-crossed", [], [], [unjustified, folderEdge("boot", "dispatch")]);
+  const { why: _why, ...unjustified } = folderEdge("validation", "pipeline");
+  const result = checkDeps("folder-cycle-crossed", [], [], [unjustified, folderEdge("pipeline", "validation")]);
 
   expect(result.status).not.toBe(0);
   expect(result.output).toContain("must be justified and dated");
@@ -274,38 +298,48 @@ test("a folder-cycle entry without a reason or a review date is refused", () => 
 });
 
 test("a facade file and the folder of the same name are two distinct nodes", () => {
-  // The fixture imports `src/dsl.ts` from `src/dispatch/`, which the authoring
+  // The fixture imports `src/dsl.ts` from `src/validation/`, which the authoring
   // surface rule forbids; that is a file-level edge, and it is the folder graph
   // this test is about.
   const barrel = [
-    { rule: "root-dsl-barrel", from: "src/dispatch/s2.ts", to: "src/dsl.ts", why: "fixture", reviewedOn: "2026-09-06" },
+    {
+      rule: "root-dsl-barrel",
+      from: "src/validation/s2.ts",
+      to: "src/dsl.ts",
+      why: "fixture",
+      reviewedOn: "2026-09-06",
+    },
   ];
   const unknown = checkDeps("folder-cycle-facade", barrel, [], []);
 
   // Were the facade folded into the folder of the same name, `dsl.ts -> dsl`
-  // would be an edge inside one node and `dispatch -> dsl.ts` would read
-  // `dispatch -> dsl`: the cycle would hold two nodes instead of three.
+  // would be an edge inside one node and `validation -> dsl.ts` would read
+  // `validation -> dsl`: the cycle would hold two nodes instead of three.
   expect(unknown.status).not.toBe(0);
   expect(unknown.output).toContain('"from":"dsl.ts","to":"dsl"');
-  expect(unknown.output).toContain('"from":"dispatch","to":"dsl.ts"');
+  expect(unknown.output).toContain('"from":"validation","to":"dsl.ts"');
 
   const cycle = [
     folderEdge("dsl.ts", "dsl"),
-    folderEdge("dsl", "dispatch"),
-    folderEdge("dispatch", "dsl"),
-    folderEdge("dispatch", "dsl.ts"),
+    folderEdge("dsl", "validation"),
+    folderEdge("validation", "dsl"),
+    folderEdge("validation", "dsl.ts"),
   ];
 
   expect(checkDeps("folder-cycle-facade", barrel, [], cycle).status).toBe(0);
 });
 
 test("a three-folder cycle needs its three edges in the baseline", () => {
-  const edges = [folderEdge("dispatch", "boot"), folderEdge("boot", "pipeline"), folderEdge("pipeline", "dispatch")];
+  const edges = [
+    folderEdge("validation", "pipeline"),
+    folderEdge("pipeline", "builtin-steps"),
+    folderEdge("builtin-steps", "validation"),
+  ];
   const partial = checkDeps("folder-cycle-three", [], [], edges.slice(0, 2));
 
   expect(partial.status).not.toBe(0);
   expect(partial.output).toContain("New folder cycle");
-  expect(partial.output).toContain('"from":"pipeline","to":"dispatch"');
+  expect(partial.output).toContain('"from":"builtin-steps","to":"validation"');
 
   expect(checkDeps("folder-cycle-three", [], [], edges).status).toBe(0);
 });

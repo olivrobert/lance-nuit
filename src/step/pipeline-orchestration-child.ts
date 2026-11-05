@@ -10,7 +10,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { loadOrCreateRun } from "../boot/resume.js";
+import { loadOrCreateRun } from "./load-or-create-run.js";
 import { errorMessage } from "../lib/errors.js";
 import type { PipelineContext, PipelineLot } from "../model/context.js";
 import type { PipelineInvocationDefinition } from "../model/definition.js";

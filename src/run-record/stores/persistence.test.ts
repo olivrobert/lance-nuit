@@ -9,7 +9,7 @@ import { readRunEvents } from "../run-journal.ts";
 import { findStepLog, matchesStepSelector } from "../run-timeline.ts";
 import { allocateAttempt } from "../attempt-lifecycle.ts";
 import { controlForRun } from "../cost-accounting.ts";
-import { loadOrCreateRun } from "../../boot/resume.ts";
+import { loadOrCreateRun } from "../../step/load-or-create-run.ts";
 import { saveRun } from "../run-repository.ts";
 import { stepLogPath } from "../run-timeline.ts";
 import { abortRun, updateStep } from "../run-transitions.ts";

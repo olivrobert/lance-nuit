@@ -87,6 +87,7 @@ export function stepLoopDeps(output: RunOutput): StepLoopDeps {
 /** Re-exported for the entry point: the shape is owned by the run finalization
  *  it feeds (`run-record/run-transitions.ts`). */
 export type { RunOutcome } from "../run-record/index.js";
+export { loadOrCreateRun } from "./load-or-create-run.js";
 
 /**
  * Initial step attempt: create a fresh session when the backend provides one, then

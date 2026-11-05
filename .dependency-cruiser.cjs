@@ -9,11 +9,13 @@ const { existsSync } = require("node:fs");
 
 const {
   LAYERS,
+  CONTEXTS,
   MODULES,
   moduleRuleName,
   modulePathPattern,
   moduleEntryPattern,
   pathAboveLevel,
+  pathForbiddenTo,
 } = require("./scripts/layers.cjs");
 
 // `contracts/` is the published surface: pure types and functions. Two `lib/`
@@ -36,6 +38,26 @@ const layerRules = LAYERS.flatMap((layer) => {
       comment: `L${layer.level} ${layer.name}: ${layer.comment} It may not import from a higher layer.`,
       from: { path: layer.path },
       to: { path: above, pathNot: layer.path },
+    },
+  ];
+});
+
+// One rule per context: it may only import the contexts it declares. A context
+// allowed to import all the others yields no rule.
+const contextRules = CONTEXTS.flatMap((context) => {
+  const forbidden = pathForbiddenTo(context);
+
+  if (forbidden === null) return [];
+
+  const allowed = context.mayImport.length === 0 ? "no other context" : context.mayImport.join(", ");
+
+  return [
+    {
+      name: `context-${context.name}-direction`,
+      severity: "error",
+      comment: `${context.name}: ${context.comment} It may import ${allowed}.`,
+      from: { path: context.path },
+      to: { path: forbidden },
     },
   ];
 });
@@ -64,6 +86,7 @@ module.exports = {
       to: { circular: true },
     },
     ...layerRules,
+    ...contextRules,
     ...moduleRules,
     {
       name: "contracts-pure",

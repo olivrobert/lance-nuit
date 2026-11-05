@@ -1,4 +1,4 @@
-// Single definition of the architecture layers and modules described in
+// Single definition of the architecture layers, contexts and modules described in
 // guide/architecture.md.
 // Both `.dependency-cruiser.cjs` (to build the `layer-<n>-no-upward` rules) and
 // `scripts/check-deps.mjs` (to prove every source file is classified) read it, so
@@ -55,7 +55,67 @@ const LAYERS = [
   },
 ];
 
-// Modules are a second axis, orthogonal to the layers: a layer says which way an
+// Contexts are the business axis: a layer says how technical a file is, a context
+// says which question it answers, and `mayImport` which contexts it may rely on.
+// Each one becomes a `context-<name>-direction` rule in `.dependency-cruiser.cjs`.
+//
+// Unlike a layer, a context classifies single files: `model/`, `env/`, `exec/` and
+// `runtime/` mix files that belong to different contexts. A new file in one of these
+// folders must be claimed here, which `check-deps.mjs` enforces.
+
+/** @type {{ name: string, path: string, mayImport: string[] | "all", comment: string }[]} */
+const CONTEXTS = [
+  {
+    name: "entry",
+    path: "^src/runner\\.ts$|^src/(entry|cli|commands|boot|output)/|^src/model/cli-options\\.ts$|^src/env/(worktree|gitguard|runlock|docker-stack|docker-stack\\.schema)\\.ts$",
+    mayImport: "all",
+    comment: "What the operator asks for, and the assembly of everything else.",
+  },
+  {
+    name: "dashboard",
+    path: "^src/modules/(ui|read-model|dashboard-home)/",
+    mayImport: ["run", "work-items", "definition", "shared"],
+    comment: "What the human reads.",
+  },
+  {
+    name: "execution",
+    path: "^src/(step|dispatch)/|^src/exec/(runners|report-extraction)\\.ts$|^src/runtime/(abort|run-output)\\.ts$",
+    mayImport: ["definition", "run", "work-items", "shared"],
+    comment: "Which step to run, and what to do with its outcome.",
+  },
+  {
+    name: "agents",
+    path: "^src/engine/",
+    mayImport: ["shared"],
+    comment: "How to talk to each agent CLI. Execution reaches it through contracts/backends, never directly.",
+  },
+  {
+    name: "definition",
+    path: "^src/(dsl|builtin-steps|builtins|validation|project|extractors|pipeline)/|^src/dsl\\.ts$|^src/model/(definition|input)\\.ts$|^src/env/builtin-pipeline\\.ts$",
+    mayImport: ["work-items", "shared"],
+    comment: "What a pipeline is, and whether it is valid.",
+  },
+  {
+    name: "run",
+    path: "^src/(run-record|run-stats)/|^src/model/(run|persisted|journal|storage-ports|run-report|scan-record)\\.ts$",
+    mayImport: ["definition", "shared"],
+    comment: "What happened during a run, and what it cost.",
+  },
+  {
+    name: "work-items",
+    path: "^src/modules/work-item/|^src/work-item-store/|^src/model/(source|artifact)\\.ts$",
+    mayImport: ["shared"],
+    comment: "Which ticket, which artifacts, which provenance.",
+  },
+  {
+    name: "shared",
+    path: "^src/(contracts|lib)/|^src/model/(context|artifact-ports|config|profiles|run-stop)\\.ts$|^src/runtime/(logging|live-feed|events|live-cost|context)\\.ts$|^src/exec/(process-runner|process-supervision|self-spawn|bash-runner)\\.ts$|^src/env/(config|config\\.schema|kit-paths|tickets|lock|pricing|pricing\\.schema|capability-frontmatter)\\.ts$",
+    mayImport: [],
+    comment: "Primitives and the language every context shares; it imports no context.",
+  },
+];
+
+// Modules are a third axis, orthogonal to the other two: a layer says which way an
 // import may go, a module says through which file it may enter. Each module
 // becomes a `module-<name>-entry-only` rule in `.dependency-cruiser.cjs`, and
 // `check-deps.mjs` proves every `entry` exists, so a renamed entry cannot leave
@@ -77,6 +137,33 @@ const MODULES = [
   { name: "run-stats", path: "src/run-stats", entry: "index.ts" },
   { name: "run-record", path: "src/run-record", entry: "index.ts" },
 ];
+
+const CONTEXT_MATCHERS = CONTEXTS.map((context) => ({ context, regex: new RegExp(context.path) }));
+
+/**
+ * Every context whose regex matches `filePath`. Anything but one match is an
+ * error `check-deps.mjs` reports, as it does for layers.
+ *
+ * @param {string} filePath repository-relative path, POSIX separators
+ */
+function contextsOf(filePath) {
+  return CONTEXT_MATCHERS.filter(({ regex }) => regex.test(filePath)).map(({ context }) => context);
+}
+
+/**
+ * Union of the regexes of the contexts `context` may not import, or `null` when it
+ * may import all of them.
+ *
+ * @param {{ name: string, mayImport: string[] | "all" }} context
+ */
+function pathForbiddenTo(context) {
+  if (context.mayImport === "all") return null;
+
+  const { mayImport } = context;
+  const forbidden = CONTEXTS.filter((other) => other.name !== context.name && !mayImport.includes(other.name));
+
+  return forbidden.length === 0 ? null : forbidden.map((other) => other.path).join("|");
+}
 
 function escapeRegex(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -148,8 +235,11 @@ function pathAboveLevel(level) {
 
 module.exports = {
   LAYERS,
+  CONTEXTS,
   MODULES,
   layersOf,
+  contextsOf,
+  pathForbiddenTo,
   layerOf,
   pathAboveLevel,
   moduleRuleName,

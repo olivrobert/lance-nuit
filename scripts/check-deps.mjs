@@ -3,8 +3,8 @@
 // Architecture gate, run by `bun run deps:check`.
 //
 // Four things, in order:
-//   1. every source file is classified in exactly one layer, and every declared
-//      module entry exists (scripts/layers.cjs);
+//   1. every source file is classified in exactly one layer and one context, and
+//      every declared module entry exists (scripts/layers.cjs);
 //   2. the dependency-cruiser violations match the known-violations baseline,
 //      entry for entry — a violation missing from the baseline is new debt, a
 //      baseline entry with no matching edge is stale and must be removed;
@@ -49,7 +49,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { MODULES, layersOf, moduleRuleName } = require("./layers.cjs");
+const { MODULES, contextsOf, layersOf, moduleRuleName } = require("./layers.cjs");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_BASELINE = ".dependency-cruiser-known-violations.json";
@@ -116,6 +116,16 @@ function checkClassification() {
       const names = matches.map((layer) => `L${layer.level} ${layer.name}`).join(", ");
 
       problems.push(`file classified in several layers (${names}): ${relativePath}`);
+    }
+
+    const contexts = contextsOf(relativePath);
+
+    if (contexts.length === 0) {
+      problems.push(`file in no context: ${relativePath}`);
+    } else if (contexts.length > 1) {
+      const names = contexts.map((context) => context.name).join(", ");
+
+      problems.push(`file in several contexts (${names}): ${relativePath}`);
     }
   }
 
@@ -521,7 +531,7 @@ function main() {
   const classification = checkClassification();
 
   if (classification.length > 0) {
-    console.error("Every file under src/ must belong to exactly one layer (scripts/layers.cjs).");
+    console.error("Every file under src/ must belong to exactly one layer and one context (scripts/layers.cjs).");
 
     for (const problem of classification) console.error(`  ${problem}`);
 

@@ -143,7 +143,7 @@ const SECTIONS: Section[] = [
     // Reachable from `InputPredicateResult`: an admission that stops the run
     // describes its stop there, so the shape belongs in this reference.
     title: "Stop cause",
-    file: "model/persisted.d.ts",
+    file: "model/run-stop.d.ts",
     names: ["RunStopKind", "RunStopState"],
     note: "Persisted in `state.json` under `outcome.stop`; not importable from `@lance-nuit/dsl`.",
   },

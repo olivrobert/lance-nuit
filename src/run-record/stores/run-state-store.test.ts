@@ -6,7 +6,7 @@ import type { PipelineContext } from "../../model/context.js";
 import type { PersistedRun, PersistedStepState } from "../../model/persisted.js";
 import type { RunStateStore } from "../../model/storage-ports.js";
 import { buildPipelineContext } from "../../pipeline/context.js";
-import { loadOrCreateRun } from "../../boot/resume.js";
+import { loadOrCreateRun } from "../../step/load-or-create-run.js";
 import { isPersistedRunComplete, isPersistedRunResumable } from "../run-predicates.js";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import { writable } from "../run.js";
