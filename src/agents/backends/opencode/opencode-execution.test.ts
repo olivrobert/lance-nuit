@@ -3,7 +3,6 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ActivityRunnerEvent, ContextRunnerEvent } from "../../../shared/runtime/events.js";
-import { clearLiveAttemptCost, liveAttemptCost } from "../../../shared/runtime/live-cost.js";
 import { parseOpencodeLogErrors } from "./events.js";
 import { createNodeOpencodeHost, executeOpencode } from "./execution.js";
 
@@ -122,19 +121,22 @@ test("executeOpencode: a provider-reported cost above the remaining budget stops
   const priced = '{"type":"step_finish","part":{"type":"step-finish","tokens":{"total":100},"cost":0.5}}';
   const { bin, dir } = fakeOpencode("budget", [emit(priced), "sleep 30"]);
 
+  let liveCost: number | undefined;
   const result = await executeOpencode({
     bin,
     args: ["run"],
     env: {},
     cwd: dir,
     budgetRemaining: 0.1,
+    onLiveCost: (costUsd) => {
+      liveCost = costUsd;
+    },
     timeoutMs: 30_000,
   });
 
   expect(result.killed).toBe(true);
   expect(result.killReason).toContain("budget exceeded");
-  expect(liveAttemptCost()).toBe(0.5);
-  clearLiveAttemptCost();
+  expect(liveCost).toBe(0.5);
 }, 20_000);
 
 test("executeOpencode: a step priced by pricing.json is estimated live and can stop the run", async () => {
@@ -146,6 +148,7 @@ test("executeOpencode: a step priced by pricing.json is estimated live and can s
   const { bin, dir } = fakeOpencode("estimated", [emit(unpriced), "sleep 30"]);
 
   const host = createNodeOpencodeHost({ projectPricing: { _currency: "$", "glm-5.2": { in: 0.6, out: 2.2 } } });
+  let liveCost: number | undefined;
   const result = await host.execute({
     bin,
     args: ["run"],
@@ -153,14 +156,16 @@ test("executeOpencode: a step priced by pricing.json is estimated live and can s
     cwd: dir,
     model: "zai-coding-plan/glm-5.2",
     budgetRemaining: 0.1,
+    onLiveCost: (costUsd) => {
+      liveCost = costUsd;
+    },
     timeoutMs: 30_000,
   });
 
   expect(result.killed).toBe(true);
   expect(result.killReason).toContain("budget exceeded");
   expect(result.killReason).toContain("estimated");
-  expect(liveAttemptCost()).toBeCloseTo(0.6);
-  clearLiveAttemptCost();
+  expect(liveCost).toBeCloseTo(0.6);
 }, 20_000);
 
 test("executeOpencode: a step reported at `cost: 0` is estimated live and can stop the run", async () => {
@@ -172,6 +177,7 @@ test("executeOpencode: a step reported at `cost: 0` is estimated live and can st
   const { bin, dir } = fakeOpencode("zero-cost", [emit(zeroPriced), "sleep 30"]);
 
   const host = createNodeOpencodeHost({ projectPricing: { _currency: "$", "glm-5.2": { in: 0.6, out: 2.2 } } });
+  let liveCost: number | undefined;
   const result = await host.execute({
     bin,
     args: ["run"],
@@ -179,14 +185,16 @@ test("executeOpencode: a step reported at `cost: 0` is estimated live and can st
     cwd: dir,
     model: "zai-coding-plan/glm-5.2",
     budgetRemaining: 0.1,
+    onLiveCost: (costUsd) => {
+      liveCost = costUsd;
+    },
     timeoutMs: 30_000,
   });
 
   expect(result.killed).toBe(true);
   expect(result.killReason).toContain("budget exceeded");
   expect(result.killReason).toContain("estimated");
-  expect(liveAttemptCost()).toBeCloseTo(0.6);
-  clearLiveAttemptCost();
+  expect(liveCost).toBeCloseTo(0.6);
 }, 20_000);
 
 test("executeOpencode: a `cost: 0` step with no declared rate never triggers a budget kill", async () => {
@@ -207,7 +215,6 @@ test("executeOpencode: a `cost: 0` step with no declared rate never triggers a b
   });
 
   expect(result.killed).toBe(false);
-  clearLiveAttemptCost();
 }, 20_000);
 
 test("executeOpencode: an unpriced step never triggers a budget kill", async () => {
@@ -411,7 +418,6 @@ test("executeOpencode: unpriceable live usage stops the attempt as unaccounted, 
   expect(result.killReason).not.toContain("budget exceeded");
   // The supervisor cleaned the group instead of waiting out the `sleep 30`.
   expect(Date.now() - started).toBeLessThan(20_000);
-  clearLiveAttemptCost();
 }, 25_000);
 
 test("executeOpencode: an authorized run is not stopped by unpriceable live usage", async () => {
@@ -432,7 +438,6 @@ test("executeOpencode: an authorized run is not stopped by unpriceable live usag
   expect(result.killed).toBe(false);
   expect(result.code).toBe(0);
   expect(result.output).toContain("done");
-  clearLiveAttemptCost();
 }, 15_000);
 
 test("executeOpencode: silence is not proof, so the accounting guard kills nothing", async () => {
@@ -453,5 +458,4 @@ test("executeOpencode: silence is not proof, so the accounting guard kills nothi
 
   expect(result.killed).toBe(false);
   expect(result.code).toBe(0);
-  clearLiveAttemptCost();
 }, 15_000);

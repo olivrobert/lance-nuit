@@ -5,7 +5,7 @@
 // extraction live in `report-extraction.ts`.
 
 import { appendFileSync } from "node:fs";
-import type { AgentBackendRegistry, AttemptStats, RunnerResult } from "../contracts/backends.js";
+import type { AgentBackendRegistry, AttemptStats, LiveCostSink, RunnerResult } from "../contracts/backends.js";
 import {
   type AgentIntent,
   type AgentRequest,
@@ -53,6 +53,7 @@ export interface InvokeBackendInput {
   readonly timeoutMs?: number;
   readonly budgetRemaining?: number;
   readonly strictCostAccounting?: boolean;
+  readonly onLiveCost?: LiveCostSink;
   readonly session?: AgentSession;
   readonly resumeSession?: AgentSession;
   readonly stepLogPath?: string;
@@ -69,6 +70,7 @@ export interface AgentRunBudget {
   /** A ceiling governs the run and `--allow-unmetered` was not given: a backend
    *  that can prove its live usage unpriceable stops the attempt. */
   strictCostAccounting?: boolean;
+  onLiveCost?: LiveCostSink;
   role?: string;
   /** Default fix intent for attempts passing through this path. */
   intent?: AgentIntent;
@@ -141,6 +143,7 @@ export async function invokeBackend(input: InvokeBackendInput): Promise<AgentRes
     timeoutMs: input.timeoutMs,
     budgetRemaining: input.budgetRemaining,
     strictCostAccounting: input.strictCostAccounting,
+    onLiveCost: input.onLiveCost,
     session,
     resumeSession,
     stepLogPath: input.stepLogPath,
@@ -169,6 +172,7 @@ function invokeBackendWithBudget(
     timeoutMs: budget.timeout ?? DEFAULT_PROCESS_TIMEOUT_MS,
     budgetRemaining: budget.budgetRemaining,
     strictCostAccounting: budget.strictCostAccounting,
+    onLiveCost: budget.onLiveCost,
     session: budget.session,
     resumeSession: budget.resumeSession,
     stepLogPath: budget.stepLogPath,
@@ -184,6 +188,7 @@ export async function executeStep(
     timeout?: number;
     budgetRemaining?: number;
     strictCostAccounting?: boolean;
+    onLiveCost?: LiveCostSink;
     session?: AgentSession;
     resumeSession?: AgentSession;
     stepLogPath?: string;

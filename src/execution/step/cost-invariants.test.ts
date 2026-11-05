@@ -31,7 +31,7 @@ import { readRunEvents } from "../../run/record/run-journal.ts";
 import { settleCrashedAttempts } from "../../run/record/run-projection.ts";
 import { readRunSnapshot } from "../../run/record/run-snapshot.ts";
 import { makeRunStep, type StepStateInput } from "../../run/record/run-step.ts";
-import { abortRun, finalizeRun } from "../../run/record/run-transitions.ts";
+import { abortRun, finalizeRun, reportLiveCost } from "../../run/record/run-transitions.ts";
 import { createAbortScope } from "../abort.ts";
 import { NULL_RUN_OUTPUT } from "../run-output.ts";
 import { type FixLoopDeps, runFixLoop } from "./fix-loop.ts";
@@ -155,7 +155,8 @@ test("a signal closes the killed attempt on the step total, not on the ledger, a
   );
   const deps = scriptedDeps([
     () => {
-      abortRun(run, "SIGINT", { estimatedCostUsd: 0.375 });
+      reportLiveCost(run, run.steps[1]!, 0.375);
+      abortRun(run, "SIGINT");
       // The backend resolves while its process drains: this figure arrives after
       // the signal handler closed the attempt, and must be charged nowhere.
       return { ok: true, stats: { duration_ms: 1, total_cost_usd: 0.5 } };
@@ -253,8 +254,8 @@ test("a metered attempt that failed before reporting a figure is a lower bound, 
   });
 
   expect(step.control?.cost_unknown).toBe(true);
-  // Nothing charged and nothing latched: the remaining budget is what spawn saw.
-  expect(budget).toEqual({ cumulative: 0, remaining: 1 });
+  // Nothing charged and nothing latched.
+  expect(budget).toEqual({ cumulative: 0 });
   expect(run.cost_unaccounted).toBeUndefined();
   expect(costIsLowerBound(run)).toBe(true);
   expect(warnings()).toHaveLength(1);

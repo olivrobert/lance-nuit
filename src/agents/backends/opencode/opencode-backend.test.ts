@@ -173,3 +173,12 @@ test("createOpencodeBackendFactory: no pricing fallback, so an unknown model is 
   expect(Object.keys(factory.usage?.pricing ?? {})).toEqual([]);
   expect(factory.create({ model: "opencode/x" }).id).toBe("opencode");
 });
+
+test("OpencodeBackend: the live cost sink reaches the execution", async () => {
+  const { host, seen } = recordingHost();
+  const onLiveCost = () => {};
+
+  await createOpencodeBackend({ model: OPENCODE_MODEL.NEMOTRON_3_ULTRA }, host).run({ prompt: "x", onLiveCost });
+
+  expect(seen().onLiveCost).toBe(onLiveCost);
+});

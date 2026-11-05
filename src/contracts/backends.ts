@@ -84,6 +84,10 @@ export interface JsonSchema {
   readonly [keyword: string]: unknown;
 }
 
+/** Receives the running cost estimate of one attempt. A call without a model keeps
+ *  the one an earlier call reported; `undefined` says nothing can be estimated yet. */
+export type LiveCostSink = (costUsd: number | undefined, model?: string) => void;
+
 export interface AgentRequest {
   readonly prompt: string;
   readonly cwd?: string;
@@ -106,6 +110,10 @@ export interface AgentRequest {
    *  it cannot be measured against. Absence of usage events is never such a
    *  proof: a guard that knows nothing yet kills nothing. */
   readonly strictCostAccounting?: boolean;
+  /** Where a backend that sees usage while it runs publishes its estimate. An
+   *  interruption charges the last figure to the killed attempt; a backend that
+   *  never calls it leaves that attempt recorded as `cost_unknown`. */
+  readonly onLiveCost?: LiveCostSink;
   readonly session?: AgentSession;
   readonly resumeSession?: AgentSession;
   readonly stepLogPath?: string;

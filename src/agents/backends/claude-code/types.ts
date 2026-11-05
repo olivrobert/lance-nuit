@@ -1,3 +1,4 @@
+import type { LiveCostSink } from "../../../contracts/backends.js";
 import type { ClaudeOptions, ClaudeResumeBaseline } from "../../../contracts/backends/claude-code.js";
 import type { BackendSpawnEvent } from "../spawn-event.js";
 
@@ -15,6 +16,7 @@ export interface ClaudeExecutionOptions {
   claudeOptions?: ClaudeOptions;
   timeoutMs?: number;
   budgetRemaining?: number;
+  onLiveCost?: LiveCostSink;
   stepLogPath?: string;
   /** Cost of the transport attempts this one replaces (overload retries). Folded
    *  into the live estimate so an abort mid-retry charges the whole spawn. */

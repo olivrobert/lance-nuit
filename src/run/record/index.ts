@@ -86,10 +86,12 @@ export {
 export {
   abortRun,
   absorbStepFailure,
+  clearLiveCost,
   finalizeRun,
   type RunOutcome,
   recordAbsorbedInputs,
   recordStepVerdict,
+  reportLiveCost,
   stopRun,
   updateStep,
 } from "./run-transitions.js";

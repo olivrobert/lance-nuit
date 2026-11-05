@@ -103,6 +103,7 @@ export class CodexBackend implements AgentBackend {
           timeoutMs: request.timeoutMs,
           budgetRemaining: request.budgetRemaining,
           strictCostAccounting: request.strictCostAccounting,
+          onLiveCost: request.onLiveCost,
           stepLogPath: request.stepLogPath,
         },
         this.host,

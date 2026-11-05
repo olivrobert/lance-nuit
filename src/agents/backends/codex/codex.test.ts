@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verdictFromStructured } from "../../../contracts/index.js";
 import { verdictSchema } from "../verdict-instruction.js";
-import { clearLiveAttemptCost, liveAttemptCost } from "../../../shared/runtime/live-cost.js";
 import { buildCodexArgs } from "./args.js";
 import { CodexBackend, VERDICT_SCHEMA } from "./backend.js";
 import { parseCodexEvents } from "./events.js";
@@ -307,18 +306,21 @@ test("CodexBackend: stops a priced turn that exceeds the remaining budget", asyn
   );
   chmodSync(bin, 0o755);
 
+  let liveCost: number | undefined;
   const result = await new CodexBackend({ bin, model: CODEX_MODEL.GPT_5_CODEX }).run({
     prompt: "test",
     cwd: dir,
     budgetRemaining: 0.01,
+    onLiveCost: (costUsd) => {
+      liveCost = costUsd;
+    },
     timeoutMs: 5_000,
   });
 
   expect(result.ok).toBe(false);
   expect(result.timedOut).toBe(false);
   expect(result.failReason).toContain("budget exceeded");
-  expect(liveAttemptCost()).toBeGreaterThan(0.01);
-  clearLiveAttemptCost();
+  expect(liveCost).toBeGreaterThan(0.01);
 }, 10_000);
 
 test("CodexBackend: unpriceable live usage stops the turn as unaccounted under a strict ceiling", async () => {
@@ -356,7 +358,6 @@ test("CodexBackend: unpriceable live usage stops the turn as unaccounted under a
   expect(result.failReason).toContain("cost unaccounted");
   expect(result.failReason).toContain("--allow-unmetered");
   expect(Date.now() - started).toBeLessThan(15_000);
-  clearLiveAttemptCost();
 }, 25_000);
 
 test("CodexBackend: an authorized run keeps an unpriceable turn alive", async () => {
@@ -380,7 +381,6 @@ test("CodexBackend: an authorized run keeps an unpriceable turn alive", async ()
 
   expect(result.ok).toBe(true);
   expect(result.costUnaccounted).toBeUndefined();
-  clearLiveAttemptCost();
 }, 15_000);
 
 test("CodexBackend: shared timeout kills the detached process", async () => {

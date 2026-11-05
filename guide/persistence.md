@@ -308,9 +308,9 @@ adopted is answered on every invocation by its in-flight mark in
 
 A step a dead runner left `running`, an orchestration node killed mid-child
 included, stays so while later steps run. The snapshot cannot tell it from the
-step being executed, so `updateStep` records the step this process put in
-`running` (`Run.executingStepId`, runtime-only), and a SIGINT or SIGTERM aborts
-that one only. In either mode, a signal that lands while no step executes
+step being executed, so `updateStep` records the steps this process put in
+`running` (`Run.executing`, runtime-only), and a SIGINT or SIGTERM aborts those
+only. In either mode, a signal that lands while no step executes
 (during an admission, or before the first step) marks no step `aborted`.
 
 `Run.reconcile` is runtime-only too: boot sets it from the definition it loads

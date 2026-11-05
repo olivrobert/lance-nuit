@@ -1,3 +1,4 @@
+import type { LiveCostSink } from "../../../contracts/backends.js";
 import type { BackendSpawnEvent } from "../spawn-event.js";
 
 export { CODEX_MODEL, CODEX_SANDBOX } from "../../../contracts/backends/codex.js";
@@ -18,6 +19,7 @@ export interface CodexExecutionOptions {
   /** A ceiling governs this attempt and unmetered spend is not authorized: the
    *  guard stops the process as soon as it can prove the usage unpriceable. */
   strictCostAccounting?: boolean;
+  onLiveCost?: LiveCostSink;
   stepLogPath?: string;
 }
 

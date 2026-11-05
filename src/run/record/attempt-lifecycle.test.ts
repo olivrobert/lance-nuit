@@ -8,7 +8,7 @@ import type { RunBudget } from "./budget.js";
 import { readRunEvents } from "./run-journal.js";
 import { readRunSnapshot } from "./run-snapshot.js";
 import { makeRunStep } from "./run-step.js";
-import { abortRun } from "./run-transitions.js";
+import { abortRun, reportLiveCost } from "./run-transitions.js";
 
 function makeRun(step: RunStep, maxCost?: number): Run {
   const dir = mkdtempSync(join(tmpdir(), "attempt-lifecycle-"));
@@ -38,9 +38,10 @@ test("openAttempt: registers, journals and persists the attempt before anything 
 test("settleAttempt: a result arriving after the signal handler closed the attempt changes nothing", () => {
   const step = runningStep();
   const run = makeRun(step, 1);
-  run.executingStepId = step.id;
+  run.executing = new Map([[step.id, {}]]);
   const opened = openAttempt(run, step, { kind: "step", command: "work" });
-  abortRun(run, "SIGINT", { estimatedCostUsd: 0.25 });
+  reportLiveCost(run, step, 0.25);
+  abortRun(run, "SIGINT");
   const budget: RunBudget = { cumulative: 0 };
   const eventsBefore = readRunEvents(run.run_dir).length;
 

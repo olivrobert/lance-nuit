@@ -18,6 +18,8 @@
 // - `recordAbsorbedInputs` the inputs that absorbed failure settled at, which
 //                         a resume compares before checking the step again;
 // - `stopRun`             a clean stop that preserves the work left to do;
+// - `reportLiveCost`      the live estimate of a step's attempt in flight, which
+//                         `abortRun` charges; runtime-only, so nothing is saved;
 // - `abortRun`            a SIGINT/SIGTERM interruption, from the signal handler;
 // - `finalizeRun`         the verdict, the outcome and the totals of a run whose
 //                         loop has returned, the `run.finished` event and the
@@ -41,7 +43,7 @@
 import type { StepControl, StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import type { RunOutcomeStopKind, RunStopState } from "../persisted.js";
 import type { RunStepView, RunView } from "../run.js";
-import type { RunStep } from "./run.js";
+import type { Run, RunStep } from "./run.js";
 import { writable } from "./run.js";
 import { closeAttempt } from "./attempt-closure.js";
 import { aggregateControl, sumStepUsage } from "./cost-accounting.js";
@@ -60,8 +62,10 @@ export function updateStep(runView: RunView, stepView: RunStepView, status: RunS
   // `running` in the snapshot does not say which step this process executes: a
   // pass the runner died in keeps it, while an operator selection lets later
   // steps run. The transition that starts a pass is what knows.
-  if (status === "running") run.executingStepId = step.id;
-  else if (run.executingStepId === step.id) delete run.executingStepId;
+  if (status === "running") {
+    run.executing ??= new Map();
+    run.executing.set(step.id, {});
+  } else run.executing?.delete(step.id);
   if (status === "running") {
     step.started_at = new Date().toISOString();
     // A resume/retry must not retain an earlier terminal timestamp.
@@ -183,64 +187,85 @@ export function recordAbsorbedInputs(
   saveRun(run);
 }
 
-/** Finalize bookkeeping when the process receives SIGINT/SIGTERM.
- *  `estimatedCostUsd` carries the killed attempt's live spend estimate: without
- *  it the budget ledger loses everything the interrupted agent consumed. `model`
- *  is the model that attempt reported, for a step that recorded none before. */
-export function abortRun(
+/** Publish the running estimate of the attempt `step` has in flight. A step this
+ *  process is not executing has nothing to charge it to, so a figure arriving after
+ *  the abort closed the attempt is dropped. */
+export function reportLiveCost(
   runView: RunView,
-  signal: "SIGINT" | "SIGTERM",
-  options: { estimatedCostUsd?: number; model?: string } = {},
+  stepView: RunStepView,
+  costUsd: number | undefined,
+  model?: string,
 ): void {
+  const estimate = writable(runView).executing?.get(stepView.id);
+  if (!estimate) return;
+  estimate.costUsd = costUsd;
+  if (model) estimate.model = model;
+}
+
+/** Forget the estimate of `step`, so an attempt never inherits the previous one's. */
+export function clearLiveCost(runView: RunView, stepView: RunStepView): void {
+  const run = writable(runView);
+  if (run.executing?.has(stepView.id)) run.executing.set(stepView.id, {});
+}
+
+/** Close one step this process was executing when the signal arrived, and return
+ *  the log of its attempt. The live estimate is what keeps the ledger from losing
+ *  everything the interrupted agent consumed, and its model is the only record of
+ *  what that attempt ran on for a step that recorded none before. */
+function abortExecutingStep(run: Run, step: RunStep, reason: string, now: string): string | null {
+  const attempt = [...(step.attempts ?? [])].reverse().find((candidate) => candidate.status === "running");
+  const logPath = attempt?.log_path ?? relativeRunPath(run.run_dir, latestAttemptLog(run, step));
+  const estimate = run.executing?.get(step.id);
+
+  step.status = "aborted";
+  run.executing?.delete(step.id);
+  step.finished_at = now;
+  step.errors = reason;
+
+  if (attempt) {
+    const started = Date.parse(attempt.started_at);
+    const duration = Number.isFinite(started) ? Math.max(0, Date.now() - started) : 0;
+    const abortedCost = estimate?.costUsd != null && estimate.costUsd > 0 ? estimate.costUsd : undefined;
+    // `closeAttempt` applies the `cost_unknown` rule (agent or fix attempt
+    // killed before a live estimate reached us) and merges into the step total.
+    const control: StepControl = {
+      duration_ms: duration,
+      ...(abortedCost != null ? { total_cost_usd: abortedCost } : {}),
+      model: step.control?.model ?? estimate?.model,
+      provider: step.control?.provider ?? step.session?.provider,
+      cost_estimated: true,
+    };
+    closeAttempt(run, step, attempt, { status: "aborted", control, reason });
+  }
+
+  appendRunEvent(run, "step.status.changed", {
+    stepId: step.id,
+    status: "aborted",
+    reason,
+    logPath: logPath ?? undefined,
+    // Absent in practice — an interruption is not a cause the step established
+    // — but written unconditionally like every other field of this event, so
+    // the two `step.status.changed` sites keep the same shape.
+    failCause: step.fail_cause,
+  });
+  return logPath;
+}
+
+/** Finalize bookkeeping when the process receives SIGINT/SIGTERM. Every step this
+ *  process is executing closes on its own estimate; the outcome names the first of
+ *  them in pipeline order. */
+export function abortRun(runView: RunView, signal: "SIGINT" | "SIGTERM"): void {
   const run = writable(runView);
   const reason = `${signal}: run interrupted manually`;
   const now = new Date().toISOString();
-  const activeStep = run.steps.find((step) => step.id === run.executingStepId && step.status === "running");
-  const activeAttempt = activeStep
-    ? [...(activeStep.attempts ?? [])].reverse().find((attempt) => attempt.status === "running")
-    : undefined;
-  const logPath =
-    activeAttempt?.log_path ?? (activeStep ? relativeRunPath(run.run_dir, latestAttemptLog(run, activeStep)) : null);
-
-  if (activeStep) {
-    activeStep.status = "aborted";
-    delete run.executingStepId;
-    activeStep.finished_at = now;
-    activeStep.errors = reason;
-
-    if (activeAttempt) {
-      const started = Date.parse(activeAttempt.started_at);
-      const duration = Number.isFinite(started) ? Math.max(0, Date.now() - started) : 0;
-      const abortedCost =
-        options.estimatedCostUsd != null && options.estimatedCostUsd > 0 ? options.estimatedCostUsd : undefined;
-      // `closeAttempt` applies the `cost_unknown` rule (agent or fix attempt
-      // killed before a live estimate reached us) and merges into the step total.
-      const control: StepControl = {
-        duration_ms: duration,
-        ...(abortedCost != null ? { total_cost_usd: abortedCost } : {}),
-        model: activeStep.control?.model ?? options.model,
-        provider: activeStep.control?.provider ?? activeStep.session?.provider,
-        cost_estimated: true,
-      };
-      closeAttempt(run, activeStep, activeAttempt, { status: "aborted", control, reason });
-    }
-
-    appendRunEvent(run, "step.status.changed", {
-      stepId: activeStep.id,
-      status: "aborted",
-      reason,
-      logPath: logPath ?? undefined,
-      // Absent in practice — an interruption is not a cause the step established
-      // — but written unconditionally like every other field of this event, so
-      // the two `step.status.changed` sites keep the same shape.
-      failCause: activeStep.fail_cause,
-    });
-  }
+  const activeSteps = run.steps.filter((step) => run.executing?.has(step.id) && step.status === "running");
+  const logPaths = activeSteps.map((step) => abortExecutingStep(run, step, reason, now));
+  const logPath = logPaths[0] ?? null;
 
   run.aborted = true;
   run.status = "ABORTED";
   run.outcome = {
-    phase: activeStep?.id ?? null,
+    phase: activeSteps[0]?.id ?? null,
     reason,
     logPath,
     // A manual interruption resumes by default: completed steps are kept and the

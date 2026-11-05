@@ -105,6 +105,7 @@ export class ClaudeBackend implements AgentBackend {
         claudeOptions: options,
         timeoutMs: request.timeoutMs,
         budgetRemaining: request.budgetRemaining,
+        onLiveCost: request.onLiveCost,
         stepLogPath: request.stepLogPath,
       },
       (o) => executeClaude(o, this.host),

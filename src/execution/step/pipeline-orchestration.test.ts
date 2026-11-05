@@ -1909,6 +1909,59 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   expect(abort.activeRuns()).toEqual([]);
 });
 
+// Same interruption seen from the scope alone: the handler has not persisted the
+// abort on the parent yet, so the node's own answer must not become the run's stop.
+test("pipeline-orchestration: an abort seen only on the scope is not reported as the parent's stop", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pipeline-compose-abort-scope-"));
+  const hook = `lanceNuitAbortScopeHook_${process.pid}`;
+  const childPath = writePipeline(
+    root,
+    "child",
+    `
+export default ({ pipeline, actionStep }) => pipeline("child")
+  .add(actionStep({ id: "a", name: "a", run: () => { globalThis[${JSON.stringify(hook)}](); }, describe: "a" }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
+  .build();
+`,
+  );
+  const parentPath = writePipeline(
+    root,
+    "parent",
+    `
+export default ({ pipeline, runPipeline }) => pipeline("parent")
+  .add(runPipeline({ id: "child", name: "child", pipeline: "./${childPath.slice(root.length + 1)}", ticket: "C-1" }))
+  .build();
+`,
+  );
+  const context = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
+  const { run: parent } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir: join(root, "parent-run"),
+    fresh: true,
+    context,
+    worktree: false,
+  });
+  const abort = createAbortScope();
+  (globalThis as Record<string, unknown>)[hook] = () => abort.requestAbort("SIGINT");
+  try {
+    const outcome = await executeRunSteps(
+      parent,
+      "P",
+      undefined,
+      { resuming: false, abort },
+      stepLoopDeps(NULL_RUN_OUTPUT),
+      context,
+    );
+
+    expect(outcome.stopped).toBe(false);
+    expect(outcome.failed).toBe(false);
+  } finally {
+    delete (globalThis as Record<string, unknown>)[hook];
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("pipeline-orchestration: a child declaring .reconcile() is resumed in reconcile mode", async () => {
   const root = mkdtempSync(join(tmpdir(), "pipeline-compose-reconcile-"));
   try {

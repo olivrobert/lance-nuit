@@ -12,7 +12,7 @@ import { controlForRun } from "../cost-accounting.ts";
 import { loadOrCreateRun } from "../../../execution/step/load-or-create-run.ts";
 import { saveRun } from "../run-repository.ts";
 import { stepLogPath } from "../run-timeline.ts";
-import { abortRun, updateStep } from "../run-transitions.ts";
+import { abortRun, reportLiveCost, updateStep } from "../run-transitions.ts";
 import { isResumable, isRunComplete } from "./run-storage.ts";
 import { builtinRegistries } from "../../../../tests/builtin-registries.ts";
 
@@ -559,7 +559,7 @@ test("abortRun: an agent attempt killed without a live estimate is flagged cost_
   run.runId = "abort-unpriced";
   const step = run.steps[1]!;
   step.status = "running";
-  run.executingStepId = step.id;
+  run.executing = new Map([[step.id, {}]]);
   step.attempts = [
     {
       attempt: 1,
@@ -584,7 +584,7 @@ test("abortRun: a live estimate charges the attempt and clears the unknown flag"
   run.runId = "abort-estimated";
   const step = run.steps[1]!;
   step.status = "running";
-  run.executingStepId = step.id;
+  run.executing = new Map([[step.id, {}]]);
   step.control = { duration_ms: 10, total_cost_usd: 0.2 };
   step.attempts = [
     {
@@ -596,7 +596,9 @@ test("abortRun: a live estimate charges the attempt and clears the unknown flag"
     },
   ];
 
-  abortRun(run, "SIGINT", { estimatedCostUsd: 0.05 });
+  reportLiveCost(run, step, 0.05);
+
+  abortRun(run, "SIGINT");
 
   expect(step.attempts?.[0]?.control?.total_cost_usd).toBeCloseTo(0.05);
   expect(step.attempts?.[0]?.control?.cost_unknown).toBeUndefined();
@@ -610,7 +612,7 @@ test("abortRun: a bash step spends nothing; its fix pass is an agent and does", 
   bash.runId = "abort-bash";
   const bashStep = bash.steps[0]!;
   bashStep.status = "running";
-  bash.executingStepId = bashStep.id;
+  bash.executing = new Map([[bashStep.id, {}]]);
   bashStep.attempts = [
     {
       attempt: 1,
@@ -628,7 +630,7 @@ test("abortRun: a bash step spends nothing; its fix pass is an agent and does", 
   fix.runId = "abort-bash-fix";
   const fixed = fix.steps[0]!;
   fixed.status = "running";
-  fix.executingStepId = fixed.id;
+  fix.executing = new Map([[fixed.id, {}]]);
   fixed.attempts = [
     {
       attempt: 2,
@@ -689,7 +691,7 @@ function makeRun(dir: string): Run {
     pipeline_path: "feat.ts",
     run_dir: dir,
     // As `updateStep(running)` records it for the step this process executes.
-    executingStepId: "spec",
+    executing: new Map([["spec", {}]]),
     steps: [
       makeRunStep({ id: "triage", name: "T", command: "x", runner: "bash" }, { status: "done" }),
       makeRunStep(
