@@ -1,7 +1,12 @@
-import { CODEX_SANDBOX } from "../../contracts/backends/codex.js";
+import type { AgentBackendRegistry } from "../../contracts/backends.js";
 import { isLogicalSegment } from "../../shared/language/artifact-ports.js";
 import type { PipelineStep } from "../definition.js";
-import type { PipelineValidationContext, PipelineValidationFinding, PipelineValidationRule } from "./types.js";
+import {
+  backendRegistryOf,
+  type PipelineValidationContext,
+  type PipelineValidationFinding,
+  type PipelineValidationRule,
+} from "./types.js";
 
 /**
  * What `parallelize` may hold. Every member runs at the same time as its siblings, in
@@ -22,7 +27,7 @@ export class ParallelGroupValidator implements PipelineValidationRule {
       : [];
     const groupIds = new Set(steps.flatMap((step) => step.parallel_group?.id ?? []));
     return [...groupIds].flatMap((groupId) =>
-      problemsOfGroup(groupId, steps).map((problem) => ({
+      problemsOfGroup(groupId, steps, backendRegistryOf(context)).map((problem) => ({
         rule: this.id,
         level: "error" as const,
         message: `parallel group "${groupId}": ${problem}`,
@@ -31,11 +36,13 @@ export class ParallelGroupValidator implements PipelineValidationRule {
   }
 }
 
-function problemsOfGroup(groupId: string, steps: readonly PipelineStep[]): string[] {
+function problemsOfGroup(groupId: string, steps: readonly PipelineStep[], registry: AgentBackendRegistry): string[] {
   const members = steps.filter((step) => step.parallel_group?.id === groupId);
   return [
     ...problemsOfShape(groupId, steps, members),
-    ...members.flatMap((member) => problemsOfMember(groupId, member).map((why) => `step "${member.id}": ${why}`)),
+    ...members.flatMap((member) =>
+      problemsOfMember(groupId, member, registry).map((why) => `step "${member.id}": ${why}`),
+    ),
     ...problemsBetweenMembers(members),
   ];
 }
@@ -57,7 +64,7 @@ function problemsOfShape(groupId: string, steps: readonly PipelineStep[], member
   return problems;
 }
 
-function problemsOfMember(groupId: string, member: PipelineStep): string[] {
+function problemsOfMember(groupId: string, member: PipelineStep, registry: AgentBackendRegistry): string[] {
   const problems: string[] = [];
   if (member.runner !== "agent") problems.push("a group holds only agent steps (llmStep)");
   if (!member.id.startsWith(`${groupId}.`)) problems.push(`id must start with "${groupId}."`);
@@ -67,11 +74,8 @@ function problemsOfMember(groupId: string, member: PipelineStep): string[] {
   if (member.rework_for?.length) {
     problems.push(`cannot be the rework step of "${member.rework_for.join(", ")}", it would replay without its group`);
   }
-  // Read-only is what a Codex step gets by default, so only an explicit grant is refused.
-  const sandbox = member.backend?.id === "codex" && (member.backend.options as { sandbox?: unknown })?.sandbox;
-  if (sandbox && sandbox !== CODEX_SANDBOX.READ_ONLY) {
-    problems.push(`sandbox "${String(sandbox)}" lets it write to the code the siblings are reading`);
-  }
+  const writeGrant = member.backend && registry.writeGrantOf(member.backend);
+  if (writeGrant) problems.push(`${writeGrant} lets it write to the code the siblings are reading`);
   return problems;
 }
 

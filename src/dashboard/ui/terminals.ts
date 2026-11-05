@@ -32,6 +32,7 @@
 
 import { existsSync } from "node:fs";
 import { isPipelineName } from "../../definition/index.js";
+import type { AgentBackendRegistry } from "../../contracts/backends.js";
 import type { WorkItemGatewayRegistry } from "../../contracts/registry.js";
 import {
   type CoderSessionRead,
@@ -491,26 +492,23 @@ export const operatorCommand: PaneCommandBuilder = ({ ticket, pipeline, worktree
   };
 };
 
-/** A Claude session id as the runner mints it (a UUID); anything else is not
- *  typed into a shell, quoted or not. */
-const CLAUDE_SESSION_ID = /^[0-9A-Fa-f-]{1,64}$/;
-
 /**
- * Default session command: the interactive Claude CLI on a FORK of an agent
- * session. The fork leaves the run's own conversation as it was, so a later
- * `resume_session` repair does not inherit what the human typed. Read-only is
- * Claude's plan mode, so the fork does not edit files under a running step.
- * Only Claude is supported: the other backends' resume commands are
- * non-interactive.
+ * Session command over the backends a registry holds: each says how its sessions
+ * reopen, or that they do not. A CLI missing from PATH is looked up at each launch,
+ * so installing it needs no dashboard restart.
  */
-export const resumeCoderCommand: SessionCommandBuilder = ({ provider, sessionId }, { readOnly }) => {
-  if (provider !== "claude") {
-    return { ok: false, status: 409, reason: `a ${provider} session cannot be reopened from the dashboard` };
-  }
-  if (!CLAUDE_SESSION_ID.test(sessionId)) return { ok: false, status: 409, reason: "the session id is malformed" };
-  if (!hasClaudeCli()) return { ok: false, status: 503, reason: "claude CLI not found" };
-  return {
-    ok: true,
-    words: ["claude", "--resume", sessionId, "--fork-session", ...(readOnly ? ["--permission-mode", "plan"] : [])],
+export function reopenSessionCommand(
+  backends: AgentBackendRegistry,
+  which: (name: string) => string | null = (name) => Bun.which(name),
+): SessionCommandBuilder {
+  return ({ provider, sessionId }, options) => {
+    const reopen = backends.interactiveReopenOf(provider);
+    if (!reopen) {
+      return { ok: false, status: 409, reason: `a ${provider} session cannot be reopened from the dashboard` };
+    }
+    const words = reopen(sessionId, options);
+    if (!words) return { ok: false, status: 409, reason: "the session id is malformed" };
+    if (which(words[0]!) === null) return { ok: false, status: 503, reason: `${words[0]} CLI not found` };
+    return { ok: true, words: [...words] };
   };
-};
+}

@@ -12,9 +12,13 @@ import {
   writeRun,
   writeRunLock,
 } from "../read-model/test-harness.js";
+import { AgentBackendRegistry } from "../../contracts/backends.js";
 import { createDefaultWorkItemGatewayRegistry } from "../../work-items/providers/registry.ts";
 import { USER_COOKIE } from "./cookies.js";
 import { type RunningUiServer, startUiServer } from "./server.js";
+import { reopenSessionCommand } from "./terminals.js";
+
+const sessionCommand = reopenSessionCommand(new AgentBackendRegistry());
 
 /** Every server in this file binds port 0: the kernel hands out a free port, so
  *  the suite never collides with a real dashboard or with itself. */
@@ -64,6 +68,7 @@ async function fixture(options: { users?: string[]; listProject?: boolean } = {}
     port: 0,
     env: { ...process.env, PIPELINE_HOME: home },
     workItems: createDefaultWorkItemGatewayRegistry(),
+    sessionCommand,
   });
   running.push(server);
   return { home, project, server, url: (path: string) => `${server.url}${path}` };
@@ -81,6 +86,7 @@ test("server: the dashboard files are created empty but valid on first start", a
     port: 0,
     env: { ...process.env, PIPELINE_HOME: home },
     workItems: createDefaultWorkItemGatewayRegistry(),
+    sessionCommand,
   });
   running.push(server);
 
@@ -453,7 +459,13 @@ async function actionFixture(options: { fakeExit?: string } = {}): Promise<Fixtu
 
   const launcher = fakeLauncher();
   const env = { ...process.env, PIPELINE_HOME: home, FAKE_EXIT: options.fakeExit ?? "0" };
-  const server = await startUiServer({ port: 0, env, launcher, workItems: createDefaultWorkItemGatewayRegistry() });
+  const server = await startUiServer({
+    port: 0,
+    env,
+    launcher,
+    workItems: createDefaultWorkItemGatewayRegistry(),
+    sessionCommand,
+  });
   running.push(server);
   return { home, project, server, launcher, url: (path: string) => `${server.url}${path}` };
 }

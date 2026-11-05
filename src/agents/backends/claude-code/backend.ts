@@ -127,12 +127,26 @@ export class ClaudeBackend implements AgentBackend {
   }
 }
 
+/** A Claude session id as the runner mints it (a UUID); anything else is not typed
+ *  into a shell, quoted or not. */
+const SESSION_ID = /^[0-9A-Fa-f-]{1,64}$/;
+
+/** The interactive CLI on a FORK of the session: the run's own conversation stays as
+ *  it was, so a later `resume_session` repair does not inherit what the human typed.
+ *  Read-only is Claude's plan mode, so the fork does not edit files under a running
+ *  step. */
+function interactiveReopen(sessionId: string, { readOnly }: { readOnly: boolean }): readonly string[] | undefined {
+  if (!SESSION_ID.test(sessionId)) return undefined;
+  return ["claude", "--resume", sessionId, "--fork-session", ...(readOnly ? ["--permission-mode", "plan"] : [])];
+}
+
 export function createClaudeBackendFactory(host: ClaudeBackendHost = createRunnerClaudeHost()): AgentBackendFactory {
   return {
     id: "claude",
     capabilities,
     usage: { pricing: MODEL_PRICING, pricingFallback: DEFAULT_PRICING_KEY },
     normalizeAuthorOptions: (o) => normalizeClaudeStepOptions(o as ClaudeStepOptions | undefined),
+    interactiveReopen,
     create: (o) => new ClaudeBackend(o && typeof o === "object" ? (o as ClaudeOptions) : undefined, host),
   };
 }

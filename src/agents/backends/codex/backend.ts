@@ -9,6 +9,7 @@ import type {
   AgentResult,
   AgentSession,
 } from "../../../contracts/index.js";
+import { CODEX_SANDBOX } from "../../../contracts/backends/codex.js";
 import { verdictSchema } from "../verdict-instruction.js";
 import { buildCodexArgs } from "./args.js";
 import { createRunnerCodexHost } from "./codex-host.js";
@@ -128,6 +129,11 @@ export function createCodexBackendFactory(host: CodexBackendHost = createRunnerC
     id: "codex",
     capabilities,
     usage: { pricing: MODEL_PRICING, inputIncludesCached: true },
+    // Read-only is what a Codex step gets by default, so only an explicit grant counts.
+    describeWriteGrant(options) {
+      const sandbox = (options as CodexOptions | undefined)?.sandbox;
+      return sandbox && sandbox !== CODEX_SANDBOX.READ_ONLY ? `sandbox "${sandbox}"` : undefined;
+    },
     create(options) {
       return createCodexBackend(options && typeof options === "object" ? (options as CodexOptions) : {}, host);
     },
