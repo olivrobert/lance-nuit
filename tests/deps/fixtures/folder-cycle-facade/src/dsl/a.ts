@@ -1,3 +1,3 @@
-import { s } from "../dispatch/s.js";
+import { s } from "../validation/s.js";
 
 export const a = s;

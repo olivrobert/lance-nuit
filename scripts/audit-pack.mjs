@@ -61,6 +61,7 @@ const required = [
   "dist/model/definition.d.ts",
   "dist/model/context.d.ts",
   "dist/model/persisted.d.ts",
+  "dist/model/run-stop.d.ts",
   "dist/dsl.js",
   "dist/dsl/artifact.d.ts",
   "dist/dsl/input.d.ts",

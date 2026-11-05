@@ -4,7 +4,7 @@
 // The builders that produce them live in `dsl/input.ts`.
 
 import type { AsyncTemplated, PipelineContext } from "./context.js";
-import type { RunStopState } from "./persisted.js";
+import type { RunStopState } from "./run-stop.js";
 
 export type InputAction = "skip" | "fail" | "stop";
 export type WhenOutcome = InputAction;

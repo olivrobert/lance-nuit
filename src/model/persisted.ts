@@ -4,18 +4,15 @@
 import type { AgentSession, StepControl, StepFailCause, StepFailKind, StepUsage } from "../contracts/backends.js";
 import type { PipelineLot } from "./context.js";
 import type { StepProfileName } from "./profiles.js";
+import type { RunStopState } from "./run-stop.js";
+
+export type { RunStopKind, RunStopState } from "./run-stop.js";
 
 export type StepStatus = "pending" | "running" | "done" | "failed" | "skipped" | "aborted";
 
 /** Durable run status. The snapshot is the source of truth for resuming; stats
  * reuse these exact uppercase values so persisted stats stay comparable. */
 export type RunStatus = "RUNNING" | "PASS" | "FAIL" | "STOPPED" | "ABORTED" | "UNKNOWN";
-
-/** Expected recovery for a clean stop, in the reader's vocabulary. The first three
- *  mirror the review kinds a `humanReview` gate declares; `blocked` is the step
- *  fail cause of the same name — an obstacle outside the code. `until` is the
- *  bound an operator gave with `--until`: nothing is wrong, rerunning continues. */
-export type RunStopKind = "needs-info" | "needs-decision" | "needs-human" | "blocked" | "until";
 
 /**
  * Why a capped run was stopped by its own cost policy, as a value instead of a
@@ -33,24 +30,6 @@ export type RunStopKind = "needs-info" | "needs-decision" | "needs-human" | "blo
  * console prints and not a contract.
  */
 export type RunOutcomeStopKind = "budget-exceeded" | "cost-unaccounted";
-
-/** Structured cause of a clean stop, so a reader does not have to parse the
- *  console sentence stored in `stopped_reason`. */
-export interface RunStopState {
-  /** Approval subject that lifts the stop, when the gate declares one. */
-  subject?: string;
-  /** Artifact the gate is about (`artifacts/<name>`), when it reads one. A
-   *  reader cannot derive it from `subject`: the binding lives in the pipeline,
-   *  which only the runner loads. */
-  artifact?: string;
-  kind?: RunStopKind;
-  /** Reason without the console decoration (`escalated:` prefix, `--approve` hint). */
-  detail: string;
-  /** The gate declares a rework step, so `--reject <subject>` is accepted. Only
-   *  the runner loads the pipeline; a reader such as the dashboard learns from
-   *  this flag whether rejecting is a way out. */
-  reworkable?: boolean;
-}
 
 /** Homogeneous issue exposed for PASS, FAIL, STOPPED, and ABORTED.
  * `logPath` is always relative to the run directory when a step is involved. */

@@ -978,7 +978,7 @@ test("step-loop: a non-blocking step killed by the live guard stays failed and r
   expect(isPersistedRunResumable(snapshot)).toBe(true);
   expect(snapshot?.steps.find((state) => state.id === "a")?.status).toBe("failed");
 
-  // `--budget 5`: the ceiling is raised and the guard latch wiped (boot/resume.ts).
+  // `--budget 5`: the ceiling is raised and the guard latch wiped (step/load-or-create-run.ts).
   const resumedSteps = [
     bashStep("a", "cmd", { blocking: false }, { status: "failed", control: { duration_ms: 1, total_cost_usd: 0.3 } }),
     bashStep("b", "cmd"),

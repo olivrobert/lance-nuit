@@ -98,8 +98,10 @@ beyond that belongs in the code, in a comment, or in the pull request.
   included). `.dependency-cruiser-known-violations.json` is no longer a debt
   record: it holds only edges someone argued for, one file → file edge per line,
   each with a `why` and a `reviewedOn` date, and the check refuses an entry
-  missing either. Three rules govern it: no entry is ever added — a new upward
-  import or a new cycle is fixed, not recorded; an entry that no longer matches
+  missing either. Three rules govern it: an entry is added only with a new rule,
+  for the existing edges it finds on the day it is declared — a new upward import,
+  a new cycle or a new import against a context's direction is fixed, not
+  recorded; an entry that no longer matches
   a real edge is removed in the same commit that removed the edge, and the check
   fails until it is; when a file moves and an existing edge merely changes path,
   the entry is rewritten by hand and the pull request states the old → new
@@ -116,6 +118,10 @@ beyond that belongs in the code, in a comment, or in the pull request.
   `to` pair of folders, and an entry carries a fourth field, `removedBy`, naming
   the cut meant to retire it. There is no `--write-baseline` for this one: it is
   edited by hand, and the target is an empty file.
+- `deps:check` also enforces the contexts declared in `CONTEXTS`
+  (`scripts/layers.cjs`): each file belongs to exactly one, and each yields a
+  `context-<name>-direction` rule limiting the contexts it may import. See
+  [guide/architecture.md](guide/architecture.md#contexts).
 - `deps:check` also enforces the modules declared in `MODULES`
   (`scripts/layers.cjs`): each yields a `module-<name>-entry-only` rule, so code
   outside a module may import only its entry file, and the check fails when a

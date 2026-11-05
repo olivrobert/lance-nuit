@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RunStatus } from "../model/persisted.js";
 import { buildPipelineContext } from "../pipeline/context.js";
-import { loadOrCreateRun } from "../boot/resume.js";
+import { loadOrCreateRun } from "../step/load-or-create-run.js";
 import { pendingSteps, resumeDecision } from "./run-predicates.js";
 import { diagnoseRunSnapshot, isRunSnapshot, readRunSnapshot } from "./run-snapshot.js";
 import { resolveRunDir } from "./stores/run-storage.js";

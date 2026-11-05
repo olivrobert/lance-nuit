@@ -928,7 +928,7 @@ test("a non-blocking step with a fix policy killed by the live guard replays and
   expect(step.retries).toBe(0);
   expect(first.calls.fix.length).toBe(0);
 
-  // `--budget 5`, as boot/resume.ts applies it: a raised ceiling, the latch wiped.
+  // `--budget 5`, as step/load-or-create-run.ts applies it: a raised ceiling, the latch wiped.
   const resumedStep = makeRunStep(
     { id: "verify", name: "Verify", command: "make test", runner: "bash", blocking: false, on_failure: policy },
     { status: "failed", retries: step.retries, control: { duration_ms: 1, total_cost_usd: 0.3 } },

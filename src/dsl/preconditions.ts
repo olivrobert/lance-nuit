@@ -1,4 +1,4 @@
-import type { RunStopState } from "../model/persisted.js";
+import type { RunStopState } from "../model/run-stop.js";
 import type { InputPredicateResult } from "./input.js";
 
 /** Reject an admission predicate with a reason suitable for logs.

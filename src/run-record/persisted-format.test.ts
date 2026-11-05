@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
-import { loadOrCreateRun } from "../boot/resume.js";
+import { loadOrCreateRun } from "../step/load-or-create-run.js";
 import { builtinRegistries } from "../../tests/builtin-registries.ts";
 import { NULL_RUN_OUTPUT } from "../runtime/run-output.js";
 import { executeRunSteps, type StepLoopDeps } from "../step/step-loop.js";

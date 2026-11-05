@@ -1,3 +1,3 @@
-import { b } from "../dispatch/b.js";
+import { pipeline } from "../builtin-steps/a.js";
 
-export const pipeline = b;
+export const boot = pipeline;

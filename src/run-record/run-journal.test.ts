@@ -9,7 +9,7 @@ import type { RunEventStore, RunStateStore } from "../model/storage-ports.js";
 import { buildPipelineContext } from "../pipeline/context.js";
 import { appendRunEvent, readRunEvents, readRunJournal } from "./run-journal.js";
 import { FileRunEventStore } from "./stores/file-run-event-store.js";
-import { loadOrCreateRun } from "../boot/resume.js";
+import { loadOrCreateRun } from "../step/load-or-create-run.js";
 import { builtinRegistries } from "../../tests/builtin-registries.ts";
 
 class MemoryRunEventStore implements RunEventStore {
