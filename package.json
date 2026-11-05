@@ -53,7 +53,7 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "language:check": "bun scripts/check-public-language.mjs",
-    "security:secrets": "gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 1",
+    "security:secrets": "gitleaks git . --config .gitleaks.toml --redact --no-banner --exit-code 1 && gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 1",
     "security:semgrep": "semgrep scan --config .semgrep.yml --metrics off",
     "security": "bun run security:secrets && bun run security:semgrep",
     "docs:dsl": "bun scripts/generate-dsl-api.ts",
