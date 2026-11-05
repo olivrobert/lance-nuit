@@ -6,7 +6,7 @@ import { backendForFix, type JsonSchema } from "../../contracts/backends.js";
 import { VERDICT_FIELD_NAMES } from "../../contracts/verdict.js";
 import { isLogicalSegment } from "../../shared/language/artifact-ports.js";
 import type { AsyncTemplated, PipelineContext, StepAction, Templated } from "../../shared/language/context.js";
-import type { PipelineStep, StepCapture, StepFailure } from "../definition.js";
+import type { ParallelGroup, PipelineStep, StepCapture, StepFailure } from "../definition.js";
 import { sourceDeclarationError, type StepInput } from "../../work-items/index.js";
 import type { Artifact } from "./artifact.js";
 import type {
@@ -251,6 +251,11 @@ export abstract class StepBuilder {
     if (policy.replayAfterFix !== undefined) failure.replay_after_fix = policy.replayAfterFix;
     applyEscalate(failure, policy.escalate);
     this.step.on_failure = failure;
+    return this;
+  }
+
+  parallelGroup(group: ParallelGroup): this {
+    this.step.parallel_group = group;
     return this;
   }
 

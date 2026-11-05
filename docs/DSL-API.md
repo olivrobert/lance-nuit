@@ -13,6 +13,8 @@ export interface Dsl {
     pipeline: typeof pipeline;
     runPipeline: typeof runPipeline;
     forEachPipeline: typeof forEachPipeline;
+    /** Run several `llmStep` side by side; they read, they do not write to the code. */
+    parallelize: typeof parallelize;
     llmStep: LlmStepFactory;
     withBackend: WithBackendFactory;
     bashStep: typeof bashStep;
@@ -122,6 +124,14 @@ export declare const mechanicalFix: (prompt: (ctx: FixContext) => string) => OnF
 export declare function runPipeline(options: RunPipelineOptions): PipelineOrchestrationStepBuilder;
 
 export declare function forEachPipeline(options: ForEachPipelineOptions): PipelineOrchestrationStepBuilder;
+
+/**
+ * Mark agent steps as one group that runs side by side. The steps stay flat in the
+ * pipeline: each keeps its status, attempts, log, session and cost, and the group is
+ * only a mark on each of them. What a group may contain is checked when the pipeline
+ * loads.
+ */
+export declare function parallelize(options: ParallelizeOptions): AgentStepBuilder[];
 
 export declare function withBackend(id: string, options: unknown, registry: AgentBackendRegistry): BackendSpec;
 ```
@@ -310,6 +320,13 @@ export interface ForEachWorkItemOptions {
         retries?: number;
     };
     do: readonly PipelineEntry[];
+}
+
+export interface ParallelizeOptions {
+    id: string;
+    name: string;
+    /** Agent steps that run side by side. Each id starts with `<id>.`. */
+    steps: readonly AgentStepBuilder[];
 }
 ```
 

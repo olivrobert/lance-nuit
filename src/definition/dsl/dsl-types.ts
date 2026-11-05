@@ -13,7 +13,7 @@ import type {
 import type { WorkItemScanDefinition } from "../definition.js";
 import type { StepInput } from "../../work-items/index.js";
 import type { Artifact } from "./artifact.js";
-import type { StepBuilder } from "./dsl-steps.js";
+import type { AgentStepBuilder, StepBuilder } from "./dsl-steps.js";
 import type { InputPredicate, When } from "./input.js";
 import type { BackendFor, StepProfileName } from "./profiles.js";
 
@@ -148,6 +148,13 @@ export interface RunPipelineOptions {
   pipeline: string;
   when?: When | readonly When[];
   ticket?: AsyncTemplated<PipelineContext, string | undefined>;
+}
+
+export interface ParallelizeOptions {
+  id: string;
+  name: string;
+  /** Agent steps that run side by side. Each id starts with `<id>.`. */
+  steps: readonly AgentStepBuilder[];
 }
 
 export interface PipelineAfterOptions {

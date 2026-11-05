@@ -92,6 +92,12 @@ export interface StepCapture {
   text: boolean;
 }
 
+/** Steps declared together by `parallelize`. */
+export interface ParallelGroup {
+  id: string;
+  name: string;
+}
+
 export interface PipelineStep {
   id: string;
   name: string;
@@ -147,6 +153,9 @@ export interface PipelineStep {
    *  step replays while one of them has a pending rejection, whatever its input
    *  freshness says: a rejection is not an input, it is the reason to run. */
   rework_for?: string[];
+  /** Group this step runs in, side by side with the other steps carrying it. Kept on
+   *  the definition only: the run stays a flat list, and a snapshot does not change. */
+  parallel_group?: ParallelGroup;
 }
 
 /** Discovery configuration carried by a pipeline work-item source.

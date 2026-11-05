@@ -434,6 +434,41 @@ test("public surface: composition and work-item budget are typed", () => {
   expect(result.output).toContain("not callable");
 });
 
+test("project pipelines: parallelize types its steps as llmStep only", () => {
+  const validRoot = project();
+  installProjectTypes(validRoot);
+  writePipeline(
+    validRoot,
+    `
+    import type { Dsl } from "@lance-nuit/dsl";
+    export default ({ pipeline, parallelize, llmStep }: Dsl) => pipeline("group")
+      .add(parallelize({ id: "audits", name: "Audits", steps: [
+        llmStep({ id: "audits.a", name: "A", profile: "coder", backend: "claude", command: "read" }),
+        llmStep({ id: "audits.b", name: "B", profile: "coder", backend: "claude", command: "read" }),
+      ] }))
+      .build();
+  `,
+  );
+  expect(typecheckProjectPipelines(validRoot)).toMatchObject({ ok: true });
+
+  const invalidRoot = project();
+  installProjectTypes(invalidRoot);
+  writePipeline(
+    invalidRoot,
+    `
+    import type { Dsl } from "@lance-nuit/dsl";
+    export default ({ pipeline, parallelize, bashStep }: Dsl) => pipeline("group")
+      .add(parallelize({ id: "audits", name: "Audits", steps: [
+        bashStep({ id: "audits.a", name: "A", command: "true" }),
+      ] }))
+      .build();
+  `,
+  );
+  const result = typecheckProjectPipelines(invalidRoot);
+  expect(result.ok).toBe(false);
+  expect(result.output).toContain("BashStepBuilder");
+});
+
 test("DSL documentation: README example typechecks and loads", async () => {
   const root = project();
   installProjectTypes(root);

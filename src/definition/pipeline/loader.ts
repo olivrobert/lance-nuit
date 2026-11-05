@@ -22,6 +22,7 @@ import {
   failUnlessCommand,
   forEachPipeline,
   mechanicalFix,
+  parallelize,
   type PipelineFactory,
   pipeline as pipelineBuilder,
   requireArtifact,
@@ -51,6 +52,7 @@ import { AgentOutputContractValidator } from "../validation/output-contract.js";
 import { ProfileCoherenceValidator } from "../validation/profile-coherence.js";
 import { ConfigurationReferenceValidator, ExtractorReferenceValidator } from "../validation/references.js";
 import { ResumeSessionValidator } from "../validation/resume-session.js";
+import { ParallelGroupValidator } from "../validation/parallel-group.js";
 import { ResumedFixEscalationValidator } from "../validation/resumed-fix-escalation.js";
 import { PipelineStructureValidator } from "../validation/structure.js";
 import { buildPipelineContext } from "./context.js";
@@ -66,6 +68,7 @@ const PIPELINE_VALIDATION_CHAIN = new PipelineValidationChain([
   new ProfileCoherenceValidator(),
   new ResumeSessionValidator(),
   new ResumedFixEscalationValidator(),
+  new ParallelGroupValidator(),
   new FixBackendValidator(),
   new ExtractorReferenceValidator(),
   new ConfigurationReferenceValidator(),
@@ -83,6 +86,7 @@ export function createProjectDsl(context: PipelineContext, pipelineDir: string):
     pipeline: pipelineBuilder,
     runPipeline,
     forEachPipeline,
+    parallelize,
     llmStep: createProjectLlmStep(pipelineDir, backendRegistry),
     withBackend: (id, options) => withBackend(id, options, backendRegistry),
     bashStep: createProjectBashStep(backendRegistry),

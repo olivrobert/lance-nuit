@@ -42,6 +42,7 @@ const SECTIONS: Section[] = [
       "mechanicalFix",
       "runPipeline",
       "forEachPipeline",
+      "parallelize",
       "withBackend",
     ],
     note: "The `Dsl` members are bound to the runner and are the forms project pipelines should call. The direct `llmStep` and `withBackend` exports below retain the runner registry parameter.",
@@ -72,7 +73,13 @@ const SECTIONS: Section[] = [
   {
     title: "Orchestration",
     file: "definition/project/dsl.d.ts",
-    names: ["RunPipelineOptions", "ForEachPipelineOptions", "PipelineAfterOptions", "ForEachWorkItemOptions"],
+    names: [
+      "RunPipelineOptions",
+      "ForEachPipelineOptions",
+      "PipelineAfterOptions",
+      "ForEachWorkItemOptions",
+      "ParallelizeOptions",
+    ],
   },
   {
     // Copying these fields manually into a guide is the trap closed here: an
