@@ -15,7 +15,7 @@
 
 import type { StackPreflightConfig } from "../../shared/env/config.js";
 import { probeComposeServices, unreadyServices } from "../env/docker-stack.js";
-import { runSupervisedCommand } from "../../shared/process/process-runner.js";
+import { killedByTimeout, runSupervisedCommand } from "../../shared/process/process-runner.js";
 import { log } from "../../shared/runtime/logging.js";
 import type { BootState, BootStep } from "./boot-state.js";
 
@@ -112,7 +112,7 @@ export const stackStep: BootStep = {
       probe: probeComposeServices,
       start: async (dir, command, timeoutMs) => {
         const result = await runSupervisedCommand("bash", ["-c", command], { cwd: dir, timeoutMs, stdio: "inherit" });
-        return { status: result.status, timedOut: result.timedOut };
+        return { status: result.status, timedOut: killedByTimeout(result.kill) };
       },
       now: () => Date.now(),
       wait: sleep,

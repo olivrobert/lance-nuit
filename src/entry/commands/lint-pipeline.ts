@@ -2,8 +2,7 @@
 // or command execution.
 
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import type { ComposeRegistries } from "../boot/extensions.js";
 import { backendSpecForStep } from "../../contracts/backends.js";
 import {
@@ -13,6 +12,7 @@ import {
   stepCapability,
 } from "../../definition/index.js";
 import { capabilityAxes, capabilityRoots } from "../../shared/env/capability-frontmatter.js";
+import { RUNNER_ROOT_DIR } from "../../shared/env/kit-layout.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import type { Pipeline, PipelineStep } from "../../definition/index.js";
 import type { RunnerArgs } from "../cli-options.js";
@@ -24,7 +24,6 @@ import { contextWithProjectProviders, errorMessage } from "./shared.js";
 /** The single option `--lint-pipeline` reads; the parser guarantees it is set. */
 type LintPipelineArgs = Pick<RunnerArgs, "pipelinePath">;
 
-const RUNNER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const LINT_TICKET = "LINT-0";
 
 export interface PipelineLintFinding {
@@ -115,7 +114,7 @@ export async function lintPipeline(reference: string, options: PipelineLintOptio
         : await contextWithProjectProviders(options.composeRegistries, {
             cwd,
             ticket: LINT_TICKET,
-            runnerDir: RUNNER_DIR,
+            runnerDir: RUNNER_ROOT_DIR,
           });
     const pipeline = await loadPipelineDefinition(source, context);
     return lintPipelineDefinition(pipeline, context, source);

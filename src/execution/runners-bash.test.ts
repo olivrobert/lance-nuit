@@ -64,13 +64,11 @@ test("command rapide: validates the contract", async () => {
 
 test("live-feed filesystem failures do not fail Bash steps: validates the contract", async () => {
   const previousLiveFeed = process.env.RUNNER_LIVE_FEED;
-  const previousEventsFile = process.env.RUNNER_EVENTS_FILE;
   process.env.RUNNER_LIVE_FEED = join(
     tmpdir(),
     `missing-live-feed-${process.pid}-${process.hrtime.bigint()}`,
     "feed.jsonl",
   );
-  delete process.env.RUNNER_EVENTS_FILE;
 
   try {
     const r = await runBashStreaming("printf ok", { timeoutMs: 5000 });
@@ -79,8 +77,6 @@ test("live-feed filesystem failures do not fail Bash steps: validates the contra
   } finally {
     if (previousLiveFeed === undefined) delete process.env.RUNNER_LIVE_FEED;
     else process.env.RUNNER_LIVE_FEED = previousLiveFeed;
-    if (previousEventsFile === undefined) delete process.env.RUNNER_EVENTS_FILE;
-    else process.env.RUNNER_EVENTS_FILE = previousEventsFile;
   }
 });
 
@@ -93,7 +89,6 @@ async function withParentRunEnv(body: (internal: Record<string, string>) => Prom
   const internal = {
     RUNNER_LOCK_HELD: "1",
     RUNNER_IN_WORKTREE: "1",
-    RUNNER_EVENTS_FILE: feed,
     RUNNER_LIVE_FEED: feed,
   };
   const touched = { ...internal, ...STEP_VISIBLE_ENV };
@@ -237,8 +232,7 @@ test("runSupervisedStream: a timeout kills the spawned CLI and its grandchild", 
     () => ({}),
   );
 
-  expect(result.killed).toBe(true);
-  expect(result.killReason).toStartWith("timeout");
+  expect(result.kill?.cause).toBe("timeout");
   const cliPid = Number(readFileSync(parentPidFile, "utf-8").trim());
   const grandchildPid = Number(readFileSync(childPidFile, "utf-8").trim());
   await waitFor(() => !isAlive(cliPid) && !isAlive(grandchildPid));

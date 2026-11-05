@@ -4,12 +4,10 @@
 // shared user directory (`~/.lance-nuit`).
 
 import { existsSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { projectKitDir } from "../../../shared/env/kit-paths.js";
+import { HISTORY_DIR, RUNNER_STATE_DIR, TICKETLESS_RUNS_DIR } from "../../../shared/env/kit-layout.js";
 
-// The runner root (`src/` or `dist/`), three directories above this module.
-export const RUNNER_DIR = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
 export const TYPES_SUBDIR = ".lance-nuit-types";
 export const TSCONFIG_NAME = "tsconfig.json";
 export const PIPELINES_SUBDIR = "pipelines";
@@ -25,10 +23,10 @@ export const GITIGNORE_ENTRIES = [
   `/${TSCONFIG_NAME}`,
   `/${NODE_MODULES_SUBDIR}`,
   "/state/",
-  "/runs/",
-  "/run/",
+  `/${TICKETLESS_RUNS_DIR}/`,
+  `/${RUNNER_STATE_DIR}/`,
   "/history/",
-  "/pipeline-history",
+  `/${HISTORY_DIR}`,
   "/work-items/",
   "/logs/",
   "/tmp/",

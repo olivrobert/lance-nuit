@@ -12,9 +12,11 @@
 // `running`, and `done` apart on a record left behind by a crash.
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ScanStore, ScanRecord } from "../../run/index.js";
+import { historyDir } from "../../shared/env/kit-layout.js";
+import { writeFileAtomic } from "../../shared/lib/atomic-write.js";
 
 const SCANS_DIR = "scans";
 
@@ -25,7 +27,7 @@ export interface FileScanStoreOptions {
 
 /** Directory holding the scan records of a project. */
 export function scansDir(projRoot: string = process.cwd()): string {
-  return join(projRoot, ".lance-nuit", "pipeline-history", SCANS_DIR);
+  return join(historyDir(projRoot), SCANS_DIR);
 }
 
 /** ISO instant without the separators a file name should not carry:
@@ -62,19 +64,6 @@ export class FileScanStore implements ScanStore {
     const dir = scansDir(this.projRoot);
     mkdirSync(dir, { recursive: true });
     const path = join(dir, scanRecordFileName(record, this.shortId));
-    // Per-writer temp name: a shared `.tmp` would let concurrent writers publish
-    // each other's half-written bytes via rename.
-    const temporaryPath = `${path}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-    try {
-      writeFileSync(temporaryPath, `${JSON.stringify(record, null, 2)}\n`);
-      renameSync(temporaryPath, path);
-    } catch (error) {
-      try {
-        unlinkSync(temporaryPath);
-      } catch {
-        // Temporary record cleanup is best effort; preserve the original write error.
-      }
-      throw error;
-    }
+    writeFileAtomic(path, `${JSON.stringify(record, null, 2)}\n`);
   }
 }

@@ -3,7 +3,7 @@ import { mapCodexExecutionResult } from "./result.js";
 import type { RawCodexExecutionResult } from "./types.js";
 
 function execution(output: string, overrides: Partial<RawCodexExecutionResult> = {}): RawCodexExecutionResult {
-  return { output, code: 0, killed: false, durationMs: 42, ...overrides };
+  return { output, code: 0, durationMs: 42, ...overrides };
 }
 
 function message(value: unknown): string {
@@ -62,17 +62,15 @@ test("Codex mapper: timeout and descendant cleanup remain distinct", () => {
   expect(
     mapCodexExecutionResult(
       execution("", {
-        killed: true,
-        killReason: "timeout after 100 ms",
+        kill: { cause: "timeout" as const, afterMs: 100000 },
       }),
     ),
-  ).toMatchObject({ ok: false, timedOut: true, failReason: "process killed: timeout after 100 ms" });
+  ).toMatchObject({ ok: false, timedOut: true, failReason: "process killed: timeout (100s)" });
 
   expect(
     mapCodexExecutionResult(
       execution("", {
-        killed: true,
-        killReason: "child exited with descendants still alive",
+        kill: { cause: "cleanup" },
       }),
     ),
   ).toMatchObject({

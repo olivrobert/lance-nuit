@@ -64,9 +64,9 @@ test("process-supervision: validates the integration contract", async () => {
 
 test("process-supervision: validates the integration contract", async () => {
   const supervised = spawnSupervisedProcess("true", [], { stdio: "ignore", timeoutMs: null });
-  await new Promise<void>((resolve) => supervised.child.once("close", () => resolve()));
-  expect(supervised.killed).toBe(false);
-  supervised.clear();
+  const end = await supervised.settle();
+  expect(end).toEqual({ code: 0 });
+  expect(supervised.kill).toBeUndefined();
 });
 
 test("process-supervision: validates the integration contract", async () => {
@@ -78,7 +78,7 @@ test("process-supervision: validates the integration contract", async () => {
   );
 
   expect(result.status).toBe(0);
-  expect(result.killedForCleanup).toBe(true);
+  expect(result.kill).toEqual({ cause: "cleanup" });
   const descendant = Number(readFileSync(pidFile, "utf8").trim());
   await waitFor(() => !isProcessAlive(descendant));
   expect(isProcessAlive(descendant)).toBe(false);

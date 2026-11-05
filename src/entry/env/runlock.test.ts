@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireRunnerLock, releaseRunnerLock, runnerLockPath, shouldSkipRunnerLock } from "./runlock.ts";
+import { runnerLockPath } from "../../shared/env/kit-layout.js";
+import { acquireRunnerLock, releaseRunnerLock, shouldSkipRunnerLock } from "./runlock.ts";
 
 const cwd = () => mkdtempSync(join(tmpdir(), "runlock-"));
 const info = (pid: number) => ({ pid, ticket: "PROJ-28", pipeline: "default", startedAt: "T" });

@@ -28,7 +28,8 @@ import {
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type * as TypeScript from "typescript";
 import { kitRoots } from "../../../shared/env/kit-paths.js";
-import { CONTRACTS_PACKAGE_NAME, kitContractsPackageDir, kitNodeModulesDir, RUNNER_DIR } from "./layout.js";
+import { RUNNER_ROOT_DIR } from "../../../shared/env/kit-layout.js";
+import { CONTRACTS_PACKAGE_NAME, kitContractsPackageDir, kitNodeModulesDir } from "./layout.js";
 import { loadTypeScript } from "./typescript-runtime.js";
 
 const CONTRACTS_SUBDIR = "contracts";
@@ -67,7 +68,7 @@ function hasContractsSources(runnerDir: string): boolean {
  * Sources in a checkout (tests excluded), emitted `.js` and `.d.ts` in a
  * published install: whichever set the copy is actually produced from.
  */
-export function contractsSourceFiles(runnerDir = RUNNER_DIR): string[] {
+export function contractsSourceFiles(runnerDir = RUNNER_ROOT_DIR): string[] {
   const dir = join(runnerDir, CONTRACTS_SUBDIR);
   if (!existsSync(dir)) {
     throw new Error("Contracts sources and emitted files are missing from this runner installation.");
@@ -84,7 +85,7 @@ export function contractsSourceFiles(runnerDir = RUNNER_DIR): string[] {
  * kit. Any change to a contracts source (or, in a published install, to the
  * emitted JS or declarations) changes the hash and marks installed copies stale.
  */
-export function contractsSourceHash(runnerDir = RUNNER_DIR): string {
+export function contractsSourceHash(runnerDir = RUNNER_ROOT_DIR): string {
   const hash = createHash("sha256");
   const dir = join(runnerDir, CONTRACTS_SUBDIR);
   for (const file of contractsSourceFiles(runnerDir)) {
@@ -113,7 +114,7 @@ function emitOptions(outDir: string, rootDir: string): TypeScript.CompilerOption
     esModuleInterop: true,
     skipLibCheck: true,
     types: ["node", "bun"],
-    typeRoots: [join(RUNNER_DIR, "..", "node_modules", "@types")],
+    typeRoots: [join(RUNNER_ROOT_DIR, "..", "node_modules", "@types")],
   };
 }
 
@@ -122,7 +123,7 @@ function diagnosticSummary(diagnostics: readonly TypeScript.Diagnostic[]): strin
   return diagnostics
     .map((diagnostic) => {
       const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
-      const file = diagnostic.file ? `${relative(RUNNER_DIR, diagnostic.file.fileName)}: ` : "";
+      const file = diagnostic.file ? `${relative(RUNNER_ROOT_DIR, diagnostic.file.fileName)}: ` : "";
       return `${file}TS${diagnostic.code}: ${message}`;
     })
     .join("\n");
@@ -246,7 +247,7 @@ function ensureSelfIgnored(nodeModules: string): void {
  * either the previous package or the new one, never a half-written tree that
  * would break every `lance-nuit/contracts` import.
  */
-export function installKitContracts(kitDir: string, runnerDir = RUNNER_DIR): KitContractsMetadata {
+export function installKitContracts(kitDir: string, runnerDir = RUNNER_ROOT_DIR): KitContractsMetadata {
   const root = resolve(kitDir);
   const nodeModules = kitNodeModulesDir(root);
   const destination = kitContractsPackageDir(root);
@@ -282,7 +283,7 @@ export function installKitContracts(kitDir: string, runnerDir = RUNNER_DIR): Kit
  * Only inspects the manifest: this runs at boot, before an extension import,
  * and must cost a file read, not a compilation.
  */
-export function staleKitContractsReason(kitDir: string, runnerDir = RUNNER_DIR): string | undefined {
+export function staleKitContractsReason(kitDir: string, runnerDir = RUNNER_ROOT_DIR): string | undefined {
   const packageDir = kitContractsPackageDir(kitDir);
   const manifest = readVendoredManifest(packageDir);
   if (!manifest) return "contracts package is missing";
@@ -300,7 +301,7 @@ export function staleKitContractsReason(kitDir: string, runnerDir = RUNNER_DIR):
  * contracts; leaves a user-owned `node_modules/lance-nuit` alone. Returns
  * `true` when something was (re)written.
  */
-export function ensureKitContracts(kitDir: string, runnerDir = RUNNER_DIR): boolean {
+export function ensureKitContracts(kitDir: string, runnerDir = RUNNER_ROOT_DIR): boolean {
   if (!staleKitContractsReason(kitDir, runnerDir)) return false;
   installKitContracts(kitDir, runnerDir);
   return true;

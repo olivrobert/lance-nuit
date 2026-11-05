@@ -3,10 +3,12 @@
 // (scan checkout, fix/ branches, sub-US commits).
 // Stale-safe via lock.ts (dead pid or corrupted lock → reclaim).
 //
-// Multi-US/scan children do NOT acquire the lock: RUNNER_LOCK_HELD is set by the
+// Scan children do NOT acquire the lock: `RUNNER_STATE_ENV.lockHeld` is set by the
 // parent that already owns the shared git tree.
 import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { runnerLockPath } from "../../shared/env/kit-layout.js";
+import { RUNNER_STATE_ENV } from "../../shared/env/runner-env.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import { log } from "../../shared/runtime/logging.js";
 import { acquireLock, type LivenessProbe, type LockAcquireResult, releaseLock } from "../../shared/env/lock.js";
@@ -16,10 +18,6 @@ export interface RunnerLockInfo {
   ticket?: string;
   pipeline?: string;
   startedAt: string;
-}
-
-export function runnerLockPath(cwd: string): string {
-  return join(cwd, ".lance-nuit", "run", "runner.lock");
 }
 
 export function acquireRunnerLock(
@@ -48,5 +46,5 @@ export function releaseRunnerLock(cwd: string, ownerPid: number = process.pid): 
 
 /** Whether this process is a child runner: the lock is already held upstream. */
 export function shouldSkipRunnerLock(env: Record<string, string | undefined>): boolean {
-  return env.RUNNER_LOCK_HELD === "1";
+  return env[RUNNER_STATE_ENV.lockHeld] === "1";
 }

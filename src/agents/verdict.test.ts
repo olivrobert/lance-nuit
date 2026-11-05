@@ -69,7 +69,6 @@ test("a BLOCKED prefix on a successful verdict is ignored", () => {
   const logs: string[] = [];
   expect(
     resolveVerdictOutcome({
-      killed: false,
       code: 0,
       requiresVerdict: true,
       verdict,
@@ -84,8 +83,7 @@ test("a BLOCKED prefix on a successful verdict is ignored", () => {
 test("a kill outranks a blocked verdict in the outcome cascade", () => {
   expect(
     resolveVerdictOutcome({
-      killed: true,
-      killReason: "timeout after 60s",
+      kill: { cause: "timeout" as const, afterMs: 60000 },
       code: null,
       requiresVerdict: true,
       verdict: { success: false, reason: "BLOCKED: the branch is missing", blocked: true },
@@ -93,7 +91,7 @@ test("a kill outranks a blocked verdict in the outcome cascade", () => {
     }),
   ).toEqual({
     ok: false,
-    failReason: "process killed: timeout after 60s",
+    failReason: "process killed: timeout (60s)",
     failKind: "technical",
     failCause: undefined,
   });

@@ -59,8 +59,7 @@ export function mapOpencodeExecutionResult(
     options.outputFormat === "json" ? parseStructuredVerdict(parsed.text, parsed.structuredOutput) : {};
   const verdictDetails = structured.value != null ? verdictFromStructured(structured.value) : undefined;
   const { ok, failReason, failKind, failCause } = resolveVerdictOutcome({
-    killed: raw.killed,
-    killReason: raw.killReason,
+    kill: raw.kill,
     code: raw.code,
     // Stream and stderr errors are transport breaks and carry no stop signal of
     // their own: no `cause`. Nothing here encodes one in the message either.
@@ -78,7 +77,7 @@ export function mapOpencodeExecutionResult(
     stats: buildStats(parsed, raw.durationMs, options.model),
     ...(session ? { session } : {}),
     ...(structured.value != null ? { structuredOutput: structured.value } : {}),
-    ...killFields(raw.killed, raw.killReason),
+    ...killFields(raw.kill),
     ...(failReason ? { failReason } : {}),
     ...(failKind ? { failKind } : {}),
     ...(failCause ? { failCause } : {}),

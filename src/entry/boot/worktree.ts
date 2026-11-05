@@ -3,12 +3,14 @@
 // guards. The rest of the runner follows cwd, so the lock must be acquired after
 // this step.
 //
-// RUNNER_IN_WORKTREE lets child runners inherit cwd without repeating setup.
+// `RUNNER_STATE_ENV.inWorktree` lets dispatch children inherit cwd without
+// repeating setup.
 // process.argv[1] remains the runner source.
 
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadPipelineConfig } from "../../shared/env/config.js";
+import { RUNNER_STATE_ENV } from "../../shared/env/runner-env.js";
 import { resolveTicketDir } from "../../shared/env/tickets.js";
 import {
   gitToplevelAsync,
@@ -39,8 +41,9 @@ export async function bootstrapWorktree(
   let pipelinePath = args.pipelinePath;
   let entered: WorktreeSpec | undefined;
 
-  const worktreeMode = worktree || process.env.RUNNER_IN_WORKTREE === "1";
-  if (worktree && process.env.RUNNER_IN_WORKTREE !== "1") {
+  const inherited = process.env[RUNNER_STATE_ENV.inWorktree] === "1";
+  const worktreeMode = worktree || inherited;
+  if (worktree && !inherited) {
     if (scan) {
       log("--worktree is not supported with --scan (scan tickets are isolated in separate worktrees).");
       process.exit(1);
@@ -81,7 +84,7 @@ export async function bootstrapWorktree(
       process.exit(1);
     }
     process.chdir(spec.path);
-    process.env.RUNNER_IN_WORKTREE = "1";
+    process.env[RUNNER_STATE_ENV.inWorktree] = "1";
     entered = spec;
     log(`  Running in worktree — main clone is free. Clean up after the MR: lancenuit worktree clean ${ticket}`);
   }
@@ -92,7 +95,7 @@ export async function bootstrapWorktree(
 export const worktreeStep: BootStep = {
   id: "worktree",
   desc: "Prepare the ticket worktree and change into it before anything that depends on cwd.",
-  // Always applicable: RUNNER_IN_WORKTREE also sets worktreeMode when a child
+  // Always applicable: the inherited flag also sets worktreeMode when a child
   // inherits an already prepared cwd.
   applies: () => true,
   async run(s: BootState): Promise<Partial<BootState>> {

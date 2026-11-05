@@ -25,6 +25,11 @@ Both are ignored and rewritten by the CLI; a worktree shares the main clone's.
 up in the worktree first, then in the main clone; see
 [Worktrees](usage.md#worktrees) for when each one runs.
 
+The state the runner writes under a kit — `run/runner.lock`, `runs/`,
+`pipeline-history/` (`runs.jsonl`, `pricing.json`, `scans/`) and the default
+`work-items/` root — is named in `shared/env/kit-layout.ts`, along with the
+worktree root and the runner's installation directory.
+
 **Resolution chain** (`shared/env/kit-paths.ts`), from highest to lowest priority:
 
 ```text

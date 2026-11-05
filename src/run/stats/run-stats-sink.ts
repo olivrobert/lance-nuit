@@ -1,20 +1,12 @@
 // Persistence for the run-stats projection.
 
-import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync, renameSync, rmdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync, readFileSync, rmdirSync, statSync } from "node:fs";
+import { historyDir, historyFilePath } from "../../shared/env/kit-layout.js";
+import { writeFileAtomic } from "../../shared/lib/atomic-write.js";
 import type { RunStatsEntry } from "./run-stats-projector.js";
 
 export interface FileRunStatsSinkOptions {
   projRoot?: string;
-}
-
-function atomicWrite(path: string, content: string): void {
-  // Per-writer temp name: a shared `.tmp` would let concurrent writers publish
-  // each other's half-written bytes via rename.
-  const tmp = `${path}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-  writeFileSync(tmp, content);
-  renameSync(tmp, path);
 }
 
 const LOCK_ACQUIRE_TIMEOUT_MS = 5_000;
@@ -71,10 +63,9 @@ export class FileRunStatsSink {
   /** Return the canonical written location, or null on best-effort failure. */
   write(entry: RunStatsEntry): string | null {
     if (entry.schemaVersion !== 1) return null;
-    const historyDir = join(this.options.projRoot, ".lance-nuit", "pipeline-history");
-    const centralPath = join(historyDir, "runs.jsonl");
+    const centralPath = historyFilePath(this.options.projRoot);
     try {
-      mkdirSync(historyDir, { recursive: true });
+      mkdirSync(historyDir(this.options.projRoot), { recursive: true });
       withHistoryLock(centralPath, () => this.upsertHistory(centralPath, entry));
       return centralPath;
     } catch {
@@ -122,6 +113,6 @@ export class FileRunStatsSink {
       }
     });
     next[index] = serialized;
-    atomicWrite(path, `${next.join("\n")}\n`);
+    writeFileAtomic(path, `${next.join("\n")}\n`);
   }
 }

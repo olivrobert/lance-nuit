@@ -7,7 +7,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import type * as TypeScript from "typescript";
 import type { ProfileOverrides, StepProfileName } from "../../../shared/language/profiles.js";
 import { contractsSourceHash } from "./contracts-package.js";
-import { RUNNER_DIR } from "./layout.js";
+import { RUNNER_ROOT_DIR } from "../../../shared/env/kit-layout.js";
 import { loadTypeScript } from "./typescript-runtime.js";
 
 // The hash contains only relative names and content: no plugin-cache, version,
@@ -38,7 +38,7 @@ const PUBLIC_DSL_SOURCES = [
   "definition/builtin-steps/lib/skill-preflight.ts",
 ] as const;
 
-export function publicDslSourceHash(runnerDir = RUNNER_DIR): string {
+export function publicDslSourceHash(runnerDir = RUNNER_ROOT_DIR): string {
   const hash = createHash("sha256");
   hash.update(contractsSourceHash(runnerDir));
   hash.update("\0");
@@ -65,7 +65,7 @@ function compilerOptions(outDir: string): TypeScript.CompilerOptions {
     sourceMap: false,
     noEmitOnError: true,
     outDir,
-    rootDir: RUNNER_DIR,
+    rootDir: RUNNER_ROOT_DIR,
     module: ts.ModuleKind.NodeNext,
     moduleResolution: ts.ModuleResolutionKind.NodeNext,
     target: ts.ScriptTarget.ES2022,
@@ -77,7 +77,7 @@ function compilerOptions(outDir: string): TypeScript.CompilerOptions {
     // Application sources live under `src/`, while dependencies remain at the
     // repository root. Keep generated project declarations independent of the
     // source relocation.
-    typeRoots: [join(RUNNER_DIR, "..", "node_modules", "@types")],
+    typeRoots: [join(RUNNER_ROOT_DIR, "..", "node_modules", "@types")],
   };
 }
 
@@ -98,18 +98,18 @@ export function diagnosticText(diagnostic: TypeScript.Diagnostic, root: string):
 
 /** Generate declarations into a temporary output directory. */
 export function generateDslDeclarations(outDir: string): void {
-  if (!existsSync(join(RUNNER_DIR, "definition", "project", "dsl.ts"))) {
-    if (!existsSync(join(RUNNER_DIR, "definition", "project", "dsl.d.ts"))) {
+  if (!existsSync(join(RUNNER_ROOT_DIR, "definition", "project", "dsl.ts"))) {
+    if (!existsSync(join(RUNNER_ROOT_DIR, "definition", "project", "dsl.d.ts"))) {
       throw new Error("DSL sources and emitted declarations are missing from this runner installation.");
     }
-    copyDeclarations(RUNNER_DIR, outDir);
+    copyDeclarations(RUNNER_ROOT_DIR, outDir);
     return;
   }
   const ts = loadTypeScript();
-  const program = ts.createProgram([join(RUNNER_DIR, "definition", "project", "dsl.ts")], compilerOptions(outDir));
-  throwOnDiagnostics("Unable to generate DSL declarations", ts.getPreEmitDiagnostics(program), RUNNER_DIR);
+  const program = ts.createProgram([join(RUNNER_ROOT_DIR, "definition", "project", "dsl.ts")], compilerOptions(outDir));
+  throwOnDiagnostics("Unable to generate DSL declarations", ts.getPreEmitDiagnostics(program), RUNNER_ROOT_DIR);
   const emitted = program.emit();
-  throwOnDiagnostics("Unable to emit DSL declarations", emitted.diagnostics, RUNNER_DIR);
+  throwOnDiagnostics("Unable to emit DSL declarations", emitted.diagnostics, RUNNER_ROOT_DIR);
 }
 
 function copyDeclarations(sourceDir: string, destinationDir: string): void {
@@ -225,7 +225,7 @@ function renderProjectProfileBackends(overrides: ProfileOverrides): string {
  * specialized by configuration, a source-only hash would leave stale types after
  * a simple `pipeline.config.json` change.
  */
-export function declarationsHash(overrides: ProfileOverrides = {}, runnerDir = RUNNER_DIR): string {
+export function declarationsHash(overrides: ProfileOverrides = {}, runnerDir = RUNNER_ROOT_DIR): string {
   return createHash("sha256")
     .update(publicDslSourceHash(runnerDir))
     .update("\0")

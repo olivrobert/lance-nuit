@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { runnerLockPath } from "../env/runlock.js";
+import { runnerLockPath } from "../../shared/env/kit-layout.js";
 import type { RunnerArgs } from "../cli-options.js";
 import { buildPipelineContext } from "../../definition/pipeline/context.js";
 import { composeRunnerRegistries } from "../composition/registries.js";

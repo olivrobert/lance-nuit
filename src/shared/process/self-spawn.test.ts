@@ -1,7 +1,7 @@
 //
 // A relaunch has to land on the same interpreter as its parent: that is what makes
-// Bun the runtime of every phase the runner delegates to itself (sub-work-item,
-// commit, finalize, scan) without a loader flag travelling in the environment.
+// Bun the runtime of every dispatch child without a loader flag travelling in the
+// environment.
 // A green suite proves nothing about the runtime unless a child reports its own.
 
 import { expect, test } from "bun:test";
@@ -10,14 +10,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { withoutRunnerInternalEnv } from "./self-spawn.js";
+import { withoutRunnerState } from "../env/runner-env.js";
 
 const selfSpawnModule = resolve(import.meta.dir, "self-spawn.ts");
 
 const INTERNAL_VALUES = {
   RUNNER_LOCK_HELD: "1",
   RUNNER_IN_WORKTREE: "1",
-  RUNNER_EVENTS_FILE: "/tmp/parent-events.jsonl",
   RUNNER_LIVE_FEED: "/tmp/parent-live.jsonl",
 };
 
@@ -66,7 +65,7 @@ test("a relaunched runner reports Bun and the interpreter of its parent", () => 
   }
 });
 
-test("withoutRunnerInternalEnv drops the runner-internal variables and keeps everything else", () => {
+test("withoutRunnerState drops the runner-internal variables and keeps everything else", () => {
   const input: NodeJS.ProcessEnv = {
     ...INTERNAL_VALUES,
     RUNNER_BIN: "/opt/runner.ts",
@@ -76,7 +75,7 @@ test("withoutRunnerInternalEnv drops the runner-internal variables and keeps eve
   };
   const snapshot = { ...input };
 
-  const stripped = withoutRunnerInternalEnv(input);
+  const stripped = withoutRunnerState(input);
 
   expect(stripped).toEqual({
     RUNNER_BIN: "/opt/runner.ts",
@@ -115,11 +114,7 @@ test("a relaunched runner still inherits the runner-internal variables", () => {
     expect(parent.status).toBe(0);
 
     const child = JSON.parse(readFileSync(proof, "utf8")) as Record<string, string | null>;
-    expect(child).toEqual({
-      ...INTERNAL_VALUES,
-      // selfSpawnRunner has always dropped this one; RUNNER_EVENTS_FILE still carries the feed.
-      RUNNER_LIVE_FEED: null,
-    });
+    expect(child).toEqual(INTERNAL_VALUES);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

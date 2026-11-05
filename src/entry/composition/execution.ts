@@ -8,6 +8,7 @@
 import { dirname } from "node:path";
 import { startLiveFeed } from "./feed.js";
 import { enforceCleanTree } from "../boot/gitguard.js";
+import { RUNNER_STEP_ENV } from "../../shared/env/runner-env.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import {
@@ -106,9 +107,9 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) =
       pipelineAllowsDirty: !!pipelineDef.allow_dirty,
     });
 
-    // Expose RUNNER_BIN / RUNNER_DIR for bash steps that invoke a sub-runner.
-    process.env.RUNNER_BIN = process.argv[1];
-    process.env.RUNNER_DIR = dirname(process.argv[1] ?? "");
+    // Published for bash steps that invoke a sub-runner.
+    process.env[RUNNER_STEP_ENV.bin] = process.argv[1];
+    process.env[RUNNER_STEP_ENV.dir] = dirname(process.argv[1] ?? "");
 
     // The loop is told what the opening did, not what the guard predicted.
     ({ run, resumed: resuming } = await loadOrCreateRun({

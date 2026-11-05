@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mapClaudeExecutionResult } from "./result.js";
 
-const raw = (output: string) => ({ output, code: 0, killed: false, durationMs: 1 });
+const raw = (output: string) => ({ output, code: 0, durationMs: 1 });
 
 describe("Claude result mapping", () => {
   test("returns structured output and successful verdict", () => {
@@ -106,8 +106,7 @@ describe("Claude result mapping", () => {
       {
         output: "",
         code: null,
-        killed: true,
-        killReason: "timeout after 1ms",
+        kill: { cause: "timeout" as const, afterMs: 1 },
         durationMs: 1,
         priorAttemptsCostUsd: 0.4,
       },
@@ -129,9 +128,9 @@ describe("Claude result mapping", () => {
   });
 
   test.each([
-    ["timeout", "timeout (900s)"],
-    ["budget", "budget exceeded: estimated $1.20 > $1.00"],
-  ])("a %s-killed attempt records its wall duration, not 0", (_label, killReason) => {
+    ["timeout", { cause: "timeout", afterMs: 900_000 }],
+    ["budget", { cause: "budget", detail: "$1.20 estimated > $1.00 remaining" }],
+  ] as const)("a %s-killed attempt records its wall duration, not 0", (_label, kill) => {
     // A killed CLI never emits its `result` event, the only place the stream
     // carries `duration_ms`: the supervisor's wall clock is the measure left.
     const assistant = JSON.stringify({
@@ -141,8 +140,7 @@ describe("Claude result mapping", () => {
     const result = mapClaudeExecutionResult({
       output: assistant,
       code: null,
-      killed: true,
-      killReason,
+      kill,
       durationMs: 900_000,
     });
     expect(result.stats.duration_ms).toBe(900_000);
@@ -163,8 +161,7 @@ describe("Claude result mapping", () => {
     const result = mapClaudeExecutionResult({
       output: "",
       code: null,
-      killed: true,
-      killReason: "timeout (1s)",
+      kill: { cause: "timeout" as const, afterMs: 1000 },
       durationMs: 1,
     });
     expect(result.ok).toBe(false);
@@ -177,7 +174,6 @@ describe("Claude result mapping", () => {
       {
         output: JSON.stringify({ type: "result", is_error: true, result: "Not logged in · Please run /login" }),
         code: 1,
-        killed: false,
         durationMs: 1,
       },
       { log: (m) => logs.push(m) },
@@ -199,7 +195,6 @@ describe("Claude result mapping", () => {
         JSON.stringify({ type: "result", is_error: true, api_error_status: 429, result: "session limit" }),
       ].join("\n"),
       code: 1,
-      killed: false,
       durationMs: 1,
     });
     expect(result.failCause).toBe("blocked");
@@ -218,7 +213,6 @@ describe("Claude result mapping", () => {
         result: "API Error: 529 Overloaded",
       }),
       code: 1,
-      killed: false,
       durationMs: 1,
     });
     expect(result.failReason).toBe("API Claude 529: API Error: 529 Overloaded");

@@ -48,7 +48,7 @@ test("a Codex run costs the same in the history as the runner charged it", () =>
   // at the input rate.
   const usage = { input_tokens: 1_000_000, cached_input_tokens: 800_000, output_tokens: 10 };
   const output = JSON.stringify({ type: "turn.completed", model: CODEX_MODEL.GPT_5_6_LUNA, usage });
-  const { stats } = mapCodexExecutionResult({ output, code: 0, killed: false, durationMs: 1 });
+  const { stats } = mapCodexExecutionResult({ output, code: 0, durationMs: 1 });
   // The runner's built-in Codex rates, as a project would declare them.
   const table = {
     _currency: "$",

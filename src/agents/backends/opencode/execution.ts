@@ -1,4 +1,4 @@
-import { runSupervisedStream, supervisorTimeout } from "../../../shared/process/process-runner.js";
+import { runSupervisedStream } from "../../../shared/process/process-runner.js";
 import {
   type JsonRecord,
   jsonRecords,
@@ -7,7 +7,7 @@ import {
   asString as stringValue,
 } from "../../../shared/lib/json-values.js";
 import { activityEvent, contextEvent } from "../../../shared/runtime/context.js";
-import { budgetExceededReason, costUnaccountedReason, lineSplitter, liveMessageSink } from "../host-helpers.js";
+import { budgetExceededKill, costUnaccountedKill, lineSplitter, liveMessageSink } from "../host-helpers.js";
 import { opencodeToolLabel, textFromEvent } from "./events.js";
 import { resolveOpencodeCost } from "./pricing.js";
 import type {
@@ -22,7 +22,7 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
   return {
     async execute(options: OpencodeExecutionOptions): Promise<RawOpencodeExecutionResult> {
       let logs = "";
-      const { killedForCleanup, ...result } = await runSupervisedStream(
+      const result = await runSupervisedStream(
         options.bin,
         options.args,
         {
@@ -37,7 +37,7 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
           // AND stderr, then a timeout kill. Measured on opencode 1.17.7.
           stdio: ["ignore", "pipe", "pipe"],
           detached: true,
-          timeoutMs: supervisorTimeout(options.timeoutMs),
+          timeoutMs: options.timeoutMs,
         },
         (control) => {
           const appendMessage = liveMessageSink(options.stepLogPath, textFromEvent);
@@ -59,7 +59,7 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
           const firstEventTimer =
             firstEventTimeoutMs != null && firstEventTimeoutMs > 0
               ? setTimeout(() => {
-                  control.kill(`no first event within ${firstEventTimeoutMs}ms`);
+                  control.kill({ cause: "no-first-event", afterMs: firstEventTimeoutMs });
                 }, firstEventTimeoutMs)
               : undefined;
           firstEventTimer?.unref();
@@ -87,16 +87,14 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
             // behind. `checkBudget` runs on a usage event only, so an attempt that
             // has reported nothing yet is never killed for it.
             if (cost.unknown && options.strictCostAccounting === true) {
-              control.kill(costUnaccountedReason(`${options.model ?? "unknown model"}: no reliable price`));
+              control.kill(costUnaccountedKill(`${options.model ?? "unknown model"}: no reliable price`));
               return;
             }
             // An unknown spend cannot be compared to a budget: killing on it would
             // stop a run over a number nobody stands behind.
             if (spent == null || cost.unknown || options.budgetRemaining == null) return;
             if (spent <= options.budgetRemaining) return;
-            control.kill(
-              budgetExceededReason(spent, options.budgetRemaining, cost.estimated ? "estimated" : "reported"),
-            );
+            control.kill(budgetExceededKill(spent, options.budgetRemaining, cost.estimated ? "estimated" : "reported"));
           };
 
           const handle = (event: JsonRecord): void => {
@@ -159,7 +157,7 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
       );
       // Same choice as the codex host: a descendant outliving `opencode run` means
       // the run did not complete as reported.
-      return { ...result, logs, killed: result.killed || killedForCleanup };
+      return { ...result, logs };
     },
     onSpawn: hostOptions.onSpawn,
     onEvent: hostOptions.onEvent,

@@ -15,7 +15,7 @@
 //    as such rather than silently read as zero.
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { historyFilePath } from "../../shared/env/kit-layout.js";
 import { loadProjectPricing } from "../../shared/env/pricing.js";
 import { isCompleted } from "../record/index.js";
 import { HistoryEntrySchema } from "./history-schema.js";
@@ -81,10 +81,6 @@ export interface HistoryAggregate {
   lastStartedAt: string | null;
 }
 
-export function historyPath(projRoot: string = process.cwd()): string {
-  return join(projRoot, ".lance-nuit", "pipeline-history", "runs.jsonl");
-}
-
 /**
  * Read every usable line of the history, newest run first.
  *
@@ -95,7 +91,7 @@ export function historyPath(projRoot: string = process.cwd()): string {
 export function readHistory(projRoot: string = process.cwd()): HistoryEntry[] {
   let raw: string;
   try {
-    raw = readFileSync(historyPath(projRoot), "utf-8");
+    raw = readFileSync(historyFilePath(projRoot), "utf-8");
   } catch {
     // A missing history is the normal case before the first run completes.
     return [];

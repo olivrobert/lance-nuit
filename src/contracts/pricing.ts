@@ -24,9 +24,6 @@ export interface TokenBreakdown {
 
 export type PricingTable = Readonly<Record<string, ModelPricing>>;
 
-/** Kit-relative path of the rate table, the same under every kit root. */
-export const PRICING_FILE = "pipeline-history/pricing.json";
-
 /** Exact match first, then the longest candidate contained in the model name.
  *  Public because the statistics readers must resolve a rate the same way the
  *  runner does; two matchers would price the same run differently. */

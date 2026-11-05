@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { WORK_ITEMS_PATH } from "./kit-layout.js";
 
 /** Default work-item root — the single constant imported everywhere else. */
-export const DEFAULT_SPEC_PATH = ".lance-nuit/work-items";
+export const DEFAULT_SPEC_PATH = WORK_ITEMS_PATH;
 
 /**
  * Maps a ticket ID to its directory path under SPEC_PATH.

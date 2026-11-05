@@ -10,7 +10,7 @@ function fixture(name: string): string {
 }
 
 function raw(overrides: Partial<RawOpencodeExecutionResult> = {}): RawOpencodeExecutionResult {
-  return { output: "", logs: "", code: 0, killed: false, durationMs: 1234, ...overrides };
+  return { output: "", logs: "", code: 0, durationMs: 1234, ...overrides };
 }
 
 function verdictEvent(verdict: string): string {
@@ -162,18 +162,21 @@ test("mapOpencodeExecutionResult: text mode needs no verdict", () => {
   expect(result.structuredOutput).toBeUndefined();
 });
 
-test("mapOpencodeExecutionResult: a killed run carries its reason, and timeouts alone set timedOut", () => {
-  const timedOut = mapOpencodeExecutionResult(raw({ killed: true, killReason: "timeout (900s)", code: null }), {
-    outputFormat: "json",
-  });
+test("mapOpencodeExecutionResult: a killed run carries its reason, and both deadlines set timedOut", () => {
+  const timedOut = mapOpencodeExecutionResult(
+    raw({ kill: { cause: "timeout" as const, afterMs: 900000 }, code: null }),
+    {
+      outputFormat: "json",
+    },
+  );
   expect(timedOut.ok).toBe(false);
   expect(timedOut.timedOut).toBe(true);
   expect(timedOut.failReason).toContain("timeout (900s)");
 
-  const starved = mapOpencodeExecutionResult(
-    raw({ killed: true, killReason: "no first event within 90000ms", code: null }),
-    { outputFormat: "json" },
-  );
-  expect(starved.timedOut).toBe(false);
+  const starved = mapOpencodeExecutionResult(raw({ kill: { cause: "no-first-event", afterMs: 90_000 }, code: null }), {
+    outputFormat: "json",
+  });
+  // A first event that never came is a deadline too: it drains like a timeout.
+  expect(starved.timedOut).toBe(true);
   expect(starved.failReason).toContain("no first event");
 });

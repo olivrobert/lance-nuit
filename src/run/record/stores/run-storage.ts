@@ -25,6 +25,7 @@ import {
   PID_START_FIELD,
   releaseLock,
 } from "../../../shared/env/lock.js";
+import { kitPath, TICKETLESS_RUNS_DIR } from "../../../shared/env/kit-layout.js";
 import { DEFAULT_SPEC_PATH, resolveTicketDir } from "../../../shared/env/tickets.js";
 import { errorMessage, isErrno } from "../../../shared/lib/errors.js";
 import { isLogicalSegment } from "../../../shared/language/artifact-ports.js";
@@ -71,7 +72,7 @@ export function runsLocationOf(context?: PipelineContext): RunsLocation {
 
 function runsDirAt({ cwd, specPath }: RunsLocation, ticket?: string): string {
   if (ticket) return join(cwd, specPath, resolveTicketDir(ticket, specPath, cwd), RUNS_DIRECTORY);
-  return join(cwd, ".lance-nuit", RUNS_DIRECTORY);
+  return kitPath(cwd, TICKETLESS_RUNS_DIR);
 }
 
 export function pipelineRunsDir(pipelineName: string, ticket?: string, context?: PipelineContext): string {

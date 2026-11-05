@@ -8,9 +8,10 @@
 // with a custom agent, 184 with `tools: {"*": false}`.
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeFileAtomic } from "../../../shared/lib/atomic-write.js";
 import { OPENCODE_AGENT } from "./types.js";
 
 const PIPELINE_PROMPT =
@@ -81,8 +82,6 @@ export function ensureOpencodeConfig(baseDir: string = tmpdir()): string {
   if (readOrEmpty(path) === content) return path;
   mkdirSync(dir, { recursive: true });
   // Publish atomically: a concurrent run must never read a half-written config.
-  const staging = join(dir, `opencode.json.${process.pid}.tmp`);
-  writeFileSync(staging, content);
-  renameSync(staging, path);
+  writeFileAtomic(path, content);
   return path;
 }

@@ -7,8 +7,8 @@
 // dead setting that looks active. This lint closes that gap and runs outside a run,
 // typically from bin/check.
 
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { RUNNER_ROOT_DIR } from "../../shared/env/kit-layout.js";
 import type { ComposeRegistries } from "../boot/extensions.js";
 import { backendSpecForStep, declaredBackendAxes, isAgentStep } from "../../contracts/backends.js";
 import {
@@ -90,13 +90,11 @@ export function lintConfigContext(
   composeRegistries: ComposeRegistries,
   cwd: string = process.cwd(),
 ): Promise<PipelineContext> {
-  // `../..`: this file lives in entry/commands/, while the context expects the runner root.
-  const runnerDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   // Dummy ticket: many commands are built from `paths.artifact()`, which throws
   // without a ticket. Without it, command resolution fails and the step appears to
   // have no capability; lint would report "machine default" for steps that actually
   // delegate to a skill.
-  return contextWithProjectProviders(composeRegistries, { cwd, runnerDir, ticket: LINT_TICKET });
+  return contextWithProjectProviders(composeRegistries, { cwd, runnerDir: RUNNER_ROOT_DIR, ticket: LINT_TICKET });
 }
 
 export async function lintStepOverrides(ctx: PipelineContext): Promise<LintReport> {

@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { DEFAULT_SPEC_PATH } from "../../../shared/env/tickets.js";
+import { writeFileAtomic } from "../../../shared/lib/atomic-write.js";
 import type { PipelineContext } from "../../../shared/language/context.js";
 import type { PersistedRun } from "../../persisted.js";
 import { createRunRef, type RunStateSnapshot, type RunStateStore } from "../../storage-ports.js";
@@ -99,20 +99,7 @@ export class FileRunStateStore implements RunStateStore {
 
     if (!existsSync(runDir)) mkdirSync(runDir, { recursive: true });
     const path = this.pathFor(runDir);
-    // Per-writer temp name: a shared `.tmp` would let two concurrent writers
-    // publish each other's half-written bytes via rename.
-    const temporaryPath = `${path}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-    try {
-      writeFileSync(temporaryPath, JSON.stringify(snapshot, null, 2));
-      renameSync(temporaryPath, path);
-    } catch (error) {
-      try {
-        unlinkSync(temporaryPath);
-      } catch {
-        // Temporary snapshot cleanup is best effort; preserve the original write error.
-      }
-      throw error;
-    }
+    writeFileAtomic(path, JSON.stringify(snapshot, null, 2));
   }
 
   pathFor(runDir: string): string {

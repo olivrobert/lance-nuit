@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { access, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, realpath, rm } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import type { PipelineConfig } from "../../shared/env/config.js";
 import { DEFAULT_SPEC_PATH, resolveTicketDir } from "../../shared/env/tickets.js";
+import { writeFileAtomicAsync } from "../../shared/lib/atomic-write.js";
 import { isErrno } from "../../shared/lib/errors.js";
 import {
   type ArtifactRef,
@@ -94,14 +94,7 @@ export class FileWorkItemArtifactStore implements WorkItemArtifactStore {
     await mkdir(resolve(path, ".."), { recursive: true });
     await this.rejectSymlinkComponents(path);
     // Atomic publish: a crash mid-write must not leave a truncated artifact.
-    const temporaryPath = `${path}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-    try {
-      await writeFile(temporaryPath, value, "utf-8");
-      await rename(temporaryPath, path);
-    } catch (error) {
-      await rm(temporaryPath, { force: true });
-      throw error;
-    }
+    await writeFileAtomicAsync(path, value);
   }
 
   async remove(ref: ArtifactRef): Promise<void> {

@@ -3,6 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ActivityRunnerEvent, ContextRunnerEvent } from "../../../shared/runtime/events.js";
+import { describeKill } from "../../../shared/process/process-runner.js";
 import { parseOpencodeLogErrors } from "./events.js";
 import { createNodeOpencodeHost, executeOpencode } from "./execution.js";
 
@@ -27,6 +28,18 @@ const BASH_TOOL =
 const STEP_FINISH =
   '{"type":"step_finish","part":{"type":"step-finish","tokens":{"total":6730,"input":6592,"output":83,"cache":{"read":0,"write":0}},"cost":0}}';
 
+test("executeOpencode: the CLI never sees the runner's state, even when the caller passes it", async () => {
+  const { bin, dir } = fakeOpencode("env", [`env > "$(dirname "$0")/env.txt"`, emit(TEXT_EVENT)]);
+  const env = { PATH: process.env.PATH ?? "", RUNNER_LOCK_HELD: "1", RUNNER_IN_WORKTREE: "1", KEPT: "yes" };
+
+  await executeOpencode({ bin, args: ["run"], env, cwd: dir, timeoutMs: 5_000 });
+
+  const seen = readFileSync(join(dir, "env.txt"), "utf8");
+  expect(seen).not.toContain("RUNNER_LOCK_HELD=");
+  expect(seen).not.toContain("RUNNER_IN_WORKTREE=");
+  expect(seen).toContain("KEPT=yes");
+});
+
 test("executeOpencode: stdin is closed, so a binary that drains it still completes", async () => {
   // `opencode run` aggregates stdin into the prompt: with stdin left open it waits
   // for an EOF forever, emitting zero byte on stdout AND stderr. This is the most
@@ -35,7 +48,7 @@ test("executeOpencode: stdin is closed, so a binary that drains it still complet
 
   const result = await executeOpencode({ bin, args: ["run"], env: {}, cwd: dir, timeoutMs: 1_500 });
 
-  expect(result.killed).toBe(false);
+  expect(result.kill).toBeUndefined();
   expect(result.code).toBe(0);
   expect(result.output).toContain("done");
 }, 15_000);
@@ -70,8 +83,8 @@ test("executeOpencode: the first-event deadline kills a run that never emits", a
     timeoutMs: 30_000,
   });
 
-  expect(result.killed).toBe(true);
-  expect(result.killReason).toContain("first event");
+  expect(result.kill).toBeDefined();
+  expect(result.kill?.cause).toBe("no-first-event");
 }, 20_000);
 
 test("executeOpencode: a slow model that did emit is not killed by the first-event deadline", async () => {
@@ -88,7 +101,7 @@ test("executeOpencode: a slow model that did emit is not killed by the first-eve
     timeoutMs: 30_000,
   });
 
-  expect(result.killed).toBe(false);
+  expect(result.kill).toBeUndefined();
   expect(result.code).toBe(0);
   expect(result.durationMs).toBeGreaterThanOrEqual(900);
 }, 20_000);
@@ -134,8 +147,8 @@ test("executeOpencode: a provider-reported cost above the remaining budget stops
     timeoutMs: 30_000,
   });
 
-  expect(result.killed).toBe(true);
-  expect(result.killReason).toContain("budget exceeded");
+  expect(result.kill).toBeDefined();
+  expect(result.kill?.cause).toBe("budget");
   expect(liveCost).toBe(0.5);
 }, 20_000);
 
@@ -162,9 +175,9 @@ test("executeOpencode: a step priced by pricing.json is estimated live and can s
     timeoutMs: 30_000,
   });
 
-  expect(result.killed).toBe(true);
-  expect(result.killReason).toContain("budget exceeded");
-  expect(result.killReason).toContain("estimated");
+  expect(result.kill).toBeDefined();
+  expect(result.kill?.cause).toBe("budget");
+  expect(result.kill && describeKill(result.kill)).toContain("estimated");
   expect(liveCost).toBeCloseTo(0.6);
 }, 20_000);
 
@@ -191,9 +204,9 @@ test("executeOpencode: a step reported at `cost: 0` is estimated live and can st
     timeoutMs: 30_000,
   });
 
-  expect(result.killed).toBe(true);
-  expect(result.killReason).toContain("budget exceeded");
-  expect(result.killReason).toContain("estimated");
+  expect(result.kill).toBeDefined();
+  expect(result.kill?.cause).toBe("budget");
+  expect(result.kill && describeKill(result.kill)).toContain("estimated");
   expect(liveCost).toBeCloseTo(0.6);
 }, 20_000);
 
@@ -214,7 +227,7 @@ test("executeOpencode: a `cost: 0` step with no declared rate never triggers a b
     timeoutMs: 30_000,
   });
 
-  expect(result.killed).toBe(false);
+  expect(result.kill).toBeUndefined();
 }, 20_000);
 
 test("executeOpencode: an unpriced step never triggers a budget kill", async () => {
@@ -232,7 +245,7 @@ test("executeOpencode: an unpriced step never triggers a budget kill", async () 
     timeoutMs: 5_000,
   });
 
-  expect(result.killed).toBe(false);
+  expect(result.kill).toBeUndefined();
   expect(result.code).toBe(0);
 }, 15_000);
 
@@ -277,7 +290,7 @@ test("executeOpencode: live output and agent messages reach their seams", async 
 test("executeOpencode: a descendant outliving the CLI rejects the run and is cleaned", async () => {
   // Same choice as the codex host, and the opposite of the Claude host, which
   // tolerates a straggler and keeps the CLI's verdict. Pinned here because the
-  // verdict is now mapped explicitly from `killedForCleanup` in execution.ts.
+  // verdict now keeps the `cleanup` kill in execution.ts.
   const { bin, dir } = fakeOpencode("orphan", [
     'PID_FILE="$(dirname "$0")/descendant.pid"',
     `(sleep 30 >/dev/null 2>&1 & echo $! > "$PID_FILE"; ${emit(TEXT_EVENT)}; exit 0)`,
@@ -292,8 +305,8 @@ test("executeOpencode: a descendant outliving the CLI rejects the run and is cle
     timeoutMs: 15_000,
   });
 
-  expect(result.killed).toBe(true);
-  expect(result.killReason).toContain("descendants");
+  expect(result.kill).toBeDefined();
+  expect(result.kill?.cause).toBe("cleanup");
   const descendant = Number(readFileSync(pidFile, "utf8").trim());
   expect(() => process.kill(descendant, 0)).toThrow();
 }, 20_000);
@@ -338,7 +351,7 @@ test("executeOpencode: an NDJSON stream over 1 MB is parsed line by line, in ord
   const host = createNodeOpencodeHost({ appendLiveOutput: (text) => writes.push(text) });
   const result = await host.execute({ bin, args: ["run"], env: {}, cwd: dir, stepLogPath, timeoutMs: 30_000 });
 
-  expect(result.killed).toBe(false);
+  expect(result.kill).toBeUndefined();
   expect(result.code).toBe(0);
   // Without several writes the test would prove nothing about fragmentation.
   expect(writes.length).toBeGreaterThan(1);
@@ -410,12 +423,11 @@ test("executeOpencode: unpriceable live usage stops the attempt as unaccounted, 
     timeoutMs: 30_000,
   });
 
-  expect(result.killed).toBe(true);
+  expect(result.kill).toBeDefined();
   // The distinct prefix is the contract `killFields` reads to raise
   // `costUnaccounted` rather than `budgetExceeded`.
-  expect(result.killReason?.startsWith("cost unaccounted")).toBe(true);
-  expect(result.killReason).toContain("--allow-unmetered");
-  expect(result.killReason).not.toContain("budget exceeded");
+  expect(result.kill?.cause).toBe("cost-unaccounted");
+  expect(result.kill && describeKill(result.kill)).toContain("--allow-unmetered");
   // The supervisor cleaned the group instead of waiting out the `sleep 30`.
   expect(Date.now() - started).toBeLessThan(20_000);
 }, 25_000);
@@ -435,7 +447,7 @@ test("executeOpencode: an authorized run is not stopped by unpriceable live usag
     timeoutMs: 10_000,
   });
 
-  expect(result.killed).toBe(false);
+  expect(result.kill).toBeUndefined();
   expect(result.code).toBe(0);
   expect(result.output).toContain("done");
 }, 15_000);
@@ -456,6 +468,6 @@ test("executeOpencode: silence is not proof, so the accounting guard kills nothi
     timeoutMs: 10_000,
   });
 
-  expect(result.killed).toBe(false);
+  expect(result.kill).toBeUndefined();
   expect(result.code).toBe(0);
 }, 15_000);

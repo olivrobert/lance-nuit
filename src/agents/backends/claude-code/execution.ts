@@ -1,9 +1,8 @@
-import { runSupervisedStream, supervisorTimeout } from "../../../shared/process/process-runner.js";
-import { withoutRunnerInternalEnv } from "../../../shared/process/self-spawn.js";
+import { runSupervisedStream } from "../../../shared/process/process-runner.js";
 import { asFiniteNumber as num, asRecord as rec } from "../../../shared/lib/json-values.js";
 import { toolLabel } from "../../../shared/lib/tool-label.js";
 import { activityEvent, contextEvent, contextTokensFromUsage } from "../../../shared/runtime/context.js";
-import { budgetExceededReason, lineSplitter, liveMessageSink } from "../host-helpers.js";
+import { budgetExceededKill, lineSplitter, liveMessageSink } from "../host-helpers.js";
 import { netCumulative } from "./cost-state.js";
 import { addUsage, estimateCostUsd, newUsageTotals, SYNTHETIC_MODEL, textFromAssistantEvent } from "./events.js";
 import { contextWindow } from "./pricing.js";
@@ -28,11 +27,11 @@ async function executeNode(
   // kills a cheap fix pass for the coder session it merely inherited.
   const costBaseline = options.sessionCostBaselineUsd ?? 0;
   options.onLiveCost?.(priorCost > 0 ? priorCost : undefined);
-  const env = withoutRunnerInternalEnv(process.env);
+  const env = { ...process.env };
   delete env.CLAUDECODE;
   // Supervised spawn: tracked for shutdown, SIGTERM→SIGKILL escalation on
   // timeout/budget kill, so an unresponsive CLI cannot hang the step forever.
-  const { killedForCleanup, killReason, ...result } = await runSupervisedStream(
+  const { kill, ...result } = await runSupervisedStream(
     options.bin,
     options.args,
     {
@@ -40,7 +39,7 @@ async function executeNode(
       env,
       stdio: ["ignore", "pipe", "inherit"],
       detached: true,
-      timeoutMs: supervisorTimeout(options.timeoutMs),
+      timeoutMs: options.timeoutMs,
       drainMs: DRAIN,
     },
     (control) => {
@@ -120,7 +119,7 @@ async function executeNode(
           // estimate is always usable for the ceiling, and `strictCostAccounting`
           // would have nothing to fire on.
           if (options.budgetRemaining != null && estimated > options.budgetRemaining && !control.killed) {
-            control.kill(budgetExceededReason(estimated, options.budgetRemaining, "estimated"));
+            control.kill(budgetExceededKill(estimated, options.budgetRemaining, "estimated"));
           }
         } catch {}
       };
@@ -131,11 +130,11 @@ async function executeNode(
       };
     },
   );
-  if (killedForCleanup) host.log?.("  · Group cleaned after CLI exit");
+  if (kill?.cause === "cleanup") host.log?.("  · Group cleaned after CLI exit");
   // A straggler is a hygiene issue, not a verdict: the CLI reported its result and
-  // the group has been cleaned. `killReason` is dropped with it so the mapper does
+  // the group has been cleaned. The kill is dropped with it so the mapper does
   // not read a kill where there was none.
-  return result.killed && killReason ? { ...result, killReason } : result;
+  return kill && kill.cause !== "cleanup" ? { ...result, kill } : result;
 }
 
 export function createNodeClaudeHost(options: NodeClaudeHostOptions = {}): ClaudeBackendHost {

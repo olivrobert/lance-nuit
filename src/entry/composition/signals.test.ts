@@ -91,7 +91,7 @@ async function interruptRunner(
   const root = mkdtempSync(join(tmpdir(), `signals-${signal.toLowerCase()}-`));
   const runDir = join(root, "run");
   const pipelinePath = pipelineFile(root);
-  const { RUNNER_EVENTS_FILE: _ignored, ...env } = process.env;
+  const { RUNNER_LIVE_FEED: _ignored, ...env } = process.env;
   const child = spawn(process.execPath, ["-e", childSource(root, runDir, pipelinePath, stopSource?.(root))], {
     cwd: root,
     env,

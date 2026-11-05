@@ -4,7 +4,8 @@
 // walking the kit chain, reading each layer through the schema, and caching the
 // answer for the process.
 
-import { mergePricingLayers, PRICING_FILE, type ProjectPricing } from "../../contracts/pricing.js";
+import { mergePricingLayers, type ProjectPricing } from "../../contracts/pricing.js";
+import { PRICING_FILE } from "./kit-layout.js";
 import { kitFileLayers } from "./kit-paths.js";
 import { readProjectPricingFile } from "./pricing.schema.js";
 

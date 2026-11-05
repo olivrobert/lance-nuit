@@ -1,5 +1,6 @@
 import type { LiveCostSink } from "../../../contracts/backends.js";
 import type { ClaudeOptions, ClaudeResumeBaseline } from "../../../contracts/backends/claude-code.js";
+import type { ProcessKill } from "../../../shared/process/process-runner.js";
 import type { BackendSpawnEvent } from "../spawn-event.js";
 
 export type {
@@ -29,8 +30,8 @@ export interface ClaudeExecutionOptions {
 export interface RawClaudeExecutionResult {
   output: string;
   code: number | null;
-  killed: boolean;
-  killReason?: string;
+  /** The kill this backend counts as one. */
+  kill?: ProcessKill;
   durationMs: number;
   /** Cost spent by transport attempts discarded before an overload retry. */
   priorAttemptsCostUsd?: number;

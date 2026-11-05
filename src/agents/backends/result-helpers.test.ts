@@ -11,7 +11,6 @@ const blockedVerdict = { success: false, reason: "the release branch is missing"
 
 function outcome(overrides: Partial<VerdictOutcomeInput> = {}) {
   return resolveVerdictOutcome({
-    killed: false,
     code: 0,
     requiresVerdict: true,
     missingVerdictLabel: "no verdict",
@@ -20,8 +19,8 @@ function outcome(overrides: Partial<VerdictOutcomeInput> = {}) {
 }
 
 test("kill: no fail cause, even with a blocked verdict left in the output", () => {
-  const result = outcome({ killed: true, killReason: "timeout after 60s", code: null, verdict: blockedVerdict });
-  expect(result.failReason).toBe("process killed: timeout after 60s");
+  const result = outcome({ kill: { cause: "timeout" as const, afterMs: 60000 }, code: null, verdict: blockedVerdict });
+  expect(result.failReason).toBe("process killed: timeout (60s)");
   expect(result.failKind).toBe("technical");
   // The kill is what ended the attempt. Reporting "blocked" would send an
   // operator to fix an environment that is fine.
@@ -30,8 +29,7 @@ test("kill: no fail cause, even with a blocked verdict left in the output", () =
 
 test("kill: a cost-guard kill discards the blocked verdict too", () => {
   const result = outcome({
-    killed: true,
-    killReason: "budget exceeded ($0.11 estimated > $0.05 remaining)",
+    kill: { cause: "budget", detail: "$0.11 estimated > $0.05 remaining" },
     code: null,
     verdict: blockedVerdict,
   });

@@ -31,13 +31,6 @@ export function buildWatcherCommand(live: string, state: string, formatterComman
   ].join("\n");
 }
 
-export function ensureLiveFeed(feed: LiveFeed): void {
-  feed.ensure();
-  const live = feed.path();
-  process.env.RUNNER_EVENTS_FILE = live;
-  process.env.RUNNER_LIVE_FEED = live;
-}
-
 export function openWatcherPane(feed: LiveFeed, options: { autoClose?: boolean } = {}): string | undefined {
   const live = feed.path();
 
