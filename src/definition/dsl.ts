@@ -7,6 +7,7 @@ import type {
 } from "./builtin-steps/lib/work-item-steps.js";
 import type { artifact, source, textArtifact } from "./dsl/artifact.js";
 import type { forEachPipeline, runPipeline } from "./dsl/dsl-orchestration.js";
+import type { parallelize } from "./dsl/dsl-parallel.js";
 import type { pipeline } from "./dsl/dsl-pipeline.js";
 import type { actionStep, bashStep, LlmStepFactory, WithBackendFactory } from "./dsl/dsl-steps.js";
 import type { OnFail } from "./dsl/dsl-types.js";
@@ -44,6 +45,7 @@ export { artifact, source, textArtifact } from "./dsl/artifact.js";
 // focused modules; export them through this stable authoring entrypoint.
 export { forEachPipeline, runPipeline } from "./dsl/dsl-orchestration.js";
 export { PipelineOrchestrationStepBuilder } from "./dsl/dsl-orchestration-step.js";
+export { parallelize } from "./dsl/dsl-parallel.js";
 export { pipeline } from "./dsl/dsl-pipeline.js";
 export {
   ActionStepBuilder,
@@ -71,6 +73,7 @@ export type {
   InternalWorkItemSourceOptions,
   LlmStepOptions,
   OnFail,
+  ParallelizeOptions,
   PipelineAfterOptions,
   PipelineEntry,
   RunPipelineOptions,
@@ -134,6 +137,8 @@ export interface Dsl {
   pipeline: typeof pipeline;
   runPipeline: typeof runPipeline;
   forEachPipeline: typeof forEachPipeline;
+  /** Run several `llmStep` side by side; they read, they do not write to the code. */
+  parallelize: typeof parallelize;
   llmStep: LlmStepFactory;
   withBackend: WithBackendFactory;
   bashStep: typeof bashStep;
