@@ -1,4 +1,3 @@
-// runner/work-item-store/layout.ts
 //
 // Where the runner keeps what it writes beside a ticket. Pure: it takes a
 // work-item directory, not a `PipelineContext`, so a reader that has no context —

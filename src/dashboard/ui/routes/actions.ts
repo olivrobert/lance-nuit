@@ -1,4 +1,3 @@
-// dashboard/ui/routes/actions.ts
 //
 // `POST /api/actions/<verb>`: one verb on one item (spec 5).
 

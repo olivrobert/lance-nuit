@@ -1,9 +1,7 @@
 import type { ArtifactScope, EffortLevel, JsonSchema } from "../../../contracts/index.js";
 import { artifactScopeInstruction } from "../artifact-scope.js";
-import { JSON_VERDICT_INSTRUCTION, verdictInstruction } from "../verdict-instruction.js";
+import { verdictInstruction } from "../verdict-instruction.js";
 import { OPENCODE_LOG_LEVEL, OPENCODE_VARIANT, type OpencodeOptions, type OpencodeVariant } from "./types.js";
-
-export { artifactScopeInstruction, JSON_VERDICT_INSTRUCTION };
 
 export interface OpencodeArgsOptions {
   readonly outputFormat?: "text" | "json";

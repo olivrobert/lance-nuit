@@ -1,4 +1,3 @@
-// dashboard/ui/routes/route.ts
 //
 // The shape of one `/api/<resource>` route. The router owns what every route
 // shares — Host, origin, method, and the operator guard — and hands a route the

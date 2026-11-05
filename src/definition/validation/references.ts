@@ -1,4 +1,4 @@
-import { configFileLabel } from "../../shared/env/kit-paths.js";
+import { CONFIG_FILE_LABEL } from "../../shared/env/kit-paths.js";
 import { listAvailableExtractors } from "../extractors/registry.js";
 import { isStepProfileName } from "../../shared/language/profiles.js";
 import { checkOverrideKeyShapes, checkStepOverrides } from "./step-overrides.js";
@@ -18,7 +18,7 @@ export class ExtractorReferenceValidator implements PipelineValidationRule {
 
   validate(context: PipelineValidationContext): readonly PipelineValidationFinding[] {
     const findings: PipelineValidationFinding[] = [];
-    const available = context.availableExtractors ?? listAvailableExtractors();
+    const available = listAvailableExtractors();
 
     for (const step of pipelineSteps(context)) {
       if (step.error_extractor && !available.has(step.error_extractor)) {
@@ -55,7 +55,7 @@ export class ConfigurationReferenceValidator implements PipelineValidationRule {
     const findings: PipelineValidationFinding[] = [];
     const registry = backendRegistryOf(context);
     const profileOverrides = context.profileOverrides ?? {};
-    const source = context.stepOverrideSource ?? configFileLabel(context.pipelineContext?.cwd);
+    const source = CONFIG_FILE_LABEL;
 
     for (const [profile, configured] of Object.entries(profileOverrides)) {
       if (!isStepProfileName(profile)) {

@@ -1,4 +1,3 @@
-// shared/env/pricing.schema.ts
 //
 // Shape and reader of the optional project rate table
 // (`.lance-nuit/pipeline-history/pricing.json`).
@@ -46,12 +45,6 @@ export const ProjectPricingSchema = z.record(z.string(), z.union([PricingEntrySc
 export function diagnoseProjectPricing(value: unknown): string | undefined {
   const result = ProjectPricingSchema.safeParse(value);
   return result.success ? undefined : z.prettifyError(result.error);
-}
-
-/** The table, or null when the value is not one. */
-export function parseProjectPricing(value: unknown): ProjectPricing | null {
-  const result = ProjectPricingSchema.safeParse(value);
-  return result.success ? result.data : null;
 }
 
 /**

@@ -1,4 +1,3 @@
-// runner/run-record/cost-figures.ts
 //
 // Turning what a backend reported into the figures the runner stores, plus the
 // difference arithmetic a by-difference charge needs. Nothing here writes: the

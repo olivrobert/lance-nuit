@@ -146,6 +146,5 @@ export type {
   RunLogStore,
   RunStateSnapshot,
   RunStateStore,
-  ScanReadResult,
   ScanStore,
 } from "./storage-ports.js";

@@ -100,7 +100,6 @@ export function createNodeCodexHost(hostOptions: NodeCodexHostOptions = {}): Cod
             onStdout: (text) => {
               lines.push(text);
               hostOptions.appendLiveOutput?.(text);
-              if (options.stepLogPath) hostOptions.appendAgentMessage?.(text, options.stepLogPath);
             },
             onStderr: (text) => stderr.push(text),
             onFinalize: () => {

@@ -1,13 +1,9 @@
-// shared/runtime/events.ts
 //
 // In-process runner event bus. Live-feed writing is no longer wired into emission:
 // it is one subscriber among others, registered when the module loads so the
 // default behavior remains exactly as before (one JSON line per event, in order).
 // It writes to the feed configured on `shared/runtime/live-feed.ts`, never to an adapter
 // it builds itself: the bus knows the port, not the file.
-//
-// This is also the destination for observability middleware in the attempt chain
-// (attempt-chain.ts): they publish here instead of writing inside caller loops.
 
 import { configuredLiveFeed, type LiveFeed } from "./live-feed.js";
 
@@ -41,18 +37,6 @@ export interface ActivityRunnerEvent {
   timestamp: number;
 }
 
-/** API overload absorbed by the Claude backend; a new spawn is scheduled. */
-export interface TransportRetryEvent {
-  type: "runner-event";
-  event: "transport-retry";
-  /** `api_error_status` from the CLI (529, 503…) when provided. */
-  status?: number;
-  attempt: number;
-  of: number;
-  delayMs: number;
-  timestamp: number;
-}
-
 export interface PipelineStepEvent {
   type: "pipeline-step";
   id: string;
@@ -82,14 +66,13 @@ export type RunnerEvent =
   | AgentSpawnEvent
   | ContextRunnerEvent
   | ActivityRunnerEvent
-  | TransportRetryEvent
   | PipelineStepEvent
   | RunnerMessageEvent;
 
 export type RunnerEventSubscriber = (event: RunnerEvent) => void;
 
 /** A subscription is identified by its entry, never by the function: the same
- *  subscriber may register twice (two middleware sharing a handler), and each
+ *  subscriber may register twice, and each
  *  unsubscribe must remove only its own entry. An unsubscribe after reset cannot
  *  affect the new list. */
 interface Subscription {

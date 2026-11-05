@@ -589,29 +589,6 @@ test("runAttempt: validates the contract", async () => {
   });
 });
 
-test("the ledger charge belongs to the attempt lifecycle, not to the chain: validates the contract", async () => {
-  const step = makeStep();
-  const run = makeRun(step, 10);
-  const seen: Array<number | undefined> = [];
-  const executeStep: ExecuteStep = async (_s, _c, budget) => {
-    seen.push(budget?.budgetRemaining);
-    return { output: "", ok: true, stats: { duration_ms: 1, total_cost_usd: 2 }, sessionId: "sess-y" };
-  };
-
-  const budget = { cumulative: 1 };
-  await runAttempt(run, step, { command: "make test", context: baseCtx, budget, executeStep, middlewares: [] });
-
-  // No middleware at all: nothing computes the remaining budget and nothing
-  // rotates the session...
-  expect(seen).toEqual([undefined]);
-  expect(step.session).toBeUndefined();
-  // ...but the closure still writes the step total and the ledger is still
-  // charged with the same figures, whatever the chain looks like.
-  expect(budget.cumulative).toBe(3);
-  expect(step.control?.total_cost_usd).toBe(2);
-  expect(step.attempts[0]?.control?.total_cost_usd).toBe(2);
-});
-
 test("runAttempt: validates the contract", async () => {
   const step = makeStep({ runner: "fn" });
   const run = makeRun(step);
@@ -691,7 +668,7 @@ test("runAttempt: validates the contract", async () => {
   expect(fixture.read()).toBeUndefined();
 });
 
-/** Blank step-log file in the run directory, used to observe what the chain writes. */
+/** Blank step-log file in the run directory, used to observe what the attempt writes. */
 test("runFixAttempt: validates the contract", async () => {
   const step = makeStep({}, { session: CLAUDE_SESSION("step-session") });
   const run = makeRun(step, 10);
@@ -845,7 +822,7 @@ test("inaccessible step logs do not fail the attempt: validates the contract", a
 
   expect(spawned).toBe(1);
   expect(outcome.ok).toBe(true);
-  // The cost is still counted: the next middleware is not carried away by the first one's failure.
+  // The cost is still counted: the banner's failure does not carry away what follows it.
   expect(budget.cumulative).toBe(0.5);
 });
 

@@ -1,4 +1,3 @@
-// pipelines/lib/work-item-notes.ts
 //
 // Note builders: run facts → `WorkItemNote`.
 //

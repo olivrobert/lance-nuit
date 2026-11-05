@@ -1,4 +1,3 @@
-// runner/step/pipeline-orchestration.ts
 //
 // Execute `runPipeline` and `forEachPipeline` nodes. A child call is a real run
 // with its own snapshot and events, but this loop drives it; pipelines never

@@ -1,4 +1,3 @@
-// runner/dispatch/scan-record-writer.ts
 //
 // Accumulates the durable scan record and publishes it at every transition.
 //

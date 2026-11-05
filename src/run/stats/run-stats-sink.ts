@@ -5,11 +5,6 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, rmdirSync, statSyn
 import { join } from "node:path";
 import type { RunStatsEntry } from "./run-stats-projector.js";
 
-export interface RunStatsSink {
-  /** Return the canonical written location, or null on best-effort failure. */
-  write(entry: RunStatsEntry): string | null;
-}
-
 export interface FileRunStatsSinkOptions {
   projRoot?: string;
 }
@@ -64,7 +59,7 @@ function withHistoryLock<T>(path: string, fn: () => T): T {
 /** Central `.lance-nuit/pipeline-history/runs.jsonl`, the sole source of truth for
  *  run statistics. Nothing is mirrored per work item: a second copy would
  *  duplicate entries without a runner reader. */
-export class FileRunStatsSink implements RunStatsSink {
+export class FileRunStatsSink {
   private readonly options: Required<FileRunStatsSinkOptions>;
 
   constructor(options: FileRunStatsSinkOptions = {}) {
@@ -73,6 +68,7 @@ export class FileRunStatsSink implements RunStatsSink {
     };
   }
 
+  /** Return the canonical written location, or null on best-effort failure. */
   write(entry: RunStatsEntry): string | null {
     if (entry.schemaVersion !== 1) return null;
     const historyDir = join(this.options.projRoot, ".lance-nuit", "pipeline-history");

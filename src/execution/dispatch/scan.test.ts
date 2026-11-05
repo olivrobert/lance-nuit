@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Pipeline } from "../../definition/definition.ts";
 import type { ScanRecord } from "../../run/scan-record.ts";
-import type { ScanReadResult, ScanStore } from "../../run/storage-ports.ts";
+import type { ScanStore } from "../../run/storage-ports.ts";
 import {
   createFakeWorkItemGateway,
   type FakeWorkItemSeed,
@@ -24,7 +24,7 @@ import { buildPipelineContext } from "../../definition/pipeline/context.ts";
 import { type DispatchDeps, runDispatch } from "./loop.ts";
 import { resolveScanLimit, scanStrategy } from "./scan.ts";
 import type { DispatchEnv } from "./dispatch-strategy.ts";
-import { DispatchAbort } from "./strategy.ts";
+import { DispatchAbort } from "./abort.ts";
 
 /** In-memory `ScanStore`. It keeps EVERY write, not only the last one: the record
  *  is written at each transition, and what a crash leaves behind is one of the
@@ -34,10 +34,6 @@ class MemoryScanStore implements ScanStore {
 
   write(record: ScanRecord): void {
     this.writes.push(structuredClone(record));
-  }
-
-  readAll(): ScanReadResult {
-    return { records: this.last ? [this.last] : [], skipped: 0 };
   }
 
   /** The version a reader would find on disk right now. */

@@ -1,4 +1,3 @@
-// runner/model/input.ts
 //
 // Admission contracts of a step: the shapes an author declares through `input`.
 // The builders that produce them live in `definition/dsl/input.ts`.

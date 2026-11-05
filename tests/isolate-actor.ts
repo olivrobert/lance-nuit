@@ -1,4 +1,3 @@
-// runner/tests/isolate-actor.ts
 //
 // Suite preload: drop the `LANCENUIT_ACTOR` the developer's shell may export.
 //

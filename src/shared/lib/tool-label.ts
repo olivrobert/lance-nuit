@@ -1,4 +1,3 @@
-// runner/lib/tool-label.ts
 //
 // One naming convention for tool calls, shared by every surface that shows them
 // (live status line, tmux formatter, attempt telemetry). A tool named the same

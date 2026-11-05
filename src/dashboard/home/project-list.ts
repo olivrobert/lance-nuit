@@ -1,4 +1,3 @@
-// dashboard/home/project-list.ts
 //
 // `projects.json`: the flat list of project paths the dashboard reads. The read
 // model describes each project from the project itself; this file only owns the

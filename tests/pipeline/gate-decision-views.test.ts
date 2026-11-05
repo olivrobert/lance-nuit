@@ -7,7 +7,7 @@ import { writeFileSync } from "node:fs";
 import { inspectTicket } from "../../src/entry/commands/diagnostics-readers.js";
 import { textArtifact } from "../../src/definition/dsl/artifact.js";
 import type { ApprovalState } from "../../src/dashboard/read-model/index.js";
-import { listItems } from "../../src/dashboard/read-model/index.js";
+import { listItems } from "../../src/dashboard/read-model/items.js";
 import {
   cleanupTempDirs,
   makeProject,

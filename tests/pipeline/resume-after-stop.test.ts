@@ -52,10 +52,7 @@ export default ({ pipeline, actionStep, reject }) => pipeline("gated")
     context: ctx,
     worktree: false,
   });
-  finalizeRun(
-    first,
-    await executeRunSteps(first, "P-01", undefined, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), ctx),
-  );
+  finalizeRun(first, await executeRunSteps(first, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), ctx));
   expect(first.status).toBe("STOPPED");
   expect(trace(root)).toEqual(["pre"]);
 
@@ -68,10 +65,7 @@ export default ({ pipeline, actionStep, reject }) => pipeline("gated")
     context: ctx,
     worktree: false,
   });
-  finalizeRun(
-    second,
-    await executeRunSteps(second, "P-01", undefined, { resuming: true }, stepLoopDeps(NULL_RUN_OUTPUT), ctx),
-  );
+  finalizeRun(second, await executeRunSteps(second, { resuming: true }, stepLoopDeps(NULL_RUN_OUTPUT), ctx));
 
   expect(second.run_dir).toBe(first.run_dir);
   expect(second.status).toBe("PASS");
@@ -147,14 +141,7 @@ export default ({ pipeline, llmStep, actionStep }) => pipeline("costly")
     context: ctx,
     worktree: false,
   });
-  const firstOutcome = await executeRunSteps(
-    first,
-    "P-01",
-    undefined,
-    { resuming: false },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    ctx,
-  );
+  const firstOutcome = await executeRunSteps(first, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), ctx);
   finalizeRun(first, firstOutcome);
   expect(firstOutcome.budgetExceeded).toBe(true);
   expect(first.steps.map((step) => step.status)).toEqual(["done", "pending"]);
@@ -168,14 +155,7 @@ export default ({ pipeline, llmStep, actionStep }) => pipeline("costly")
     context: ctx,
     worktree: false,
   });
-  const retryOutcome = await executeRunSteps(
-    retry,
-    "P-01",
-    undefined,
-    { resuming: true },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    ctx,
-  );
+  const retryOutcome = await executeRunSteps(retry, { resuming: true }, stepLoopDeps(NULL_RUN_OUTPUT), ctx);
   expect(retryOutcome.budgetExceeded).toBe(true);
   expect(retry.steps.map((step) => step.status)).toEqual(["done", "pending"]);
 
@@ -189,14 +169,7 @@ export default ({ pipeline, llmStep, actionStep }) => pipeline("costly")
     maxCostUsd: 20,
     worktree: false,
   });
-  const approvedOutcome = await executeRunSteps(
-    approved,
-    "P-01",
-    undefined,
-    { resuming: true },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    ctx,
-  );
+  const approvedOutcome = await executeRunSteps(approved, { resuming: true }, stepLoopDeps(NULL_RUN_OUTPUT), ctx);
   finalizeRun(approved, approvedOutcome);
 
   expect(approved.max_cost_usd).toBe(20);
@@ -261,7 +234,7 @@ export default ({ pipeline, actionStep, textArtifact }) => {
       context: ctx,
       worktree: false,
     });
-    finalizeRun(run, await executeRunSteps(run, "P-01", undefined, { resuming }, stepLoopDeps(NULL_RUN_OUTPUT), ctx));
+    finalizeRun(run, await executeRunSteps(run, { resuming }, stepLoopDeps(NULL_RUN_OUTPUT), ctx));
     return run;
   };
 

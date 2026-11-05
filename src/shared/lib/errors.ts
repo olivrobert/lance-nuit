@@ -1,4 +1,3 @@
-// shared/lib/errors.ts
 //
 // The two things every `catch` in this repository needs: a readable message,
 // and errno discrimination. Both were reimplemented inline dozens of times

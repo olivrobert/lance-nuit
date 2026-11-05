@@ -1,4 +1,3 @@
-// runner/run-record/budget.ts
 //
 // The run cost ledger and the stop decisions read off it. PURE helpers: the cost
 // gate (`costGate`, `run/record/cost-stop-events.ts`) decides through them, the

@@ -1,4 +1,3 @@
-// runner/env/kit-paths.ts
 //
 // SINGLE resolution chain for kit files: project > user > builtin.
 //
@@ -162,15 +161,5 @@ export function listKitFiles(subdir: string, suffix: string, options: KitLookupO
   return [...names].sort();
 }
 
-/**
- * Relative path of the config file to NAME in an error message.
- *
- * Errors always point to the project's canonical location.
- */
-export function configFileLabel(cwd: string = process.cwd()): string {
-  for (const root of kitRoots({ cwd })) {
-    if (root.kind !== "project") continue;
-    if (existsSync(join(root.dir, CONFIG_FILE))) return `${KIT_DIR}/${CONFIG_FILE}`;
-  }
-  return `${KIT_DIR}/${CONFIG_FILE}`;
-}
+/** The config file an error message names: always the project's canonical location. */
+export const CONFIG_FILE_LABEL = `${KIT_DIR}/${CONFIG_FILE}`;

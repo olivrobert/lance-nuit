@@ -1,4 +1,3 @@
-// entry/output/status-line.ts
 //
 // Repainting single-line progress indicator for the main console.
 //

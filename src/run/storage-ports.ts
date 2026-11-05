@@ -1,4 +1,3 @@
-// runner/model/storage-ports.ts
 //
 // Storage contracts use business identities. Adapters may keep local locations,
 // but location is not part of run, artifact, or log identity.
@@ -90,22 +89,8 @@ export interface RunEventStore {
   /** Contracted events only. Unknown and invalid lines are kept on disk and
    * counted, but a typed reader never sees them. */
   read(runId: string): RunJournalEvent[];
-  /** Bounded read extension; `read` loads the entire journal, which external
-   * readers cannot afford for a long run. */
-  readFrom?(runId: string, offset: number, options?: { maxBytes?: number }): RunEventPage;
   /** Diagnostic read extension: the complete envelope with its counters. */
   readJournal?(runId: string): RunJournalCounts & { entries: JournalEntry[] };
-}
-
-/** Result of reading the durable scan records.
- *
- * `skipped` counts files that exist but cannot be used (unreadable, not JSON,
- * off schema). Reading is tolerant on purpose: one truncated record must not
- * hide every other scan, and the count is what makes a surprising total
- * explainable instead of invisible. */
-export interface ScanReadResult {
-  records: ScanRecord[];
-  skipped: number;
 }
 
 /** Durable record of a `--scan` dispatch, one record per scan.
@@ -115,7 +100,6 @@ export interface ScanReadResult {
  * keep `pending`, `running`, and `done` distinct after a crash. */
 export interface ScanStore {
   write(record: ScanRecord): void;
-  readAll(): ScanReadResult;
 }
 
 export interface RunLogStore {

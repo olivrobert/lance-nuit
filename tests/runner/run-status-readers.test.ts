@@ -11,7 +11,10 @@ import { closeLatestRun } from "../../src/entry/commands/closure.js";
 import { cleanLogs, inspectTicket } from "../../src/entry/commands/diagnostics-readers.js";
 import { loadPipelineConfig } from "../../src/shared/env/config.js";
 import type { PersistedRun } from "../../src/run/persisted.js";
-import { readItem, readRecap, readStats, readSteps } from "../../src/dashboard/read-model/index.js";
+import { readItem } from "../../src/dashboard/read-model/items.js";
+import { readRecap } from "../../src/dashboard/read-model/recap.js";
+import { readStats } from "../../src/dashboard/read-model/stats.js";
+import { readSteps } from "../../src/dashboard/read-model/steps.js";
 import {
   cleanupTempDirs,
   DEAD_PID,

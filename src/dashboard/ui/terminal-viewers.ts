@@ -1,4 +1,3 @@
-// dashboard/ui/terminal-viewers.ts
 //
 // The browser side of a terminal: one tmux client per viewer.
 //

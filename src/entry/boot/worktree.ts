@@ -1,4 +1,3 @@
-// runner/boot/worktree.ts
 //
 // Worktree boot step: setup and chdir before pipeline resolution, locking, and
 // guards. The rest of the runner follows cwd, so the lock must be acquired after

@@ -1,4 +1,3 @@
-// runner/model/run-report.ts
 //
 // Contract of `artifacts/report.json`: the structured delivery report a pipeline
 // writes at the end of a run, and the only file the dashboard reads to render a

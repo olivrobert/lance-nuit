@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { parseGithubIssueRefs, parseGithubPayload } from "./index.js";
+import { parseGithubIssueRefs, parseGithubPayload } from "./payload.js";
 
 describe("github payload parsing", () => {
   it("reads issue numbers in appearance order and removes duplicates", () => {

@@ -1,4 +1,3 @@
-// runner/boot/boot-state.ts
 //
 // The boot port and the state it threads, on their own: `step.ts` imports every
 // boot step to build BOOT, and every boot step needs these types. Keeping them

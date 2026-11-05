@@ -1,4 +1,3 @@
-// runner/model/artifact.ts
 //
 // Artifact descriptor: the shape a pipeline author binds a name and a parser to.
 // The factories that build one live in `definition/dsl/artifact.ts`.

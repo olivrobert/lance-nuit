@@ -1,4 +1,3 @@
-// runner/env/capability-frontmatter.ts
 //
 // Resolve frontmatter for a skill or agent invoked by a step.
 //

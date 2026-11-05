@@ -82,16 +82,6 @@ function processEvent(rawEvent: unknown): void {
     return;
   }
 
-  if (obj.type === "runner-event" && obj.event === "transport-retry") {
-    const status = obj.status ? ` ${displayValue(obj.status)}` : "";
-    const attempt = numberValue(obj.attempt);
-    const of = numberValue(obj.of);
-    const delayMs = numberValue(obj.delayMs);
-    if (attempt === undefined || of === undefined || delayMs === undefined) return;
-    writeLine(yellow(`  ⚠ API overloaded${status} — retry ${attempt}/${of} in ${Math.round(delayMs / 1000)}s`));
-    return;
-  }
-
   if (obj.type === "runner-event" && obj.event === "activity") {
     const label = stringValue(obj.label);
     if (label) writeLine(`  ${cyan("▶")} ${label}${paintShare(state.pct)}`);

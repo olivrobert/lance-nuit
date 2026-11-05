@@ -43,8 +43,7 @@ export class FileLiveFeed implements LiveFeed {
   }
 }
 
-/** Build the feed a child process inherited through the environment. `entry/`
- * installs it before boot so the bus keeps writing where the parent expects. */
+/** Build the feed a child process inherited through the environment. */
 export function liveFeedFromEnvironment(env: NodeJS.ProcessEnv = process.env): LiveFeed | undefined {
   const filePath = liveFeedPathFromEnvironment(env);
   return filePath ? new FileLiveFeed(filePath) : undefined;

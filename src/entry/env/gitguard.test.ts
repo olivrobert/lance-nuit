@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bashStep, pipeline } from "../../definition/dsl.ts";
-import { checkWorkingTree, shouldGuardCleanTree } from "./gitguard.ts";
+import { checkWorkingTreeAsync, shouldGuardCleanTree } from "./gitguard.ts";
 
 function gitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "gitguard-"));
@@ -18,7 +18,7 @@ function gitRepo(): string {
   return dir;
 }
 
-const base = { resuming: false, subRunner: false, allowDirty: false, pipelineAllowsDirty: false };
+const base = { resuming: false, allowDirty: false, pipelineAllowsDirty: false };
 
 test("shouldGuardCleanTree: run fresh top-level → guard active", () => {
   expect(shouldGuardCleanTree(base)).toBe(true);
@@ -26,10 +26,6 @@ test("shouldGuardCleanTree: run fresh top-level → guard active", () => {
 
 test("shouldGuardCleanTree: resuming a run → no guard (legitimately dirty tree)", () => {
   expect(shouldGuardCleanTree({ ...base, resuming: true })).toBe(false);
-});
-
-test("shouldGuardCleanTree: sub-runner → no guard", () => {
-  expect(shouldGuardCleanTree({ ...base, subRunner: true })).toBe(false);
 });
 
 test("shouldGuardCleanTree: --allow-dirty → no guard", () => {
@@ -40,42 +36,42 @@ test("shouldGuardCleanTree: pipeline allow_dirty (commit, quality) → no guard"
   expect(shouldGuardCleanTree({ ...base, pipelineAllowsDirty: true })).toBe(false);
 });
 
-test("checkWorkingTree: outside a git repo → ok (guard not applicable)", () => {
+test("checkWorkingTreeAsync: outside a git repo → ok (guard not applicable)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "notgit-"));
-  expect(checkWorkingTree(dir).ok).toBe(true);
+  expect((await checkWorkingTreeAsync(dir)).ok).toBe(true);
 });
 
-test("checkWorkingTree: clean repo → ok", () => {
-  expect(checkWorkingTree(gitRepo()).ok).toBe(true);
+test("checkWorkingTreeAsync: clean repo → ok", async () => {
+  expect((await checkWorkingTreeAsync(gitRepo())).ok).toBe(true);
 });
 
-test("checkWorkingTree: modified file → rejection with reason", () => {
+test("checkWorkingTreeAsync: modified file → rejection with reason", async () => {
   const dir = gitRepo();
   writeFileSync(join(dir, "a.txt"), "modif\n");
-  const r = checkWorkingTree(dir);
+  const r = await checkWorkingTreeAsync(dir);
   expect(r.ok).toBe(false);
   expect(r.reason).toContain("a.txt");
 });
 
-test("checkWorkingTree rejects an untracked file with a reason", () => {
+test("checkWorkingTreeAsync rejects an untracked file with a reason", async () => {
   const dir = gitRepo();
   writeFileSync(join(dir, "new-file.txt"), "x\n");
-  const r = checkWorkingTree(dir);
+  const r = await checkWorkingTreeAsync(dir);
   expect(r.ok).toBe(false);
   expect(r.reason).toContain("new-file.txt");
 });
 
-test("checkWorkingTree ignores an untracked entry Git cannot commit (FIFO, device)", () => {
+test("checkWorkingTreeAsync ignores an untracked entry Git cannot commit (FIFO, device)", async () => {
   const dir = gitRepo();
   spawnSync("mkfifo", [join(dir, ".bashrc")]);
-  expect(checkWorkingTree(dir).ok).toBe(true);
+  expect((await checkWorkingTreeAsync(dir)).ok).toBe(true);
 });
 
-test("checkWorkingTree still lists a real untracked file next to an uncommittable one", () => {
+test("checkWorkingTreeAsync still lists a real untracked file next to an uncommittable one", async () => {
   const dir = gitRepo();
   spawnSync("mkfifo", [join(dir, ".bashrc")]);
   writeFileSync(join(dir, "new-file.txt"), "x\n");
-  const r = checkWorkingTree(dir);
+  const r = await checkWorkingTreeAsync(dir);
   expect(r.ok).toBe(false);
   expect(r.reason).toContain("dirty Git tree (1 file(s))");
   expect(r.reason).toContain("new-file.txt");

@@ -1,4 +1,3 @@
-// dashboard/read-model/report.ts
 //
 // The delivery report of a work item's current run: `artifacts/report.json`,
 // written by the pipeline, validated here before the dashboard renders it.

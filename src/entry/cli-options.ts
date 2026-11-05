@@ -1,4 +1,3 @@
-// entry/cli-options.ts
 //
 // CLI option METADATA: the `RunnerArgs` shape and the `FLAGS` registry that
 // describes every option. Pure data — no parsing, no I/O — so boot and commands

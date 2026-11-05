@@ -7,7 +7,7 @@ import type { Pipeline } from "../../definition/definition.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
 import { classifyPersistedRunOutcome, type DispatchDeps, runDispatch } from "./loop.ts";
 import type { DispatchEnv, DispatchOutcome, DispatchStrategy } from "./dispatch-strategy.ts";
-import { DispatchAbort } from "./strategy.ts";
+import { DispatchAbort } from "./abort.ts";
 
 const def: Pipeline = { name: "p", steps: [] };
 
@@ -27,11 +27,10 @@ function env(overrides: Partial<DispatchEnv> = {}): DispatchEnv {
 function strategy(overrides: Partial<DispatchStrategy> = {}): DispatchStrategy {
   return {
     id: "fake",
-    flag: null,
+    flag: "--fake",
     isActive: () => false,
-    ticket: "required",
     desc: "test strategy",
-    onFailure: "continue",
+    ticketError: "--fake does not accept a ticket.",
     tickets: () => ["A", "B"],
     onEmpty: () => ({ message: "empty", code: 0 }),
     childArgs: () => [],
@@ -157,10 +156,10 @@ test("betweenTickets also runs after a skip and knows it was skipped", async () 
   ]);
 });
 
-test('onFailure "continue": failed ticket does not stop loop, report rendered', async () => {
+test("a failed ticket does not stop the loop, report rendered", async () => {
   const reported: DispatchOutcome[] = [];
   const code = await runDispatch(
-    strategy({ onFailure: "continue", report: (outcomes) => reported.push(...outcomes) }),
+    strategy({ report: (outcomes) => reported.push(...outcomes) }),
     env(),
     deps({ spawn: (args) => (args[0] === "A" ? 1 : 0) }),
   );
@@ -172,63 +171,11 @@ test('onFailure "continue": failed ticket does not stop loop, report rendered', 
   ]);
 });
 
-test('onFailure "stop": loop returns child code without report or after', async () => {
-  let reportCalls = 0;
-  let afterCalls = 0;
-  const spawned: string[][] = [];
-  const code = await runDispatch(
-    strategy({
-      onFailure: "stop",
-      after: async () => {
-        afterCalls++;
-        return 0;
-      },
-      report: () => {
-        reportCalls++;
-      },
-    }),
-    env(),
-    deps({
-      spawn: (args) => {
-        spawned.push(args);
-        return args[0] === "A" ? 42 : 0;
-      },
-    }),
-  );
-
-  expect(code).toBe(42);
-  expect(spawned.map((a) => a[0])).toEqual(["A"]);
-  expect(afterCalls).toBe(0);
-  expect(reportCalls).toBe(0);
-});
-
-test('betweenTickets false + onFailure "stop" → 1, loop stopped', async () => {
-  const spawned: string[][] = [];
-  const code = await runDispatch(
-    strategy({ onFailure: "stop", betweenTickets: (t) => t !== "A" }),
-    env(),
-    deps({
-      spawn: (args) => {
-        spawned.push(args);
-        return 0;
-      },
-    }),
-  );
-  expect(code).toBe(1);
-  expect(spawned.map((a) => a[0])).toEqual(["A"]);
-});
-
-test('betweenTickets false + onFailure "continue" → 0, report still rendered, after skipped', async () => {
-  let afterCalls = 0;
+test("betweenTickets false → 0, report still rendered", async () => {
   const reported: DispatchOutcome[] = [];
   const code = await runDispatch(
     strategy({
-      onFailure: "continue",
       betweenTickets: (t) => t !== "A",
-      after: async () => {
-        afterCalls++;
-        return 0;
-      },
       report: (outcomes) => reported.push(...outcomes),
     }),
     env(),
@@ -236,24 +183,7 @@ test('betweenTickets false + onFailure "continue" → 0, report still rendered, 
   );
 
   expect(code).toBe(0);
-  expect(afterCalls).toBe(0);
   expect(reported.map((o) => o.ticket)).toEqual(["A"]);
-});
-
-test("failed after: its code propagates and report is skipped", async () => {
-  let reportCalls = 0;
-  const code = await runDispatch(
-    strategy({
-      after: async () => 7,
-      report: () => {
-        reportCalls++;
-      },
-    }),
-    env(),
-    deps(),
-  );
-  expect(code).toBe(7);
-  expect(reportCalls).toBe(0);
 });
 
 test("report receives the COMPLETE ticket list, not only processed tickets", async () => {
@@ -261,7 +191,6 @@ test("report receives the COMPLETE ticket list, not only processed tickets", asy
   await runDispatch(
     strategy({
       tickets: () => ["A", "B", "C"],
-      onFailure: "continue",
       betweenTickets: (t) => t !== "A",
       report: (_o, tickets) => {
         seen = tickets;
@@ -291,24 +220,6 @@ test("classifyPersistedRunOutcome: exit 0 without stopped_reason → fixed", () 
 test("classifyPersistedRunOutcome: the --until exit code → until, although the run is stopped", () => {
   const run = { schemaVersion: 1, runId: "scan-1", steps: [], stopped_reason: "stop requested by --until after plan" };
   expect(classifyPersistedRunOutcome(UNTIL_STOP_EXIT_CODE, run as never)).toBe("until");
-});
-
-test("a child stopped at its --until bound is not a failure, even for a strategy that stops on one", async () => {
-  const failed: string[] = [];
-  const spawned: string[] = [];
-  const code = await runDispatch(
-    strategy({ onFailure: "stop", onTicketFailed: (ticket) => failed.push(ticket) }),
-    env(),
-    deps({
-      spawn: (args) => {
-        spawned.push(args[0]!);
-        return UNTIL_STOP_EXIT_CODE;
-      },
-    }),
-  );
-  expect(code).toBe(0);
-  expect(spawned).toEqual(["A", "B"]);
-  expect(failed).toEqual([]);
 });
 
 /* ------------------------------------------------------------------------- *
@@ -388,18 +299,6 @@ test("hooks: onHalted names the refusing hook's ticket, and the loop stops", asy
   const code = await runDispatch(tracingStrategy(trace, { betweenTickets: (ticket) => ticket !== "A" }), env(), deps());
 
   expect(code).toBe(0);
-  expect(trace).toEqual(["started:A", "finished:A:fixed:none", "halted:betweenTickets refused to continue after A"]);
-});
-
-test("hooks: onHalted runs before a stop-mode loop returns its failure code", async () => {
-  const trace: string[] = [];
-  const code = await runDispatch(
-    tracingStrategy(trace, { onFailure: "stop", betweenTickets: () => false }),
-    env(),
-    deps(),
-  );
-
-  expect(code).toBe(1);
   expect(trace).toEqual(["started:A", "finished:A:fixed:none", "halted:betweenTickets refused to continue after A"]);
 });
 

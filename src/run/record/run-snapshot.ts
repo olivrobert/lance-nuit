@@ -1,4 +1,3 @@
-// runner/run-record/run-snapshot.ts
 //
 // Defensive run snapshot reader. Consumers add their own business rules afterward
 // (resume, completion, escalation, diagnostics, and so on).

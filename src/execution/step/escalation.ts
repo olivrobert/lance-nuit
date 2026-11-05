@@ -1,4 +1,3 @@
-// runner/step/escalation.ts
 //
 // Two-rung escalation ladder: effort first, model second.
 //

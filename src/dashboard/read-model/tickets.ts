@@ -1,4 +1,3 @@
-// dashboard/read-model/tickets.ts
 //
 // Is this string a ticket of that project? The answer belongs to the project's
 // work-item provider — a Jira key and a GitHub issue number look nothing alike —

@@ -1,4 +1,3 @@
-// dashboard/read-model/read-model.ts
 //
 // The read model as one port: every dashboard read, bound once to the
 // environment it reads. The server holds one `ReadModel` and never passes `env`

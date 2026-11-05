@@ -5,11 +5,8 @@ import type { JournalEntry, RunJournalCounts, RunJournalEvent } from "../../jour
 import type { RunEventPage, RunEventStore } from "../../storage-ports.js";
 import { parseJournalEntry } from "../journal-schema.js";
 
-export type { RunEventPage } from "../../storage-ports.js";
-
 export interface FileRunEventStoreOptions {
   runDir?: string;
-  runDirs?: Map<string, string>;
 }
 
 /** Default read window: bounds memory use when an external reader scans a large journal. */
@@ -20,8 +17,8 @@ export interface RunEventPageOptions {
   maxBytes?: number;
 }
 
-function emptyPage(offset: number, size = 0): RunEventPage {
-  return { events: [], entries: [], nextOffset: offset, size, eof: true, skipped: 0, invalid: 0, unknown: 0 };
+function emptyPage(): RunEventPage {
+  return { events: [], entries: [], nextOffset: 0, size: 0, eof: true, skipped: 0, invalid: 0, unknown: 0 };
 }
 
 /** Journal lines classified by `parseJournalEntry`, with the counters. A line
@@ -78,22 +75,21 @@ export function runEventsFilePath(runDir: string): string {
 export class FileRunEventStore implements RunEventStore {
   private readonly runDir?: string;
 
-  private readonly runDirs?: Map<string, string>;
-
   private appendFailureReported = false;
 
-  constructor({ runDir, runDirs }: FileRunEventStoreOptions = {}) {
+  constructor({ runDir }: FileRunEventStoreOptions = {}) {
     this.runDir = runDir;
-    this.runDirs = runDirs;
   }
 
-  append(runId: string, event: RunJournalEvent): void {
-    const runDir = this.resolveRunDir(runId);
+  // One store serves one run directory: the run id the port carries is not
+  // needed to find the journal.
+  append(_runId: string, event: RunJournalEvent): void {
+    const runDir = this.runDir;
     if (runDir) this.appendAt(runDir, event);
   }
 
-  read(runId: string): RunJournalEvent[] {
-    const runDir = this.resolveRunDir(runId);
+  read(_runId: string): RunJournalEvent[] {
+    const runDir = this.runDir;
     return runDir ? this.readAt(runDir) : [];
   }
 
@@ -119,8 +115,8 @@ export class FileRunEventStore implements RunEventStore {
     return this.classifyAt(runDir).events;
   }
 
-  readJournal(runId: string): RunJournalCounts & { entries: JournalEntry[] } {
-    const runDir = this.resolveRunDir(runId);
+  readJournal(_runId: string): RunJournalCounts & { entries: JournalEntry[] } {
+    const runDir = this.runDir;
     return runDir ? this.readJournalAt(runDir) : { entries: [], skipped: 0, invalid: 0, unknown: 0 };
   }
 
@@ -144,37 +140,12 @@ export class FileRunEventStore implements RunEventStore {
     }
   }
 
-  /** Read a page from a byte offset. Unlike `readAt`, this bounds memory use and
-   *  lets external readers follow a live run by passing `nextOffset` back. */
-  readFrom(runId: string, offset: number, options?: RunEventPageOptions): RunEventPage {
-    const runDir = this.resolveRunDir(runId);
-    return runDir ? this.readFromAt(runDir, offset, options) : emptyPage(offset);
-  }
-
-  readFromAt(runDir: string, offset: number, options: RunEventPageOptions = {}): RunEventPage {
-    const maxBytes = Math.max(1, options.maxBytes ?? DEFAULT_EVENT_PAGE_BYTES);
-    const start = Math.max(0, Math.trunc(offset) || 0);
-
-    return this.withFile(runDir, start, (fd, size) => {
-      if (start >= size) return { ...emptyPage(Math.min(start, size), size) };
-
-      const buffer = Buffer.allocUnsafe(Math.min(maxBytes, size - start));
-      const read = readSync(fd, buffer, 0, buffer.length, start);
-      const { consumed, ...lines } = parseCompleteLines(buffer.subarray(0, read));
-      const nextOffset = start + consumed;
-      // No complete line in the window: keep the cursor still, or a line longer
-      // than `maxBytes` could be lost.
-      return { ...lines, nextOffset, size, eof: nextOffset >= size };
-    });
-  }
-
-  /** Read the tail of a completed journal. A partial leading line is discarded;
-   *  `nextOffset` remains usable for subsequent reads. */
+  /** Read the tail of a completed journal. A partial leading line is discarded. */
   readTailAt(runDir: string, options: RunEventPageOptions = {}): RunEventPage {
     const maxBytes = Math.max(1, options.maxBytes ?? DEFAULT_EVENT_PAGE_BYTES);
 
-    return this.withFile(runDir, 0, (fd, size) => {
-      if (size === 0) return emptyPage(0, 0);
+    return this.withFile(runDir, (fd, size) => {
+      if (size === 0) return emptyPage();
 
       const start = Math.max(0, size - maxBytes);
       const buffer = Buffer.allocUnsafe(size - start);
@@ -188,21 +159,14 @@ export class FileRunEventStore implements RunEventStore {
     });
   }
 
-  /** Current journal size without reading it; used for cache invalidation. */
-  sizeAt(runDir: string): number {
-    return this.withFile(runDir, 0, (_fd, size) => size, 0);
-  }
-
-  private withFile<T>(runDir: string, fallbackOffset: number, read: (fd: number, size: number) => T): T;
-  private withFile<T>(runDir: string, fallbackOffset: number, read: (fd: number, size: number) => T, fallback: T): T;
-  private withFile<T>(runDir: string, fallbackOffset: number, read: (fd: number, size: number) => T, fallback?: T): T {
+  private withFile(runDir: string, read: (fd: number, size: number) => RunEventPage): RunEventPage {
     let fd: number | null = null;
     try {
       fd = openSync(this.pathFor(runDir), "r");
       return read(fd, fstatSync(fd).size);
     } catch {
       // Readers use the typed empty page fallback when the journal is unavailable.
-      return (fallback ?? emptyPage(fallbackOffset)) as T;
+      return emptyPage();
     } finally {
       if (fd !== null) {
         try {
@@ -216,9 +180,5 @@ export class FileRunEventStore implements RunEventStore {
 
   private pathFor(runDir: string): string {
     return runEventsFilePath(runDir);
-  }
-
-  private resolveRunDir(runId: string): string | undefined {
-    return this.runDirs?.get(runId) ?? this.runDir;
   }
 }

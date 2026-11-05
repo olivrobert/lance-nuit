@@ -78,7 +78,6 @@ test("runners: validates the integration contract", async () => {
     step,
     "step prompt",
     {
-      timeout: 120,
       budgetRemaining: 456,
       onLiveCost: stepLiveCost,
       session: { provider: "other", id: "wrong-provider", resumable: true },
@@ -96,7 +95,6 @@ test("runners: validates the integration contract", async () => {
     role: "coder",
     outputFormat: "json",
     options: stepOptions,
-    timeoutMs: 120,
     budgetRemaining: 456,
     onLiveCost: stepLiveCost,
     // A session minted by another provider never reaches this backend.

@@ -1,4 +1,3 @@
-// runner/project/dsl-types/typescript-runtime.ts
 //
 // On-demand access to the `typescript` package.
 //

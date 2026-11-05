@@ -1,4 +1,3 @@
-// dashboard/read-model/runs.ts
 //
 // Which run a work item is currently about.
 //

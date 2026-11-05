@@ -1,4 +1,3 @@
-// runner/output/run-output.ts
 //
 // Presentation destinations for the `RunOutput` port declared in
 // `execution/run-output.ts`: the JSONL live feed and the human-readable console.

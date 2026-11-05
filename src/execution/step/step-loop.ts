@@ -1,4 +1,3 @@
-// runner/step/step-loop.ts
 //
 // Run step orchestration. Business responsibilities are split into admission
 // (pre-spawn guards), the pass of an admitted step (`step-pass.ts`: attempt
@@ -8,7 +7,7 @@
 import { extractErrors } from "../report-extraction.js";
 import { executeStep } from "../runners.js";
 import type { PipelineContext } from "../../shared/language/context.js";
-import { reconcilable, rerunsOnResume, buildPipelineContext } from "../../definition/index.js";
+import { reconcilable, rerunsOnResume } from "../../definition/index.js";
 import type { RunStepView, RunView } from "../../run/index.js";
 import type { RunOutput } from "../run-output.js";
 import { type AbortScope, createAbortScope } from "../abort.js";
@@ -25,17 +24,11 @@ import {
 } from "../../run/index.js";
 
 import { runFixLoop } from "./fix-loop.js";
-import { admitStep, checkInputs, type StepAdmission, skipForOperatorSelection } from "./step-admission.js";
-import { resolveOutcome } from "./step-outcome.js";
+import { admitStep, type StepAdmission, skipForOperatorSelection } from "./step-admission.js";
 import { type AdmittedStep, executionUnits, runParallelGroup } from "./parallel-group.js";
 import { admissionStop, runStepPass, type StepLoopDeps, type StepLoopStop, type StepPassEnv } from "./step-pass.js";
 
-export type { StepAdmission, StepLoopDeps };
-export { admitStep, checkInputs, resolveOutcome };
-
-export function buildContext(ticket: string | undefined, baseBranch: string | undefined): PipelineContext {
-  return buildPipelineContext({ ticket, baseBranch });
-}
+export type { StepLoopDeps };
 
 /** Build production dependencies while allowing callers to replace only the
  * output destination. Keeping the function boundaries required preserves the
@@ -127,11 +120,9 @@ function stopOnUnfinishedSelection(run: RunView, step: RunStepView, output: RunO
 
 export async function executeRunSteps(
   run: RunView,
-  ticket: string | undefined,
-  baseBranch: string | undefined,
   opts: ExecuteRunStepsOptions,
   deps: StepLoopDeps,
-  context?: PipelineContext,
+  baseCtx: PipelineContext,
 ): Promise<RunOutcome> {
   const abort = opts.abort ?? createAbortScope();
   const unregisterActiveRun = abort.registerActiveRun(run);
@@ -147,15 +138,12 @@ export async function executeRunSteps(
     const setAside: string[] = [];
     let leftUnfinished: RunStepView | undefined;
     const bound = untilStepOf(run, opts.until);
-    const baseCtx = context ?? buildContext(ticket, baseBranch);
     const isAborted = () => abort.isRunAborted(run);
     const passEnv: StepPassEnv = {
       run,
       baseCtx,
-      baseBranch,
       budget,
       abort,
-      resuming,
       reconcile,
       replayInterrupted: opts.replayInterrupted,
       deps,

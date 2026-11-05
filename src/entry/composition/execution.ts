@@ -1,4 +1,3 @@
-// runner/entry/execution.ts
 //
 // The normal-run half of the entry point: resolve which snapshot to run, guard
 // the tree, wire the outputs, execute the steps, report.

@@ -1,18 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import type { AutomationQueue, WorkItemState } from "../../../../contracts/work-items.js";
-import { createJiraWorkItemGateway, parseAcliTicketKeys } from "./index.js";
-import {
-  commandsMatching,
-  createAcliSim,
-  DEFAULT_SEED,
-  FAKE_CONVERTER,
-  harness,
-  ko,
-  messageOf,
-  NO_CONVERTER,
-  ok,
-  stubbed,
-} from "./test-harness.js";
+import { createJiraWorkItemGateway } from "./index.js";
+import { parseAcliTicketKeys } from "./payload.js";
+import { commandsMatching, createAcliSim, harness, ko, messageOf, ok, stubbed } from "./test-harness.js";
 
 describe("jira gateway — JQL", () => {
   const jqlFor = async (queue: AutomationQueue, state: WorkItemState): Promise<string> => {
@@ -57,7 +47,6 @@ describe("jira gateway — JQL", () => {
       workItem: { provider: "jira", project: "OPS", todoState: "Backlog", reviewState: "Code Review" },
       labels: { bugTodo: "robot-bug", featureTodo: "robot-feat", done: "robot-ok", escalate: "human" },
       run: sim.run,
-      adfConverter: NO_CONVERTER,
     });
     await gateway.findCandidates({ queue: "escalate", state: "inReview" });
     expect(sim.commands[0]?.[5]).toBe("project = OPS AND labels = human AND status = 'Code Review'");
@@ -236,38 +225,6 @@ describe("jira gateway — reading a ticket", () => {
   it("empty description → error (the next step depends on this spec)", async () => {
     const { gateway } = harness([{ key: "PROJ-24", description: null }]);
     expect(await messageOf(gateway.fetch("PROJ-24"))).toContain("no usable description");
-  });
-
-  it("reuses the plugin script when available", async () => {
-    const { gateway, sim } = harness(DEFAULT_SEED, FAKE_CONVERTER);
-    sim.python = ok("## Contexte converti par le script\n");
-    const item = await gateway.fetch("PROJ-24");
-    expect(item.description).toBe("## Contexte converti par le script");
-    const shell = sim.commands.find((command) => command[0] === "sh")!;
-    expect(shell[1]).toBe("-c");
-    // Paths are positional arguments ($1 = script, $2 = payload), so nothing is
-    // interpolated into the shell script.
-    expect(shell[4]).toBe(FAKE_CONVERTER);
-    // The payload goes through a file because the process port does not expose stdin.
-    expect(shell[5]).toContain("workitem.json");
-  });
-
-  it("script not found → internal conversion, no conversion subprocess", async () => {
-    const { gateway, sim } = harness();
-    await gateway.fetch("PROJ-24");
-    expect(sim.commands.some((command) => command[0] === "sh")).toBe(false);
-  });
-
-  it("script present but fails (python missing) → internal conversion", async () => {
-    const { gateway, sim } = harness(DEFAULT_SEED, FAKE_CONVERTER);
-    sim.python = ko("sh: python3: command not found", 127);
-    expect((await gateway.fetch("PROJ-24")).description).toBe("## Contexte\n\nL'export plante en prod.");
-  });
-
-  it("script present but output is empty → internal conversion", async () => {
-    const { gateway, sim } = harness(DEFAULT_SEED, FAKE_CONVERTER);
-    sim.python = ok("\n");
-    expect((await gateway.fetch("PROJ-24")).description).toBe("## Contexte\n\nL'export plante en prod.");
   });
 });
 

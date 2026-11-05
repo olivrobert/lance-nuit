@@ -1,4 +1,3 @@
-// runner/run-record/attempt-projection.ts
 //
 // Rebuild step attempts from the journal. `state.json` keeps only the state a
 // resume needs; `step.attempt.started` and `step.attempt.finished` already carry

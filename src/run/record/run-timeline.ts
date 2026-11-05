@@ -1,4 +1,3 @@
-// runner/run-record/run-timeline.ts
 //
 // Step logs and their paths for a run: where an attempt's log and command go,
 // and how a reader finds them. Registering an attempt is not done here

@@ -61,14 +61,6 @@ export function fmtDuration(ms: number | undefined | null): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}`;
 }
 
-/** A token count, in thousands or millions once it stops being readable whole. */
-export function fmtTokens(count: number | undefined | null): string {
-  if (typeof count !== "number" || !Number.isFinite(count)) return ABSENT;
-  if (count < 1000) return String(count);
-  if (count < 1_000_000) return `${(count / 1000).toFixed(1)} k`;
-  return `${(count / 1_000_000).toFixed(2)} M`;
-}
-
 /** A model id as a reader names it: `claude-opus-5-5-20260101` reads `Opus 5.5`.
  *  An id of another shape is shown as it is: a wrong guess at a name would be
  *  worse than the raw id. */

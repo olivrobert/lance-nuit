@@ -1,4 +1,3 @@
-// dashboard/ui/routes/static.ts
 //
 // Every path outside `/api/`: the bundled front, revalidated on every request.
 

@@ -55,6 +55,9 @@ export function verdictInstruction(fields?: Readonly<Record<string, JsonSchema>>
 Set "blocked": true only when an obstacle outside the code stops you — a missing branch, an unreachable service, a credential you do not have. The run then stops instead of attempting a repair that cannot work.${fieldsText}`;
 }
 
-/** The verdict block with no captured fields, re-exported by the backends that
- *  inject the contract into the prompt. */
+/** The verdict block with no captured fields. */
 export const JSON_VERDICT_INSTRUCTION = verdictInstruction();
+
+/** Bare verdict schema, without captured fields. Claude's `--json-schema` and
+ *  Codex's `--output-schema` carry `verdictSchema(outputFields)`. */
+export const VERDICT_SCHEMA = verdictSchema();

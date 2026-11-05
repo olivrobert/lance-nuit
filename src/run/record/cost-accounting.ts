@@ -1,4 +1,3 @@
-// runner/run-record/cost-accounting.ts
 //
 // The one module that WRITES a spend figure, and the one that says what a figure
 // proves.
@@ -443,8 +442,7 @@ export function reserveAllowance(budget: RunBudget, maxCost: number | undefined,
 }
 
 /** The attempt is over: what it was allowed goes back to the pot, and what it spent
- *  is on the ledger. Safe when nothing is held, which a chain without the budget
- *  gate leaves. */
+ *  is on the ledger. Safe when nothing is held. */
 export function releaseAllowance(budget: RunBudget, stepId: string): void {
   budget.allowances?.delete(stepId);
 }

@@ -1,4 +1,3 @@
-// runner/run-record/run-status.ts
 //
 // What a run status means, in one place.
 //

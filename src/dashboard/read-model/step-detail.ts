@@ -1,4 +1,3 @@
-// dashboard/read-model/step-detail.ts
 //
 // One step, opened: what each attempt cost and why it ended, what the chosen
 // attempt was given and what it printed, and the artifacts it produced.

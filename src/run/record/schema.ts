@@ -1,4 +1,3 @@
-// run/record/schema.ts
 //
 // Runtime schema of the persisted run snapshot (`state.json`).
 //

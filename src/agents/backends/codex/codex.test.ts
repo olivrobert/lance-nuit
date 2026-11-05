@@ -3,9 +3,9 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verdictFromStructured } from "../../../contracts/index.js";
-import { verdictSchema } from "../verdict-instruction.js";
+import { VERDICT_SCHEMA, verdictSchema } from "../verdict-instruction.js";
 import { buildCodexArgs } from "./args.js";
-import { CodexBackend, VERDICT_SCHEMA } from "./backend.js";
+import { CodexBackend } from "./backend.js";
 import { parseCodexEvents } from "./events.js";
 import { CODEX_MODEL, CODEX_SANDBOX, type CodexBackendHost } from "./types.js";
 

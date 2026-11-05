@@ -1,4 +1,3 @@
-// dashboard/ui/routes/stats.ts
 //
 // `/api/stats`: every ticket's cost and duration. Read on request, never
 // polled: the scan opens every run snapshot of every project, for figures read

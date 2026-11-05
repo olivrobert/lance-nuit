@@ -1,4 +1,3 @@
-// dashboard/ui/routes/launches.ts
 //
 // `/api/launches`: the verbs the dashboard triggered for one item, and the tail
 // of one launch's log.

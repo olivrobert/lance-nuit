@@ -1,4 +1,3 @@
-// runner/run-record/step-bookkeeping.ts
 //
 // The named writes of an execution that are neither a transition
 // (`run-transitions.ts`), the end of an attempt (`attempt-lifecycle.ts`) nor a

@@ -1,4 +1,3 @@
-// runner/exec/self-spawn.test.ts
 //
 // A relaunch has to land on the same interpreter as its parent: that is what makes
 // Bun the runtime of every phase the runner delegates to itself (sub-work-item,
@@ -11,7 +10,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { DISPATCH_CHILD_ENV, withoutRunnerInternalEnv } from "./self-spawn.js";
+import { withoutRunnerInternalEnv } from "./self-spawn.js";
 
 const selfSpawnModule = resolve(import.meta.dir, "self-spawn.ts");
 
@@ -20,7 +19,6 @@ const INTERNAL_VALUES = {
   RUNNER_IN_WORKTREE: "1",
   RUNNER_EVENTS_FILE: "/tmp/parent-events.jsonl",
   RUNNER_LIVE_FEED: "/tmp/parent-live.jsonl",
-  RUNNER_DISABLE_DISPATCH: "1",
 };
 
 interface ChildRuntime {
@@ -99,15 +97,15 @@ test("a relaunched runner still inherits the runner-internal variables", () => {
       harness,
       [
         'import { writeFileSync } from "node:fs";',
-        `import { selfSpawnRunner, DISPATCH_CHILD_ENV } from ${JSON.stringify(selfSpawnModule)};`,
+        `import { selfSpawnRunner } from ${JSON.stringify(selfSpawnModule)};`,
         "",
         'if (process.argv.includes("--relaunched")) {',
         `  const names = ${JSON.stringify(names)};`,
         `  writeFileSync(${JSON.stringify(proof)}, JSON.stringify(Object.fromEntries(names.map((n) => [n, process.env[n] ?? null]))));`,
         "  process.exit(0);",
         "}",
-        `Object.assign(process.env, ${JSON.stringify({ ...INTERNAL_VALUES, RUNNER_DISABLE_DISPATCH: undefined })});`,
-        'process.exit(await selfSpawnRunner(["--relaunched"], { ...DISPATCH_CHILD_ENV }));',
+        `Object.assign(process.env, ${JSON.stringify(INTERNAL_VALUES)});`,
+        'process.exit(await selfSpawnRunner(["--relaunched"]));',
         "",
       ].join("\n"),
     );
@@ -119,7 +117,6 @@ test("a relaunched runner still inherits the runner-internal variables", () => {
     const child = JSON.parse(readFileSync(proof, "utf8")) as Record<string, string | null>;
     expect(child).toEqual({
       ...INTERNAL_VALUES,
-      ...DISPATCH_CHILD_ENV,
       // selfSpawnRunner has always dropped this one; RUNNER_EVENTS_FILE still carries the feed.
       RUNNER_LIVE_FEED: null,
     });

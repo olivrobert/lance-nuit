@@ -1,4 +1,3 @@
-// dashboard/ui/test-harness.ts
 //
 // Test doubles for the terminal routes: a tmux runner that keeps its sessions in
 // memory, and an attach spawner whose clients are driven by hand. Shared by the

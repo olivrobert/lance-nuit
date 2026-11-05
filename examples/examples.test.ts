@@ -38,14 +38,7 @@ async function execute(def: Pipeline, context: PipelineContext, ticket: string):
     status: "RUNNING",
     steps: def.steps.map((step) => makeRunStep(step)),
   };
-  const outcome = await executeRunSteps(
-    run,
-    ticket,
-    undefined,
-    { resuming: false },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const outcome = await executeRunSteps(run, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(run, outcome);
   return run;
 }

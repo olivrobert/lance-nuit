@@ -61,7 +61,6 @@ export interface NodeOpencodeHostOptions {
   appendLiveOutput?: (text: string) => void;
   /** stderr as it arrives. Captured in `logs` regardless of this seam. */
   appendLiveLogs?: (text: string) => void;
-  appendAgentMessage?: (text: string, stepLogPath?: string) => void;
   onSpawn?: (event: OpencodeSpawnEvent) => void;
   onEvent?: (event: unknown) => void;
   /**

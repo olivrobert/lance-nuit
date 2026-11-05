@@ -11,10 +11,6 @@ export class PipelineValidationReport {
     return this.findings.filter((finding) => finding.level === "error");
   }
 
-  get warnings(): readonly PipelineValidationFinding[] {
-    return this.findings.filter((finding) => finding.level === "warning");
-  }
-
   get ok(): boolean {
     return this.errors.length === 0;
   }
@@ -45,10 +41,5 @@ export class PipelineValidationChain {
     const findings: PipelineValidationFinding[] = [];
     for (const rule of this.rules) findings.push(...rule.validate(context));
     return new PipelineValidationReport(findings);
-  }
-
-  assertValid(context: PipelineValidationContext): void {
-    const report = this.validate(context);
-    if (!report.ok) throw new PipelineValidationError(context.source, report.errors);
   }
 }

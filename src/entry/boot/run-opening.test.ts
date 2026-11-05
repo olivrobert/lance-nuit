@@ -305,10 +305,7 @@ test("a composed child records the worktree its parent runs in", async () => {
       context: ctx,
       worktree: true,
     });
-    finalizeRun(
-      parent,
-      await executeRunSteps(parent, "W-1", undefined, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), ctx),
-    );
+    finalizeRun(parent, await executeRunSteps(parent, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), ctx));
     expect(parent.status).toBe("PASS");
     const ref = parent.steps[0]!.orchestration!.children[0]!;
     const child = readRunSnapshot(join(pipelineRunsDir("child", "W-1", ctx), ref.runId!, "state.json"))!;

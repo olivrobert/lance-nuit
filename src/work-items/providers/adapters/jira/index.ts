@@ -1,21 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { renderPlainText } from "../../../../contracts/index.js";
-import { nodeProcessRunner, type ProcessResult, type ProcessRunner } from "../../process/runner.js";
 import {
   type AutomationQueue,
-  configuredState,
   type ExecutionKey,
   hasMarker,
-  humanComments,
   type MoveTarget,
   type PipelineLabels,
-  performMove,
-  queueLabel,
-  reconcileMutation,
-  refValidator,
-  requireValidRef,
+  renderPlainText,
   type WorkItem,
   type WorkItemConfig,
   type WorkItemGateway,
@@ -23,8 +12,18 @@ import {
   type WorkItemQuery,
   type WorkItemRef,
   type WorkItemState,
+} from "../../../../contracts/index.js";
+import { nodeProcessRunner, type ProcessResult, type ProcessRunner } from "../../process/runner.js";
+import {
+  configuredState,
+  humanComments,
+  performMove,
+  queueLabel,
+  reconcileMutation,
+  refValidator,
+  requireValidRef,
 } from "../gateway-shared.js";
-import { adfToMarkdown, resolveAdfConverter } from "./adf.js";
+import { adfToMarkdown } from "./adf.js";
 import { outputOf } from "./diagnostics.js";
 import {
   commentBodies,
@@ -36,19 +35,12 @@ import {
   statusNameOf,
 } from "./payload.js";
 
-export type { ProcessResult, ProcessRunner, ProcessRunOptions } from "../../process/runner.js";
-export { nodeProcessRunner } from "../../process/runner.js";
-export { adfToMarkdown, resolveAdfConverter } from "./adf.js";
-export { redactProviderOutput } from "./diagnostics.js";
-export { parseAcliTicketKeys } from "./payload.js";
-
 const PROVIDER = "jira";
 const REF_KEY = /^[A-Z][A-Z0-9]*-\d+$/;
 export interface JiraGatewayOptions {
   workItem: WorkItemConfig;
   labels: PipelineLabels;
   run?: ProcessRunner;
-  adfConverter?: string;
 }
 interface TicketState {
   labels: string[];
@@ -57,7 +49,6 @@ interface TicketState {
 
 export function createJiraWorkItemGateway(opts: JiraGatewayOptions): WorkItemGateway {
   const run = opts.run ?? nodeProcessRunner;
-  const converter = resolveAdfConverter(opts.adfConverter);
   const labelFor = (queue: AutomationQueue): string => queueLabel(opts.labels, queue);
   const statusFor = (state: WorkItemState): string => configuredState(opts.workItem, state);
   const acli = (args: string[]): Promise<ProcessResult> => run("acli", args);
@@ -88,25 +79,7 @@ export function createJiraWorkItemGateway(opts: JiraGatewayOptions): WorkItemGat
   async function describe(raw: unknown): Promise<string> {
     if (raw == null) return "";
     if (typeof raw === "string") return raw.trim();
-    if (converter) {
-      const converted = await convertWithScript(converter, raw);
-      if (converted !== undefined) return converted;
-    }
     return adfToMarkdown(raw).trim();
-  }
-
-  async function convertWithScript(script: string, description: unknown): Promise<string | undefined> {
-    const dir = mkdtempSync(join(tmpdir(), "pipeline-adf-"));
-    const payload = join(dir, "workitem.json");
-    try {
-      writeFileSync(payload, JSON.stringify({ fields: { description } }), "utf-8");
-      const result = await run("sh", ["-c", 'exec python3 "$1" description < "$2"', "sh", script, payload]);
-      if (result.code !== 0) return undefined;
-      const text = result.stdout.replace(/\s+$/, "");
-      return text.length > 0 ? text : undefined;
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   }
 
   async function readState(ref: WorkItemRef): Promise<TicketState> {

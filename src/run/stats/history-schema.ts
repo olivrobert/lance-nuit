@@ -1,4 +1,3 @@
-// run/stats/history-schema.ts
 //
 // Runtime schema of one line of the central history (`pipeline-history/runs.jsonl`).
 //
@@ -51,7 +50,7 @@ import type { TokenCounts } from "./stats-core.js";
  *   same rule the backend NDJSON schemas apply to a provider stream.
  * ------------------------------------------------------------------------- */
 
-const USAGE_STATUSES = ["complete", "partial", "unavailable"] as const satisfies readonly UsageStatus[];
+const USAGE_STATUSES = ["partial", "unavailable"] as const satisfies readonly UsageStatus[];
 const RUN_STATS_STATUSES = [
   "PASS",
   "FAIL",
@@ -160,9 +159,6 @@ export const HistoryEntrySchema = z.looseObject({
   warnings: tolerant(z.array(WarningSchema)),
   costUsd: optionalNumber,
 });
-
-/** Entry as read back from disk, before the reader applies its own policies. */
-export type HistoryEntryInput = z.input<typeof HistoryEntrySchema>;
 
 /** Human-readable reason a value is not a usable history line (not an object,
  * or no `runId`), or undefined when it is. A field that merely reads as absent

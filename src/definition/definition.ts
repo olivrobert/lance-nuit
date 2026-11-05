@@ -104,7 +104,7 @@ export interface PipelineStep {
   command: AsyncTemplated<PipelineContext>;
   /** Step execution mode. The provider lives in `backend`: these are distinct
    *  axes, and one agent mode can serve every provider. */
-  runner?: "agent" | "bash" | "noop" | "fn" | "pipeline";
+  runner?: "agent" | "bash" | "fn" | "pipeline";
   /** Definition of a pipeline call controlled by the runner. */
   orchestration?: PipelineOrchestrationDefinition;
   /** Provider that runs the step. Required by every `agent` step. */

@@ -145,6 +145,18 @@ test("types wrapper rejects unsupported forms cleanly", () => {
   }
 });
 
+// `single` promises one ticket; `--scan` was the only way to dispatch from it.
+test("single refuses --scan before launching the runner", () => {
+  const root = mkdtempSync(join(tmpdir(), "lancenuit-single-scan-"));
+  try {
+    const result = runLancenuit(root, "single", "--scan");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("does not accept --scan");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // `dist/` in a source checkout is a git-ignored packaging product; it is stale as
 // soon as a source changes. When the wrapper preferred it, `lancenuit types
 // install` from a checkout installed the declarations of an old build and every

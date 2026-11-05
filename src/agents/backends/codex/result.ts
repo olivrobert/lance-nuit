@@ -1,10 +1,9 @@
 import type { AgentResult } from "../../../contracts/index.js";
 import { verdictFromStructured } from "../../../contracts/index.js";
-import { agentSession, killFields, resolveVerdictOutcome } from "../result-helpers.js";
+import { agentSession, killFields, parseStructuredVerdict, resolveVerdictOutcome } from "../result-helpers.js";
 import { type ParsedCodexEvents, parseCodexEvents } from "./events.js";
 import { computeCostUsd } from "./pricing.js";
 import type { CodexOptions, RawCodexExecutionResult } from "./types.js";
-import { parseStructuredOutput } from "./verdict.js";
 
 export interface CodexResultOptions {
   outputFormat?: "text" | "json";
@@ -47,7 +46,11 @@ function buildStats(parsed: ParsedCodexEvents, durationMs: number): AgentResult[
 
 export function mapCodexExecutionResult(raw: RawCodexExecutionResult, options: CodexResultOptions = {}): AgentResult {
   const parsed = parseCodexEvents(raw.output, options.model);
-  const structured = options.outputFormat === "json" ? parseStructuredOutput(parsed) : {};
+  // `--output-schema` usually makes the structured candidate the verdict; the
+  // shared cascade still lets an explicit ```json:verdict fence win, so a stray
+  // trailing JSON message cannot mask a verdict the agent already stated.
+  const structured =
+    options.outputFormat === "json" ? parseStructuredVerdict(parsed.text, parsed.structuredOutput) : {};
   const verdictDetails = structured.value != null ? verdictFromStructured(structured.value) : undefined;
   const { ok, failReason, failKind, failCause } = resolveVerdictOutcome({
     killed: raw.killed,

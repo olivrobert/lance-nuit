@@ -1,4 +1,3 @@
-// agents/backends/claude-code/events.schema.ts
 //
 // Shape of ONE line of the `claude --output-format stream-json` NDJSON stream.
 //

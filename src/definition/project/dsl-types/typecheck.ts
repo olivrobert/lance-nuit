@@ -1,4 +1,3 @@
-// runner/project/dsl-types/typecheck.ts
 //
 // Typechecking of project and shared-kit pipelines against their installed
 // declarations.

@@ -1,9 +1,8 @@
 import { expect, test } from "bun:test";
-import { CODEX_MODEL_PRICING, computeCostUsd, MODEL_PRICING, pricingForModel } from "./pricing.js";
+import { computeCostUsd, MODEL_PRICING, pricingForModel } from "./pricing.js";
 import { CODEX_MODEL } from "./types.js";
 
 test("Codex pricing exposes the same model-table contract as Claude", () => {
-  expect(CODEX_MODEL_PRICING).toBe(MODEL_PRICING);
   expect(pricingForModel(CODEX_MODEL.GPT_5_CODEX, null)).toBe(MODEL_PRICING[CODEX_MODEL.GPT_5_CODEX]!);
   expect(pricingForModel("GPT-5.6-LUNA", null)).toBe(MODEL_PRICING[CODEX_MODEL.GPT_5_6_LUNA]!);
 });

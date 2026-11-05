@@ -1,4 +1,3 @@
-// runner/step/parallel-group.ts
 //
 // One admitted group of `parallelize`: each member gets the same pass a lone step
 // gets, at the same time, in one git tree. Which members were admitted stays with the

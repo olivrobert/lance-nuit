@@ -1,4 +1,3 @@
-// runner/validation/step-overrides.ts
 //
 // Per-step model/effort overrides from `.lance-nuit/config.json`, allowing tuning
 // without changing pipeline code.

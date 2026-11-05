@@ -1,4 +1,3 @@
-// shared/runtime/context.ts
 //
 import type { ActivityRunnerEvent, ContextRunnerEvent } from "./events.js";
 

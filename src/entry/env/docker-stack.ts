@@ -1,15 +1,10 @@
-// runner/env/docker-stack.ts
 //
 // Probe for a `docker compose` stack, shared by boot preflight (entry/boot/stack.ts)
 // and worktree setup (entry/env/worktree.ts).
 //
-// One source of truth for TWO distinct questions:
-//   - "are any containers running?"        → stackHasRunningContainers
-//   - "are these specific services ready?" → unreadyServices
-//
-// The latter is the only one that can identify the failing service:
-// `docker compose ps -q` only says that something is running, which remains true
-// while the database is up but not healthy yet.
+// It answers "are these specific services ready?" (unreadyServices), which can
+// identify the failing service: `docker compose ps -q` only says that something
+// is running, which remains true while the database is up but not healthy yet.
 
 import { runSupervisedCommand } from "../../shared/process/process-runner.js";
 import { type ComposeService, readComposeService } from "./docker-stack.schema.js";
@@ -97,13 +92,4 @@ export async function probeComposeServices(
   });
   if (result.status !== 0) return null;
   return parseComposePs(result.stdout);
-}
-
-/** Coarse question: is the stack up, without requiring a service list? */
-export async function stackHasRunningContainers(
-  cwd: string,
-  timeoutMs: number = STACK_PROBE_TIMEOUT_MS,
-): Promise<boolean> {
-  const services = await probeComposeServices(cwd, timeoutMs);
-  return services?.some((service) => service.state === "running") ?? false;
 }

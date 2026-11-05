@@ -1,4 +1,3 @@
-// dashboard/read-model/steps.ts
 //
 // Where a run stands, step by step.
 //
@@ -131,7 +130,6 @@ export function readSteps(
   return {
     pipeline: resolved.run.pipeline,
     runId: resolved.run.state.runId ?? "",
-    runDir: resolved.run.runDir,
     status: resolved.status,
     steps: resolved.run.state.steps.map((step) => stepView(step, resolved.interrupted)),
     ...(event ? { lastEvent: event } : {}),

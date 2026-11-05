@@ -1,4 +1,3 @@
-// execution/dispatch/file-scan-store.ts
 //
 // Filesystem adapter for `ScanStore`.
 //
@@ -13,10 +12,9 @@
 // `running`, and `done` apart on a record left behind by a crash.
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ScanReadResult, ScanStore, ScanRecord } from "../../run/index.js";
-import { parseScanRecord } from "./scan-schema.js";
+import type { ScanStore, ScanRecord } from "../../run/index.js";
 
 const SCANS_DIR = "scans";
 
@@ -77,46 +75,6 @@ export class FileScanStore implements ScanStore {
         // Temporary record cleanup is best effort; preserve the original write error.
       }
       throw error;
-    }
-  }
-
-  /** Every readable record, newest scan first. A file that cannot be read or
-   *  does not pass the schema is counted, not thrown: a single truncated write
-   *  must not hide every other scan. */
-  readAll(): ScanReadResult {
-    let names: string[];
-    try {
-      names = readdirSync(scansDir(this.projRoot)).filter((name) => name.endsWith(".json"));
-    } catch {
-      // No scan has run yet in this project: an absent directory is not an error.
-      return { records: [], skipped: 0 };
-    }
-
-    const records: ScanRecord[] = [];
-    let skipped = 0;
-    // File names start with the compact start instant, so a descending sort on
-    // the name is a descending sort on time.
-    for (const name of names.sort().reverse()) {
-      const record = this.readOne(join(scansDir(this.projRoot), name));
-      if (record) records.push(record);
-      else skipped += 1;
-    }
-    return { records, skipped };
-  }
-
-  private readOne(path: string): ScanRecord | null {
-    let raw: string;
-    try {
-      raw = readFileSync(path, "utf-8");
-    } catch {
-      // Unreadable file: counted as skipped by the caller.
-      return null;
-    }
-    try {
-      return parseScanRecord(JSON.parse(raw));
-    } catch {
-      // Not JSON — a write interrupted midway, or a foreign file.
-      return null;
     }
   }
 }

@@ -1,4 +1,3 @@
-// dashboard/home/launch-store.ts
 //
 // Launches: the dashboard's own record of every verb it triggered, two files per
 // launch under `~/.lance-nuit/ui/launches/` — `<id>.json`, the record, and

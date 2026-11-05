@@ -1,4 +1,3 @@
-// dashboard/read-model/launches.ts
 //
 // Launches as the read model needs them. The records are owned by
 // `dashboard-home/` (the server writes them when a verb is clicked); reading

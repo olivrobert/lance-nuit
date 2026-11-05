@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-
 const BLOCK_TYPES = new Set([
   "blockquote",
   "bulletList",
@@ -233,12 +231,4 @@ export function adfToMarkdown(node: unknown, indent = 0): string {
     default:
       return holdsBlocks(current) ? blocksOf(current, indent) : inlineOf(current, indent);
   }
-}
-/**
- * Only an explicitly passed converter replaces the internal one. A script picked
- * up from the environment made the output depend on what happened to be
- * installed, and a run could not tell which converter it got.
- */
-export function resolveAdfConverter(explicit?: string): string | undefined {
-  return explicit && existsSync(explicit) ? explicit : undefined;
 }

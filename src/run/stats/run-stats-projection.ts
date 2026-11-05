@@ -23,7 +23,6 @@ export interface ProjectionAccumulator {
   totals: TokenCounts;
   usageStatus?: UsageStatus;
   costStatus?: UsageStatus;
-  costUnknown?: true;
   costUsd?: number;
 }
 
@@ -201,7 +200,6 @@ export function projectStepStats(
   aggregate.phases[step.id] = phase;
   if (phaseUsageStatus) aggregate.usageStatus = mergeMeasurementStatus(aggregate.usageStatus, phaseUsageStatus);
   if (phaseCostStatus) aggregate.costStatus = mergeMeasurementStatus(aggregate.costStatus, phaseCostStatus);
-  if (phaseCostUnknown) aggregate.costUnknown = true;
   addTokens(aggregate.totals, tokens);
 
   if (step.profile) {

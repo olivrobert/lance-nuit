@@ -13,8 +13,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   [CODEX_MODEL.GPT_5_6_LUNA]: { input: 0.2, output: 1.2, cache_read: 0.02, cache_write_5m: 0.25, cache_write_1h: 0.25 },
 };
 
-export const CODEX_MODEL_PRICING = MODEL_PRICING;
-
 export function pricingForModel(
   model?: string,
   projectPricing: ProjectPricing | null = loadProjectPricing(),

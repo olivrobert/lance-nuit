@@ -1,4 +1,3 @@
-// definition/dsl/profiles.ts
 //
 // Semantic roles for agent steps. A profile fixes the nominal regime; the DSL
 // never chooses a model or effort locally: these axes belong to the role's

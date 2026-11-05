@@ -1,4 +1,3 @@
-// runner/runner.ts
 //
 // Entry point. Its only responsibility is orchestration; each stage lives in its
 // registry or in `entry/`:
@@ -64,8 +63,6 @@ async function main() {
 
   const outcome = await executeRunSteps(
     run,
-    started.ready.args.ticket,
-    started.ready.args.baseBranch,
     {
       resuming,
       abort,

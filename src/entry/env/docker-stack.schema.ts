@@ -1,4 +1,3 @@
-// entry/env/docker-stack.schema.ts
 //
 // Shape of ONE service entry of `docker compose ps --format json` — a JSONL
 // stream since Compose v2.21, a single JSON array before that. Both forms hold

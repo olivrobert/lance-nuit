@@ -1,4 +1,3 @@
-// runner/boot/gitguard.ts
 //
 // Clean-tree guard. It is outside BOOT[] because it depends on `resuming`, then
 // on `def.name`, and therefore on `loadPipelineDefinition`: it is a run
@@ -23,7 +22,6 @@ export async function enforceCleanTree(args: CleanTreeGuardArgs): Promise<void> 
   if (
     !shouldGuardCleanTree({
       resuming: args.resuming,
-      subRunner: false,
       allowDirty: args.allowDirty || args.worktreeMode,
       pipelineAllowsDirty: args.pipelineAllowsDirty,
     })

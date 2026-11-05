@@ -17,7 +17,6 @@ export function makeItem(overrides: Partial<Item> = {}): Item {
     cost: { estimated: false },
     updatedAt: "2026-01-10T10:00:00.000Z",
     worktree: false,
-    effectiveWorkItemDir: "/srv/web/work-items/ABC-1",
     busy: false,
     verbs: [],
     ...overrides,
@@ -44,14 +43,12 @@ export const TREE: WorkItemTree = {
   root: "/srv/web/work-items/ABC-1",
   pipeline: "feature",
   runId: "run-1",
-  runDir: "/srv/web/work-items/ABC-1/runs/run-1",
   children: [],
 };
 
 export const STEPS: RunStepsView = {
   pipeline: "feature",
   runId: "run-1",
-  runDir: "/srv/web/work-items/ABC-1/runs/run-1",
   status: "STOPPED",
   steps: [],
 };

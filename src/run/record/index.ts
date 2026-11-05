@@ -1,4 +1,3 @@
-// runner/run-record/index.ts
 //
 // Entry of the run record: a run's snapshot (`state.json`), its journal
 // (`events.jsonl`), its attempt logs and closure file, the transitions that

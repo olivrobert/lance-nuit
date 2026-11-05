@@ -1,4 +1,3 @@
-// runner/step/tree-snapshot.ts
 //
 // What a git tree holds beyond its last commit, to tell afterwards what changed in
 // between. Status lines alone cannot say: a pipeline often reaches this point with

@@ -4,7 +4,7 @@ import { type PipelineStep, stepsWithoutDeliverable, withoutDeliverableMessage }
 import { sourceDeclarationError } from "../../work-items/index.js";
 import type { PipelineValidationContext, PipelineValidationFinding, PipelineValidationRule } from "./types.js";
 
-const VALID_RUNNERS = new Set(["agent", "bash", "noop", "fn", "pipeline"]);
+const VALID_RUNNERS = new Set(["agent", "bash", "fn", "pipeline"]);
 const VALID_OUTPUT_FORMAT = new Set(["text", "json"]);
 
 function stepsOf(context: PipelineValidationContext): PipelineStep[] {

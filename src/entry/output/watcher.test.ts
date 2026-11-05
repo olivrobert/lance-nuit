@@ -1,4 +1,3 @@
-// runner/output/watcher.test.ts
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -16,9 +15,8 @@ beforeEach(() => {
     RUNNER_LIVE_FEED: process.env.RUNNER_LIVE_FEED,
   };
   runDir = mkdtempSync(join(tmpdir(), "watcher-"));
-  // Each runner explicitly sets its own feed path.
   delete process.env.RUNNER_EVENTS_FILE;
-  process.env.RUNNER_LIVE_FEED = join(runDir, "live.jsonl");
+  delete process.env.RUNNER_LIVE_FEED;
 });
 
 afterEach(() => {
@@ -33,41 +31,35 @@ const live = () => join(runDir, "live.jsonl");
 
 test("preserves existing log on top-level relaunch", () => {
   writeFileSync(live(), "previous attempt\n");
-  ensureLiveFeed();
+  ensureLiveFeed(new FileLiveFeed(live()));
   expect(readFileSync(live(), "utf-8")).toBe("previous attempt\n");
 });
 
 test("preserves existing feed", () => {
   writeFileSync(live(), "feed parent\n");
-  ensureLiveFeed();
+  ensureLiveFeed(new FileLiveFeed(live()));
   expect(readFileSync(live(), "utf-8")).toBe("feed parent\n");
 });
 
 test("creates empty feed when absent (both modes)", () => {
   expect(existsSync(live())).toBe(false);
-  ensureLiveFeed();
+  ensureLiveFeed(new FileLiveFeed(live()));
   expect(existsSync(live())).toBe(true);
   expect(readFileSync(live(), "utf-8")).toBe("");
 });
 
 test("sets RUNNER_LIVE_FEED on the run dir", () => {
-  ensureLiveFeed();
+  ensureLiveFeed(new FileLiveFeed(live()));
   expect(process.env.RUNNER_LIVE_FEED).toBe(live());
 });
 
-test("uses injected feed path before environment fallback", () => {
+test("advertises the injected feed path to child processes", () => {
   const injected = join(runDir, "nested", "events.jsonl");
   ensureLiveFeed(new FileLiveFeed(injected));
   expect(existsSync(injected)).toBe(true);
   expect(existsSync(live())).toBe(false);
   expect(process.env.RUNNER_EVENTS_FILE).toBe(injected);
   expect(process.env.RUNNER_LIVE_FEED).toBe(injected);
-});
-
-test("missing injected or configured feed is silent", () => {
-  delete process.env.RUNNER_EVENTS_FILE;
-  delete process.env.RUNNER_LIVE_FEED;
-  expect(() => ensureLiveFeed()).not.toThrow();
 });
 
 test("watcher remains persistent by default and closes only with the option", () => {

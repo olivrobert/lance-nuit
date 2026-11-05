@@ -13,8 +13,17 @@ import { loadOrCreateRun } from "../../../execution/step/load-or-create-run.ts";
 import { saveRun } from "../run-repository.ts";
 import { stepLogPath } from "../run-timeline.ts";
 import { abortRun, reportLiveCost, updateStep } from "../run-transitions.ts";
-import { isResumable, isRunComplete } from "./run-storage.ts";
+import { isPersistedRunComplete, isPersistedRunResumable } from "../run-predicates.ts";
+import { readRunFile } from "./run-storage.ts";
 import { builtinRegistries } from "../../../../tests/builtin-registries.ts";
+
+function isResumable(runFile: string): boolean {
+  return isPersistedRunResumable(readRunFile(runFile));
+}
+
+function isRunComplete(runFile: string): boolean {
+  return isPersistedRunComplete(readRunFile(runFile));
+}
 
 function writeRun(obj: any): string {
   const dir = mkdtempSync(join(tmpdir(), "resume-"));
@@ -111,7 +120,6 @@ test("isRunComplete: validates the contract", () => {
 test("isRunComplete: validates the contract", () => {
   expect(isRunComplete(writeRun({ aborted: true, steps: [{ id: "a", status: "done" }] }))).toBe(false);
   expect(isRunComplete(writeRun({ steps: [] }))).toBe(false);
-  expect(isRunComplete(null)).toBe(false);
   expect(isRunComplete(join(tmpdir(), "nope.json"))).toBe(false);
 });
 

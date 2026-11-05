@@ -251,17 +251,22 @@ case "$VERB" in
     ;;
 esac
 
-# Map command to pipeline NAME (`run` uses default; `single` disables dispatch).
+# Map command to pipeline NAME (`run` and `single` use default).
 #
 # The runner resolves a name through project, shared, then builtin configuration.
 PIPELINE_NAME=""
-DISABLE_MULTI=0
 case "$VERB" in
   run)
     PIPELINE_NAME="default" ;;
   single)
-    PIPELINE_NAME="default"
-    DISABLE_MULTI=1 ;;
+    # `single` promises one ticket: it refuses the only option that dispatches.
+    for arg in "$@"; do
+      if [[ "$arg" == "--scan" ]]; then
+        echo "lancenuit single does not accept --scan: use 'lancenuit run --scan'." >&2
+        exit 1
+      fi
+    done
+    PIPELINE_NAME="default" ;;
   *)
     echo "Unknown command: $VERB" >&2
     echo "See 'lancenuit help' for the list." >&2
@@ -282,8 +287,4 @@ for arg in "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"; do
   esac
 done
 
-if [[ $DISABLE_MULTI -eq 1 ]]; then
-  exec env RUNNER_DISABLE_DISPATCH=1 "$RUNNER_BIN" "$RUNNER_ENTRY" "${PIPELINE_ARGS[@]+"${PIPELINE_ARGS[@]}"}" "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"
-else
-  exec "$RUNNER_BIN" "$RUNNER_ENTRY" "${PIPELINE_ARGS[@]+"${PIPELINE_ARGS[@]}"}" "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"
-fi
+exec "$RUNNER_BIN" "$RUNNER_ENTRY" "${PIPELINE_ARGS[@]+"${PIPELINE_ARGS[@]}"}" "${RUN_ARGS[@]+"${RUN_ARGS[@]}"}"

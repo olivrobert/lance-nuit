@@ -165,8 +165,13 @@ export class ProcessScope {
   private forceRequested = false;
 
   track(child: ChildProcess, options: ProcessTrackingOptions = {}): void {
+    this.register(child, options);
+  }
+
+  /** Track `child` unless already tracked, and return its record either way. */
+  private register(child: ChildProcess, options: ProcessTrackingOptions): TrackedProcess {
     const existing = this.byChild.get(child);
-    if (existing) return;
+    if (existing) return existing;
 
     const record: TrackedProcess = {
       child,
@@ -186,6 +191,7 @@ export class ProcessScope {
     });
     child.once("exit", () => this.prune(record));
     child.once("close", () => this.prune(record));
+    return record;
   }
 
   untrack(child: ChildProcess): void {
@@ -241,14 +247,10 @@ export class ProcessScope {
     this.killAll("SIGKILL");
   }
 
-  private async waitForChild(child: ChildProcess, graceMs: number, forceWaitMs: number): Promise<void> {
-    const record = this.recordFor(child);
+  private async waitForChild(record: TrackedProcess, graceMs: number, forceWaitMs: number): Promise<void> {
     const alive = (): boolean => {
-      if (record) {
-        this.prune(record);
-        return this.processes.has(record);
-      }
-      return childIsRunning(child);
+      this.prune(record);
+      return this.processes.has(record);
     };
 
     const waitUntil = async (timeoutMs: number): Promise<void> => {
@@ -258,12 +260,7 @@ export class ProcessScope {
 
     await waitUntil(graceMs);
     if (alive()) {
-      if (record) killTarget(record, "SIGKILL");
-      else {
-        try {
-          child.kill("SIGKILL");
-        } catch {}
-      }
+      killTarget(record, "SIGKILL");
       await waitUntil(forceWaitMs);
     }
   }
@@ -307,14 +304,10 @@ export class ProcessScope {
     child: ChildProcess,
     options: { graceMs?: number; forceWaitMs?: number; group?: boolean } = {},
   ): Promise<void> {
-    let record = this.recordFor(child);
-    if (!record) {
-      this.track(child, { group: options.group ?? true });
-      record = this.recordFor(child);
-    }
-    if (record) killTarget(record, "SIGTERM");
+    const record = this.register(child, { group: options.group ?? true });
+    killTarget(record, "SIGTERM");
     return this.waitForChild(
-      child,
+      record,
       options.graceMs ?? DEFAULT_KILL_GRACE_MS,
       options.forceWaitMs ?? DEFAULT_FORCE_WAIT_MS,
     );
@@ -325,39 +318,4 @@ const defaultProcessScope = new ProcessScope();
 
 export function defaultScope(): ProcessScope {
   return defaultProcessScope;
-}
-
-export function trackChild(child: ChildProcess, options: ProcessTrackingOptions = {}): void {
-  defaultProcessScope.track(child, options);
-}
-
-export function untrackChild(child: ChildProcess): void {
-  defaultProcessScope.untrack(child);
-}
-
-/**
- * Kill every active child tree. TERM remains the default signal for regular
- * callers; the `exit` handler explicitly uses KILL.
- */
-export function killAllChildren(signal: NodeJS.Signals = "SIGTERM"): void {
-  defaultProcessScope.killAllChildren(signal);
-}
-
-export function forceKillAllChildren(): void {
-  defaultProcessScope.forceKillAll();
-}
-
-export function shutdownAllChildren(options: { graceMs?: number; forceWaitMs?: number } = {}): Promise<void> {
-  return defaultProcessScope.shutdown(options);
-}
-
-/**
- * Stop a detached child. Return the promise so streaming runners can wait for
- * descendants to disappear before returning; older callers may ignore it.
- */
-export function gracefulKill(
-  child: ChildProcess,
-  options: { graceMs?: number; forceWaitMs?: number; group?: boolean } = {},
-): Promise<void> {
-  return defaultProcessScope.gracefulKill(child, options);
 }

@@ -1,4 +1,3 @@
-// runner/work-item-store/decisions.ts
 //
 // Human decisions. The runner is the only writer: `--approve <subject>` and
 // `--reject <subject>` validate the artifact, hash it, and write the decision
@@ -194,10 +193,9 @@ export async function recordRejection(
 }
 
 /**
- * Read a decision file by path and validate its shape only. Gates such as
- * `reuseState` do not have the artifact descriptor, so they cannot verify that
- * `artifact` matches `subject`; `decisionMatchesArtifact` and
- * `markDecisionApplied` perform that identity check when given the artifact.
+ * Read a decision file by path and validate its shape only. Without the artifact
+ * descriptor it cannot verify that `artifact` matches `subject`;
+ * `decisionMatchesArtifact` performs that identity check when given the artifact.
  */
 export function readDecisionAt(path: string): ApprovalDecision | undefined {
   try {
@@ -273,8 +271,6 @@ export function rejectionPending(decision: ApprovalDecision | undefined, body: s
  *  `stale`: the artifact changed since the approval, or cannot be read. `rejected`:
  *  the rework has not answered the rejection yet. `reworked`: it has, and the gate
  *  waits for a new human decision. */
-export type GateDecisionState = "absent" | "fresh" | "stale" | "rejected" | "reworked";
-
 export type GateDecisionStatus =
   | { state: "absent" }
   | { state: "fresh" | "stale" | "reworked"; decision: ApprovalDecision }
@@ -360,18 +356,4 @@ export async function decisionMatchesArtifact(
 ): Promise<boolean> {
   const status = await gateDecisionStatus(workItemDirOf(ctx, subject), subject, artifactReaderOf(ctx));
   return status.state === "fresh" && status.decision.artifact === artifactKey(artifact.name);
-}
-
-export async function markDecisionApplied(
-  ctx: PipelineContext,
-  subject: DecisionSubject,
-  artifact: Artifact<unknown>,
-): Promise<ApprovalDecision> {
-  const existing = readDecision(ctx, subject);
-  if (!existing || !(await decisionMatchesArtifact(ctx, subject, artifact))) {
-    throw new Error(`decision ${subject} missing or artifact modified`);
-  }
-  const applied: ApprovalDecision = { ...existing, decision: "applied", decidedAt: new Date().toISOString() };
-  atomicWrite(decisionPath(ctx, subject), applied);
-  return applied;
 }

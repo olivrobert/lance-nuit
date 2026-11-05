@@ -1,4 +1,3 @@
-// runner/boot/pipeline-path.ts
 //
 // Boot step that resolves the pipeline. `--pipeline` accepts either a name
 // (`deploy`), resolved through the kit chain like `--create`, or a path

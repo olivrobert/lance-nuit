@@ -1,4 +1,3 @@
-// runner/model/journal.ts
 //
 // Contract of the run journal (`events.jsonl`).
 //

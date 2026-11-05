@@ -1,41 +1,13 @@
 import type {
   AutomationQueue,
-  ExecutionKey,
   MoveTarget,
   PipelineLabels,
   RefValidation,
-  WorkItem,
   WorkItemConfig,
-  WorkItemGateway,
-  WorkItemNote,
-  WorkItemQuery,
-  WorkItemRef,
   WorkItemState,
 } from "../../../contracts/index.js";
-import { hasMarker, isPipelineNote } from "../../../contracts/index.js";
+import { isPipelineNote } from "../../../contracts/index.js";
 import type { ProcessResult } from "../process/runner.js";
-
-export type {
-  AutomationQueue,
-  ExecutionKey,
-  MoveTarget,
-  PipelineLabels,
-  WorkItem,
-  WorkItemConfig,
-  WorkItemGateway,
-  WorkItemNote,
-  WorkItemQuery,
-  WorkItemRef,
-  WorkItemState,
-};
-export { hasMarker };
-
-const QUEUE_LABEL_KEYS: Record<AutomationQueue, keyof PipelineLabels> = {
-  bugTodo: "bugTodo",
-  featureTodo: "featureTodo",
-  done: "done",
-  escalate: "escalate",
-};
 
 const STATE_CONFIG_KEYS: Record<WorkItemState, "todoState" | "reviewState"> = {
   todo: "todoState",
@@ -66,7 +38,7 @@ export function humanComments(bodies: readonly string[]): string[] {
 }
 
 /** Apply a planned move in order while leaving provider-specific mutations injectable. */
-export async function applyMoveOperations<TState>(
+async function applyMoveOperations<TState>(
   planned: readonly MoveOperation[],
   state: TState,
   handlers: {
@@ -108,14 +80,14 @@ export async function reconcileMutation<TState>(
 }
 
 export function queueLabel(labels: PipelineLabels, queue: AutomationQueue): string {
-  return labels[QUEUE_LABEL_KEYS[queue]];
+  return labels[queue];
 }
 
 export function configuredState(workItem: WorkItemConfig, state: WorkItemState): string {
   return workItem[STATE_CONFIG_KEYS[state]];
 }
 
-export function planMove(
+function planMove(
   target: MoveTarget,
   valueForQueue: (queue: AutomationQueue) => string,
   valueForState: (state: WorkItemState) => string,

@@ -9,7 +9,6 @@ import {
   linkWorktree,
   makeProject,
   makeTempDir,
-  SPEC_PATH,
   workItemDir,
   writeArtifact,
   writeDecision,
@@ -75,7 +74,7 @@ test("items: each status lands in its group, decisions first and done last", asy
   ]);
 });
 
-test("items: identity, cost, and the effective directory of a run in the main clone", async () => {
+test("items: identity and cost of a run in the main clone", async () => {
   const project = listedProject();
   const runDir = writeRun(project, "DEMO-7", "feature", {
     runId: "r-1",
@@ -94,7 +93,6 @@ test("items: identity, cost, and the effective directory of a run in the main cl
   expect(item!.cost).toEqual({ usd: 1.25, estimated: true });
   expect(item!.updatedAt).toBe("2026-09-05T08:00:00.000Z");
   expect(item!.worktree).toBe(false);
-  expect(item!.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-7"));
   expect(item!.project).toEqual({ name: "demo-app", cwd: project, provider: "jira" });
   expect(item!.branch).toBeUndefined();
   expect(item!.launch).toBeUndefined();
@@ -482,7 +480,6 @@ test("items: a worktree run reads its approval from the main clone's work item",
   const [item] = await listItems();
 
   expect(item!.worktree).toBe(true);
-  expect(item!.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-1"));
   expect(item!.approval).toMatchObject({ subject: "plan", state: "fresh" });
 });
 
@@ -494,7 +491,6 @@ test("items: a worktree run whose worktree is gone still reads its approval", as
 
   const [item] = await listItems();
 
-  expect(item!.effectiveWorkItemDir).toBe(join(project, SPEC_PATH, "DEMO-1"));
   expect(item!.approval).toMatchObject({ subject: "plan", state: "fresh" });
 });
 

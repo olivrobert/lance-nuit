@@ -1,4 +1,3 @@
-// execution/abort.ts
 //
 // Abort scope: the interruption state one execution tree shares. The
 // SIGINT/SIGTERM handler sets `run.aborted` on the runs it can reach at that

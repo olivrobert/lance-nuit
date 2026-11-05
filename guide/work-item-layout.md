@@ -90,9 +90,8 @@ Rules the dashboard applies when it reads the file:
 Like every artifact, the file is read from the effective work-item directory,
 which is the worktree copy for a worktree run.
 
-## Disable dispatch
+## Dispatch children
 
-`RUNNER_DISABLE_DISPATCH=1` forces single-run mode. This recursion guard is set on
-every child launched by a dispatch strategy; without it, the child would select
-the same strategy forever. Steps and agents do not receive it, so a `--scan`
-started from a step dispatches normally.
+A dispatch child never selects a strategy again: its argv carries its ticket, the
+pipeline and the propagated options, never `--scan`. `lancenuit single` refuses
+`--scan` outright.

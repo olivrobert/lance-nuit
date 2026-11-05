@@ -1,4 +1,3 @@
-// runner/run-record/run-opening.ts
 //
 // Open the run an invocation executes: select its directory, read its snapshot,
 // and either restore it — the snapshot projected with its journal, merged with

@@ -1,4 +1,3 @@
-// agents/backends/opencode/events.schema.ts
 //
 // Shape of ONE line of the `opencode run --format json` NDJSON stream.
 //

@@ -1,4 +1,3 @@
-// dashboard/ui/routes/projects.ts
 //
 // `/api/projects`: the project list, its edits, and each project's pipelines.
 

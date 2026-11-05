@@ -1,4 +1,3 @@
-// runner/tests/ensure-ui-bundle.ts
 //
 // Suite preload: make sure the dashboard bundle exists and is not stale.
 //

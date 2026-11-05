@@ -1,4 +1,3 @@
-// runner/env/worktree.ts
 // --worktree mode: the run executes in a dedicated git worktree; the main clone
 // remains free during the run, and two runs can execute in parallel (runlock is per
 // cwd). Setup hooks are entirely optional and belong to the project under `.lance-nuit/`.

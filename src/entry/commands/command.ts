@@ -1,4 +1,3 @@
-// runner/commands/command.ts
 //
 // A `RunnerCommand` does not launch a pipeline: no lock, clean-tree guard, or run
 // directory. This distinguishes it from a `BootStep` and a `DispatchStrategy`.

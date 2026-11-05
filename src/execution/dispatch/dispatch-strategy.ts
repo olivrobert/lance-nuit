@@ -1,4 +1,3 @@
-// runner/dispatch/dispatch-strategy.ts
 //
 // The dispatch port and the environment it receives, on their own: `strategy.ts`
 // imports every strategy to build DISPATCH, and every strategy needs these
@@ -54,15 +53,14 @@ export interface DispatchArgs {
 
 export interface DispatchStrategy {
   id: string;
-  /** CLI flag that activates it, or null for automatic detection. */
-  flag: string | null;
+  /** CLI flag that activates it. */
+  flag: string;
   /** Whether this invocation asks for it. */
   isActive(args: DispatchArgs): boolean;
-  /** Positional ticket: required or forbidden when the strategy discovers it. */
-  ticket: "required" | "forbidden";
   desc: string;
-  /** Usage message when `ticket: "forbidden"` is violated. */
-  ticketError?: string;
+  /** Usage message when a positional ticket is given: the strategy discovers its
+   *  tickets itself. */
+  ticketError: string;
   /** Ticket set to process; throw DispatchAbort when its source is unreachable. */
   tickets(env: DispatchEnv): string[] | Promise<string[]>;
   /** Result when `tickets()` returns []: message and exit code. */
@@ -76,21 +74,14 @@ export interface DispatchStrategy {
   /** Hook between tickets. It also runs after a skip so multi-ticket runs can
    * commit an already-complete child; returning false stops the loop. */
   betweenTickets?(ticket: string, env: DispatchEnv, info: { skipped: boolean }): boolean | Promise<boolean>;
-  /** Whether a failed ticket stops the whole run. */
-  onFailure: "continue" | "stop";
-  /** Log a failed ticket before a possible stop. */
-  onTicketFailed?(ticket: string, code: number, env: DispatchEnv): void;
   /** A ticket is about to be handed to a child. Not called for a ticket skipped
    *  on resume: nothing starts. */
   onTicketStarted?(ticket: string, env: DispatchEnv): void | Promise<void>;
-  /** A ticket is settled, skipped ones included. Called before the failure
-   *  policy decides whether the loop continues. */
+  /** A ticket is settled, skipped ones included. */
   onTicketFinished?(outcome: DispatchOutcome, env: DispatchEnv): void | Promise<void>;
   /** The loop stopped before processing every ticket because `betweenTickets`
    *  refused to continue. `reason` is what the loop knows; a strategy that knows
    *  more uses its own. */
   onHalted?(reason: string, env: DispatchEnv): void | Promise<void>;
-  /** Final step; a non-zero code fails the run and skips reporting. */
-  after?(env: DispatchEnv): Promise<number>;
   report(outcomes: DispatchOutcome[], tickets: string[], env: DispatchEnv): void;
 }

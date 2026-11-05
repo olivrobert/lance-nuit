@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { emitRunStats } from "./run-stats.js";
 import type { RunStatsEntry } from "./run-stats-projector.js";
 import { FileRunStatsSink } from "./run-stats-sink.js";
 
@@ -47,30 +46,4 @@ test("run-stats-sink: validates the integration contract", () => {
     .map((line) => JSON.parse(line));
   expect(history).toHaveLength(1);
   expect(history[0]).toMatchObject({ runId: "run-1", schemaVersion: 1, status: "FAIL" });
-});
-
-test("emitRunStats uses the injected sink: validates the contract", () => {
-  const projRoot = mkdtempSync(join(tmpdir(), "run-stats-custom-sink-"));
-  const received: RunStatsEntry[] = [];
-  const sink = {
-    write(value: RunStatsEntry): string {
-      received.push(value);
-      return "memory://run-stats";
-    },
-  };
-  const result = emitRunStats(
-    {
-      runId: "run-custom-sink",
-      name: "quality",
-      pipeline: "quality",
-      pipeline_path: "quality.ts",
-      run_dir: join(projRoot, "run"),
-      steps: [],
-    },
-    { projRoot, sink },
-  );
-
-  expect(result).toBe("memory://run-stats");
-  expect(received[0]).toMatchObject({ schemaVersion: 1, runId: "run-custom-sink", sourceRunDir: "run" });
-  expect(existsSync(join(projRoot, ".lance-nuit/pipeline-history/runs.jsonl"))).toBe(false);
 });

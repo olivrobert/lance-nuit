@@ -1,4 +1,3 @@
-// run/record/journal-schema.ts
 //
 // Runtime schema of the run journal (`events.jsonl`), the read side of the
 // contract declared in `run/journal.ts`.

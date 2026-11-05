@@ -6,8 +6,7 @@ import { loadOrCreateRun } from "../../execution/step/load-or-create-run.js";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import { NULL_RUN_OUTPUT } from "../../execution/run-output.js";
 import { executeRunSteps, type StepLoopDeps } from "../../execution/step/step-loop.js";
-import { assumptionsArtifact, lotsArtifact } from "../../definition/builtin-steps/lib/artifacts.js";
-import { textArtifact } from "../../definition/dsl/artifact.js";
+import { artifact, textArtifact } from "../../definition/dsl/artifact.js";
 import { loadPipelineConfig } from "../../shared/env/config.js";
 import type { ArtifactRef, WorkItemArtifactStore } from "../../shared/language/artifact-ports.js";
 import type { Run } from "./run.js";
@@ -16,7 +15,6 @@ import { makeRunStep } from "./run-step.js";
 import { projectStepAttempts } from "./attempt-projection.js";
 import {
   decisionMatchesArtifact,
-  markDecisionApplied,
   readDecision,
   readDecisionAt,
   recordApproval,
@@ -28,6 +26,8 @@ import { saveRun } from "./run-repository.js";
 import { createRunId, latestRunFile, readRunFile, resolveRunDir } from "./stores/run-storage.js";
 
 const refactoringArtifact = textArtifact("refactoring.md");
+const lotsArtifact = artifact("lots.json", (value) => value);
+const assumptionsArtifact = artifact("assumptions.json", (value) => value);
 
 class FakeWorkItemArtifactStore implements WorkItemArtifactStore {
   private readonly values = new Map<string, string>();
@@ -396,9 +396,6 @@ test("persisted format: validates the contract", async () => {
     expect(decision.artifactSha256).toBe(createHash("sha256").update(value).digest("hex"));
     expect(existsSync(storeCtx.paths.artifact(name))).toBe(false);
     expect(await decisionMatchesArtifact(storeCtx, subject, artifact)).toBe(true);
-    if (subject === "refactoring") {
-      expect((await markDecisionApplied(storeCtx, subject, artifact)).decision).toBe("applied");
-    }
 
     artifacts.put(name, `${value}changed`);
     expect(await decisionMatchesArtifact(storeCtx, subject, artifact)).toBe(false);
@@ -666,7 +663,7 @@ test("persisted format: a snapshot written before cost_unaccounted existed still
     runFixLoop: async () => ({ failed: false }),
     output: NULL_RUN_OUTPUT,
   };
-  const outcome = await executeRunSteps(run, "PROJ-9", undefined, { resuming: true }, deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(outcome.costUnaccounted).toBe(true);
   expect(spawned).toEqual([]);
@@ -725,7 +722,7 @@ test("persisted format: a snapshot that still carries a step's last_command open
     runFixLoop: async () => ({ failed: false }),
     output: NULL_RUN_OUTPUT,
   };
-  await executeRunSteps(run, "PROJ-11", undefined, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   const saved = JSON.parse(readFileSync(join(runDir, "state.json"), "utf-8"));
   expect(saved.steps.map((step: { status: string }) => step.status)).toEqual(["done", "done"]);
@@ -786,7 +783,7 @@ test("persisted format: a minimal step flagged cost_unknown with nothing measure
     runFixLoop: async () => ({ failed: false }),
     output: NULL_RUN_OUTPUT,
   };
-  const outcome = await executeRunSteps(run, "PROJ-10", undefined, { resuming: true }, deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(outcome.costUnaccounted).toBe(false);
   expect(spawned).toEqual(["a", "b"]);

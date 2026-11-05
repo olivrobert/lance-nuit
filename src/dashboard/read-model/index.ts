@@ -1,4 +1,3 @@
-// dashboard/read-model/index.ts
 //
 // Public surface of the read model — the ONLY module allowed to import
 // `src/run/record` and `src/work-items/store`. The dashboard (`src/dashboard/ui/`)
@@ -16,33 +15,11 @@ export type {
   RunReportProof,
   RunReportReview,
 } from "../../definition/index.js";
-export {
-  contentKindOf,
-  IMAGE_LIMIT_BYTES,
-  RAW_IMAGE_LIMIT_BYTES,
-  readFile,
-  readImage,
-  readTree,
-  TEXT_LIMIT_BYTES,
-} from "./explorer.js";
 // The dashboard must refuse a reason or a subject the runner would refuse, before spawning.
 export { isValidSubjectToken, MAX_REJECTION_REASON } from "../../work-items/index.js";
-export { GROUP_ORDER, listItems, readItem } from "./items.js";
-export { readLaunches, readLaunchesFor } from "./launches.js";
-export {
-  type ProjectEntry,
-  type ReadModelOptions,
-  readProjects,
-  ticketUrl,
-  workItemsRoot,
-} from "./projects.js";
+export type { ProjectEntry, ReadModelOptions } from "./projects.js";
 export { createReadModel, type ReadModel } from "./read-model.js";
-export { readRecap } from "./recap.js";
-export { readRunJourney } from "./run-journey.js";
-export { parseRunReport, type ReportRead, readReport } from "./report.js";
-export { readStats, STATS_ARCHIVE_FILE, STATS_CONFIG_FILE } from "./stats.js";
-export { readStepDetail, readStepSession } from "./step-detail.js";
-export { readCoderSession, readSteps } from "./steps.js";
+export type { ReportRead } from "./report.js";
 export { isTicketToken, ticketPrefixOf, validateTicketRef } from "./tickets.js";
 export type {
   ApprovalState,

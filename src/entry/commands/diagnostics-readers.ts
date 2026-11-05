@@ -1,4 +1,3 @@
-// runner/commands/diagnostics-readers.ts
 //
 // Human-facing inspection of persisted runs. These readers deliberately walk only the
 // durable `runs/<pipeline>/<runId>` tree; they never consult the old run layout or
@@ -97,7 +96,7 @@ function toRecord(snapshot: RunStateSnapshot, location: RunsLocation): RunRecord
   };
 }
 
-export function listRunRecords(context: PipelineContext, ticket?: string, options?: DiagnosticsOptions): RunRecord[] {
+function listRunRecords(context: PipelineContext, ticket?: string, options?: DiagnosticsOptions): RunRecord[] {
   const stateStore = stateStoreFor(context, ticket, options);
   const snapshots = stateStore.listSnapshots?.(ticket, context) ?? [];
   const location = runsLocationOf(context);
@@ -143,7 +142,7 @@ function latestPerPipeline(records: RunRecord[], stateStore: RunStateStore, tick
   return sortNewest(latest);
 }
 
-export function selectRunRecord(records: RunRecord[], runId?: string): RunRecord | undefined {
+function selectRunRecord(records: RunRecord[], runId?: string): RunRecord | undefined {
   if (runId) return records.find((record) => record.runId === runId || basename(record.dir) === runId);
   return sortNewest(records)[0];
 }
@@ -213,7 +212,7 @@ async function approvalLine(context: PipelineContext, record: RunRecord): Promis
   }
 }
 
-export function formatRunRecord(record: RunRecord, approval?: string): string {
+function formatRunRecord(record: RunRecord, approval?: string): string {
   const { state, status, interrupted } = record;
   const lines = [
     `Run ${record.runId}`,

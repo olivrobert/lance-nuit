@@ -1,4 +1,3 @@
-// runner/boot/step.ts
 //
 // Run prelude: conditional, ordered preparations that combine with one another.
 // This distinguishes them from `DispatchStrategy`, whose scopes are exclusive.

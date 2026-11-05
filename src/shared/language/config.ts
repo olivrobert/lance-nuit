@@ -1,4 +1,3 @@
-// runner/model/config.ts
 //
 // Normalized runner configuration: the shape every layer reads. Reading and
 // validating the configuration files stays in `shared/env/config.ts`.

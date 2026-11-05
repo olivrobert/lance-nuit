@@ -1,4 +1,3 @@
-// runner/step/pipeline-orchestration-child.ts
 //
 // The cycle of ONE composed child, in order: gate, resolution, identity, boot,
 // start fact, execution, reconciliation, settlement, report. This module orders
@@ -232,8 +231,6 @@ export async function executeChild(
     // process stops its loops too, and the handler persists it as an active run.
     childOutcome = await executeRunSteps(
       childRun,
-      ticket,
-      input.baseBranch,
       {
         resuming: childResumed,
         abort,

@@ -1,4 +1,3 @@
-// runner/step/fix-loop.ts
 //
 // Public on_failure repair facade. Session/context preparation and pass execution
 // live in internal modules; this file keeps the API.

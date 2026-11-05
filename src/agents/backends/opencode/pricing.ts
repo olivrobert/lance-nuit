@@ -17,8 +17,6 @@ import { loadProjectPricing } from "../../../shared/env/pricing.js";
 
 export const MODEL_PRICING: Record<string, ModelPricing> = {};
 
-export const OPENCODE_MODEL_PRICING = MODEL_PRICING;
-
 export function pricingForModel(
   model?: string,
   projectPricing: ProjectPricing | null = loadProjectPricing(),

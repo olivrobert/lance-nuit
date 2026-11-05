@@ -27,11 +27,6 @@ export const capabilities: AgentCapabilities = {
   configurationAxes: ["model", "effort"],
 };
 
-/** Bare verdict schema, without captured fields. The one written to `--output-schema`
- *  is `verdictSchema(request.outputFields)`; see `verdict-instruction.ts` for the
- *  strict-mode rules (`required` derived from `properties`, `null` for optional). */
-export const VERDICT_SCHEMA = verdictSchema();
-
 function schemaPath(): string {
   return join(tmpdir(), `runner-codex-verdict-${process.pid}-${Date.now()}.json`);
 }
@@ -82,7 +77,6 @@ export class CodexBackend implements AgentBackend {
     const args = buildCodexArgs(request.prompt, options, {
       outputFormat: request.outputFormat,
       cwd: request.cwd,
-      sessionId: request.session?.id,
       resumeSessionId: resumeSession?.id,
       schemaPath: schema,
       artifactScope: request.artifactScope,

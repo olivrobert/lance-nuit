@@ -1,4 +1,3 @@
-// runner/run-record/child-transitions.ts
 //
 // The owner of the persisted child reference of a composed run: the record a
 // `runPipeline` or `forEachPipeline` node keeps, in the PARENT snapshot, for

@@ -1,4 +1,3 @@
-// runner/run-record/attempt-lifecycle.ts
 //
 // The two ends of a tracked attempt, as the step layer sees them: `openAttempt`
 // before spawn and `settleAttempt` once the spawn returned or rejected. Each one

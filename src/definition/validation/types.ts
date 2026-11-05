@@ -3,7 +3,7 @@ import { type PipelineContext, requireAgentBackendRegistry } from "../../shared/
 import type { Pipeline } from "../definition.js";
 import type { ProfileOverrides, StepOverride } from "../../shared/language/profiles.js";
 
-export type PipelineValidationLevel = "error" | "warning";
+export type PipelineValidationLevel = "error";
 
 export interface PipelineValidationFinding {
   readonly rule: string;
@@ -20,10 +20,6 @@ export interface PipelineValidationContext {
   readonly stepOverrides?: Readonly<Record<string, StepOverride>>;
   /** Context required by rules that inspect capabilities. */
   readonly pipelineContext?: PipelineContext;
-  /** Source shown in configuration error messages. */
-  readonly stepOverrideSource?: string;
-  /** Extractor registry injectable for contract tests. */
-  readonly availableExtractors?: ReadonlySet<string>;
 }
 
 /** The registry selected by boot. Validating a pipeline is validating it against

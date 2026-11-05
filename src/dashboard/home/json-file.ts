@@ -1,4 +1,3 @@
-// dashboard/home/json-file.ts
 //
 // JSON files of the dashboard, read leniently and written atomically.
 

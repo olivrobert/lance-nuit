@@ -1,4 +1,3 @@
-// runner/entry/registries.ts
 //
 // Composition root: the only place the standalone runner names the built-in
 // providers. A run and the commands outside one receive `composeRunnerRegistries`

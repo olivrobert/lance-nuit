@@ -1,4 +1,3 @@
-// dashboard/ui/static-files.ts
 //
 // The dashboard's own assets: `index.html`, `app.js`, `app.css`.
 //

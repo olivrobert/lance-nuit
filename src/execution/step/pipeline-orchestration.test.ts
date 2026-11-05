@@ -152,14 +152,7 @@ async function executeParent(
 ) {
   const context = contextOverride ?? buildPipelineContext({ cwd: root, ticket, agentBackendRegistry: REGISTRY });
   const { run } = await loadOrCreateRun({ pipelinePath: parentPath, ticket, runDir, fresh, context, worktree: false });
-  const outcome = await executeRunSteps(
-    run,
-    ticket,
-    undefined,
-    { resuming: !fresh },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const outcome = await executeRunSteps(run, { resuming: !fresh }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(run, outcome);
   return { run, outcome };
 }
@@ -847,8 +840,6 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
   });
   const childOutcome = await executeRunSteps(
     childRun,
-    "P-01",
-    undefined,
     { resuming: false },
     stepLoopDeps(NULL_RUN_OUTPUT),
     childContext,
@@ -1070,14 +1061,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
     budgetApproved: true,
     worktree: false,
   });
-  const approved = await executeRunSteps(
-    approvedRun,
-    "P",
-    undefined,
-    { resuming: true },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const approved = await executeRunSteps(approvedRun, { resuming: true }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(approvedRun, approved);
   expect(approved.budgetExceeded).toBe(false);
   expect(approved.failed).toBe(false);
@@ -1264,14 +1248,7 @@ test("pipeline-orchestration: a fan-out stops spawning children once its ceiling
     context,
     worktree: false,
   });
-  const outcome = await executeRunSteps(
-    parent,
-    "P",
-    undefined,
-    { resuming: false },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const outcome = await executeRunSteps(parent, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(parent, outcome);
 
   // Exactly one child ran. The gate is the same decision step admission reads, so
@@ -1315,14 +1292,7 @@ test("pipeline-orchestration: an authorized fan-out runs every item and both cal
     allowUnmetered: true,
     worktree: false,
   });
-  const outcome = await executeRunSteps(
-    parent,
-    "P",
-    undefined,
-    { resuming: false },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const outcome = await executeRunSteps(parent, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(parent, outcome);
 
   // Three items plus three `afterEach` plus one `afterAll`.
@@ -1354,14 +1324,7 @@ test("pipeline-orchestration: re-reconciling a child that costs nothing new keep
       })
     ).run,
   );
-  const outcome = await executeRunSteps(
-    parent,
-    "P",
-    undefined,
-    { resuming: false },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const outcome = await executeRunSteps(parent, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(parent, outcome);
   const ref = parent.steps[0]!.orchestration!.children[0]!;
   expect(parent.steps[0]!.control?.cost_unknown).toBe(true);
@@ -1385,8 +1348,6 @@ test("pipeline-orchestration: re-reconciling a child that costs nothing new keep
   });
   const childOutcome = await executeRunSteps(
     authorizedChild,
-    "P",
-    undefined,
     { resuming: true },
     stepLoopDeps(NULL_RUN_OUTPUT),
     context,
@@ -1402,14 +1363,7 @@ test("pipeline-orchestration: re-reconciling a child that costs nothing new keep
   updateStep(parent, parent.steps[0]!, "failed", "interruption after accounting");
   saveRun(parent);
 
-  const second = await executeRunSteps(
-    parent,
-    "P",
-    undefined,
-    { resuming: true },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const second = await executeRunSteps(parent, { resuming: true }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(parent, second);
 
   const snapshot = readRunSnapshot(join(runDir, "state.json"))!;
@@ -1433,14 +1387,7 @@ test("pipeline-orchestration: an authorized root propagates the authorization to
     worktree: false,
   });
   expect(parent.allow_unmetered).toBe(true);
-  const outcome = await executeRunSteps(
-    parent,
-    "P",
-    undefined,
-    { resuming: false },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const outcome = await executeRunSteps(parent, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(parent, outcome);
 
   // The child never had the flag: it received the authorization through the
@@ -1472,14 +1419,7 @@ test("pipeline-orchestration: a composed child cannot authorize itself past a st
     context,
     worktree: false,
   });
-  const outcome = await executeRunSteps(
-    parent,
-    "P",
-    undefined,
-    { resuming: false },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const outcome = await executeRunSteps(parent, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   finalizeRun(parent, outcome);
   expect(outcome.costUnaccounted).toBe(true);
 
@@ -1505,14 +1445,7 @@ test("pipeline-orchestration: a composed child cannot authorize itself past a st
   });
   expect(resumedChild.allow_unmetered).toBeUndefined();
   expect(resumedChild.cost_unaccounted).toBe(true);
-  const childOutcome = await executeRunSteps(
-    resumedChild,
-    "P",
-    undefined,
-    { resuming: true },
-    stepLoopDeps(NULL_RUN_OUTPUT),
-    context,
-  );
+  const childOutcome = await executeRunSteps(resumedChild, { resuming: true }, stepLoopDeps(NULL_RUN_OUTPUT), context);
   expect(childOutcome.costUnaccounted).toBe(true);
   expect(resumedChild.steps.map((step) => step.status)).toEqual(["done", "pending"]);
 }, 30_000);
@@ -1990,14 +1923,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
     for (const active of abort.activeRuns()) abortRun(active, "SIGINT");
   };
   try {
-    const outcome = await executeRunSteps(
-      parent,
-      "P",
-      undefined,
-      { resuming: false, abort },
-      stepLoopDeps(NULL_RUN_OUTPUT),
-      context,
-    );
+    const outcome = await executeRunSteps(parent, { resuming: false, abort }, stepLoopDeps(NULL_RUN_OUTPUT), context);
     finalizeRun(parent, outcome);
   } finally {
     delete (globalThis as Record<string, unknown>)[hook];
@@ -2055,14 +1981,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   const abort = createAbortScope();
   (globalThis as Record<string, unknown>)[hook] = () => abort.requestAbort("SIGINT");
   try {
-    const outcome = await executeRunSteps(
-      parent,
-      "P",
-      undefined,
-      { resuming: false, abort },
-      stepLoopDeps(NULL_RUN_OUTPUT),
-      context,
-    );
+    const outcome = await executeRunSteps(parent, { resuming: false, abort }, stepLoopDeps(NULL_RUN_OUTPUT), context);
 
     expect(outcome.stopped).toBe(false);
     expect(outcome.failed).toBe(false);

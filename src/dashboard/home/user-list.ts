@@ -1,4 +1,3 @@
-// dashboard/home/user-list.ts
 //
 // `users.json`: the names allowed to use the dashboard. It is edited by hand
 // (H2); the dashboard only creates it, empty, and reads it.

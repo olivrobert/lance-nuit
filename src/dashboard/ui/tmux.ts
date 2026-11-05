@@ -1,4 +1,3 @@
-// dashboard/ui/tmux.ts
 //
 // The dashboard's only way to reach tmux: a thin adapter over the `tmux` CLI,
 // always on the dashboard's own socket (`tmux -L lancenuit`), so the reader's

@@ -1,4 +1,3 @@
-// runner/step/load-or-create-run.ts
 //
 // Build or resume a run: load the definition, validate `--start-at`, and decide
 // this invocation's selection. Opening the run itself — selecting its directory,

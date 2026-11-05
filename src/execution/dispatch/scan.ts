@@ -1,4 +1,3 @@
-// runner/dispatch/scan.ts
 //
 // Scan strategy: deterministic, zero-token discovery followed by a sequential
 // loop that always continues. A stopped run is escalated; a failed ticket is
@@ -64,10 +63,8 @@ export const scanStrategy: DispatchStrategy = {
   id: "scan",
   flag: "--scan",
   isActive: (args) => args.scan,
-  ticket: "forbidden",
   desc: "Discover tickets in the tracker and process them sequentially (continue on failure).",
   ticketError: "--scan does not accept a ticket (it discovers tickets in the tracker).",
-  onFailure: "continue",
 
   async tickets(env: DispatchEnv): Promise<string[]> {
     const cfg = env.ctx.config;

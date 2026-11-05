@@ -1,4 +1,3 @@
-// runner/step/step-outcome.ts
 //
 // Resolve an attempt result: extraction, blocking, non-blocking, escalation, and
 // on_failure dispatch. This phase does not know how spawn happened; it applies only

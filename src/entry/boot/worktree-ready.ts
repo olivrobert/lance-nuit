@@ -1,4 +1,3 @@
-// runner/boot/worktree-ready.ts
 //
 // Project hook that finishes preparing a worktree once its services are up.
 //

@@ -1,4 +1,3 @@
-// runner/run-stats/index.ts
 //
 // Entry of the run statistics: the summary of a finished run appended to the
 // central history (`pipeline-history/runs.jsonl`), and the readers that roll that

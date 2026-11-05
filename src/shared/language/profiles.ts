@@ -1,4 +1,3 @@
-// runner/model/profiles.ts
 //
 // Identities and shapes of the semantic roles a step can carry, plus the per-step
 // override read from configuration. Data only: the built-in policy table and its

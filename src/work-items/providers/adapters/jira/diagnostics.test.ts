@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { redactProviderOutput } from "./index.js";
+import { redactProviderOutput } from "./diagnostics.js";
 import { ko, messageOf, stubbed } from "./test-harness.js";
 
 describe("jira gateway — redaction", () => {

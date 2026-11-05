@@ -1,4 +1,3 @@
-// runner/entry/startup.ts
 //
 // Everything that happens BEFORE the first step runs: argument parsing, the
 // no-pipeline commands, run-argument validation, boot, the one-per-process
@@ -27,8 +26,6 @@ import type { Pipeline } from "../../definition/index.js";
 import { loadPipelineDefinition } from "../../definition/index.js";
 import { CliError, type RunnerArgs } from "../cli-options.js";
 import { parseRunnerArgs } from "../cli/parse.js";
-import { liveFeedFromEnvironment } from "../output/live-feed.js";
-import { setRunnerLiveFeed } from "../../shared/runtime/live-feed.js";
 import { log } from "../../shared/runtime/logging.js";
 import { type ApprovalDecision, type RecordedApproval, recordApproval } from "../../work-items/index.js";
 import { FileRunStateStore, resolveLatestRunSnapshot, runLockHolder } from "../../run/index.js";
@@ -134,7 +131,8 @@ export type ApprovalOutcome =
 
 /**
  * Record the `--approve` decision against the already-loaded pipeline, which owns
- * the subject → artifact mapping. `--approve-only` stops there by design.
+ * the subject → artifact mapping. `--approve-only` never reaches this point:
+ * `approvalCommand` records it before boot, without the worktree or the project lock.
  */
 export async function applyApproval(
   args: RunnerArgs,
@@ -150,7 +148,6 @@ export async function applyApproval(
   } catch (error) {
     return { kind: "error", message: errorMessage(error) };
   }
-  if (args.approveOnly) return { kind: "done" };
   return resumeAfterDecision(recorded, "approval", pipelineDef, args, context);
 }
 
@@ -238,11 +235,6 @@ export async function startup(argv: string[]): Promise<StartupOutcome> {
     log(cwdError);
     return { kind: "exit", code: 1 };
   }
-
-  // The event bus only writes to the feed installed here. A child run inherits its
-  // parent's feed through the environment; `entry/composition/feed.ts` replaces it with the
-  // run's own feed once `run_dir` is known.
-  setRunnerLiveFeed(liveFeedFromEnvironment());
 
   const boot = await runBoot({
     args,

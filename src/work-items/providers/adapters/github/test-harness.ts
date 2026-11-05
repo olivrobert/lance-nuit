@@ -1,4 +1,3 @@
-// work-items/providers/adapters/github/test-harness.ts
 //
 // The GitHub adapter runs against a small `gh` simulator. It models the JSON
 // shapes and mutations used by the adapter, keeping the tests offline while

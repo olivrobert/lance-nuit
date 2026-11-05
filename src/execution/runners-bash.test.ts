@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSupervisedStream } from "../shared/process/process-runner.js";
 import { stripStderrMarker } from "../shared/process/bash-runner.js";
-import { runBashAsync, runBashStreaming } from "./runners.js";
+import { runBashAsync, runBashStreaming } from "../shared/process/bash-runner.js";
 
 function isAlive(pid: number): boolean {
   try {
@@ -95,7 +95,6 @@ async function withParentRunEnv(body: (internal: Record<string, string>) => Prom
     RUNNER_IN_WORKTREE: "1",
     RUNNER_EVENTS_FILE: feed,
     RUNNER_LIVE_FEED: feed,
-    RUNNER_DISABLE_DISPATCH: "1",
   };
   const touched = { ...internal, ...STEP_VISIBLE_ENV };
   const previous = Object.fromEntries(Object.keys(touched).map((name) => [name, process.env[name]]));
