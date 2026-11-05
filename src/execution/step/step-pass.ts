@@ -53,7 +53,7 @@ export interface StepLoopStop {
   costUnaccountedStop?: boolean;
 }
 
-const INTERRUPTED: StepLoopStop = {};
+export const INTERRUPTED: StepLoopStop = {};
 
 /** The stop a refused admission asks for. */
 export function admissionStop(admission: Exclude<StepAdmission, { kind: "skip" | "ready" }>): StepLoopStop {

@@ -69,6 +69,7 @@ export { isBudgetExceeded, type RunBudget, remainingBudget, strictCostAccounting
 export {
   chargeChildReconciliation,
   costIsLowerBound,
+  expectAllowances,
   measuredRunCost,
   openRunLedger,
   releaseAllowance,

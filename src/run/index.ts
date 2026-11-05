@@ -36,6 +36,7 @@ export {
   declareChild,
   discardedResumeNotice,
   effectiveStatus,
+  expectAllowances,
   failChildLaunch,
   finalizeRun,
   freezeOrchestrationItems,

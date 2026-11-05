@@ -1,8 +1,9 @@
 // runner/step/step-loop.ts
 //
 // Run step orchestration. Business responsibilities are split into admission
-// (pre-spawn guards) and the pass of an admitted step (`step-pass.ts`: attempt
-// execution and verdict resolution). The loop keeps only global step order.
+// (pre-spawn guards), the pass of an admitted step (`step-pass.ts`: attempt
+// execution and verdict resolution), and the group of steps that run together
+// (`parallel-group.ts`). The loop keeps only global step order.
 
 import { extractErrors } from "../report-extraction.js";
 import { executeStep } from "../runners.js";
@@ -26,6 +27,7 @@ import {
 import { runFixLoop } from "./fix-loop.js";
 import { admitStep, checkInputs, type StepAdmission, skipForOperatorSelection } from "./step-admission.js";
 import { resolveOutcome } from "./step-outcome.js";
+import { type AdmittedStep, executionUnits, runParallelGroup } from "./parallel-group.js";
 import { admissionStop, runStepPass, type StepLoopDeps, type StepLoopStop, type StepPassEnv } from "./step-pass.js";
 
 export type { StepAdmission, StepLoopDeps };
@@ -159,68 +161,79 @@ export async function executeRunSteps(
       deps,
     };
 
-    for (const step of run.steps) {
-      if (isAborted()) break;
-      // The `--until` bound is reached once its step settled (`done` or
-      // `skipped`), or once this invocation's selection left it out, even
-      // unfinished: every exit below that leaves it unsettled breaks the loop
-      // first, so the next step is where this invocation ends.
-      if (
-        bound &&
-        run.steps.indexOf(step) > run.steps.indexOf(bound) &&
-        (isSettledStatus(bound.status) || setAside.includes(bound.id))
-      ) {
-        boundReached = true;
-        break;
-      }
-      if (reconcile && leftOutBySelection(run, step, opts)) {
-        if (skipForOperatorSelection(run, step, deps.output) === "unfinished") leftUnfinished ??= step;
-        setAside.push(step.id);
-        continue;
-      }
-      // Reconsider a settled step on resume when it asked for it, when it
-      // declares `input` (its outputs may have been produced from bytes that have
-      // since changed), or when it reworks an artifact a human may have rejected.
-      // A re-admitted step with nothing to redo costs zero. Reconcile mode
-      // re-admits every step that declares what it delivers, except
-      // orchestration nodes (`runPipeline`, `forEachPipeline`), which keep the
-      // authority of their status whatever they declare. A step declaring
-      // neither output nor rerunOnResume can only be the runner's work-item
-      // source step (the build refuses any other), and keeps its status too.
-      const reconciled = reconcile && reconcilable(step.def);
-      const reconsider =
-        resuming &&
-        (reconciled ||
-          rerunsOnResume(step.def, reconcile) ||
-          (step.def.sources?.length ?? 0) > 0 ||
-          (step.def.rework_for?.length ?? 0) > 0);
-      // A legacy operator exclusion (`--steps`, `--skip`, `--start-at`) is a
-      // decision, not a freshness verdict: it survives the resume that re-admits
-      // the rest. Reconcile mode persists none (above).
-      if (step.status === "skipped" && !(reconsider && (reconciled || step.def.sources) && !step.excluded)) continue;
-      // Skip a done step on resume unless it is reconsidered. This idempotently
-      // restores Git state: create-branch moves HEAD to feature/fix, while skipping
-      // would leave it on base/develop and attach commits to the wrong branch.
-      if (step.status === "done" && !reconsider) continue;
+    // Every member is admitted, in order, before any of them spawns: a refusal stops
+    // the run with nothing launched, which needs the outer label.
+    units: for (const unit of executionUnits(run.steps)) {
+      const admitted: AdmittedStep[] = [];
+      for (const step of unit) {
+        if (isAborted()) break units;
+        // The `--until` bound is reached once its step settled (`done` or
+        // `skipped`), or once this invocation's selection left it out, even
+        // unfinished: every exit below that leaves it unsettled breaks the loop
+        // first, so the next step is where this invocation ends.
+        if (
+          bound &&
+          run.steps.indexOf(step) > run.steps.indexOf(bound) &&
+          (isSettledStatus(bound.status) || setAside.includes(bound.id))
+        ) {
+          boundReached = true;
+          break units;
+        }
+        if (reconcile && leftOutBySelection(run, step, opts)) {
+          if (skipForOperatorSelection(run, step, deps.output) === "unfinished") leftUnfinished ??= step;
+          setAside.push(step.id);
+          continue;
+        }
+        // Reconsider a settled step on resume when it asked for it, when it
+        // declares `input` (its outputs may have been produced from bytes that have
+        // since changed), or when it reworks an artifact a human may have rejected.
+        // A re-admitted step with nothing to redo costs zero. Reconcile mode
+        // re-admits every step that declares what it delivers, except
+        // orchestration nodes (`runPipeline`, `forEachPipeline`), which keep the
+        // authority of their status whatever they declare. A step declaring
+        // neither output nor rerunOnResume can only be the runner's work-item
+        // source step (the build refuses any other), and keeps its status too.
+        const reconciled = reconcile && reconcilable(step.def);
+        const reconsider =
+          resuming &&
+          (reconciled ||
+            rerunsOnResume(step.def, reconcile) ||
+            (step.def.sources?.length ?? 0) > 0 ||
+            (step.def.rework_for?.length ?? 0) > 0);
+        // A legacy operator exclusion (`--steps`, `--skip`, `--start-at`) is a
+        // decision, not a freshness verdict: it survives the resume that re-admits
+        // the rest. Reconcile mode persists none (above).
+        if (step.status === "skipped" && !(reconsider && (reconciled || step.def.sources) && !step.excluded)) continue;
+        // Skip a done step on resume unless it is reconsidered. This idempotently
+        // restores Git state: create-branch moves HEAD to feature/fix, while skipping
+        // would leave it on base/develop and attach commits to the wrong branch.
+        if (step.status === "done" && !reconsider) continue;
 
-      const admission: StepAdmission = await admitStep({
-        run,
-        step,
-        baseCtx,
-        budget,
-        output: deps.output,
-        replayInterrupted: opts.replayInterrupted,
-        startAt: opts.startAt,
-        reconcile,
-      });
-      if (isAborted()) break;
-      if (admission.kind === "skip") continue;
-      if (admission.kind !== "ready") {
-        stop = admissionStop(admission);
-        break;
+        const admission: StepAdmission = await admitStep({
+          run,
+          step,
+          baseCtx,
+          budget,
+          output: deps.output,
+          replayInterrupted: opts.replayInterrupted,
+          startAt: opts.startAt,
+          reconcile,
+        });
+        if (isAborted()) break units;
+        if (admission.kind === "skip") continue;
+        if (admission.kind !== "ready") {
+          stop = admissionStop(admission);
+          break units;
+        }
+        admitted.push({ step, admission });
       }
 
-      const passStop = await runStepPass(passEnv, step, admission);
+      // A group reduced to one member, by a resume or a skip, is a lone step.
+      const [first] = admitted;
+      const passStop =
+        admitted.length > 1
+          ? await runParallelGroup(passEnv, admitted)
+          : first && (await runStepPass(passEnv, first.step, first.admission));
       if (passStop) {
         stop = passStop;
         break;

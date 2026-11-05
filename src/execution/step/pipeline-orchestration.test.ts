@@ -76,6 +76,31 @@ const unpricedCapabilities: AgentCapabilities = {
   cost: "none",
 };
 
+/** Answers once `overlapping.expected` agents are in flight at the same time: agents
+ *  running one after the other would never get there, and the test would time out. */
+const OVERLAP_BACKEND = `pipeline-compose-overlap-${process.pid}`;
+const overlapping = { expected: 0, arrived: 0, open: () => {} };
+let allArrived = Promise.resolve();
+
+if (!REGISTRY.has(OVERLAP_BACKEND)) {
+  REGISTRY.register({
+    id: OVERLAP_BACKEND,
+    capabilities: unpricedCapabilities,
+    create() {
+      return {
+        id: OVERLAP_BACKEND,
+        capabilities: unpricedCapabilities,
+        async run() {
+          overlapping.arrived += 1;
+          if (overlapping.arrived % overlapping.expected === 0) overlapping.open();
+          await allArrived;
+          return { provider: OVERLAP_BACKEND, output: "", ok: true, stats: { duration_ms: 1 } };
+        },
+      };
+    },
+  });
+}
+
 if (!REGISTRY.has(UNPRICED_BACKEND)) {
   REGISTRY.register({
     id: UNPRICED_BACKEND,
@@ -1181,6 +1206,49 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   expect(outcome.costUnaccounted).toBe(true);
   expect(outcome.costUnaccountedStop).toBe(true);
   expect(outcome.budgetExceeded).toBe(false);
+});
+
+test("pipeline-orchestration: a group inside a forEachPipeline child runs its members side by side", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pipeline-compose-group-"));
+  const childPath = writePipeline(
+    root,
+    "child",
+    `
+export default ({ pipeline, parallelize, llmStep }) => pipeline("child")
+  .add(parallelize({ id: "audits", name: "Audits", steps: [
+    llmStep({ id: "audits.a", name: "a", backend: ${JSON.stringify(OVERLAP_BACKEND)}, profile: "coder", command: "a" }),
+    llmStep({ id: "audits.b", name: "b", backend: ${JSON.stringify(OVERLAP_BACKEND)}, profile: "coder", command: "b" }),
+  ] }))
+  .build();
+`,
+  );
+  const parentPath = writePipeline(
+    root,
+    "parent",
+    `
+export default ({ pipeline, forEachPipeline }) => pipeline("parent")
+  .add(forEachPipeline({ id: "items", name: "Items", items: ["T-1"], pipeline: "./${childPath.slice(root.length + 1)}" }))
+  .build();
+`,
+  );
+  const base = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
+  const context = buildPipelineContext({
+    cwd: root,
+    ticket: "P",
+    agentBackendRegistry: REGISTRY,
+    config: { ...base.config, profiles: { ...base.config.profiles, coder: { backends: { [OVERLAP_BACKEND]: {} } } } },
+  });
+  overlapping.expected = 2;
+  overlapping.arrived = 0;
+  allArrived = new Promise<void>((resolve) => {
+    overlapping.open = resolve;
+  });
+
+  const { run, outcome } = await executeParent(parentPath, root, "P", join(root, "parent-run"), true, context);
+
+  expect(outcome.failed).toBe(false);
+  expect(overlapping.arrived).toBe(2);
+  expect(run.steps[0]!.orchestration!.children.map((child) => child.status)).toEqual(["done"]);
 });
 
 test("pipeline-orchestration: a fan-out stops spawning children once its ceiling is unenforceable", async () => {

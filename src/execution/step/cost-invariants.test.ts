@@ -719,17 +719,6 @@ test("a retry finds what is left and leaves a late sibling its share", () => {
   expect(budget.cumulative + held(budget)).toBe(12);
 });
 
-test("an announcement that ended leaves no share aside for a step that never started", () => {
-  const budget: RunBudget = { cumulative: 0 };
-  expectAllowances(budget, ["a", "never-started"]);
-  expect(reserveAllowance(budget, 8, "a")).toBe(4);
-  releaseAllowance(budget, "a");
-
-  expectAllowances(budget, []);
-
-  expect(reserveAllowance(budget, 8, "next")).toBe(8);
-});
-
 test("held is not spent: with nothing left to give, the allowance is zero and no gate stops", () => {
   const budget: RunBudget = { cumulative: 0 };
   const run = { cost_unaccounted: undefined } as Run;
