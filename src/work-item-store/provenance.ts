@@ -27,12 +27,16 @@ import { withoutRunnerInternalEnv } from "../exec/self-spawn.js";
 import { errorMessage } from "../lib/errors.js";
 import type { Artifact } from "../model/artifact.js";
 import { createArtifactRef } from "../model/artifact-ports.js";
-import type { PipelineContext } from "../model/context.js";
-import { resolveTemplateAsync } from "../model/definition.js";
-import type { StepDefinition } from "../model/run.js";
+import { type PipelineContext, resolveTemplateAsync } from "../model/context.js";
 import { isSource, type Source, type StepInput } from "../model/source.js";
 import { sha256Bytes, sha256Text } from "./hash.js";
 import { artifactKey, PROVENANCE_DIRNAME } from "./layout.js";
+
+/** What provenance reads of a step: what it takes in and what it delivers. */
+export interface StepIo {
+  readonly sources?: StepInput[];
+  readonly outputs?: Artifact<unknown>[];
+}
 
 /** Reserved artifact-name prefix owned by the runner. */
 export const PROVENANCE_PREFIX = `${PROVENANCE_DIRNAME}/`;
@@ -457,7 +461,7 @@ function vouching(record: ArtifactProvenance): VouchingRecord {
  */
 export async function markInFlight(
   ctx: PipelineContext,
-  step: Pick<StepDefinition, "sources" | "outputs">,
+  step: StepIo,
   attempt: Omit<InFlightAttempt, "revision">,
 ): Promise<void> {
   const revised = revisedInPlace(step);
@@ -508,14 +512,14 @@ function revisionMark(
 
 /** Inputs a step actually depends on: what it reads minus what it revises. A
  *  source is never revised: it cannot be an output. */
-export function pureInputsOf(step: Pick<StepDefinition, "sources" | "outputs">): StepInput[] {
+export function pureInputsOf(step: StepIo): StepInput[] {
   const revised = new Set((step.outputs ?? []).map((output) => output.name));
   return (step.sources ?? []).filter((input) => isSource(input) || !revised.has(input.name));
 }
 
 /** Pure inputs an attempt records as it was given them, read before it starts:
  *  the artifacts. */
-export function inputsReadBeforeAttempt(step: Pick<StepDefinition, "sources" | "outputs">): StepInput[] {
+export function inputsReadBeforeAttempt(step: StepIo): StepInput[] {
   return pureInputsOf(step).filter((input) => !isSource(input));
 }
 
@@ -524,12 +528,12 @@ export function inputsReadBeforeAttempt(step: Pick<StepDefinition, "sources" | "
  *  would otherwise record the state before its change, and be stale on every
  *  later admission because of it. The price is a change made by someone else
  *  during the attempt, which the record then absorbs. */
-export function inputsReadAfterAttempt(step: Pick<StepDefinition, "sources" | "outputs">): StepInput[] {
+export function inputsReadAfterAttempt(step: StepIo): StepInput[] {
   return pureInputsOf(step).filter(isSource);
 }
 
 /** Outputs the step revises in place: declared as both input and output. */
-export function revisedInPlace(step: Pick<StepDefinition, "sources" | "outputs">): Set<string> {
+export function revisedInPlace(step: StepIo): Set<string> {
   const declaredInputs = new Set(
     (step.sources ?? []).filter((input) => !isSource(input)).map((artifact) => artifact.name),
   );
@@ -576,7 +580,7 @@ const MUST_RUN: ReadonlySet<OutputFreshness> = new Set(["missing", "unfinished",
 /** Aggregate the freshness of every output a step declares. */
 export async function stepFreshness(
   ctx: PipelineContext,
-  step: Pick<StepDefinition, "id" | "sources" | "outputs">,
+  step: StepIo & { readonly id: string },
 ): Promise<StepFreshnessReport> {
   const { fingerprints, unavailable } = await readInputs(ctx, pureInputsOf(step));
   const states: Record<string, OutputFreshness> = {};
@@ -608,7 +612,7 @@ export async function stepFreshness(
  *  a source unreadable now is not, since nobody knows what it holds. */
 export async function inputsUnchanged(
   ctx: PipelineContext,
-  step: Pick<StepDefinition, "sources" | "outputs">,
+  step: StepIo,
   recorded: Record<string, InputFingerprint>,
 ): Promise<boolean> {
   const { fingerprints: current, unavailable } = await readInputs(ctx, pureInputsOf(step));

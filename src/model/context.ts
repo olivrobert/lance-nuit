@@ -1,8 +1,8 @@
 // runner/model/context.ts
 //
-// Execution context handed to pipeline authors and the accessors of the
-// registries a run attaches to it. Shapes only: assembling a context is
-// `pipeline/context.ts`.
+// Execution context handed to pipeline authors, the accessors of the registries a
+// run attaches to it, and the resolver of its templated values. No I/O: assembling
+// a context is `pipeline/context.ts`.
 
 import type { AgentBackendRegistry } from "../contracts/backends.js";
 import type { WorkItemGatewayRegistry } from "../contracts/registry.js";
@@ -85,6 +85,16 @@ export type Templated<TCtx, T = string> = T | ((ctx: TCtx) => T);
  *  this form: these points are already asynchronous, and commands often need to
  *  read an artifact—`artifact.read()` is asynchronous. */
 export type AsyncTemplated<TCtx, T = string> = T | ((ctx: TCtx) => T | Promise<T>);
+
+/** Resolve templated values that accept an `async` function. A sync function
+ *  remains valid: `await` passes through a non-thenable value. */
+export async function resolveTemplateAsync<TCtx, TValue = string>(
+  value: AsyncTemplated<TCtx, TValue> | undefined,
+  ctx: TCtx,
+): Promise<TValue | undefined> {
+  if (value == null) return undefined;
+  return typeof value === "function" ? await (value as (c: TCtx) => TValue | Promise<TValue>)(ctx) : value;
+}
 
 /** In-process action for an `fn` step. Returns a readable log summary, or nothing
  *  when the action has no useful output. */
