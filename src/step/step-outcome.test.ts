@@ -20,9 +20,8 @@ import type { PipelineStep } from "../model/definition.ts";
 import type { Run, RunStep } from "../run-record/run.ts";
 import { buildPipelineContext } from "../pipeline/context.ts";
 import { createAbortScope } from "../runtime/abort.ts";
-import type { RunnerEvent } from "../runtime/events.ts";
 import { setLogInterceptor } from "../runtime/logging.ts";
-import type { RunOutput } from "../runtime/run-output.ts";
+import type { RunOutput, RunOutputEvent } from "../runtime/run-output.ts";
 import { makeRunStep } from "../run-record/run-step.ts";
 import { type ResolveOutcomeInput, resolveOutcome } from "./step-outcome.ts";
 
@@ -31,8 +30,8 @@ afterEach(() => setLogInterceptor(undefined));
 /** Recording destination plus a count of the stderr writes performed while the
  *  phase ran. The interceptor is the hook every runner write passes through, so a
  *  forgotten `log()` shows up as a non-zero count. */
-function recorder(): { output: RunOutput; events: RunnerEvent[]; stderrWrites: () => number } {
-  const events: RunnerEvent[] = [];
+function recorder(): { output: RunOutput; events: RunOutputEvent[]; stderrWrites: () => number } {
+  const events: RunOutputEvent[] = [];
   let writes = 0;
   setLogInterceptor(() => {
     writes++;
@@ -88,7 +87,7 @@ test("a step failing without a retry policy says it once, on the output port", a
 
   expect(action).toBe("failed");
   expect(events.map((event) => event.type)).toEqual(["step.failed", "runner.message"]);
-  const message = events[1] as Extract<RunnerEvent, { type: "runner.message" }>;
+  const message = events[1] as Extract<RunOutputEvent, { type: "runner.message" }>;
   expect(message.level).toBe("info");
   expect(message.message).toContain("📄 Output:");
   expect(stderrWrites()).toBe(0);
@@ -102,7 +101,7 @@ test("a silent extractor on a failed step warns through the port, not through st
   await resolveOutcome(failedInput({ error_extractor: "tests-json" }, output));
 
   const warnings = events.filter(
-    (event): event is Extract<RunnerEvent, { type: "runner.message" }> =>
+    (event): event is Extract<RunOutputEvent, { type: "runner.message" }> =>
       event.type === "runner.message" && event.level === "warn",
   );
   expect(warnings).toHaveLength(1);
@@ -117,7 +116,7 @@ test("an absorbed non-blocking failure warns through the port, not through stder
 
   expect(action).toBe("continue");
   const warnings = events.filter(
-    (event): event is Extract<RunnerEvent, { type: "runner.message" }> =>
+    (event): event is Extract<RunOutputEvent, { type: "runner.message" }> =>
       event.type === "runner.message" && event.level === "warn",
   );
   expect(warnings).toHaveLength(1);
@@ -166,7 +165,7 @@ test("fixOnlyWhenExtracted fails a step whose report was never written, without 
   expect(input.step.retries).toBe(0);
   expect(input.step.status).toBe("failed");
   const messages = events
-    .filter((event): event is Extract<RunnerEvent, { type: "runner.message" }> => event.type === "runner.message")
+    .filter((event): event is Extract<RunOutputEvent, { type: "runner.message" }> => event.type === "runner.message")
     .map((event) => event.message);
   expect(messages.some((message) => message.includes("no report was produced"))).toBe(true);
   expect(messages.some((message) => message.includes("fixOnlyWhenExtracted"))).toBe(true);
@@ -181,7 +180,7 @@ test("fixOnlyWhenExtracted distinguishes a green report from a missing one", asy
   expect(action).toBe("failed");
   expect(fixCalls()).toBe(0);
   const messages = events
-    .filter((event): event is Extract<RunnerEvent, { type: "runner.message" }> => event.type === "runner.message")
+    .filter((event): event is Extract<RunOutputEvent, { type: "runner.message" }> => event.type === "runner.message")
     .map((event) => event.message);
   expect(messages.some((message) => message.includes("the report holds no actionable error"))).toBe(true);
   expect(messages.some((message) => message.includes("no report was produced"))).toBe(false);
@@ -322,14 +321,14 @@ function refusedCaptureInput(
   return { input, values, spawns };
 }
 
-function messagesOf(events: RunnerEvent[]): string[] {
+function messagesOf(events: RunOutputEvent[]): string[] {
   return events
-    .filter((event): event is Extract<RunnerEvent, { type: "runner.message" }> => event.type === "runner.message")
+    .filter((event): event is Extract<RunOutputEvent, { type: "runner.message" }> => event.type === "runner.message")
     .map((event) => event.message);
 }
 
-function failedSuffixOf(events: RunnerEvent[]): string | undefined {
-  return events.find((event): event is Extract<RunnerEvent, { type: "step.failed" }> => event.type === "step.failed")
+function failedSuffixOf(events: RunOutputEvent[]): string | undefined {
+  return events.find((event): event is Extract<RunOutputEvent, { type: "step.failed" }> => event.type === "step.failed")
     ?.suffix;
 }
 
