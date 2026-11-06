@@ -16,7 +16,6 @@
 import { closeSync, openSync, readSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
-import { createArtifactRef } from "../../shared/language/artifact-ports.js";
 import type { PersistedRun } from "../../run/index.js";
 import {
   awaitsHuman,
@@ -32,15 +31,11 @@ import {
   readHistory,
 } from "../../run/index.js";
 import { itemCost } from "./cost.js";
-import {
-  FileWorkItemArtifactStore,
-  gateDecisionStatus,
-  isValidSubjectToken,
-  workItemLayout,
-} from "../../work-items/index.js";
+import { workItemLayout } from "../../work-items/index.js";
 import { latestLaunchByItem } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl } from "./projects.js";
 import {
+  approvalOf,
   budgetExceededOf,
   closureOf,
   costUnaccountedOf,
@@ -50,7 +45,7 @@ import {
   stopOf,
 } from "./run-facts.js";
 import { effectiveCwd, latestRuns, ticketDirectories, workItemDirOf } from "./runs.js";
-import type { Item, ItemApproval, ItemCost, ItemFailure, ItemGroup, ItemStatus, Launch } from "./types.js";
+import type { Item, ItemCost, ItemFailure, ItemGroup, ItemStatus, Launch } from "./types.js";
 
 /** The box an item sits in, from what its status means: a verdict that is
  *  neither a failure nor a completion waits on a decision. */
@@ -137,43 +132,6 @@ function costOf(state: PersistedRun): ItemCost {
   // Deliberately NOT the stop condition: the `≥` is a property of the figure,
   // and it outlives an authorization that let the run continue.
   return itemCost(runSpend(state));
-}
-
-/**
- * The single pending approval of a stopped run.
- *
- * Gates are sequential, so a stopped run has exactly one. Its state is the
- * runner's own reading (`gateDecisionStatus`), judged on the artifact as it
- * stands NOW in the effective directory: an artifact rewritten since the approval
- * makes the decision stale, and a rejection the rework answered is `reworked`,
- * exactly as the gate and `--inspect` will say.
- */
-async function approvalOf(project: ProjectEntry, ticket: string, subject: string): Promise<ItemApproval | undefined> {
-  // The subject reaches a file path; an invalid one is dropped rather than
-  // joined, so a corrupt snapshot cannot steer the read out of `decisions/`.
-  if (!isValidSubjectToken(subject)) return undefined;
-
-  const store = new FileWorkItemArtifactStore({
-    cwd: project.cwd,
-    config: { specPath: project.specPath },
-    ticket,
-    ticketDir: ticket,
-  });
-  const status = await gateDecisionStatus(workItemDirOf(project, ticket), subject, (name) =>
-    store.readText(createArtifactRef(ticket, name)),
-  );
-  if (status.state === "absent") return { subject, state: "absent" };
-  const { decision } = status;
-  return {
-    subject,
-    state: status.state,
-    decidedAt: decision.decidedAt,
-    decidedBy: decision.decidedBy,
-    ...(status.state === "rejected" && decision.reason ? { reason: decision.reason } : {}),
-    ...((status.state === "rejected" || status.state === "reworked") && decision.round
-      ? { round: decision.round }
-      : {}),
-  };
 }
 
 /** Branch of the run, as the central history recorded it at finalization. */
@@ -264,6 +222,13 @@ function readTicketHead(workItemDir: string): string | undefined {
   }
 }
 
+/** The ticket title of the work item in `workItemDir`, or `undefined` when its
+ *  `ticket.md` is missing or has no heading. */
+export function readTicketTitle(workItemDir: string, ticket: string): string | undefined {
+  const head = readTicketHead(workItemDir);
+  return head === undefined ? undefined : titleOfTicketMarkdown(head, ticket);
+}
+
 async function buildItem(project: ProjectEntry, ticket: string, cache: RequestCache): Promise<Item | undefined> {
   const [selected] = latestRuns(project, ticket);
   if (!selected) return undefined;
@@ -282,8 +247,7 @@ async function buildItem(project: ProjectEntry, ticket: string, cache: RequestCa
   // A runner the dashboard just spawned is running before it has written
   // anything: the launch, not the snapshot, is what knows that. A closed run
   // waits on nobody, whatever its status says.
-  const ticketHead = readTicketHead(workItemDirOf(project, ticket));
-  const title = ticketHead === undefined ? undefined : titleOfTicketMarkdown(ticketHead, ticket);
+  const title = readTicketTitle(workItemDirOf(project, ticket), ticket);
   const group: ItemGroup = launch?.alive ? "running" : closed ? "done" : groupOf(status);
 
   return {

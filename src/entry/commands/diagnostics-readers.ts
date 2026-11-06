@@ -25,6 +25,7 @@ import {
   readRunJournal,
   runsLocationOf,
 } from "../../run/index.js";
+import { parseAge } from "../../shared/lib/durations.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import { gateDecisionStatus, isValidSubjectToken } from "../../work-items/index.js";
 import { isPathWithin } from "../../shared/lib/path-safety.js";
@@ -352,15 +353,6 @@ export function logsForTicket(
     if (log !== undefined) chunks.push(`===== ${stateStep.id} =====\n${log}`);
   }
   return chunks.length > 0 ? chunks.join("\n") : `No logs found for ${step ?? "this run"}.`;
-}
-
-export function parseAge(value = "30d"): number {
-  const match = value.trim().match(/^(\d+)([smhdw])$/i);
-  if (!match) throw new Error(`Invalid duration: ${value} (expected: 30d, 12h, 45m...)`);
-  const amount = Number(match[1]);
-  const unit = match[2]!.toLowerCase();
-  const factor = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[unit]!;
-  return amount * factor;
 }
 
 function compressAndRemove(path: string): number {

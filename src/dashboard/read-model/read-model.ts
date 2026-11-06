@@ -7,6 +7,8 @@ import { readFile, readImage, readTree } from "./explorer.js";
 import { listItems, readItem } from "./items.js";
 import { readLaunchesFor } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects } from "./projects.js";
+import { type ApiRunFilters, listApiRuns, readApiRun } from "./read-api.js";
+import type { ApiRunDetail, ApiRunList } from "./read-api.schema.js";
 import { readRecap } from "./recap.js";
 import { readRunJourney } from "./run-journey.js";
 import { type ReportRead, readReport } from "./report.js";
@@ -50,6 +52,10 @@ export interface ReadModel {
   image(project: string, ticket: string, path: string): ImageRead;
   launches(project: string, ticket: string): Launch[];
   stats(): StatsRead;
+  /** Read API v1: the root runs that pass `filters`, newest first. */
+  apiRuns(filters: ApiRunFilters): Promise<ApiRunList>;
+  /** Read API v1: one root run with its steps, or `undefined`. */
+  apiRun(project: string, ticket: string, runId: string): Promise<ApiRunDetail | undefined>;
 }
 
 export function createReadModel(options: ReadModelOptions = {}): ReadModel {
@@ -70,5 +76,7 @@ export function createReadModel(options: ReadModelOptions = {}): ReadModel {
     image: (project, ticket, path) => readImage(project, ticket, path, options),
     launches: (project, ticket) => readLaunchesFor(project, ticket, options),
     stats: () => readStats(options),
+    apiRuns: (filters) => listApiRuns(filters, options),
+    apiRun: (project, ticket, runId) => readApiRun(project, ticket, runId, options),
   };
 }
