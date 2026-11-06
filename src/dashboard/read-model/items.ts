@@ -20,19 +20,14 @@ import { createArtifactRef } from "../../shared/language/artifact-ports.js";
 import type { PersistedRun } from "../../run/index.js";
 import {
   awaitsHuman,
-  remainingWork,
   hasVerdict,
-  isClosureCurrent,
   isCompleted,
   isFailure,
   lastPassInterrupted,
   owesWork,
   type RunHistory,
-  readClosureAt,
   readRunHistory,
-  runProvesUnpricedSpend,
   runSpend,
-  strictCostAccountingFor,
   type HistoryEntry,
   readHistory,
 } from "../../run/index.js";
@@ -45,18 +40,17 @@ import {
 } from "../../work-items/index.js";
 import { latestLaunchByItem } from "./launches.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl } from "./projects.js";
+import {
+  budgetExceededOf,
+  closureOf,
+  costUnaccountedOf,
+  failureOf,
+  type RunFailure,
+  type RunStop,
+  stopOf,
+} from "./run-facts.js";
 import { effectiveCwd, latestRuns, ticketDirectories, workItemDirOf } from "./runs.js";
-import type {
-  Item,
-  ItemApproval,
-  ItemClosure,
-  ItemCost,
-  ItemFailure,
-  ItemGroup,
-  ItemStatus,
-  ItemStop,
-  Launch,
-} from "./types.js";
+import type { Item, ItemApproval, ItemCost, ItemFailure, ItemGroup, ItemStatus, Launch } from "./types.js";
 
 /** The box an item sits in, from what its status means: a verdict that is
  *  neither a failure nor a completion waits on a decision. */
@@ -81,47 +75,6 @@ function createCache(options: ReadModelOptions): RequestCache {
   return { history: new Map(), launches: latestLaunchByItem(options) };
 }
 
-/**
- * A run that hit its cost ceiling.
- *
- * `outcome.stopKind` is the answer of the generation that stopped, and the only
- * one that survives a `--budget` resume wiping `budget_exceeded`. The flag comes
- * next, and the sentence the report printed is the fallback for a snapshot
- * written before either existed.
- */
-function budgetExceededOf(state: PersistedRun): boolean {
-  if (state.outcome?.stopKind === "budget-exceeded") return true;
-  if (state.outcome?.stopKind === "cost-unaccounted") return false;
-  if (state.budget_exceeded === true) return true;
-  const text = `${state.outcome?.reason ?? ""} ${state.stopped_reason ?? ""}`;
-  return /budget exceeded|cost limit/i.test(text);
-}
-
-/**
- * A run that actually STOPPED because its spending stopped being accountable —
- * the only case where the dashboard may print the accounting banner and the
- * `--allow-unmetered` command.
- *
- * Keyed on a real stop, like `budgetExceededOf`: a ceiling to enforce, no human
- * authorization, evidence of unpriceable spend, and work left to do. Without
- * those, an unknown total is only a `≥` on a run nothing withheld anything from —
- * an uncapped run has no ceiling to lose, an authorized one already answered the
- * question, and a finished one has nothing left to withhold. The evidence is the
- * latch, or the attempts of a snapshot written before it existed, or the sentence
- * the report printed for a run older still.
- */
-function costUnaccountedOf(state: PersistedRun): boolean {
-  if (!strictCostAccountingFor(state.max_cost_usd, state.allow_unmetered)) return false;
-  if (remainingWork(state).steps.length === 0) return false;
-  // The stopping generation's own typed answer, when it wrote one: it also says
-  // NO for a run whose ledger is a lower bound but which stopped at its ceiling
-  // or failed for its own reason, which the evidence tiers below cannot tell
-  // apart.
-  if (state.outcome?.stopKind) return state.outcome.stopKind === "cost-unaccounted";
-  if (state.cost_unaccounted === true || runProvesUnpricedSpend(state)) return true;
-  return /cost unaccounted/i.test(`${state.outcome?.reason ?? ""} ${state.stopped_reason ?? ""}`);
-}
-
 /** The runner's failure kinds in the dashboard's words. */
 function failKindOf(kind: StepFailKind | undefined): ItemFailure["failKind"] {
   if (kind === "verdict") return "judgment";
@@ -135,48 +88,15 @@ function failCauseOf(cause: StepFailCause | undefined): ItemFailure["failCause"]
   return cause === "blocked" ? "blocked" : undefined;
 }
 
-/**
- * Structured cause of a clean stop.
- *
- * `outcome.stop` is the current shape; a run stopped before it existed carries
- * only the console sentence of `stopped_reason`, which becomes the detail with
- * no subject and no kind — the reader sees why, and no button claims to know
- * which approval would lift it.
- */
-function stopOf(state: PersistedRun): ItemStop {
-  const stop = state.outcome?.stop;
-  if (stop) {
-    return {
-      ...(stop.subject ? { subject: stop.subject } : {}),
-      ...(stop.kind ? { kind: stop.kind } : {}),
-      detail: stop.detail,
-      ...(stop.reworkable ? { reworkable: true } : {}),
-    };
-  }
-  return { detail: state.stopped_reason ?? state.outcome?.reason ?? "" };
-}
-
-function failureOf(state: PersistedRun): ItemFailure {
-  const failKind = failKindOf(state.outcome?.failKind);
-  const failCause = failCauseOf(state.outcome?.failCause);
+/** A failure as the morning box shows it. */
+function itemFailureOf(failure: RunFailure): ItemFailure {
+  const failKind = failKindOf(failure.kind);
+  const failCause = failCauseOf(failure.cause);
   return {
-    phase: state.outcome?.phase ?? "",
-    reason: state.outcome?.reason ?? state.stopped_reason ?? "",
+    phase: failure.phase,
+    reason: failure.reason,
     ...(failKind ? { failKind } : {}),
     ...(failCause ? { failCause } : {}),
-  };
-}
-
-/** Why an interrupted run has no verdict. A fixed sentence: the snapshot of a
- *  run nobody finished carries no outcome to quote. */
-const INTERRUPTED_REASON = "the runner process died without recording a verdict (crash, kill, or reboot)";
-
-/** The failure of a run whose runner died: the step it was in, when the snapshot
- *  recorded one, and why there is no verdict. */
-function interruptedFailureOf(state: PersistedRun): ItemFailure {
-  return {
-    phase: state.steps.find((step) => step.status === "running")?.id ?? "",
-    reason: INTERRUPTED_REASON,
   };
 }
 
@@ -194,7 +114,7 @@ function interruptedStepOf(
   runDir: string,
   state: PersistedRun,
   interrupted: boolean,
-  stop: ItemStop | undefined,
+  stop: RunStop | undefined,
 ): string | undefined {
   if (!interrupted && !(stop && !stop.subject)) return undefined;
   let attemptsByStep: RunHistory["attempts"];
@@ -254,20 +174,6 @@ async function approvalOf(project: ProjectEntry, ticket: string, subject: string
       ? { round: decision.round }
       : {}),
   };
-}
-
-/**
- * The hand closure of the run, while it still describes the snapshot.
- *
- * A closure taken on a snapshot the runner has since rewritten is ignored: the
- * run moved, so whatever it now waits on is new. A closure on a status nobody
- * waits on (PASS, RUNNING) is ignored too, rather than hiding a live run.
- */
-function closureOfRun(runDir: string, state: PersistedRun, status: ItemStatus): ItemClosure | undefined {
-  if (!awaitsHuman(status)) return undefined;
-  const closure = readClosureAt(runDir);
-  if (!closure || !isClosureCurrent(closure, state)) return undefined;
-  return { at: closure.closedAt, by: closure.closedBy };
 }
 
 /** Branch of the run, as the central history recorded it at finalization. */
@@ -364,14 +270,15 @@ async function buildItem(project: ProjectEntry, ticket: string, cache: RequestCa
 
   const { state, status, interrupted } = selected;
   const runId = state.runId ?? "";
-  const stop = status === "STOPPED" ? stopOf(state) : undefined;
+  const stop = stopOf(state, status);
+  const failure = failureOf(state, status, interrupted);
   const interruptedStep = interruptedStepOf(selected.runDir, state, interrupted, stop);
   const approval = stop?.subject ? await approvalOf(project, ticket, stop.subject) : undefined;
   const url = ticketUrl(project, ticket);
   const branch = runId ? branchOf(project, runId, cache) : undefined;
   const key = `${project.name}/${ticket}`;
   const launch = cache.launches.get(key);
-  const closed = closureOfRun(selected.runDir, state, status);
+  const closed = closureOf(selected.runDir, state, status);
   // A runner the dashboard just spawned is running before it has written
   // anything: the launch, not the snapshot, is what knows that. A closed run
   // waits on nobody, whatever its status says.
@@ -396,11 +303,7 @@ async function buildItem(project: ProjectEntry, ticket: string, cache: RequestCa
     group,
     awaitsHuman: awaitsHuman(status),
     ...(stop ? { stop } : {}),
-    ...(interrupted
-      ? { failure: interruptedFailureOf(state) }
-      : isFailure(status)
-        ? { failure: failureOf(state) }
-        : {}),
+    ...(failure ? { failure: itemFailureOf(failure) } : {}),
     ...(approval ? { approval } : {}),
     ...(budgetExceededOf(state) ? { budgetExceeded: true } : {}),
     ...(costUnaccountedOf(state) ? { costUnaccounted: true } : {}),
