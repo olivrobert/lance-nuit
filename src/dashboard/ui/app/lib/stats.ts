@@ -31,7 +31,7 @@ export interface StatsSort {
 /** The default order answers the first question a reader has: what cost most. */
 export const DEFAULT_SORT: StatsSort = { column: "cost", descending: true };
 
-export type SourceFilter = "all" | "live" | "archive";
+export type SourceFilter = "all" | "live" | "history";
 
 export type ScopeFilter = "delivery" | "all";
 

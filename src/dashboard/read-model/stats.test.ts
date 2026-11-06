@@ -8,6 +8,7 @@ import {
   makeTempDir,
   workItemDir,
   writeArtifact,
+  writeHistory,
   writeProjectsFile,
   writeRun,
 } from "./test-harness.ts";
@@ -251,89 +252,62 @@ test("stats: with shipping steps, a ticket passes once a run reached its handove
   expect(byTicket.get("DEMO-34")).toMatchObject({ outcome: "PASS", runs: [{ handover: "failed" }] });
 });
 
-test("stats: an archived run carries its handover", () => {
-  const home = kit();
-  listedProject(home);
-  writeUiFile(home, "stats.json", { delivery: { steps: ["create-mr"] } });
-  writeUiFile(home, "stats-archive.json", {
-    version: 1,
-    runs: [
-      { project: "demo-app", ticket: "OLD-2", runId: "a", pipeline: "feature", status: "PASS", handover: "shipped" },
-      { project: "demo-app", ticket: "OLD-3", runId: "b", pipeline: "feature", status: "PASS" },
-      { project: "demo-app", ticket: "OLD-4", runId: "c", pipeline: "feature", status: "FAIL", handover: "failed" },
-      { project: "demo-app", ticket: "OLD-5", runId: "d", pipeline: "feature", status: "PASS", handover: "yes" },
-    ],
-  });
-
-  const outcomes = Object.fromEntries(readStats().tickets.map((ticket) => [ticket.ticket, ticket.outcome]));
-
-  expect(outcomes).toEqual({ "OLD-2": "PASS", "OLD-3": "UNSHIPPED", "OLD-4": "PASS", "OLD-5": "UNSHIPPED" });
-});
-
-test("stats: archived runs are merged, and a run present in both is read live", () => {
+test("stats: a run whose snapshot is gone is read from its runs.jsonl line", () => {
   const home = kit();
   const project = listedProject(home);
   writeRun(project, "DEMO-11", "feature", { runId: "r-1", total_control: control(5, 10) });
-  writeUiFile(home, "stats-archive.json", {
-    version: 1,
-    generatedAt: "2026-09-20T00:00:00.000Z",
-    runs: [
-      { project: "demo-app", ticket: "DEMO-11", runId: "r-1", pipeline: "feature", costUsd: 99 },
-      { project: "demo-app", ticket: "DEMO-11", runId: "old", pipeline: "runner:feature", costUsd: 1, kind: "feature" },
-      {
-        project: "gone-app",
-        ticket: "OLD-1",
-        runId: "x",
-        pipeline: "bugfix",
-        status: "STOP",
-        costUsd: 2,
-        costEstimated: true,
-        activeMs: 60_000,
-        createdAt: "2026-07-01T00:00:00.000Z",
-        kind: "bug",
-      },
-      { project: "demo-app", ticket: "missing-run-id" },
-    ],
-  });
+  writeHistory(project, [
+    // Written before a resume the snapshot already holds: the snapshot wins.
+    { runId: "r-1", pipeline: "feature", ticket: "DEMO-11", costUsd: 99 },
+    { runId: "gone", pipeline: "feature", ticket: "DEMO-11", status: "FAIL", costUsd: 1, costStatus: "partial" },
+    { runId: "gone-child", pipeline: "lot", ticket: "DEMO-11", parentRunId: "gone", costUsd: 0.5 },
+    {
+      runId: "x",
+      pipeline: "bugfix",
+      ticket: "OLD-1",
+      costUsd: 2,
+      costUnknown: true,
+      startedAt: "2026-07-01T00:00:00.000Z",
+      endedAt: "2026-07-01T01:00:00.000Z",
+    },
+    { runId: "no-ticket", pipeline: "release", ticket: null, costUsd: 3 },
+  ]);
 
-  const { tickets, archive } = readStats();
+  const { tickets } = readStats();
 
-  expect(archive).toEqual({ status: "ok", generatedAt: "2026-09-20T00:00:00.000Z", runs: 3 });
-  const live = tickets.find((ticket) => ticket.ticket === "DEMO-11");
-  expect(live).toMatchObject({ cost: { usd: 6 }, source: "mixed", kind: "feature" });
+  expect(tickets.map((ticket) => ticket.ticket).sort()).toEqual(["DEMO-11", "OLD-1"]);
+  const mixed = tickets.find((ticket) => ticket.ticket === "DEMO-11");
+  expect(mixed).toMatchObject({ cost: { usd: 6, estimated: true }, source: "mixed" });
+  expect(mixed?.runs.map((run) => [run.runId, run.source, run.cost?.usd, run.status])).toEqual(
+    expect.arrayContaining([
+      ["r-1", "live", 5, "ABORTED"],
+      ["gone", "history", 1, "FAIL"],
+    ]),
+  );
   const old = tickets.find((ticket) => ticket.ticket === "OLD-1");
   expect(old).toMatchObject({
-    project: "gone-app",
-    source: "archive",
-    kind: "bug",
-    cost: { usd: 2, estimated: true },
-    activeMs: 60_000,
-    // A status the archive cannot vouch for, on a run nothing holds any more:
-    // an interrupted run, as the morning box would serve it live.
+    source: "history",
+    cost: { usd: 2, estimated: false, unknown: true },
+    firstAt: "2026-07-01T00:00:00.000Z",
+    lastAt: "2026-07-01T01:00:00.000Z",
+    // A line without a verdict, on a run nothing holds any more: an interrupted
+    // run, as the morning box would serve it from its snapshot.
     outcome: "ABORTED",
   });
-  expect(old?.ticketUrl).toBeUndefined();
+  // The line holds neither the active time nor the step statuses.
+  expect(old?.activeMs).toBeUndefined();
 });
 
-test("stats: a malformed archive is reported and ignored, the live tickets still read", () => {
+test("stats: a snapshot this release no longer reads falls back to its line", () => {
   const home = kit();
   const project = listedProject(home);
-  writeRun(project, "DEMO-12", "feature", { runId: "r-1", total_control: control(1, 1) });
-  writeUiFile(home, "stats-archive.json", "{ not json");
+  const runDir = writeRun(project, "DEMO-12", "feature", { runId: "v2", total_control: control(7, 1) });
+  writeFileSync(join(runDir, "state.json"), JSON.stringify({ schemaVersion: 2, runId: "v2", steps: [] }));
+  writeHistory(project, [{ runId: "v2", pipeline: "feature", ticket: "DEMO-12", status: "PASS", costUsd: 4 }]);
 
-  const { tickets, archive } = readStats();
+  const [ticket] = readStats().tickets;
 
-  expect(archive.status).toBe("invalid");
-  expect(tickets.map((ticket) => ticket.ticket)).toEqual(["DEMO-12"]);
-});
-
-test("stats: an archive with the wrong shape is invalid, a missing one is absent", () => {
-  const home = kit();
-  listedProject(home);
-  expect(readStats().archive).toEqual({ status: "absent" });
-
-  writeUiFile(home, "stats-archive.json", { version: 2, runs: [] });
-  expect(readStats().archive.status).toBe("invalid");
+  expect(ticket).toMatchObject({ ticket: "DEMO-12", source: "history", cost: { usd: 4 }, outcome: "PASS" });
 });
 
 test("stats: tickets are sorted costliest first", () => {

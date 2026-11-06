@@ -99,7 +99,7 @@ function RunRows({ runs }: { runs: StatsRun[] }): JSX.Element {
           <td />
           <td colSpan={2} className="small">
             <span className="mute">{run.pipeline || "—"}</span> <code>{shortRunId(run.runId)}</code>
-            {run.source === "archive" ? <span className="small mute"> · archive</span> : null}
+            {run.source === "history" ? <span className="small mute"> · history</span> : null}
           </td>
           <td className={styles.num}>{fmtCost(run.cost)}</td>
           <td className={styles.num}>{fmtDuration(run.activeMs)}</td>

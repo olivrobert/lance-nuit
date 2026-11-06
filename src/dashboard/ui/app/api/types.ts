@@ -46,7 +46,6 @@ export type {
   RunStepsView,
   RunStepView,
   RunTokens,
-  StatsArchiveState,
   StatsHandover,
   StatsRead,
   StatsRun,

@@ -33,7 +33,7 @@ const b = ticket("app/T-10", {
   kind: "feature",
   cost: { usd: 20, estimated: false },
   activeMs: 3000,
-  source: "archive",
+  source: "history",
 });
 const c = ticket("web/T-1", { kind: "bug", source: "mixed", outcome: "FAIL" });
 const d = ticket("web/T-3", { kind: "feature", cost: { usd: 1, estimated: true, unknown: true } });
@@ -68,7 +68,7 @@ describe("filterTickets", () => {
       filterTickets([a, b, c, d], { ...DEFAULT_FILTER, ...filter, scope: "all" }).map((entry) => entry.key);
     expect(keys({ project: "web", kind: null, source: "all" })).toEqual(["web/T-1", "web/T-3"]);
     expect(keys({ project: null, kind: "bug", source: "all" })).toEqual(["app/T-2", "web/T-1"]);
-    expect(keys({ project: null, kind: null, source: "archive" })).toEqual(["app/T-10", "web/T-1"]);
+    expect(keys({ project: null, kind: null, source: "history" })).toEqual(["app/T-10", "web/T-1"]);
     expect(keys({ project: null, kind: null, source: "live" })).toEqual(["app/T-2", "web/T-1", "web/T-3"]);
   });
 
