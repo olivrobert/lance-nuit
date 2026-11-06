@@ -249,12 +249,19 @@ src/dashboard/home/  the files under ~/.lance-nuit/ui/, one owner each:
                              FileUserList, FileProjectList, FileLaunchStore
                              (openDashboardHome binds the three to one home)
 src/dashboard/read-model/      every dashboard read, bound once as the ReadModel port
+  run-facts.ts               how a run ended (stop, failure, budget, approval,
+                             closure), read once for the inbox and the read API
+  read-api.ts                the read API's projection: every root run, filtered
+  read-api.schema.ts         its published contract, v1; generates docs/read-api/v1/
 src/dashboard/ui/              server side
   server.ts                  composition root: builds UiDeps, starts node:http
-  deps.ts                    UiDeps — readModel, home, launcher, terminals, workItems
-  router.ts                  host, method and same-origin checks, then the ROUTES table
-  routes/                    one module per /api resource; `open` or `operator` access
-  http/                      respond, body, guards, identity: the HTTP helpers
+  deps.ts                    UiDeps — readModel, home, launcher, terminals, workItems,
+                             corsOrigins
+  router.ts                  host, method and same-origin checks, the read API's
+                             preflight, then the ROUTES table
+  routes/                    one module per /api resource; `open` or `operator` access;
+                             `v1.ts` is the read API, a published contract
+  http/                      respond, body, guards, identity, cors: the HTTP helpers
   verbs.ts                   which verbs an item admits, and their exact argv
   launcher.ts                VerbLauncher: spawns the runner detached, records the launch
   tmux.ts, terminals.ts,

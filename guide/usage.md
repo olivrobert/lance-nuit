@@ -180,6 +180,11 @@ through an SSH tunnel that keeps the same port on both ends:
 `~/.lance-nuit/ui/users.json` (`{"users": ["Olivier"]}`); projects are added
 from the dashboard or in `~/.lance-nuit/ui/projects.json`.
 
+The same server answers a versioned, read-only [read API](read-api.md) under
+`/api/v1/` for dashboards and scripts of your own. `--cors-origin <origins>`
+(comma-separated, such as `http://localhost:3000`) lists the browser origins
+allowed to read it; nothing else under `/api/` opens to another origin.
+
 ### Review inbox
 
 Two tabs split the runs. **Inbox** holds what still needs a look, in the order
@@ -446,7 +451,9 @@ declared name and a same-origin request, every `/api/*` request must carry
 `Host: 127.0.0.1:<port>` or `localhost:<port>` (which blocks DNS rebinding),
 and typing into a terminal needs the viewer token its stream handed out.
 Anyone who can reach the port with a declared name can type into a shell as
-the user running the dashboard: keep it on loopback and behind the tunnel.
+the user running the dashboard: keep it on loopback and behind the tunnel. The
+[read API](read-api.md) only reads, needs no name, and answers a cross-origin
+browser only for the origins `--cors-origin` lists, without credentials.
 
 ### Ticket costs
 

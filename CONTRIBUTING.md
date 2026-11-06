@@ -45,6 +45,7 @@ bun test
 bun run typecheck
 bun run language:check
 bun run docs:dsl        # regenerates docs/DSL-API.md; commit the diff
+bun run docs:read-api   # regenerates docs/read-api/v1/*.schema.json; commit the diff
 bun run pack:audit
 bun run smoke:standalone
 bun run verify:production # clean tarball installation, execution/resume, external extension
@@ -135,6 +136,11 @@ beyond that belongs in the code, in a comment, or in the pull request.
   outside import through its entry. See
   [guide/architecture.md](guide/architecture.md#modules).
 - `docs/DSL-API.md` is generated. Never edit it by hand; run `bun run docs:dsl`.
+- `docs/read-api/v1/*.schema.json` is generated from
+  `src/dashboard/read-model/read-api.schema.ts`, the read API's contract. Run
+  `bun run docs:read-api` after changing it; a test fails while the files are
+  stale. Within version 1 the contract only grows (see
+  [guide/read-api.md](guide/read-api.md#compatibility)).
 - Semgrep rules live in `.semgrep.yml`. An `ERROR` rule must match nothing in
   the repository, so a hit always means a regression; a pattern that is
   legitimate here belongs at `WARNING`, which never blocks CI.
