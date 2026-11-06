@@ -220,7 +220,8 @@ lancenuit clean --logs-only --older-than 30d
 ```
 
 `lancenuit ui` serves a local [dashboard](guide/usage.md#dashboard): a review
-inbox, interactive runs, and what every ticket cost across your projects.
+inbox, interactive runs, and what every ticket cost across your projects. It
+also serves a versioned [read API](guide/read-api.md) for your own dashboards.
 
 ## What is in the box
 

@@ -59,6 +59,8 @@ provider-specific backend options: [generated DSL API](../docs/DSL-API.md).
 - [Core contract and extensions](packages-and-extensions.md) — keep the app
   cohesive while adding local or npm adapters such as Redmine.
 - [CLI options](cli-options.md) — runner flags and propagation rules.
+- [Read API](read-api.md) — the versioned JSON API under `/api/v1/` for your
+  own dashboards and scripts, and its CORS allowlist.
 - [Where kit files live](kit-paths.md) — project/user kit resolution and config
   precedence.
 - [Persistence](persistence.md) — snapshots, artifacts and their provenance,
