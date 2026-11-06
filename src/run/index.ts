@@ -134,10 +134,11 @@ export {
   emitRunStats,
   fmtInt,
   readHistory,
+  readHistoryRuns,
   statusBadge,
   summarizeHistory,
 } from "./stats/index.js";
-export type { HistoryAggregate, HistoryEntry, HistoryFilter, PipelineTotals } from "./stats/index.js";
+export type { HistoryAggregate, HistoryEntry, HistoryFilter, HistoryRun, PipelineTotals } from "./stats/index.js";
 export { createRunRef } from "./storage-ports.js";
 export type {
   RunEventStore,

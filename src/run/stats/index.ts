@@ -8,15 +8,16 @@
 // Writing a finished run to the history.
 export { emitRunStats } from "./run-stats.js";
 
-// Reading the history.
+// Reading the history: each run from its snapshot, else from its line.
 export {
   type HistoryAggregate,
   type HistoryEntry,
   type HistoryFilter,
+  type HistoryRun,
   type PipelineTotals,
   readHistory,
-  summarizeHistory,
 } from "./history-reader.js";
+export { readHistoryRuns, summarizeHistory } from "./history-runs.js";
 
 // Rendering.
 export { fmtInt, statusBadge } from "./stats-core.js";

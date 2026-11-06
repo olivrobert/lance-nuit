@@ -1,5 +1,5 @@
 // stats-core — single source for the run-stats schema, its token arithmetic,
-// and the cost and labels the history readers print.
+// and the labels the history readers print.
 //
 // Shape of an entry in the central pipeline-history/runs.jsonl projection:
 //   { runId, pipeline, ticket, ticketDir, sessionId, startedAt, endedAt,
@@ -7,10 +7,9 @@
 //     totals: { in, out, cacheRead, cacheWrite }, models: { <model-id>: tokens },
 //     profiles: { <role>: { steps, tokens, costUsd? } },
 //     lot, lotTitle, commit, fixEvents: [{ kind, phase, iter, contract, details }],
-//     costUsd? }   <- written by the runner (exact CLI cost); estimated from
-//                    pricing.json when absent.
+//     costUsd? }   <- the run's `runSpend` when the line was written; absent when
+//                    nothing priced it.
 
-import { type ProjectPricing, projectPricingForModel, tokenCostUsd } from "../../contracts/pricing.js";
 import type { RunOutcomeState } from "../persisted.js";
 
 export interface TokenCounts {
@@ -79,12 +78,6 @@ export interface RunStatsEntry {
   costUsd?: number;
 }
 
-/** What `entryCost` reads of a history entry. */
-export interface CostedEntry {
-  models?: Record<string, TokenCounts>;
-  costUsd?: number;
-}
-
 export const zeroTokens = (): TokenCounts => ({ in: 0, out: 0, cacheRead: 0, cacheWrite: 0 });
 
 // Add two counters already using the internal {in, out, cacheRead, cacheWrite} format.
@@ -105,46 +98,3 @@ const STATUS_BADGES: Readonly<Record<string, string>> = {
 
 export const statusBadge = (s?: string): string =>
   s !== undefined && Object.hasOwn(STATUS_BADGES, s) ? (STATUS_BADGES[s] as string) : `⚪ ${s || "?"}`;
-
-const spentTokens = (t: TokenCounts): number => (t.in || 0) + (t.out || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0);
-
-// Cost of a run from its model breakdown. Prices are never hardcoded because they
-// change; use the project's pricing.json, otherwise leave the cost absent (null).
-//
-// The rate lookup and the formula are the runner's (`contracts/pricing.ts`): a
-// second copy here priced the same run differently whenever one of them changed.
-// `in` is billed as is: every backend stores the non-cached input there (Codex is
-// normalized where its result is mapped), so cached reads are billed once, through
-// `cacheRead`.
-//
-// A model the table cannot price makes the whole run unpriceable, not cheaper: a
-// silent skip returned $0.00 for a table that simply did not list the model, and
-// the run then read as "priced, estimated" in every total. A table in another
-// currency prices no model (`projectPricingForModel`): the runner's `costUsd` is
-// always in dollars, and a total mixing the two would be in no currency at all.
-export function costOf(models?: Record<string, TokenCounts> | null, table?: ProjectPricing | null): number | null {
-  if (!table) return null;
-  let usd = 0;
-  let unpriced = 0;
-  for (const [model, t] of Object.entries(models || {})) {
-    const rate = projectPricingForModel(model, table);
-    if (!rate) {
-      // A model with no tokens costs nothing whether or not it is listed.
-      if (spentTokens(t) > 0) unpriced += 1;
-      continue;
-    }
-    usd += tokenCostUsd(
-      { output_tokens: t.out, cache_read_tokens: t.cacheRead, cache_creation_tokens: t.cacheWrite },
-      rate,
-      t.in,
-    );
-  }
-  return unpriced > 0 ? null : usd;
-}
-
-// Entry cost: costUsd written by the runner (the exact Claude CLI cost, including
-// subagents) takes precedence over the token × pricing estimate.
-export function entryCost(entry: CostedEntry | null | undefined, pricing?: ProjectPricing | null): number | null {
-  if (entry && typeof entry.costUsd === "number") return entry.costUsd;
-  return costOf(entry?.models, pricing);
-}

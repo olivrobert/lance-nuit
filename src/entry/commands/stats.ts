@@ -1,20 +1,26 @@
-// Cross-run statistics, read from the central `pipeline-history/runs.jsonl`.
+// Cross-run statistics: every run of the project, read from its snapshot while it
+// still reads and from its `pipeline-history/runs.jsonl` line once it is gone
+// (`run/stats/history-runs.ts`), the same runs and amounts as the dashboard's
+// statistics page.
 //
-// Like the other diagnostics it takes neither the lock nor the git guard, but
-// unlike them it needs no work item: the history is the only input, so the whole
-// project can be summarized without knowing which run to ask about.
+// Like the other diagnostics it takes neither the lock nor the git guard, and it
+// needs no work item: the whole project is summarized without knowing which run to
+// ask about.
 
 import type { RunnerArgs } from "../cli-options.js";
 import {
   isCompleted,
   fmtInt,
   type HistoryAggregate,
-  type HistoryEntry,
   type HistoryFilter,
+  type HistoryRun,
   type PipelineTotals,
+  type RunsLocation,
   statusBadge,
   summarizeHistory,
 } from "../../run/index.js";
+import { loadPipelineConfig } from "../../shared/env/config.js";
+import { DEFAULT_SPEC_PATH } from "../../shared/env/tickets.js";
 import { parseAge } from "../../shared/lib/durations.js";
 import { log } from "../../shared/runtime/logging.js";
 import type { RunnerCommand } from "./runner-command.js";
@@ -26,8 +32,8 @@ type StatsArgs = Pick<RunnerArgs, "ticket" | "pipelinePath" | "since" | "failure
 /** Runs listed individually before the aggregate, unless `--limit` says otherwise. */
 const DEFAULT_RUN_ROWS = 10;
 
-/** Every figure the history holds is in dollars: the runner's own, or one priced
- *  from a dollar table (`projectPricingForModel` prices nothing in another). */
+/** Every figure the history holds is in dollars: the runner's own, or one it
+ *  priced from a dollar table (`projectPricingForModel` prices nothing in another). */
 function money(amount: number): string {
   return `$${amount.toFixed(2)}`;
 }
@@ -55,12 +61,12 @@ function statusLine(byStatus: Record<string, number>): string {
 function costLine(
   totals: Pick<PipelineTotals, "costUsd" | "costMissing" | "costEstimated" | "costUnderCounted" | "runs">,
 ): string {
-  if (totals.costMissing === totals.runs) return "cost unavailable (no provider cost, no pricing.json)";
+  if (totals.costMissing === totals.runs) return "cost unavailable (no run reported an amount)";
   const priced = totals.runs - totals.costMissing;
   // A total containing a lower bound is itself a lower bound.
   const parts = [`${totals.costUnderCounted > 0 ? "≥ " : ""}${money(totals.costUsd)}`];
   if (priced > 0) parts.push(`avg ${money(totals.costUsd / priced)}`);
-  if (totals.costEstimated > 0) parts.push(`${totals.costEstimated} estimated from pricing.json`);
+  if (totals.costEstimated > 0) parts.push(`${totals.costEstimated} estimated from a rate table`);
   if (totals.costUnderCounted > 0) parts.push(`${totals.costUnderCounted} under-counted (unpriced attempts)`);
   if (totals.costMissing > 0) parts.push(`${totals.costMissing} unpriced, excluded`);
   return parts.join("  ");
@@ -76,18 +82,18 @@ function describeFilter(filter: HistoryFilter, since?: string): string {
   return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
-function renderRunRows(entries: readonly HistoryEntry[], limit: number): string[] {
+function renderRunRows(runs: readonly HistoryRun[], limit: number): string[] {
   const rows: string[] = [];
-  for (const entry of entries.slice(0, limit)) {
+  for (const { entry, spend } of runs.slice(0, limit)) {
     const started = entry.startedAt ? entry.startedAt.slice(0, 16).replace("T", " ") : "?";
-    const cost = typeof entry.costUsd === "number" ? `${entry.costUnknown ? "≥" : ""}${money(entry.costUsd)}` : "-";
+    const cost = spend.usd !== undefined ? `${spend.lowerBound ? "≥" : ""}${money(spend.usd)}` : "-";
     const target = entry.ticket ?? "-";
     const failure = !isCompleted(entry.status) && entry.failPhase ? `  fail: ${entry.failPhase}` : "";
     rows.push(
       `  ${started}  ${statusBadge(entry.status)}  ${entry.pipeline ?? "?"}  ${target}  ${cost}  ${entry.runId}${failure}`,
     );
   }
-  if (entries.length > limit) rows.push(`  ... ${entries.length - limit} more (use --limit)`);
+  if (runs.length > limit) rows.push(`  ... ${runs.length - limit} more (use --limit)`);
   return rows;
 }
 
@@ -95,7 +101,7 @@ function renderRunRows(entries: readonly HistoryEntry[], limit: number): string[
  *  that module renders one entry as markdown, this one renders a set as console
  *  text, and merging the two would give either format the other's constraints. */
 export function renderStats(
-  entries: readonly HistoryEntry[],
+  runs: readonly HistoryRun[],
   aggregate: HistoryAggregate,
   options: { filterLabel?: string; runRows?: number } = {},
 ): string {
@@ -104,7 +110,7 @@ export function renderStats(
     const hint =
       aggregate.childrenSkipped > 0
         ? " Only nested runs matched; use --include-children to list them."
-        : " Run a pipeline, or check that .lance-nuit/pipeline-history/runs.jsonl exists.";
+        : " Run a pipeline, or check that the work items or .lance-nuit/pipeline-history/runs.jsonl hold one.";
     return `No run in history${label}.${hint}`;
   }
 
@@ -159,10 +165,20 @@ export function renderStats(
     }
   }
 
-  const rows = renderRunRows(entries, options.runRows ?? DEFAULT_RUN_ROWS);
+  const rows = renderRunRows(runs, options.runRows ?? DEFAULT_RUN_ROWS);
   if (rows.length > 0) lines.push("", "Runs", ...rows);
 
   return lines.join("\n");
+}
+
+/** Where the project keeps its runs. A malformed `config.json` costs a custom
+ *  work-item root, not the summary: the runs' lines are still read. */
+function historyLocation(cwd: string): RunsLocation {
+  try {
+    return { cwd, specPath: loadPipelineConfig(cwd).specPath };
+  } catch {
+    return { cwd, specPath: DEFAULT_SPEC_PATH };
+  }
 }
 
 export const statsCommand: RunnerCommand = {
@@ -191,9 +207,9 @@ export const statsCommand: RunnerCommand = {
       ...(args.includeChildren ? { includeChildren: true } : {}),
     };
 
-    const { entries, aggregate } = summarizeHistory(process.cwd(), filter);
+    const { runs, aggregate } = summarizeHistory(historyLocation(process.cwd()), filter);
     log(
-      renderStats(entries, aggregate, {
+      renderStats(runs, aggregate, {
         filterLabel: describeFilter(filter, args.since),
         ...(args.limit ? { runRows: args.limit } : {}),
       }),

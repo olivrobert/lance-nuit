@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { parseRunnerArgs } from "../cli/parse.js";
 import { composeRunnerRegistries } from "../composition/registries.js";
 import { setLogInterceptor } from "../../shared/runtime/logging.js";
-import { aggregateHistory, type HistoryEntry } from "../../run/stats/history-reader.js";
+import { aggregateHistory, type HistoryEntry, type HistoryRun } from "../../run/stats/history-reader.js";
+import { lineSpend } from "../../run/stats/history-runs.js";
 import { COMMANDS } from "./command.js";
 import { renderStats, statsCommand } from "./stats.js";
 import { WRAPPER_COMMANDS } from "./wrapper-help.js";
@@ -24,8 +25,14 @@ function entry(overrides: Partial<HistoryEntry> & { runId: string }): HistoryEnt
   } as HistoryEntry;
 }
 
+/** Runs whose snapshot is gone, read from their lines alone. */
+function runs(entries: readonly HistoryEntry[]): HistoryRun[] {
+  return entries.map((read) => ({ entry: read, spend: lineSpend(read) }));
+}
+
 function render(entries: readonly HistoryEntry[]): string {
-  return renderStats(entries, aggregateHistory(entries));
+  const read = runs(entries);
+  return renderStats(read, aggregateHistory(read));
 }
 
 test("stats: an empty history explains where to look instead of printing zeros", () => {
@@ -78,15 +85,15 @@ test("stats: several pipelines get a breakdown, a single one does not repeat its
 });
 
 test("stats: excluded nested runs are explained, not silently dropped", () => {
-  const entries = [entry({ runId: "parent" })];
+  const read = runs([entry({ runId: "parent" })]);
 
-  expect(renderStats(entries, aggregateHistory(entries, null, 2))).toContain("2 nested run(s) excluded");
+  expect(renderStats(read, aggregateHistory(read, 2))).toContain("2 nested run(s) excluded");
 });
 
 test("stats: the run list is bounded and says how much it withheld", () => {
-  const entries = Array.from({ length: 4 }, (_unused, index) => entry({ runId: `run-${index}` }));
+  const read = runs(Array.from({ length: 4 }, (_unused, index) => entry({ runId: `run-${index}` })));
 
-  const output = renderStats(entries, aggregateHistory(entries), { runRows: 2 });
+  const output = renderStats(read, aggregateHistory(read), { runRows: 2 });
 
   expect(output).toContain("run-0");
   expect(output).toContain("... 2 more (use --limit)");

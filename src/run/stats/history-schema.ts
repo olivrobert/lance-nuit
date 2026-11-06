@@ -51,7 +51,7 @@ import type { TokenCounts } from "./stats-core.js";
  * ------------------------------------------------------------------------- */
 
 const USAGE_STATUSES = ["partial", "unavailable"] as const satisfies readonly UsageStatus[];
-const RUN_STATS_STATUSES = [
+export const RUN_STATS_STATUSES = [
   "PASS",
   "FAIL",
   "STOPPED",
