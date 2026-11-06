@@ -697,12 +697,26 @@ At finalization the runner projects one entry per logical `runId` into:
 .lance-nuit/pipeline-history/runs.jsonl
 ```
 
-Resuming atomically replaces that run's line. This central file is the only
-run-statistics projection; nothing is mirrored per work item. Statistics emission
-is best effort and cannot change the run outcome.
+Resuming atomically replaces that run's line; nothing is mirrored per work item.
+Statistics emission is best effort and cannot change the run outcome.
 The projection includes status/outcome, phases, models, profiles, tokens, costs,
 commit/branch when available, a relative source run directory, and the parent
-`runId` when the run was nested.
+`runId` when the run was nested. Its cost is the run's `runSpend` at that
+moment: `costUsd`, `costUnknown` for a floor, `costStatus: "partial"` for an
+amount a rate table produced.
+
+The line is a copy, not the record: the snapshot is. It matters once the
+snapshot is gone — its run directory or work item deleted, or written in a
+snapshot format this release no longer reads — because the line is kept apart
+from the work items and outlives them. The history of a project is therefore
+read in one place, `readHistoryRuns` (`run/stats/history-runs.ts`), by
+`lancenuit stats` and the dashboard's statistics page alike: every run from its
+snapshot while it still reads, with its current `runSpend` — a resume or a
+death since the line was written included — and from its line otherwise; a run
+not projected yet (in flight, or its emission failed) is read from its snapshot
+alone. The two screens therefore list the same runs at the same amounts. A run
+read from its line keeps only what the line holds: no active time, no step
+statuses.
 
 A nested run gets its own line, but its usage is also folded into its parent's
 step: summing every line would count the same spend twice. `parentRunId` is what
@@ -721,16 +735,15 @@ lancenuit stats --failures --limit 20
 ```
 
 The summary answers what a single run's state cannot: what a pipeline has cost,
-which phase keeps failing, and where the tokens go per profile. Cost is exact when
-the provider reported it, estimated when the runner computed it from a rate table
-or when `stats` derives it from `pipeline-history/pricing.json` (with the
-runner's own rate lookup and formula, `contracts/pricing.ts`, so a model the
-runner cannot price from that file is unpriced here too), and reported as
-unavailable rather than as zero when neither applies — a total mixing exact and
+which phase keeps failing, and where the tokens go per profile. A run's cost is
+the one `readHistoryRuns` read: exact when the provider reported it, estimated
+when the runner computed it from a rate table (`pipeline-history/pricing.json`
+included, applied when each attempt closed), and reported as unavailable rather
+than as zero when the run recorded no amount — a total mixing exact and
 estimated figures says how many runs were estimated, and how many were left out.
-Every figure is in USD: a `pricing.json` declaring another `_currency` is ignored
-here as it is by the runner, so its runs count as unpriced instead of adding
-euros to dollars.
+`stats` prices nothing itself: a run the runner could not price stays unpriced,
+as it is on the dashboard. Tokens, phases and profiles come from the lines; a
+run not projected yet counts in the cost, not in those breakdowns.
 
 Inspect current state and attempt logs with the wrapper:
 

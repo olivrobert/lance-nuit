@@ -157,7 +157,7 @@ the files inside import each other freely.
 | Module | Entry | Owns |
 | --- | --- | --- |
 | `src/run/record/` | `index.ts` | A run: its snapshot (`state.json`), journal (`events.jsonl`), attempt logs and closure file; the meaning of a run status; every write to a run (transitions, named writes, opening and restoring); the cost ledger, budget and cost gate. Outside it a run is a read-only `RunView` (§7). |
-| `src/run/stats/` | `index.ts` | The cross-run history (`pipeline-history/runs.jsonl`): one summary per finished run, its readers, and the cost they estimate with the runner's rate lookup. |
+| `src/run/stats/` | `index.ts` | The cross-run history (`pipeline-history/runs.jsonl`): one summary per finished run, and the one reader of the history, which takes each run from its snapshot while it reads and from its line once it is gone. |
 | `src/work-items/store/` | `index.ts` | What the runner keeps beside a ticket, outside any run: artifacts, the human decisions bound to them and the gate status they give, provenance and freshness, and the work-item layout. |
 | `src/work-items/providers/` | `registry.ts` | The tracker adapters (Jira, GitHub, …) behind the work-item contract. |
 | `src/execution/step/` | `step-loop.ts` | Loading the definition and selection a run opens with; executing a step: admission, attempts, retries, verdicts, repairs, composed children. |
@@ -546,8 +546,8 @@ honest:
   `run/stats/history-schema.ts`) that fails its schema is skipped so one
   truncated write never costs the whole file (`diagnoseHistoryEntry`); a
   malformed `pricing.json` is reported once by name and treated as absent
-  (`shared/env/pricing.schema.ts`), because pricing is optional and statistics readers
-  must keep working without it; **no line of the run journal (`events.jsonl`,
+  (`shared/env/pricing.schema.ts`), because pricing is optional and the backends
+  that price from it must keep working without it; **no line of the run journal (`events.jsonl`,
   `run/record/journal-schema.ts`) is ever discarded** — the file doubles as the live
   feed, so a reader classifies every line as `known`, `unknown` (a type outside
   the contract, which is most of a real journal), `invalid` (a contracted type
