@@ -17,7 +17,7 @@ import type { RunnerCommand } from "./runner-command.js";
 import { errorMessage } from "./shared.js";
 
 /** Options this command reads. */
-type UiArgs = Pick<RunnerArgs, "port">;
+type UiArgs = Pick<RunnerArgs, "port" | "corsOrigin">;
 
 /**
  * Signals a foreground command is expected to honour.
@@ -58,6 +58,7 @@ export async function serveUi(args: UiArgs): Promise<number> {
     // Built-in providers only: the dashboard spans projects, each with its own manifest.
     running = await startUiServer({
       port: args.port ?? DEFAULT_UI_PORT,
+      corsOrigins: args.corsOrigin ?? [],
       workItems: createDefaultWorkItemGatewayRegistry(),
       sessionCommand: reopenSessionCommand(createDefaultAgentBackendRegistry()),
     });

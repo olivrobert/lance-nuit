@@ -7,6 +7,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { UI_HOST } from "../../shared/lib/ui-defaults.js";
 import type { UiDeps } from "./deps.js";
+import { answerPreflight } from "./http/cors.js";
 import { isExpectedHost, isSameOrigin, pathSegments } from "./http/guards.js";
 import { identityOf } from "./http/identity.js";
 import { sendError, sendMethodNotAllowed, sendNotFound } from "./http/respond.js";
@@ -21,6 +22,7 @@ import { sessionsRoute } from "./routes/sessions.js";
 import { serveStatic } from "./routes/static.js";
 import { statsRoute } from "./routes/stats.js";
 import { terminalsRoute } from "./routes/terminals.js";
+import { v1Route } from "./routes/v1.js";
 
 const ROUTES: Readonly<Record<string, Route>> = {
   me: meRoute,
@@ -32,6 +34,7 @@ const ROUTES: Readonly<Record<string, Route>> = {
   sessions: sessionsRoute,
   terminals: terminalsRoute,
   actions: actionsRoute,
+  v1: v1Route,
 };
 
 /** Where the server listens: the only names a request may arrive under. */
@@ -65,6 +68,12 @@ export async function route(req: IncomingMessage, res: ServerResponse, deps: UiD
 
   if (!isExpectedHost(req, host, port)) {
     sendError(res, 403, "unexpected Host header");
+    return;
+  }
+  // A browser asks before reading the read API from another origin. Answered
+  // here, before the method check that would turn the question into a 405.
+  if (method === "OPTIONS" && segments[1] === "v1") {
+    answerPreflight(req, res, deps.corsOrigins);
     return;
   }
   if (!isApiMethod(method)) {
