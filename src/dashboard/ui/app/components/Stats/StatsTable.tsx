@@ -101,13 +101,7 @@ function RunRows({ runs }: { runs: StatsRun[] }): JSX.Element {
             <span className="mute">{run.pipeline || "—"}</span> <code>{shortRunId(run.runId)}</code>
             {run.source === "archive" ? <span className="small mute"> · archive</span> : null}
           </td>
-          <td className={styles.num}>
-            {fmtCost({
-              ...(run.costUsd !== undefined ? { usd: run.costUsd } : {}),
-              estimated: run.costEstimated === true,
-              unknown: run.costUnknown === true,
-            })}
-          </td>
+          <td className={styles.num}>{fmtCost(run.cost)}</td>
           <td className={styles.num}>{fmtDuration(run.activeMs)}</td>
           <td />
           <td />
@@ -162,13 +156,7 @@ export function StatsTable({
                   <td>
                     <span className={cx(styles.kind, styles[ticket.kind])}>{ticket.kind}</span>
                   </td>
-                  <td className={styles.num}>
-                    {fmtCost({
-                      ...(ticket.costUsd !== undefined ? { usd: ticket.costUsd } : {}),
-                      estimated: ticket.costEstimated,
-                      unknown: ticket.costUnknown,
-                    })}
-                  </td>
+                  <td className={styles.num}>{fmtCost(ticket.cost)}</td>
                   <td className={styles.num}>{fmtDuration(ticket.activeMs)}</td>
                   <td className={styles.num}>{fmtDuration(spanMs(ticket))}</td>
                   <td className={styles.num}>

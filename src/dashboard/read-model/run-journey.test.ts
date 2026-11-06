@@ -76,7 +76,8 @@ test("every attempt of the run comes in the order it started, named after its st
     ["implement", 1],
     ["review", 2],
   ]);
-  expect(journey?.attempts[0]).toMatchObject({ costUsd: 1.2, model: "claude-opus-5-5", status: "done" });
+  expect(journey?.attempts[0]).toMatchObject({ cost: { usd: 1.2 }, model: "claude-opus-5-5", status: "done" });
+  expect(journey?.mainModel).toBe("claude-opus-5-5");
   expect(journey?.maxCostUsd).toBe(15);
   expect(journey?.startedAt).toBe("2026-09-05T07:00:00.000Z");
 });

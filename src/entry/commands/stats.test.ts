@@ -25,7 +25,7 @@ function entry(overrides: Partial<HistoryEntry> & { runId: string }): HistoryEnt
 }
 
 function render(entries: readonly HistoryEntry[]): string {
-  return renderStats(entries, aggregateHistory(entries), "$");
+  return renderStats(entries, aggregateHistory(entries));
 }
 
 test("stats: an empty history explains where to look instead of printing zeros", () => {
@@ -80,13 +80,13 @@ test("stats: several pipelines get a breakdown, a single one does not repeat its
 test("stats: excluded nested runs are explained, not silently dropped", () => {
   const entries = [entry({ runId: "parent" })];
 
-  expect(renderStats(entries, aggregateHistory(entries, null, 2), "$")).toContain("2 nested run(s) excluded");
+  expect(renderStats(entries, aggregateHistory(entries, null, 2))).toContain("2 nested run(s) excluded");
 });
 
 test("stats: the run list is bounded and says how much it withheld", () => {
   const entries = Array.from({ length: 4 }, (_unused, index) => entry({ runId: `run-${index}` }));
 
-  const output = renderStats(entries, aggregateHistory(entries), "$", { runRows: 2 });
+  const output = renderStats(entries, aggregateHistory(entries), { runRows: 2 });
 
   expect(output).toContain("run-0");
   expect(output).toContain("... 2 more (use --limit)");

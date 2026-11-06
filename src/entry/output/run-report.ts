@@ -9,13 +9,14 @@ import type {
 import { backendSpecForStep } from "../../contracts/backends.js";
 import type { StepStatus, DeepReadonly, RunStepView, RunView } from "../../run/index.js";
 import {
-  aggregateControl,
-  aggregateUsage,
-  costIsLowerBound,
   isCompleted,
   type RunEndingKind,
+  type RunSpend,
   replayedAfterInterruption,
   runEnding,
+  runEventsFilePath,
+  runSpend,
+  runUsage,
 } from "../../run/index.js";
 
 export interface RunReportOutcome {
@@ -30,7 +31,6 @@ export interface RunReportOutcome {
    *  work over that uncertainty. This — not `costUnaccounted` — is what earns the
    *  `cost` headline and the `--allow-unmetered` recovery line. */
   costUnaccountedStop?: boolean;
-  cumulativeCost: number;
   /** Steps this invocation's selectors left out in reconcile mode. */
   setAside?: readonly string[];
 }
@@ -97,7 +97,8 @@ export interface RunReport {
   failedStep?: string;
   steps: RunReportStep[];
   statusCounts: Record<StepStatus, number>;
-  totalControl: DeepReadonly<StepControl>;
+  /** What the run spent, as every other reader of the run prints it. */
+  spend: RunSpend;
   totalUsage?: DeepReadonly<StepUsage>;
   /** `costUnknown`: an attempt spent tokens no pricing table could price, so
    * `spent` is a lower bound and the limit was not strictly enforceable. */
@@ -305,7 +306,7 @@ export function buildRunReport(
   const kind = reportKind(run, outcome);
   const resources: RunReportResource[] = [
     { label: "run", path: run.run_dir },
-    { label: "events", path: join(run.run_dir, "events.jsonl") },
+    { label: "events", path: runEventsFilePath(run.run_dir) },
   ];
   if (options.statsPath) resources.push({ label: "stats", path: options.statsPath });
   if (run.outcome?.logPath)
@@ -314,12 +315,7 @@ export function buildRunReport(
       path: join(run.run_dir, run.outcome.logPath),
     });
 
-  const totalControl = run.total_control ?? aggregateControl(run.steps);
-  // The ledger stops at the last attempt the loop charged itself. An attempt
-  // killed by a signal is closed by `closeAttempt` from the signal handler,
-  // outside the loop's ledger, so the step totals can be ahead of it — and the
-  // same screen would print two different amounts for the same run.
-  const spent = Math.max(outcome.cumulativeCost, totalControl.total_cost_usd ?? 0);
+  const spend = runSpend(run);
 
   return {
     kind,
@@ -342,15 +338,10 @@ export function buildRunReport(
       ...(replayedAfterInterruption(step) ? { replayedAfterInterruption: true as const } : {}),
     })),
     statusCounts: statusCounts(run.steps),
-    totalControl,
-    totalUsage: run.total_usage ?? aggregateUsage(run.steps),
+    spend,
+    totalUsage: runUsage(run),
     budget: run.max_cost_usd
-      ? {
-          spent,
-          limit: run.max_cost_usd,
-          // The `≥` the dashboard prints for the same run.
-          ...(costIsLowerBound(run) ? { costUnknown: true } : {}),
-        }
+      ? { spent: spend.usd ?? 0, limit: run.max_cost_usd, ...(spend.lowerBound ? { costUnknown: true } : {}) }
       : undefined,
     resources,
     resumptions: resumptions(run, failed, kind, registry),

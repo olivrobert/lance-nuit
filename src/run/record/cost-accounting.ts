@@ -64,7 +64,7 @@ import type { Run } from "./run.js";
 import { writable } from "./run.js";
 import { type RunBudget, remainingBudget } from "./budget.js";
 import { appendRunEvent } from "./run-journal.js";
-import { usageDelta } from "./cost-figures.js";
+import { measuredTokens, usageDelta } from "./cost-figures.js";
 
 /** Anything that carries an attempt's or a step's settled figures. Structural on
  *  purpose: an in-memory `RunStep`, a `PersistedStepState`, and a
@@ -83,10 +83,22 @@ export interface SpendingStep extends SpendFigures {
 /** Figures as code outside the module holds them, through a `RunView`. */
 type FiguresView = DeepReadonly<SpendFigures>;
 
+/** A run as the readers of its spend need it: executing (a `RunView`) or read
+ *  from its snapshot (a `PersistedRun`). */
+export interface SpendingRun {
+  readonly steps: readonly (DeepReadonly<SpendingStep> & {
+    /** A composed node's child calls: one still out holds spend the node lacks. */
+    readonly orchestration?: { readonly children: readonly { readonly status: string }[] };
+  })[];
+  readonly total_control?: DeepReadonly<StepControl>;
+  readonly total_usage?: DeepReadonly<StepUsage>;
+  readonly cost_unaccounted?: boolean;
+}
+
 /** A usage value as the module shares it. Every charge replaces a step's or a
  *  run's usage with a new object and none is changed in place, so one usage may
  *  stand at once for an attempt, its step total and a child reference. It leaves
- *  the module only read-only (a `RunView`, `aggregateUsage`), and no code here
+ *  the module only read-only (a `RunView`, `runUsage`), and no code here
  *  writes one. */
 function usageValue(usage: DeepReadonly<StepUsage> | undefined): StepUsage | undefined {
   return usage as StepUsage | undefined;
@@ -167,48 +179,26 @@ export function sumStepUsage(steps: readonly FiguresView[]): StepUsage | undefin
   return total;
 }
 
-/** `sumStepUsage` for a reader outside the module. Read-only because the sum may
- *  be a step's own usage: writing it would rewrite that step's tokens. */
-export function aggregateUsage(steps: readonly FiguresView[]): DeepReadonly<StepUsage> | undefined {
-  return sumStepUsage(steps);
-}
-
 /**
  * Return the run-level control when it is already materialized, otherwise derive
  * it from the steps. Resume snapshots can contain either form: using this one
- * fallback keeps budget seeding and child reconciliation from repeating their own
- * step reductions (and from disagreeing about the fallback semantics).
+ * fallback keeps budget seeding, child reconciliation and every reader of a run's
+ * spend (`runSpend`) from repeating their own step reductions.
  */
-export function controlForRun(run: Pick<RunView, "steps" | "total_control">): StepControl {
+function controlForRun(run: Pick<SpendingRun, "steps" | "total_control">): DeepReadonly<StepControl> {
   return run.total_control ?? aggregateControl(run.steps);
 }
 
 /** Token counterpart of `controlForRun`: the run's materialized usage when it has
- *  one, otherwise the sum of its steps. */
-export function usageForRun(run: Pick<RunView, "steps" | "total_usage">): StepUsage | undefined {
+ *  one, otherwise the sum of its steps. Read-only because the sum may be a step's
+ *  own usage: writing it would rewrite that step's tokens. */
+export function runUsage(run: Pick<SpendingRun, "steps" | "total_usage">): DeepReadonly<StepUsage> | undefined {
   return usageValue(run.total_usage) ?? sumStepUsage(run.steps);
-}
-
-/** A run's measured cost, or `fallback` when it measured nothing. A child that
- *  died before pricing anything still reports the ledger the loop kept for it. */
-export function measuredRunCost(run: Pick<RunView, "steps" | "total_control">, fallback: number): number {
-  const measured = controlForRun(run).total_cost_usd ?? 0;
-  return measured || fallback;
 }
 
 // ---------------------------------------------------------------------------
 // What the figures prove.
 // ---------------------------------------------------------------------------
-
-/** Tokens a provider actually counted. */
-function consumedTokens(usage?: DeepReadonly<StepUsage>): number {
-  return (
-    (usage?.input_tokens ?? 0) +
-    (usage?.output_tokens ?? 0) +
-    (usage?.cache_read_tokens ?? 0) +
-    (usage?.cache_creation_tokens ?? 0)
-  );
-}
 
 /**
  * Whether these figures prove unpriceable CONSUMPTION, the only thing that stops
@@ -223,7 +213,7 @@ function consumedTokens(usage?: DeepReadonly<StepUsage>): number {
  */
 export function isUnpricedSpend(control?: StepControl, usage?: DeepReadonly<StepUsage>): boolean {
   if (control?.cost_unknown !== true) return false;
-  return consumedTokens(usage) > 0 || control.total_cost_usd != null;
+  return measuredTokens(usage) > 0 || control.total_cost_usd != null;
 }
 
 /**
@@ -267,9 +257,9 @@ export function runProvesUnpricedSpend(
  * or uncapped run also prints `≥`.
  */
 export function costIsLowerBound(run: {
-  cost_unaccounted?: boolean;
-  total_control?: StepControl;
-  steps?: readonly { control?: StepControl; attempts?: readonly FiguresView[] }[];
+  readonly cost_unaccounted?: boolean;
+  readonly total_control?: DeepReadonly<StepControl>;
+  readonly steps?: readonly DeepReadonly<SpendingStep>[];
 }): boolean {
   if (run.cost_unaccounted === true || run.total_control?.cost_unknown === true) return true;
   return (run.steps ?? []).some(
@@ -277,6 +267,69 @@ export function costIsLowerBound(run: {
       step.control?.cost_unknown === true ||
       (step.attempts ?? []).some((attempt) => attempt.control?.cost_unknown === true),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Spend as a reader prints it.
+// ---------------------------------------------------------------------------
+
+/** A spend figure as every reader prints it: the amount, where it came from, and
+ *  whether it is a floor. */
+export interface Spend {
+  /** Dollars; absent when nothing reported a figure. */
+  usd?: number;
+  /** A rate table produced the figure rather than the provider (`~`). */
+  estimated: boolean;
+  /** Some spend could not be priced: the figure is a floor (`≥`), never an exact
+   *  amount, least of all `$0.00`. */
+  lowerBound: boolean;
+}
+
+/** What a run spent, and the time its steps were accounted for: absent while no
+ *  step was accounted and no finalization wrote a total, never a made-up zero. */
+export interface RunSpend extends Spend {
+  durationMs?: number;
+}
+
+/** What one step or one attempt spent, from the figures it settled. A step total
+ *  keeps `cost_unknown` once any of its attempts carried it. */
+export function figuresSpend(control: DeepReadonly<StepControl> | undefined): Spend {
+  const usd = control?.total_cost_usd;
+  return {
+    ...(usd !== undefined ? { usd } : {}),
+    estimated: control?.cost_estimated === true,
+    lowerBound: control?.cost_unknown === true,
+  };
+}
+
+/**
+ * Whether a composed child is still out: launched (`running`) and not yet
+ * reconciled into its node, which happens once the child's loop returns. A
+ * parent read meanwhile, or whose runner died during the child, holds none of
+ * that child's spend.
+ */
+function hasChildInFlight(run: Pick<SpendingRun, "steps">): boolean {
+  return run.steps.some((step) => step.orchestration?.children.some((child) => child.status === "running") === true);
+}
+
+/**
+ * What a run spent: the one reading the console report, the history, the
+ * dashboard and the statistics print, so the same run never shows two amounts.
+ *
+ * The amount is the one the ledger was seeded from (`controlForRun`): the total
+ * a finalization materialized, or the step totals of a run still in flight. The
+ * loop's ledger never holds more: every charge it makes reaches a step total
+ * too, and the signal handler closes an attempt on the step total alone.
+ */
+export function runSpend(run: Pick<SpendingRun, "steps" | "total_control" | "cost_unaccounted">): RunSpend {
+  const control = controlForRun(run);
+  const accounted = run.total_control !== undefined || run.steps.some((step) => step.control !== undefined);
+  return {
+    ...figuresSpend(control),
+    // A child still out spent money its node does not hold yet: a floor.
+    lowerBound: costIsLowerBound(run) || hasChildInFlight(run),
+    ...(accounted ? { durationMs: control.duration_ms } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -316,7 +369,7 @@ type ChargedRun = Pick<Run, "total_control" | "total_usage" | "cost_unaccounted"
 /**
  * Materialized totals describe the generation that finalized them. Any charge
  * reaching the run makes the steps the more complete record, so the totals are
- * dropped and `controlForRun` / `usageForRun` derive them until the next
+ * dropped and `controlForRun` / `runUsage` derive them until the next
  * finalization writes them again.
  */
 function invalidateRunTotals(run: Pick<Run, "total_control" | "total_usage">): void {
@@ -455,8 +508,6 @@ export interface ChildReconciliation {
   ref: ChildRefView;
   child: RunView;
   budget: RunBudget;
-  /** Cost the loop kept for a child whose own totals measured nothing. */
-  fallbackCost: number;
 }
 
 /**
@@ -475,23 +526,24 @@ export function chargeChildReconciliation(input: ChildReconciliation): number {
   const parent = writable(input.parent);
   const step = writable(input.step);
   const ref = writable(input.ref);
-  const totalCost = Math.max(0, measuredRunCost(child, input.fallbackCost));
+  const spend = runSpend(child);
+  const totalCost = Math.max(0, spend.usd ?? 0);
   const previousCost = Math.max(0, ref.accountedCostUsd ?? 0);
   const delta = Math.max(0, totalCost - previousCost);
-  const totalDuration = Math.max(0, controlForRun(child).duration_ms);
+  const totalDuration = Math.max(0, spend.durationMs ?? 0);
   const previousDuration = Math.max(0, ref.accountedDurationMs ?? 0);
   const durationDelta = Math.max(0, totalDuration - previousDuration);
   // Tokens travel with the dollars. Accounting only `control` left the parent's
   // dollars including its children and its tokens excluding them, so every
   // per-token reading of an orchestrating pipeline was short by a whole subtree.
-  const totalUsage = usageForRun(child);
+  const totalUsage = usageValue(runUsage(child));
   const gainedUsage = usageDelta(totalUsage, ref.accountedUsage);
   if (gainedUsage) step.usage = mergeUsage(step.usage, gainedUsage);
   // An unpriced attempt inside the child makes the charge here a lower bound
   // whatever the deltas are. A resumed child that re-reports history it was
   // already charged for posts a delta of zero and would otherwise take the flag
   // away with it — a run reading `$0.00` exact over spend nobody priced.
-  const unknown = child.total_control?.cost_unknown === true || step.control?.cost_unknown === true;
+  const unknown = spend.lowerBound || step.control?.cost_unknown === true;
   if (delta > 0 || durationDelta > 0) {
     step.control = {
       duration_ms: (step.control?.duration_ms ?? 0) + durationDelta,
@@ -599,7 +651,7 @@ export function restoreAttemptSpend(attempt: SpendFigures, control?: StepControl
 /**
  * The run totals a resume may trust: those of a snapshot whose generation was
  * finalized and left nothing to execute (`terminal`). A live resume gets none and
- * derives them from the step totals through `controlForRun` / `usageForRun`: a
+ * derives them from the step totals through `controlForRun` / `runUsage`: a
  * crash between an attempt snapshot and `finalizeRun` would otherwise hide the
  * spend of that attempt behind a total written before it.
  *

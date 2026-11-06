@@ -15,12 +15,13 @@
 //    as such rather than silently read as zero.
 
 import { readFileSync } from "node:fs";
+import type { ProjectPricing } from "../../contracts/pricing.js";
 import { historyFilePath } from "../../shared/env/kit-layout.js";
 import { loadProjectPricing } from "../../shared/env/pricing.js";
 import { isCompleted } from "../record/index.js";
 import { HistoryEntrySchema } from "./history-schema.js";
 import type { RunStatsEntry } from "./run-stats-projector.js";
-import { addTokens, entryCost, type PricingTable, type TokenCounts, zeroTokens } from "./stats-core.js";
+import { addTokens, entryCost, type TokenCounts, zeroTokens } from "./stats-core.js";
 
 /** Entry as read back from disk: every field is suspect, including the ones the
  *  projector always writes, because a line may predate a schema addition. The
@@ -177,7 +178,7 @@ function emptyPipelineTotals(): PipelineTotals {
  */
 export function aggregateHistory(
   entries: readonly HistoryEntry[],
-  pricing: PricingTable | null = null,
+  pricing: ProjectPricing | null = null,
   childrenSkipped = 0,
 ): HistoryAggregate {
   const aggregate: HistoryAggregate = {
@@ -268,28 +269,11 @@ export function aggregateHistory(
   return aggregate;
 }
 
-/**
- * `pricing.json` as the cost helpers want it.
- *
- * `ProjectPricing` types every key, `_currency` included, as a rate or a string,
- * while `PricingTable` declares `_currency` as a string. The two describe the same
- * file; this is the one place that reconciles them.
- *
- * A non-USD table is dropped, exactly as the runtime drops it: the runner's
- * `costUsd` is always in dollars, so estimating the other runs in euros and adding
- * the two would print a total in no currency at all.
- */
-export function pricingTable(loaded = loadProjectPricing()): PricingTable | null {
-  if (!loaded) return null;
-  const currency = typeof loaded._currency === "string" ? loaded._currency : "$";
-  return currency === "$" ? (loaded as PricingTable) : null;
-}
-
 /** Read, filter, and aggregate in one call; the reader's normal entry point. */
 export function summarizeHistory(
   projRoot: string = process.cwd(),
   filter: HistoryFilter = {},
-  pricing: PricingTable | null = pricingTable(),
+  pricing: ProjectPricing | null = loadProjectPricing(),
 ): { entries: HistoryEntry[]; aggregate: HistoryAggregate } {
   const all = readHistory(projRoot);
   const entries = filterHistory(all, filter);

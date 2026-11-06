@@ -25,11 +25,11 @@ import {
   aggregateControl,
   chargeAttemptToLedger,
   chargeChildReconciliation,
-  controlForRun,
   costIsLowerBound,
   expectAllowances,
   releaseAllowance,
   reserveAllowance,
+  runSpend,
 } from "../../run/record/cost-accounting.ts";
 import { readRunEvents } from "../../run/record/run-journal.ts";
 import { settleCrashedAttempts } from "../../run/record/run-projection.ts";
@@ -108,7 +108,6 @@ test("every attempt the loop closes reaches the ledger and the step total by the
 
   const outcome = await executeRunSteps(run, LOOP, deps, buildPipelineContext({}));
 
-  expect(outcome.cumulativeCost).toBe(0.875);
   expect(stepSpend(run)).toBe(0.875);
   expect(run.steps[0]!.attempts!.map((attempt) => attempt.control?.total_cost_usd)).toEqual([0.125, 0.25]);
   finalizeRun(run, outcome);
@@ -130,7 +129,7 @@ test("a resumed run seeds its ledger with the spend its steps carry", async () =
   const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(outcome.budgetExceeded).toBe(true);
-  expect(outcome.cumulativeCost).toBe(1);
+  expect(runSpend(run).usd).toBe(1);
   expect(run.steps[2]!.status).toBe("pending");
   expect(eventsOf(run, "run.budget.exceeded")).toEqual([
     expect.objectContaining({ stepId: "c", cumulativeUsd: 1, maxCostUsd: 1, estimated: false, remainingSteps: 1 }),
@@ -147,7 +146,6 @@ test("a materialized run total seeds the ledger in place of the step totals", as
   const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
   expect(outcome.budgetExceeded).toBe(true);
-  expect(outcome.cumulativeCost).toBe(1);
   // The charge dropped the materialized total; the steps alone say 0.25.
   expect(run.total_control).toBeUndefined();
   expect(stepSpend(run)).toBe(0.25);
@@ -170,7 +168,6 @@ test("a signal closes the killed attempt on the step total, not on the ledger, a
 
   const outcome = await executeRunSteps(run, { resuming: true }, deps, buildPipelineContext({}));
 
-  expect(outcome.cumulativeCost).toBe(0.25);
   const killed = run.steps[1]!;
   expect(killed.attempts!.map((attempt) => [attempt.status, attempt.control?.total_cost_usd])).toEqual([
     ["aborted", 0.375],
@@ -179,10 +176,11 @@ test("a signal closes the killed attempt on the step total, not on the ledger, a
   finalizeRun(run, outcome);
   expect(run.status).toBe("ABORTED");
   expect(run.total_control?.total_cost_usd).toBe(0.625);
-  // The report prints the step total, ahead of the ledger by the killed attempt.
+  // The report prints the step total, which holds the killed attempt the ledger
+  // never saw.
   expect(buildRunReport(run, outcome).budget?.spent).toBe(0.625);
   // The next generation seeds from the step totals, so the estimate is counted.
-  expect(controlForRun(run).total_cost_usd).toBe(0.625);
+  expect(runSpend(run).usd).toBe(0.625);
   expect(readRunSnapshot(join(run.run_dir, "state.json"))?.total_control?.total_cost_usd).toBe(0.625);
 });
 
@@ -201,7 +199,7 @@ test("a composed child is charged to the parent ledger and the node total by the
     accountedCostUsd: 0,
   } as PersistedPipelineChildRef;
   const child = makeRun([bashStep("x", {}, { status: "done", control: { duration_ms: 1, total_cost_usd: 0.5 } })]);
-  const reconcile = () => chargeChildReconciliation({ parent, step: node, ref, child, budget, fallbackCost: 0 });
+  const reconcile = () => chargeChildReconciliation({ parent, step: node, ref, child, budget });
 
   expect(reconcile()).toBe(0.5);
   expect(budget.cumulative).toBe(0.75);
@@ -232,7 +230,8 @@ test("an unpriced attempt latches the run, warns once, and the next gate stops a
 
   expect(outcome.costUnaccounted).toBe(true);
   expect(outcome.costUnaccountedStop).toBe(true);
-  expect(outcome.cumulativeCost).toBe(0);
+  expect(runSpend(run)).toMatchObject({ lowerBound: true });
+  expect(runSpend(run).usd).toBeUndefined();
   expect(run.cost_unaccounted).toBe(true);
   expect(run.steps[1]!.status).toBe("pending");
   expect(warnings()).toHaveLength(1);
@@ -296,7 +295,7 @@ test("an attempt the runner died in is settled unpriced on resume and does not s
   );
 
   expect(outcome.costUnaccounted).toBe(false);
-  expect(outcome.cumulativeCost).toBe(0.25);
+  expect(runSpend(run).usd).toBe(0.25);
   expect(step.status).toBe("done");
   expect(run.cost_unaccounted).toBeUndefined();
   expect(costIsLowerBound(run)).toBe(true);
@@ -736,7 +735,7 @@ test("held is not spent: with nothing left to give, the allowance is zero and no
   releaseAllowance(budget, "a");
 
   expect(reserveAllowance(budget, 4, "a")).toBe(0);
-  expect(costDecision(4, budget)).toBe("continue");
+  expect(costDecision(4, budget)).toBeUndefined();
 });
 
 /** Deterministic, so a failing interleaving can be replayed from its seed. */

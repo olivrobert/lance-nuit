@@ -30,12 +30,11 @@ export { recordedVerdict } from "./run-verdict.js";
 
 // What a run or a step still owes, read from its steps.
 export {
-  hasUnfinishedWork,
   isPersistedRunComplete,
   isSettledStatus,
   lastPassInterrupted,
   owesWork,
-  pendingSteps,
+  remainingWork,
   replayedAfterInterruption,
 } from "./run-predicates.js";
 
@@ -64,12 +63,10 @@ export {
   openAttempt,
   settleAttempt,
 } from "./attempt-lifecycle.js";
-export { isBudgetExceeded, type RunBudget, remainingBudget, strictCostAccountingFor } from "./budget.js";
+export { childCostCeiling, isBudgetExceeded, type RunBudget, strictCostAccountingFor } from "./budget.js";
 export {
   chargeChildReconciliation,
-  costIsLowerBound,
   expectAllowances,
-  measuredRunCost,
   openRunLedger,
   releaseAllowance,
   reserveAllowance,
@@ -77,11 +74,12 @@ export {
 } from "./cost-accounting.js";
 export { costGate, inheritChildBudgetStop, ledgerStops } from "./cost-stop-events.js";
 export {
-  ATTEMPT_COMMAND_FILE,
+  attemptCommandPath,
   findStepLog,
   latestAttemptLog,
   logicalAttemptLogPath,
   matchesStepSelector,
+  stepLogDir,
 } from "./run-timeline.js";
 
 // Run and step transitions during execution.
@@ -115,13 +113,12 @@ export {
 // Composed child calls: the state of an orchestration node and the transitions
 // of a child run's reference.
 export {
-  bindChildRun,
+  bindChildRunDir,
   commitChildCall,
   completedSuccessfully,
   declareChild,
   failChildLaunch,
   freezeOrchestrationItems,
-  hasJournaledChildStart,
   isChildSettled,
   openOrchestration,
   recordChildStarted,
@@ -134,8 +131,7 @@ export {
 // selection the caller's policy gives. The stores also serve as ports: the
 // statistics of the run a process just executed read its journal through one,
 // `--inspect` lists snapshots through the other before reading each with
-// `readListedRun`, and a composed child is booted with its own. Whether a
-// directory already holds a snapshot decides how strictly a child is reopened.
+// `readListedRun`, and a composed child is booted with its own.
 export {
   type OpenedRun,
   openRun,
@@ -144,26 +140,28 @@ export {
 } from "./run-opening.js";
 export { FileRunEventStore } from "./stores/file-run-event-store.js";
 export { FileRunStateStore } from "./stores/file-run-state-store.js";
-export { hasRunSnapshotEntry } from "./run-snapshot.js";
 
-// Run reports: the figures a report prints.
-export { aggregateControl, aggregateUsage } from "./cost-accounting.js";
+// What a run, a step or an attempt spent, as every reader prints it: the console
+// report, the history, the dashboard and the statistics read the same figures.
+export { measuredTokens } from "./cost-figures.js";
+export { figuresSpend, type RunSpend, runSpend, runUsage, type Spend } from "./cost-accounting.js";
 
 // Human closure of a run, which `lancenuit close` and the dashboard read.
 export { closureOf, isClosureCurrent, readClosureAt, removeClosureAt, writeClosureAt } from "./closure.js";
 
-// Run locations, selection and the run lock.
+// Run locations, selection and the run lock. The layout of `runs/` (its
+// directories, the `latest` link, the snapshot file) is known only below: a
+// reader asks for a run by what it wants, never by a path it builds.
 export { relativeRunPath } from "./run-journal.js";
 export { discardedResumeNotice, type ExplicitRunSelection, selectExplicitRun } from "./run-selection.js";
 export { FileRunLogStore } from "./stores/file-run-log-store.js";
 export {
-  createRunId,
-  latestRunFile,
-  pipelineRunsDir,
-  RUNS_DIRECTORY,
-  resolveLatestRunSnapshot,
-  runLockHolder,
+  composedRunDir,
+  latestRunDir,
+  latestRunHolder,
+  listWorkItemRuns,
   type RunsLocation,
+  runSnapshotFile,
   runsLocationOf,
   wouldResumeLatest,
 } from "./stores/run-storage.js";

@@ -20,8 +20,7 @@ import { createArtifactRef } from "../../shared/language/artifact-ports.js";
 import type { PersistedRun } from "../../run/index.js";
 import {
   awaitsHuman,
-  costIsLowerBound,
-  hasUnfinishedWork,
+  remainingWork,
   hasVerdict,
   isClosureCurrent,
   isCompleted,
@@ -32,10 +31,12 @@ import {
   readClosureAt,
   readRunHistory,
   runProvesUnpricedSpend,
+  runSpend,
   strictCostAccountingFor,
   type HistoryEntry,
   readHistory,
 } from "../../run/index.js";
+import { itemCost } from "./cost.js";
 import {
   FileWorkItemArtifactStore,
   gateDecisionStatus,
@@ -111,7 +112,7 @@ function budgetExceededOf(state: PersistedRun): boolean {
  */
 function costUnaccountedOf(state: PersistedRun): boolean {
   if (!strictCostAccountingFor(state.max_cost_usd, state.allow_unmetered)) return false;
-  if (!hasUnfinishedWork(state)) return false;
+  if (remainingWork(state).steps.length === 0) return false;
   // The stopping generation's own typed answer, when it wrote one: it also says
   // NO for a run whose ledger is a lower bound but which stopped at its ceiling
   // or failed for its own reason, which the evidence tiers below cannot tell
@@ -213,15 +214,9 @@ function interruptedStepOf(
 }
 
 function costOf(state: PersistedRun): ItemCost {
-  const usd = state.total_control?.total_cost_usd;
-  return {
-    ...(typeof usd === "number" ? { usd } : {}),
-    estimated: state.total_control?.cost_estimated === true,
-    // Deliberately NOT the stop condition: the `≥` is a property of the figure,
-    // and it outlives an authorization that let the run continue. The costs page
-    // reads the same rule.
-    ...(costIsLowerBound(state) ? { unknown: true } : {}),
-  };
+  // Deliberately NOT the stop condition: the `≥` is a property of the figure,
+  // and it outlives an authorization that let the run continue.
+  return itemCost(runSpend(state));
 }
 
 /**

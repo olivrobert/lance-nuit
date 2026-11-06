@@ -25,6 +25,7 @@ import type { Run, RunStep } from "../../run/record/run.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
 import { sha256Text } from "../../work-items/store/hash.ts";
 import { writeProvenance } from "../../work-items/store/provenance.ts";
+import { runSpend } from "../../run/record/cost-accounting.ts";
 import { readRunEvents } from "../../run/record/run-journal.ts";
 import { finalizeRun } from "../../run/record/run-transitions.ts";
 import { settleStepFailure } from "./non-blocking.ts";
@@ -1846,12 +1847,12 @@ test("reconcile: a done step whose deliverable is present is not paid twice, and
   const run = makeRun([step, later]);
 
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
+  await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["later"]);
   expect(step.status).toBe("done");
   expect(step.control?.total_cost_usd).toBe(0.4);
-  expect(outcome.cumulativeCost).toBe(0.4);
+  expect(runSpend(run).usd).toBe(0.4);
   const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
   expect(skipped).toMatchObject({ stepId: "branch", reason: "outputs present" });
 });

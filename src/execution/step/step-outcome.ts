@@ -93,7 +93,7 @@ async function reaskRefusedCapture(input: ResolveOutcomeInput): Promise<StepResu
     input.output.emit({
       type: "runner.message",
       level: "warn",
-      message: stop === "unaccounted" ? "  Spending unaccounted, no re-ask" : "  Budget exceeded, no re-ask",
+      message: stop === "cost-unaccounted" ? "  Spending unaccounted, no re-ask" : "  Budget exceeded, no re-ask",
     });
     return undefined;
   }

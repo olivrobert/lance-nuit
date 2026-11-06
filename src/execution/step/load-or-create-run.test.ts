@@ -19,7 +19,7 @@ import { saveRun } from "../../run/record/run-repository.js";
 import { readRunSnapshot } from "../../run/record/run-snapshot.js";
 import { abortRun, finalizeRun, stopRun, updateStep } from "../../run/record/run-transitions.js";
 import { allocateAttempt } from "../../run/record/attempt-lifecycle.js";
-import { controlForRun } from "../../run/record/cost-accounting.js";
+import { runSpend } from "../../run/record/cost-accounting.js";
 import { resolveRunDir } from "../../run/record/stores/run-storage.js";
 import { FileRunStateStore } from "../../run/record/stores/file-run-state-store.js";
 import { selectExplicitRun } from "../../run/record/run-selection.js";
@@ -412,7 +412,7 @@ test("resume: an attempt priced in the journal but missing from the snapshot sti
   // The budget ledger seeds from step totals: the journaled spend must reach them.
   expect(resumed.steps[0]!.control?.total_cost_usd).toBe(1);
   expect(resumed.steps[0]!.usage?.input_tokens).toBe(10);
-  expect(controlForRun(resumed).total_cost_usd).toBe(1);
+  expect(runSpend(resumed).usd).toBe(1);
 });
 
 test("resume: the snapshot total wins when it already covers the journaled attempts", async () => {
@@ -910,13 +910,13 @@ test("resume: a mid-step .maxCost() kill stops the run, and its cost is read bac
   });
   expect(resumed.max_cost_usd).toBe(1);
   expect(resumed.budget_exceeded).toBe(true);
-  expect(controlForRun(resumed).total_cost_usd).toBe(0.9);
+  expect(runSpend(resumed).usd).toBe(0.9);
 
   const second = countingDeps([{ ok: true }, { ok: true }, { ok: true }]);
   const again = await executeRunSteps(resumed, { resuming: true }, second.deps, ctx);
   expect(again.budgetExceeded).toBe(true);
   expect(second.spawned).toEqual([]);
-  expect(again.cumulativeCost).toBe(0.9);
+  expect(runSpend(resumed).usd).toBe(0.9);
 }, 20_000);
 
 test("resume: an accounting stop resists a plain resume and --budget, and only --allow-unmetered lifts it", async () => {
@@ -1355,7 +1355,7 @@ test("resume: materialized totals are trusted on a terminal snapshot and derived
   expect(resumed.status).toBe("RUNNING");
   expect(resumed.total_control).toBeUndefined();
   expect(resumed.total_usage).toBeUndefined();
-  expect(controlForRun(resumed).total_cost_usd).toBe(1);
+  expect(runSpend(resumed).usd).toBe(1);
 });
 
 // Attempt identity when the journal lost the attempt. The snapshot's
@@ -1464,7 +1464,7 @@ test("resume: loading the same run twice neither adds spend nor reuses an attemp
     expect(resumed.steps[0]!.attempts.map((attempt) => attempt.attempt)).toEqual([1]);
     expect(resumed.steps[0]!.control?.total_cost_usd).toBe(1);
     expect(resumed.steps[0]!.usage?.input_tokens).toBe(10);
-    expect(controlForRun(resumed).total_cost_usd).toBe(1);
+    expect(runSpend(resumed).usd).toBe(1);
     expect(allocateAttempt(resumed, resumed.steps[0]!, "step").logPath).toContain("attempt-002");
   }
   const events = readRunEvents(dir);
@@ -1512,7 +1512,7 @@ test("resume: --start-at requeues the target and every later step, keeping their
     ["pending", true],
   ]);
   expect(resumed.steps[1]).toMatchObject({ retries: 1, last_attempt: 2, control: { total_cost_usd: 1 } });
-  expect(controlForRun(resumed).total_cost_usd).toBe(1);
+  expect(runSpend(resumed).usd).toBe(1);
 
   const deps = countingDeps([{ ok: true }, { ok: true }]);
   await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
@@ -1650,7 +1650,7 @@ test("resume: --start-at on an explicitly selected PASS run replays from the tar
   expect(resumed.status).toBe("RUNNING");
   expect(resumed.outcome).toBeUndefined();
   expect(resumed.total_control).toBeUndefined();
-  expect(controlForRun(resumed).total_cost_usd).toBe(3);
+  expect(runSpend(resumed).usd).toBe(3);
 
   const deps = countingDeps([{ ok: true }]);
   await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);

@@ -6,7 +6,6 @@ import { expect, test } from "bun:test";
 import type { RunStatus } from "../persisted.js";
 import { costIsLowerBound } from "./cost-accounting.js";
 import {
-  awaitsFinalization,
   awaitsHuman,
   effectiveStatus,
   hasVerdict,
@@ -66,16 +65,6 @@ test("effective status: a snapshot without a verdict runs only while a live proc
     expect(effectiveStatus({ status }, () => true)).toEqual({ status: "RUNNING", interrupted: false });
     expect(effectiveStatus({ status }, () => false)).toEqual({ status: "ABORTED", interrupted: true });
   }
-});
-
-test("finalization: a crash or a resumable interruption still owes a verdict", () => {
-  expect(awaitsFinalization({ status: "RUNNING" })).toBe(true);
-  expect(awaitsFinalization({ status: "ABORTED" })).toBe(true);
-  expect(
-    awaitsFinalization({ status: "ABORTED", outcome: { phase: null, reason: null, logPath: null, resumable: false } }),
-  ).toBe(false);
-  for (const status of ["PASS", "FAIL", "STOPPED", "UNKNOWN"] as const)
-    expect(awaitsFinalization({ status })).toBe(false);
 });
 
 // One row per ending: the status the snapshot keeps, the headline of the report

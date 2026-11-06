@@ -15,7 +15,7 @@
 //   the child boots, so a crash in the window can retry the initialization under
 //   the same id. Once `pipeline.child.started` is in the parent journal, that id
 //   has been used: a missing or damaged child snapshot is refused rather than
-//   turned into a second child (`hasJournaledChildStart`).
+//   turned into a second child (`bindChildRunDir`).
 // - `accountedCostUsd`, `accountedDurationMs` and `accountedUsage` belong to cost
 //   accounting (`chargeChildReconciliation`, `run/record/cost-accounting.ts`): what
 //   the parent already charged for this child, so a resumed child re-reporting
@@ -25,7 +25,7 @@
 //
 // Statuses, and the one operation that writes each transition:
 //
-//   pending ──commitChildCall──▶ running ──bindChildRun──▶ running (runId bound)
+//   pending ──commitChildCall──▶ running ─bindChildRunDir▶ running (runId bound)
 //      │            │                                                 │
 //      │            └──skipChild──▶ skipped                           ├──settleChild──▶ done | failed
 //      │                                                              │
@@ -46,7 +46,9 @@
 // run's lineage), and `freezeOrchestrationItems` fixes the items a
 // `forEachPipeline` iterates.
 
-import type { PipelineLot } from "../../shared/language/context.js";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import type { PipelineContext, PipelineLot } from "../../shared/language/context.js";
 import type {
   PersistedPipelineChildRef,
   PersistedPipelineOrchestrationState,
@@ -56,8 +58,11 @@ import type { ChildRefView, OrchestrationView, RunStepView, RunView } from "../r
 import { writable } from "./run.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
 import { isSettledStatus } from "./run-predicates.js";
+import type { StrictSnapshotRead } from "./run-opening.js";
 import { saveRun } from "./run-repository.js";
+import { hasRunSnapshotEntry } from "./run-snapshot.js";
 import { isCompleted } from "./run-status.js";
+import { allocateRunId, pipelineRunsDir, STATE_FILE } from "./stores/run-storage.js";
 
 /**
  * The state of an orchestration node, found on its step or created empty, and
@@ -192,6 +197,54 @@ export function hasJournaledChildStart(parent: RunView, ref: ChildRefView): bool
   if (ref.runId === undefined) return false;
   const runId = ref.runId;
   return readRunEvents(parent).some((event) => event.type === "pipeline.child.started" && event.childRunId === runId);
+}
+
+/** Where a child call runs once its reference is bound. */
+export interface BoundChildRun {
+  runDir: string;
+  /** The identity was already used: the boot must resume THAT snapshot, and a
+   *  missing or damaged one is refused instead of becoming a second child under
+   *  the same id. */
+  strictSnapshot?: StrictSnapshotRead;
+}
+
+/** A new identity for a child run: the only case that writes, since a bound
+ *  identity is only read. */
+function newChildRunId(pipelineDir: string, pipeline: string): string {
+  mkdirSync(pipelineDir, { recursive: true });
+  return allocateRunId(pipelineDir, pipeline);
+}
+
+/**
+ * Bind the reference to its child run directory, under its bound id or a fresh
+ * one allocated in the child pipeline's runs directory.
+ *
+ * Whether that identity was already used is read BEFORE the binding is
+ * persisted: a `pipeline.child.started` in the parent journal, or a snapshot
+ * entry already in the directory (a crash between the child's first snapshot and
+ * the start event).
+ */
+
+export function bindChildRunDir(
+  parent: RunView,
+  ref: ChildRefView,
+  child: { pipeline: string; ticket?: string; context: PipelineContext },
+): BoundChildRun {
+  const pipelineDir = pipelineRunsDir(child.pipeline, child.ticket, child.context);
+  const runId = ref.runId ?? newChildRunId(pipelineDir, child.pipeline);
+  const runDir = join(pipelineDir, runId);
+  const snapshotPath = join(runDir, STATE_FILE);
+  const used = hasJournaledChildStart(parent, ref) || hasRunSnapshotEntry(snapshotPath);
+  bindChildRun(parent, ref, runId);
+  if (!used) return { runDir };
+  return {
+    runDir,
+    strictSnapshot: {
+      path: snapshotPath,
+      releaseRunLock: false,
+      expectedIdentity: { runId, pipeline: child.pipeline, ticket: child.ticket },
+    },
+  };
 }
 
 /** Journal that the child run booted under its identity. Event only: the

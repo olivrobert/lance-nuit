@@ -45,7 +45,7 @@ export async function runFixRetryLoop(
         type: "runner.message",
         level: "warn",
         message:
-          beforeFix === "unaccounted"
+          beforeFix === "cost-unaccounted"
             ? `  Spending unaccounted, stopping retries`
             : `  Budget exceeded, stopping retries`,
       });
@@ -114,7 +114,7 @@ export async function runFixRetryLoop(
         type: "runner.message",
         level: "warn",
         message:
-          beforeRetry === "unaccounted"
+          beforeRetry === "cost-unaccounted"
             ? `  Spending unaccounted, stopping retries`
             : `  Budget exceeded, stopping retries`,
       });

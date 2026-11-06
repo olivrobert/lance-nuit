@@ -8,7 +8,7 @@ import { makeRunStep } from "../run-step.ts";
 import { readRunEvents } from "../run-journal.ts";
 import { findStepLog, matchesStepSelector } from "../run-timeline.ts";
 import { allocateAttempt } from "../attempt-lifecycle.ts";
-import { controlForRun } from "../cost-accounting.ts";
+import { runSpend } from "../cost-accounting.ts";
 import { loadOrCreateRun } from "../../../execution/step/load-or-create-run.ts";
 import { saveRun } from "../run-repository.ts";
 import { stepLogPath } from "../run-timeline.ts";
@@ -462,7 +462,7 @@ test("hydrate derives live totals from steps instead of a stale finalized aggreg
   });
   expect(run.total_control).toBeUndefined();
   expect(run.total_usage).toBeUndefined();
-  expect(controlForRun(run).total_cost_usd).toBe(0.4);
+  expect(runSpend(run).usd).toBe(0.4);
 
   const reread = JSON.parse(readFileSync(join(runDir, "state.json"), "utf-8"));
   expect(reread.steps[0].control).toEqual({ duration_ms: 100, total_cost_usd: 0.4 });

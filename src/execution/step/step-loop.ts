@@ -12,7 +12,7 @@ import type { RunStepView, RunView } from "../../run/index.js";
 import type { RunOutput } from "../run-output.js";
 import { type AbortScope, createAbortScope } from "../abort.js";
 import {
-  hasUnfinishedWork,
+  remainingWork,
   isSettledStatus,
   lastPassInterrupted,
   ledgerStops,
@@ -231,10 +231,8 @@ export async function executeRunSteps(
     // A live guard kill is a budget stop even though the step itself failed, and
     // the retry and fix loops break on the gate's decision without reporting it
     // upward: the ledger names the stops reached inside them, for unfinished work
-    // only (`ledgerStops`). "Unfinished work" is not only a pending step: an
-    // orchestration node whose fan-out stopped mid-list is done with none of its
-    // items, and its own step may already read `done` from a previous generation.
-    const unfinished = hasUnfinishedWork(run);
+    // only (`ledgerStops`).
+    const unfinished = remainingWork(run).steps.length > 0;
     // A bound with nothing owed after it changes nothing: the run completes.
     const untilStop = boundReached && bound !== undefined && unfinished;
     if (untilStop) stopAtBound(run, bound, deps.output);
@@ -259,7 +257,6 @@ export async function executeRunSteps(
       // The retry and fix gates record their refusal on the shared ledger; the
       // admission gate and the orchestration gates report theirs directly.
       costUnaccountedStop: stop.costUnaccountedStop === true || ledger.costUnaccountedStop,
-      cumulativeCost: budget.cumulative,
       setAside,
     };
   } finally {

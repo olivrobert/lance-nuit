@@ -184,6 +184,10 @@ a signal before any live estimate reached the runner, is recorded with
 `cost_unknown`. The ledger then holds a lower bound: the console report warns
 that spend is under-counted, the run's history entry carries `costUnknown`, and
 `lancenuit stats` prefixes such totals with `≥` and counts the affected runs.
+The console report, the history, the dashboard and the statistics page read the
+run's amount and its `≥` from the same place, so one run never shows two figures.
+Cache writes count as tokens there too: an attempt that reports only cache
+writes, with no price, is `cost_unknown` rather than free.
 A backend publishes that estimate through `AgentRequest.onLiveCost`; an extension
 backend that never calls it leaves its interrupted attempts recorded this way.
 A Claude transport retry after an overload carries the discarded attempts' cost

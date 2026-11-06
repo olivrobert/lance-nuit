@@ -119,7 +119,9 @@ async function retryStepCommand(ctx: OnFailureContext, spec: RetryLoopSpec): Pro
         type: "runner.message",
         level: "warn",
         message:
-          stop === "unaccounted" ? "  Spending unaccounted, stopping retries" : "  Budget exceeded, stopping retries",
+          stop === "cost-unaccounted"
+            ? "  Spending unaccounted, stopping retries"
+            : "  Budget exceeded, stopping retries",
       });
       state.costStopped = true;
       break;

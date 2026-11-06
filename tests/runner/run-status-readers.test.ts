@@ -232,7 +232,7 @@ test("the ≥ of a partial total is the same on the sheet and on the costs page"
 
     const item = await readItem("demo-app", TICKET, listed.options);
     const ticket = readStats(listed.options).tickets.find((candidate) => candidate.ticket === TICKET);
-    expect({ label, sheet: item?.cost.unknown === true, costs: ticket?.runs[0]?.costUnknown === true }).toEqual({
+    expect({ label, sheet: item?.cost.unknown === true, costs: ticket?.runs[0]?.cost?.unknown === true }).toEqual({
       label,
       sheet: partial,
       costs: partial,

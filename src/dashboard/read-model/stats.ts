@@ -2,14 +2,13 @@
 // What every ticket cost, across every listed project: one row per ticket,
 // summed over its ROOT runs.
 //
-// Two rules keep the sums honest. A run is read once, by its real path: the
-// `latest` link of a pipeline points at a run that is also listed under its own
-// id, and following both would count it twice. And only a run without a
+// Two rules keep the sums honest. A run is read once, by its real path: a run
+// directory reached through a link is the same run. And only a run without a
 // `parentRunId` is summed: a composed child's spend is already inside its
-// parent's `total_control`, the ledger the budget was enforced against.
+// parent's ledger, the one the budget was enforced against.
 //
-// The figures themselves are the runner's own — `total_control`, never a sum
-// recomputed here. Runs written before the current layout are not parsed at
+// The figures themselves are the run record's (`runSpend`), the same ones the
+// console report and the morning box print. Runs written before the current layout are not parsed at
 // all: an export script outside the product normalizes them once into
 // `~/.lance-nuit/ui/stats-archive.json`, and this file only merges that list,
 // preferring the live snapshot of any run that appears in both.
@@ -29,11 +28,20 @@ import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { asFiniteNumber, asRecord } from "../../shared/lib/json-values.js";
 import type { PersistedRun, RunStatus } from "../../run/index.js";
-import { costIsLowerBound, effectiveStatus, isCompleted, type RunRead, readRun } from "../../run/index.js";
+import {
+  effectiveStatus,
+  isCompleted,
+  listWorkItemRuns,
+  type RunRead,
+  readRun,
+  runSpend,
+  type Spend,
+} from "../../run/index.js";
+import { reportedCost } from "./cost.js";
 import { workItemLayout } from "../../work-items/index.js";
 import { dashboardPaths } from "../home/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, ticketUrl, workItemsRoot } from "./projects.js";
-import { directoryNames, runsLocationOfProject, ticketDirectories } from "./runs.js";
+import { runsLocationOfProject, ticketDirectories } from "./runs.js";
 import { isTicketToken } from "./tickets.js";
 import type {
   ItemStatus,
@@ -227,9 +235,8 @@ function realPath(path: string): string | null {
 
 /** The figures of a run, live or archived, before they are checked. */
 interface RunFigures {
-  costUsd: unknown;
-  costEstimated: boolean;
-  costUnknown: boolean;
+  /** `usd` still unchecked: an archive is a file anybody may have edited. */
+  spend: Omit<Spend, "usd"> & { usd?: unknown };
   activeMs: unknown;
   createdAt: unknown;
   updatedAt: unknown;
@@ -239,16 +246,16 @@ interface RunFigures {
 /** A run view from figures of either source: a figure that is not a usable
  *  number or stamp is left out rather than shown as zero. */
 function statsRun(identity: Pick<StatsRun, "runId" | "pipeline" | "status" | "source">, figures: RunFigures): StatsRun {
-  const cost = asFiniteNumber(figures.costUsd);
+  const usd = asFiniteNumber(figures.spend.usd);
+  const { estimated, lowerBound } = figures.spend;
+  const cost = reportedCost({ estimated, lowerBound, ...(usd !== undefined ? { usd } : {}) });
   const activeMs = asFiniteNumber(figures.activeMs);
   const createdAt = text(figures.createdAt);
   const updatedAt = text(figures.updatedAt);
   const { handover } = figures;
   return {
     ...identity,
-    ...(cost !== undefined ? { costUsd: cost } : {}),
-    ...(figures.costEstimated ? { costEstimated: true } : {}),
-    ...(figures.costUnknown ? { costUnknown: true } : {}),
+    ...(cost ? { cost } : {}),
     ...(activeMs !== undefined && activeMs >= 0 ? { activeMs } : {}),
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
@@ -258,18 +265,15 @@ function statsRun(identity: Pick<StatsRun, "runId" | "pipeline" | "status" | "so
 
 function liveRunView(pipeline: string, run: RunRead, steps: ReadonlySet<string> | null): StatsRun {
   const { state, status } = run;
-  // The ledger's totals, never a sum of the steps: a run without them reports
-  // no figure rather than one that disagrees with what its budget was held to.
-  const control = state.total_control;
+  // The figure every other reader prints for this run.
+  const spend = runSpend(state);
   // `status` is the one the morning box shows for the same run (`readRun`): a
   // dead runner's RUNNING snapshot is an interrupted run here too.
   return statsRun(
     { runId: state.runId ?? "", pipeline: state.pipeline || pipeline, status, source: "live" },
     {
-      costUsd: control?.total_cost_usd,
-      costEstimated: control?.cost_estimated === true,
-      costUnknown: costIsLowerBound(state),
-      activeMs: control?.duration_ms,
+      spend,
+      activeMs: spend.durationMs,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       handover: handoverOf(state, steps),
@@ -294,10 +298,9 @@ function liveRuns(project: ProjectEntry, steps: ReadonlySet<string> | null): Col
   const collected: CollectedRun[] = [];
   const root = workItemsRoot(project);
   for (const folder of ticketDirectories(project)) {
-    const runsDir = join(root, folder, "runs");
-    for (const pipeline of directoryNames(runsDir)) {
-      for (const runName of directoryNames(join(runsDir, pipeline))) {
-        const runDir = realPath(join(runsDir, pipeline, runName));
+    for (const { pipeline, runDirs } of listWorkItemRuns(join(root, folder))) {
+      for (const listed of runDirs) {
+        const runDir = realPath(listed);
         if (!runDir || seen.has(runDir)) continue;
         seen.add(runDir);
         const run = readRun(runDir, location);
@@ -341,9 +344,7 @@ function archivedRun(value: unknown): CollectedRun | undefined {
     run: statsRun(
       { runId, pipeline: text(entry.pipeline) ?? "", status: archiveStatusOf(entry.status), source: "archive" },
       {
-        costUsd: entry.costUsd,
-        costEstimated: entry.costEstimated === true,
-        costUnknown: entry.costUnknown === true,
+        spend: { usd: entry.costUsd, estimated: entry.costEstimated === true, lowerBound: entry.costUnknown === true },
         activeMs: entry.activeMs,
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
@@ -455,7 +456,7 @@ function buildTicket(
   const ticket = first?.ticket ?? "";
   const entry = projects.get(project);
   const url = entry ? ticketUrl(entry, ticket) : undefined;
-  const cost = sumOf(runs.map((run) => run.costUsd));
+  const usd = sumOf(runs.map((run) => run.cost?.usd));
   const activeMs = sumOf(runs.map((run) => run.activeMs));
   const firstAt = earliest(runs.map((run) => run.createdAt ?? run.updatedAt));
   const lastAt = latest(runs.map((run) => run.updatedAt ?? run.createdAt));
@@ -467,9 +468,11 @@ function buildTicket(
     ...(url ? { ticketUrl: url } : {}),
     kind: ticketKind(rules, newestFirst, workItemDirs),
     source: sourceOf(runs),
-    ...(cost !== undefined ? { costUsd: cost } : {}),
-    costEstimated: runs.some((run) => run.costEstimated === true),
-    costUnknown: runs.some((run) => run.costUnknown === true),
+    cost: {
+      ...(usd !== undefined ? { usd } : {}),
+      estimated: runs.some((run) => run.cost?.estimated === true),
+      ...(runs.some((run) => run.cost?.unknown === true) ? { unknown: true } : {}),
+    },
     ...(activeMs !== undefined ? { activeMs } : {}),
     ...(firstAt ? { firstAt } : {}),
     ...(lastAt ? { lastAt } : {}),
@@ -511,6 +514,6 @@ export function readStats(options: ReadModelOptions = {}): StatsRead {
   const tickets = [...byTicket.entries()].map(([key, collected]) =>
     buildTicket(key, collected, rules, delivery, projectsByName),
   );
-  tickets.sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0) || a.key.localeCompare(b.key));
+  tickets.sort((a, b) => (b.cost.usd ?? 0) - (a.cost.usd ?? 0) || a.key.localeCompare(b.key));
   return { tickets, archive: archive.state };
 }

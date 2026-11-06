@@ -8,6 +8,8 @@
 // `chargeAttemptToLedger`, `chargeChildReconciliation`), which is the only place
 // spend moves.
 
+import type { RunOutcomeStopKind } from "../persisted.js";
+
 /**
  * MUTABLE ledger for run spending. Opened once per execution (`openRunLedger`) and shared by
  * all phases (admission, attempts, verdict, repair, child runs): no signature
@@ -78,15 +80,28 @@ export interface RunBudget {
 }
 
 /**
- * Why a capped run may or may not admit more work.
+ * A cost stop, in the words a run's outcome records it with (`stopKind`).
  *
- * `exceeded` — the ledger reached the ceiling, or a live guard already killed an
- * attempt for crossing it. `unaccounted` — an attempt spent tokens no pricing
- * table could price, so the ceiling is unenforceable and the run stops with a
- * reason of its own instead of pretending the remainder is affordable.
- * `continue` — spending may go on.
+ * `budget-exceeded` — the ledger reached the ceiling, or a live guard already
+ * killed an attempt for crossing it. `cost-unaccounted` — an attempt spent tokens
+ * no pricing table could price, so the ceiling is unenforceable and the run stops
+ * with a reason of its own instead of pretending the remainder is affordable.
  */
-export type CostDecision = "continue" | "exceeded" | "unaccounted";
+export type CostStop = RunOutcomeStopKind;
+
+/**
+ * The one precedence between the two cost stops: a reached ceiling wins over
+ * uncertainty. Both are stops, and the known lower bound is the harder fact — an
+ * authorization for unmetered spend must not turn a genuinely exceeded budget
+ * into a continue, and a report must not send to `--allow-unmetered` a run that
+ * more money alone would let through. The gate, the verdict, the outcome and the
+ * report headline all read it from here.
+ */
+export function costStopOf(facts: { budgetExceeded?: boolean; costUnaccounted?: boolean }): CostStop | undefined {
+  if (facts.budgetExceeded === true) return "budget-exceeded";
+  if (facts.costUnaccounted === true) return "cost-unaccounted";
+  return undefined;
+}
 
 /** Whether a limit is defined and already reached/exceeded. No limit → false. */
 export function isBudgetExceeded(maxCost: number | undefined, cumulativeCost: number): boolean {
@@ -95,21 +110,19 @@ export function isBudgetExceeded(maxCost: number | undefined, cumulativeCost: nu
 
 /**
  * The one stop decision every retry, fix, admission gate, and orchestration node
- * reads. Reading the ledger alone is not enough: a killed attempt whose partial
- * cost lands under the ceiling would be replayed and paid again, and an unpriced
- * attempt would leave the ceiling looking affordable forever.
- *
- * Precedence: a reached ceiling wins over uncertainty. Both are stops, and the
- * known lower bound is the harder fact — an authorization for unmetered spend
- * must not turn a genuinely exceeded budget into a continue.
+ * reads; `undefined` lets spending go on. Reading the ledger alone is not enough:
+ * a killed attempt whose partial cost lands under the ceiling would be replayed
+ * and paid again, and an unpriced attempt would leave the ceiling looking
+ * affordable forever.
  *
  * Uncertainty only stops a CAPPED run: with no ceiling to enforce there is
  * nothing for unknown spend to invalidate, and the run keeps its warning.
  */
-export function costDecision(maxCost: number | undefined, budget: RunBudget): CostDecision {
-  if (budget.exceeded === true || isBudgetExceeded(maxCost, budget.cumulative)) return "exceeded";
-  if (budget.costUnknown === true && strictCostAccountingFor(maxCost, budget.allowUnmetered)) return "unaccounted";
-  return "continue";
+export function costDecision(maxCost: number | undefined, budget: RunBudget): CostStop | undefined {
+  return costStopOf({
+    budgetExceeded: budget.exceeded === true || isBudgetExceeded(maxCost, budget.cumulative),
+    costUnaccounted: budget.costUnknown === true && strictCostAccountingFor(maxCost, budget.allowUnmetered),
+  });
 }
 
 /**
@@ -130,4 +143,24 @@ export function strictCostAccountingFor(
 /** Remaining budget (>= 0), or undefined when no limit is set. */
 export function remainingBudget(maxCost: number | undefined, cumulativeCost: number): number | undefined {
   return maxCost != null ? Math.max(0, maxCost - cumulativeCost) : undefined;
+}
+
+/**
+ * The ceiling a composed child runs under: what is left of the parent's ceiling,
+ * capped by the child's own. On resume, what the parent already charged for this
+ * child is restored into that ceiling: the parent pays only the difference, and
+ * the child is not truncated by the newly computed remainder. For a new child it
+ * is exactly min(parent remaining, child ceiling).
+ */
+export function childCostCeiling(
+  parentMax: number | undefined,
+  budget: RunBudget,
+  alreadyAccounted: number,
+  ownMax: number | undefined,
+): number | undefined {
+  const parentRemaining = remainingBudget(parentMax, budget.cumulative);
+  const parentCeiling = parentRemaining === undefined ? undefined : parentRemaining + alreadyAccounted;
+  if (parentCeiling === undefined) return ownMax;
+  if (ownMax === undefined) return parentCeiling;
+  return Math.min(parentCeiling, ownMax);
 }

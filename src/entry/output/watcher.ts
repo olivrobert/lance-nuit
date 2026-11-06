@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { VERDICT_STATUSES } from "../../run/index.js";
+import { runSnapshotFile, VERDICT_STATUSES } from "../../run/index.js";
 import { log } from "../../shared/runtime/logging.js";
 import type { LiveFeed } from "../../shared/runtime/live-feed.js";
 
@@ -43,7 +43,7 @@ export function openWatcherPane(feed: LiveFeed, options: { autoClose?: boolean }
   // The runner's own interpreter runs the formatter: it already loads this
   // TypeScript module, so it needs no separate resolution.
   const formatterCommand = `${shellQuote(process.execPath)} ${shellQuote(formatter)}`;
-  const state = join(dirname(live), "state.json");
+  const state = runSnapshotFile(dirname(live));
   const cmd = buildWatcherCommand(live, state, formatterCommand, options.autoClose);
   const tmuxResult = spawnSync("tmux", ["split-window", "-h", "-d", "-P", `bash -c ${shellQuote(cmd)}`], {
     encoding: "utf-8",

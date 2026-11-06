@@ -97,7 +97,7 @@ function sortValue(ticket: StatsTicket, column: StatsColumn): string | number | 
     case "kind":
       return ticket.kind;
     case "cost":
-      return ticket.costUsd;
+      return ticket.cost.usd;
     case "active":
       return ticket.activeMs;
     case "span":
@@ -192,15 +192,15 @@ export function median(values: readonly number[]): number | undefined {
 }
 
 function groupTotals(tickets: readonly StatsTicket[]): StatsGroupTotals {
-  const priced = tickets.map((ticket) => ticket.costUsd).filter((cost): cost is number => cost !== undefined);
+  const priced = tickets.map((ticket) => ticket.cost.usd).filter((cost): cost is number => cost !== undefined);
   const total = sum(priced);
   const medianUsd = median(priced);
   return {
     tickets: tickets.length,
     ...(total !== undefined ? { costUsd: total, meanUsd: total / priced.length } : {}),
     ...(medianUsd !== undefined ? { medianUsd } : {}),
-    estimated: tickets.some((ticket) => ticket.costEstimated),
-    unknown: tickets.some((ticket) => ticket.costUnknown),
+    estimated: tickets.some((ticket) => ticket.cost.estimated),
+    unknown: tickets.some((ticket) => ticket.cost.unknown === true),
   };
 }
 

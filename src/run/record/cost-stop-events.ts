@@ -45,11 +45,8 @@
 import type { RunView } from "../run.js";
 import type { Run } from "./run.js";
 import { writable } from "./run.js";
-import { type CostDecision, costDecision, type RunBudget } from "./budget.js";
+import { type CostStop, costDecision, type RunBudget } from "./budget.js";
 import { appendRunEvent } from "./run-journal.js";
-
-/** A `costDecision` that stops the run. */
-export type CostStop = Exclude<CostDecision, "continue">;
 
 /**
  * Where a stop was observed. The origin decides which facts the stop
@@ -81,7 +78,7 @@ export interface CostStopOrigin {
  * is journaled once per generation regardless of how many sites observe it.
  */
 export function recordCostStop(run: Run, budget: RunBudget, stop: CostStop, origin: CostStopOrigin): void {
-  if (stop === "exceeded") {
+  if (stop === "budget-exceeded") {
     if (origin.kind === "live-guard") {
       // Journaled BEFORE the latch is set, so `estimated` is not read from a state
       // this very kill established.
@@ -120,7 +117,7 @@ export function recordCostStop(run: Run, budget: RunBudget, stop: CostStop, orig
 export function costGate(runView: RunView, budget: RunBudget, stepId: string | null): CostStop | undefined {
   const run = writable(runView);
   const decision = costDecision(run.max_cost_usd, budget);
-  if (decision === "continue") return undefined;
+  if (!decision) return undefined;
   recordCostStop(run, budget, decision, { kind: "gate", stepId });
   return decision;
 }
@@ -143,15 +140,15 @@ export interface LedgerStops {
  * into a stop after the fact would fail a pipeline that did its job; the same
  * holds for a guard stop restored from the snapshot once a resume skipped the
  * step the guard killed. "Unfinished" is the caller's reading of the steps
- * (`hasUnfinishedWork`). `exceeded` keeps its precedence over `unaccounted`, as
- * in `costDecision`.
+ * (`remainingWork`). `budget-exceeded` keeps its precedence over
+ * `cost-unaccounted`, as in `costStopOf`.
  */
 export function ledgerStops(run: RunView, budget: RunBudget, unfinished: boolean): LedgerStops {
-  const decision = unfinished ? costDecision(run.max_cost_usd, budget) : "continue";
+  const decision = unfinished ? costDecision(run.max_cost_usd, budget) : undefined;
   return {
     budgetExceeded: budget.exceeded === true && unfinished,
-    costUnaccounted: decision === "unaccounted",
-    costUnaccountedStop: budget.unaccountedStop === true && decision === "unaccounted",
+    costUnaccounted: decision === "cost-unaccounted",
+    costUnaccountedStop: budget.unaccountedStop === true && decision === "cost-unaccounted",
   };
 }
 

@@ -7,33 +7,26 @@
 // verdict to `finalizeRun` (`run/record/run-transitions.ts`), and the persisted child
 // reference to `run/record/child-transitions.ts`.
 
-import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
 import { loadOrCreateRun } from "./load-or-create-run.js";
 import { errorMessage } from "../../shared/lib/errors.js";
-import type { PipelineContext, PipelineLot } from "../../shared/language/context.js";
+import type { PipelineLot } from "../../shared/language/context.js";
 import type { PipelineInvocationDefinition } from "../../definition/index.js";
 import type { ChildRefView, RunView } from "../../run/index.js";
 import { loadPipelineDefinition } from "../../definition/index.js";
 import {
-  bindChildRun,
+  bindChildRunDir,
   chargeChildReconciliation,
+  childCostCeiling,
   completedSuccessfully,
   costGate,
-  createRunId,
   failChildLaunch,
   FileRunStateStore,
   finalizeRun,
-  hasJournaledChildStart,
-  hasRunSnapshotEntry,
   isBudgetExceeded,
   isChildSettled,
   isHalted,
-  measuredRunCost,
-  pendingSteps,
-  pipelineRunsDir,
   recordChildStarted,
-  remainingBudget,
+  remainingWork,
   type RunBudget,
   settleChild,
   emitRunStats,
@@ -45,31 +38,6 @@ import {
   resolvePipelinePath,
   resolveTicket,
 } from "./pipeline-orchestration-resolution.js";
-
-function effectiveMaxCost(
-  parentRemaining: number | undefined,
-  ownMax: number | undefined,
-  alreadyAccounted: number,
-): number | undefined {
-  // For a new child, alreadyAccounted is zero and this is exactly
-  // min(parent remaining, child ceiling). On resume, previously charged cost is
-  // restored into the total ceiling: the parent pays only the difference and the
-  // child is not truncated by the newly computed remainder.
-  const parentCeiling = parentRemaining === undefined ? undefined : parentRemaining + alreadyAccounted;
-  if (parentCeiling === undefined) return ownMax;
-  if (ownMax === undefined) return parentCeiling;
-  return Math.min(parentCeiling, ownMax);
-}
-
-function allocateChildRunId(pipeline: string, ticket: string | undefined, ctx: PipelineContext): string {
-  const dir = pipelineRunsDir(pipeline, ticket, ctx);
-  mkdirSync(dir, { recursive: true });
-  const base = createRunId(pipeline);
-  let id = base;
-  let suffix = 1;
-  while (existsSync(join(dir, id))) id = `${base}-${suffix++}`;
-  return id;
-}
 
 /**
  * The one gate every composed launch passes through: a child of a `runPipeline`
@@ -91,7 +59,7 @@ export function childLaunchGate(
   // no journal of its own, and the stop belongs to the scope that owns the ceiling.
   const stop = costGate(parent, budget, stepId);
   if (!stop) return undefined;
-  if (stop === "exceeded") {
+  if (stop === "budget-exceeded") {
     return { ok: false, budgetExceeded: true, reason: `parent budget exhausted before ${key}` };
   }
   return {
@@ -110,7 +78,6 @@ interface ChildLoopOutcome {
   budgetExceeded: boolean;
   costUnaccounted: boolean;
   costUnaccountedStop: boolean;
-  cumulativeCost: number;
 }
 
 /** Execute or resume one persisted child reference and reconcile its usage. */
@@ -140,28 +107,24 @@ export async function executeChild(
   const childPath = resolvePipelinePath(ref.pipeline, parent.pipeline_path, baseCtx);
   const pipelineLineage = lineageForChild(parent, childPath, ticket);
   const childDefinition = await loadPipelineDefinition(childPath, childCtx);
-  const parentRemaining = remainingBudget(parent.max_cost_usd, budget.cumulative);
   // `--budget` on the parent is the human answer to the "rerun with --budget" the
   // child printed. Re-imposing the child's own cap here would make that answer
   // inert; the parent's remaining budget is the only ceiling left.
   const ownMax = parent.budget_approved
     ? undefined
     : (childDefinition.max_cost_usd ?? childDefinition.max_cost_per_work_item_usd);
-  const maxCostUsd = effectiveMaxCost(parentRemaining, ownMax, ref.accountedCostUsd);
+  const maxCostUsd = childCostCeiling(parent.max_cost_usd, budget, ref.accountedCostUsd, ownMax);
 
-  // 3. Identity. The reference reuses its bound run id or receives a fresh one;
-  //    whether that id was ever STARTED is a journal fact, read before the
-  //    reference is (re)bound and persisted.
-  const childRunId = ref.runId ?? allocateChildRunId(childDefinition.name, ticket, childCtx);
-  const runDir = join(pipelineRunsDir(childDefinition.name, ticket, childCtx), childRunId);
-  const snapshotPath = join(runDir, "state.json");
-  const hadSnapshot = hasRunSnapshotEntry(snapshotPath);
-  const childStarted = hasJournaledChildStart(parent, ref);
-  bindChildRun(parent, ref, childRunId);
+  // 3. Identity. The reference reuses its bound run id or receives a fresh one,
+  //    and learns whether that identity was already used.
+  const { runDir, strictSnapshot } = bindChildRunDir(parent, ref, {
+    pipeline: childDefinition.name,
+    ticket,
+    context: childCtx,
+  });
 
-  // 4. Boot. A started identity, or one whose snapshot exists, must resume THAT
-  //    snapshot: a missing or damaged one is refused instead of becoming a second
-  //    child under the same id. A boot failure leaves the reference resumable.
+  // 4. Boot. A used identity must resume THAT snapshot. A boot failure leaves
+  //    the reference resumable.
   const stateStore = new FileRunStateStore({ context: childCtx, pipeline: childDefinition.name, ticket });
   let childRun: RunView;
   let childResumed: boolean;
@@ -188,14 +151,7 @@ export async function executeChild(
       budgetScopeId: parent.budgetScopeId ?? parent.rootRunId ?? parent.runId,
       lot,
       pipelineLineage,
-      strictSnapshot:
-        childStarted || hadSnapshot
-          ? {
-              path: snapshotPath,
-              releaseRunLock: false,
-              expectedIdentity: { runId: childRunId, pipeline: childDefinition.name, ticket },
-            }
-          : undefined,
+      strictSnapshot,
     }));
   } catch (error) {
     const reason = errorMessage(error).trim();
@@ -209,21 +165,18 @@ export async function executeChild(
   // 5. Start fact: from here on the identity is spent.
   recordChildStarted(parent, step, childRun);
 
-  // 6. Execution, unless the child is already terminal. A terminal child with
-  //    only done/skipped steps must be reported as-is. The exception is a settled
-  //    snapshot that never received a verdict — the window between the last step
-  //    and finalizeRun — which `hydrate` deliberately loads as RUNNING precisely
-  //    so this call finalizes it.
+  // 6. Execution, unless the child owes nothing. A terminal child with only
+  //    done/skipped steps must be reported as-is; a settled snapshot that never
+  //    received a verdict — the window between the last step and finalizeRun —
+  //    still owes one, and this call stamps it.
   let childOutcome: ChildLoopOutcome = {
     failed: false,
     stopped: false,
     budgetExceeded: false,
     costUnaccounted: false,
     costUnaccountedStop: false,
-    cumulativeCost: measuredRunCost(childRun, 0),
   };
-  const childNeedsExecution = childRun.status === "RUNNING" || pendingSteps(childRun).length > 0;
-  if (!completedSuccessfully(childRun) && childNeedsExecution) {
+  if (!completedSuccessfully(childRun) && remainingWork(childRun).owed) {
     // Keep the recursive dependency out of the step-loop → step-pass →
     // orchestration → step-loop load graph.
     const { executeRunSteps, stepLoopDeps } = await import("./step-loop.js");
@@ -247,14 +200,7 @@ export async function executeChild(
   //    lose already-reconciled cost. Cost accounting owns the charge: the node
   //    total, the parent ledger, the reconciliation event and the accounting
   //    latch a resume reads back.
-  const delta = chargeChildReconciliation({
-    parent,
-    step,
-    ref,
-    child: childRun,
-    budget,
-    fallbackCost: childOutcome.cumulativeCost,
-  });
+  const delta = chargeChildReconciliation({ parent, step, ref, child: childRun, budget });
 
   // 8. Settlement of the reference from the child's own verdict.
   const success = settleChild(parent, ref, step, childRun, delta);

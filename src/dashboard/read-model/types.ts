@@ -279,10 +279,8 @@ export interface StepAttemptView {
   finishedAt?: string;
   /** Duration the runner accounted for the attempt. */
   durationMs?: number;
-  costUsd?: number;
-  costEstimated?: true;
-  /** The attempt spent tokens no pricing table could price. */
-  costUnknown?: true;
+  /** Absent when the attempt reported no figure and no unpriced spend. */
+  cost?: ItemCost;
   model?: string;
   /** Why it failed or was aborted: the error extractor's text when the step
    *  declares one, the exit code or the verdict's reason otherwise. */
@@ -352,6 +350,9 @@ export interface RunJourney {
   startedAt?: string;
   /** Budget of the run, when one was set. */
   maxCostUsd?: number;
+  /** The model the run's attempts spent the most on; the others are drawn in a
+   *  second tone. */
+  mainModel?: string;
   attempts: RunJourneyAttempt[];
   pauses: RunPause[];
 }
@@ -386,11 +387,9 @@ export interface RunRecapStep {
   id: string;
   status: RunStepStatus;
   durationMs?: number;
-  costUsd?: number;
-  /** The figure came from a rate table rather than from the provider. */
-  costEstimated?: true;
-  /** An attempt of the step spent tokens no pricing table could price. */
-  costUnknown?: true;
+  /** The ledger's figure for the step; absent when it reported none and spent
+   *  nothing unpriced. */
+  cost?: ItemCost;
   /** Model of a step that ran one agent. Absent on a node composing pipelines,
    *  which ran none of its own: see `models`. */
   model?: string;
@@ -454,10 +453,8 @@ export interface StatsRun {
   pipeline: string;
   status: ItemStatus;
   source: StatsSource;
-  costUsd?: number;
-  costEstimated?: true;
-  /** The figure is a lower bound: the run spent tokens nobody could price. */
-  costUnknown?: true;
+  /** Absent when the run reported no figure and no unpriced spend. */
+  cost?: ItemCost;
   /** Time spent executing steps, as the runner accounted it. */
   activeMs?: number;
   createdAt?: string;
@@ -484,10 +481,8 @@ export interface StatsTicket {
   kind: TicketKind;
   /** `mixed` when the ticket has both live and archived runs. */
   source: StatsSource | "mixed";
-  /** Absent when no run reported a figure. */
-  costUsd?: number;
-  costEstimated: boolean;
-  costUnknown: boolean;
+  /** Its runs' costs summed; `usd` absent when no run reported a figure. */
+  cost: ItemCost;
   activeMs?: number;
   /** Earliest `createdAt` and latest `updatedAt` of its runs: the span includes
    *  every pause, so it is shown beside the active time, never instead of it. */

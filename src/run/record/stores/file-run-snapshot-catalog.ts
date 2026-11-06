@@ -1,10 +1,10 @@
-import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { DEFAULT_SPEC_PATH } from "../../../shared/env/tickets.js";
 import type { PipelineContext } from "../../../shared/language/context.js";
 import type { RunStateSnapshot } from "../../storage-ports.js";
 import { readRunSnapshot } from "../run-snapshot.js";
-import { baseRunsDir, STATE_FILE } from "./run-storage.js";
+import { baseRunsDir, isLatestRunDir, RUNS_DIRECTORY, STATE_FILE } from "./run-storage.js";
 
 /** Filesystem inventory of snapshots, independent from store CRUD operations. */
 export class FileRunSnapshotCatalog {
@@ -43,7 +43,7 @@ function findRunsRoots(root: string, depth = 0): string[] {
   if (depth > 8 || !existsSync(root)) return [];
   const found: string[] = [];
   for (const path of directories(root)) {
-    if (basename(path) === "runs") {
+    if (basename(path) === RUNS_DIRECTORY) {
       found.push(path);
       continue;
     }
@@ -59,13 +59,7 @@ function collectSnapshots(runsRoot: string): RunStateSnapshot[] {
       const statePath = join(runDir, STATE_FILE);
       const state = readRunSnapshot(statePath);
       if (!state) continue;
-      let isLatest: boolean | undefined;
-      try {
-        isLatest = realpathSync(join(pipelineDir, "latest")) === realpathSync(runDir);
-      } catch {
-        // A missing or broken latest link simply means this snapshot is not latest.
-        isLatest = false;
-      }
+      const isLatest = isLatestRunDir(pipelineDir, runDir);
       let modifiedAt: number | undefined;
       try {
         modifiedAt = statSync(statePath).mtimeMs;

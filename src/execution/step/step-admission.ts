@@ -2,7 +2,6 @@
 // Step admission before any spawn: budget, inputs, and preflight. This module does
 // not know sessions or on_failure strategies; it decides whether execution may run.
 
-import { join } from "node:path";
 import type { InputAction, InputDecision, StepInputCondition } from "../../definition/index.js";
 import { runBashAsync, stripStderrMarker } from "../../shared/process/bash-runner.js";
 import { errorMessage } from "../../shared/lib/errors.js";
@@ -22,6 +21,7 @@ import {
   recordUnfinishedOutputs,
   stopRun,
   updateStep,
+  stepLogDir,
 } from "../../run/index.js";
 import {
   adoptOutputs,
@@ -300,7 +300,7 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
     // same treatment applies to both stops: an unaccountable run resumes where it
     // stopped once the operator decides how to continue.
     const remaining = run.steps.filter((other) => other.status === "pending").length;
-    if (stop === "unaccounted") {
+    if (stop === "cost-unaccounted") {
       input.output.emit({
         type: "runner.message",
         level: "warn",
@@ -427,5 +427,5 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
     }
   }
 
-  return { kind: "ready", command, stepLogDir: join(run.run_dir, "steps", step.id) };
+  return { kind: "ready", command, stepLogDir: stepLogDir(run.run_dir, step.id) };
 }

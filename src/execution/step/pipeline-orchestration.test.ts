@@ -6,6 +6,7 @@ import type { AgentCapabilities, AgentRequest } from "../../contracts/backends.j
 import { createDefaultAgentBackendRegistry } from "../../agents/default-registry.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import { buildPipelineContext } from "../../definition/pipeline/context.js";
+import { runSpend } from "../../run/record/cost-accounting.js";
 import { appendRunEvent, readRunEvents } from "../../run/record/run-journal.js";
 import { abortRun, finalizeRun } from "../../run/record/run-transitions.js";
 import { loadOrCreateRun } from "./load-or-create-run.js";
@@ -996,7 +997,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
 
   const { run, outcome } = await executeParent(parentPath, root, "P", runDir, true, context);
   expect(outcome.failed).toBe(true);
-  expect(outcome.cumulativeCost).toBeCloseTo(0.4, 10);
+  expect(runSpend(run).usd).toBeCloseTo(0.4, 10);
   expect(run.steps[0]!.control?.total_cost_usd).toBeCloseTo(0.4, 10);
   expect(run.total_control?.total_cost_usd).toBeCloseTo(0.4, 10);
   const snapshot = JSON.parse(readFileSync(join(runDir, "state.json"), "utf8"));
@@ -1635,7 +1636,7 @@ test("pipeline-orchestration: a child already finished is settled without runnin
   costCalls.length = 0;
 
   expect(resumed.run.status).toBe("PASS");
-  expect(resumed.outcome.cumulativeCost).toBeCloseTo(1, 10);
+  expect(runSpend(resumed.run).usd).toBeCloseTo(1, 10);
   const step = resumed.run.steps[0]!;
   expect(step.control?.total_cost_usd).toBeCloseTo(1, 10);
   expect(step.control?.duration_ms).toBe(firstDuration);
@@ -1822,7 +1823,7 @@ test("pipeline-orchestration: a nested tree resumes under the same identities an
 
   const first = await executeParent(rootPath, root, "R", runDir, true, context);
   expect(first.run.status).toBe("FAIL");
-  expect(first.outcome.cumulativeCost).toBeCloseTo(1, 10);
+  expect(runSpend(first.run).usd).toBeCloseTo(1, 10);
   const midRef = first.run.steps[0]!.orchestration!.children[0]!;
   expect(midRef.status).toBe("failed");
   expect(midRef.accountedCostUsd).toBeCloseTo(1, 10);
@@ -1832,7 +1833,7 @@ test("pipeline-orchestration: a nested tree resumes under the same identities an
   const resumed = await executeParent(rootPath, root, "R", runDir, false, context);
 
   expect(resumed.run.status).toBe("PASS");
-  expect(resumed.outcome.cumulativeCost).toBeCloseTo(2, 10);
+  expect(runSpend(resumed.run).usd).toBeCloseTo(2, 10);
   const rootStep = resumed.run.steps[0]!;
   expect(rootStep.control?.total_cost_usd).toBeCloseTo(2, 10);
   const resumedMidRef = rootStep.orchestration!.children[0]!;

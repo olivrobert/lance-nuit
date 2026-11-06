@@ -35,6 +35,11 @@ export function logicalAttemptLogPath(stepId: string, attempt: number): string {
   return join("steps", stepId, `attempt-${String(attempt).padStart(3, "0")}`, "output.log").replaceAll("\\", "/");
 }
 
+/** Directory that holds every attempt of `stepId` in the run at `runDir`. */
+export function stepLogDir(runDir: string, stepId: string): string {
+  return join(runDir, dirname(dirname(logicalAttemptLogPath(stepId, 1))));
+}
+
 /** Path for the next attempt, retained for callers that explicitly request a path
  *  before spawning. Registering the attempt belongs to `openAttempt`
  *  (`run/record/attempt-lifecycle.ts`). */
@@ -68,12 +73,18 @@ export function attemptLogPath(run: RunView, step: RunStepView, attempt: number)
 /** What an attempt was given, beside what it printed. The snapshot does not
  *  keep the rendered prompt (it would be rewritten on every transition), so this
  *  file is the only place a reader can still see it once the run is over. */
-export const ATTEMPT_COMMAND_FILE = "command.txt";
+const ATTEMPT_COMMAND_FILE = "command.txt";
+
+/** Where the command of the attempt that wrote `logPath` is kept: beside it, in
+ *  the same form (relative to the run when `logPath` is). */
+export function attemptCommandPath(logPath: string): string {
+  return join(dirname(logPath), ATTEMPT_COMMAND_FILE);
+}
 
 /** Write the rendered command — the agent prompt, the fix prompt, or the shell
  *  command — next to the attempt log. */
 export function writeAttemptCommand(stepLogPath: string, command: string): void {
-  writeFileSync(join(dirname(stepLogPath), ATTEMPT_COMMAND_FILE), command, { encoding: "utf-8" });
+  writeFileSync(attemptCommandPath(stepLogPath), command, { encoding: "utf-8" });
 }
 
 export function latestAttemptLog(run: RunView, step: RunStepView): string | null {

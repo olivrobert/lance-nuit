@@ -37,7 +37,7 @@ test("cost stop: a gate stopping on the ledger journals the ceiling and latches 
   const run = makeRun(1);
   const budget: RunBudget = { cumulative: 1.2 };
 
-  recordCostStop(run, budget, "exceeded", { kind: "gate", stepId: "b" });
+  recordCostStop(run, budget, "budget-exceeded", { kind: "gate", stepId: "b" });
 
   expect(budget.exceeded).toBeUndefined();
   expect(run.budget_exceeded).toBeUndefined();
@@ -60,7 +60,7 @@ test("cost stop: a gate stopping on a restored guard flag journals an estimate",
   run.budget_exceeded = true;
   const budget: RunBudget = { cumulative: 0.3, exceeded: true };
 
-  recordCostStop(run, budget, "exceeded", { kind: "gate", stepId: "b" });
+  recordCostStop(run, budget, "budget-exceeded", { kind: "gate", stepId: "b" });
 
   const events = eventsOf(run, "run.budget.exceeded");
   expect(events).toHaveLength(1);
@@ -74,7 +74,7 @@ test("cost stop: a live guard kill latches the ledger and the run, and journals 
   const run = makeRun(1);
   const budget: RunBudget = { cumulative: 0.3 };
 
-  recordCostStop(run, budget, "exceeded", { kind: "live-guard", stepId: "a" });
+  recordCostStop(run, budget, "budget-exceeded", { kind: "live-guard", stepId: "a" });
 
   expect(budget.exceeded).toBe(true);
   expect(run.budget_exceeded).toBe(true);
@@ -90,7 +90,7 @@ test("cost stop: an accounting stop latches the withheld work and journals the l
     const run = makeRun(5);
     const budget: RunBudget = { cumulative: 2, costUnknown: true };
 
-    recordCostStop(run, budget, "unaccounted", { kind, stepId: "a" });
+    recordCostStop(run, budget, "cost-unaccounted", { kind, stepId: "a" });
 
     expect(budget.unaccountedStop).toBe(true);
     // The proof stays what accounting made it, and the ceiling stop is untouched.
@@ -112,14 +112,14 @@ test("cost stop: several sites observing the same stop journal it once per gener
   const run = makeRun(1);
   const budget: RunBudget = { cumulative: 1.5 };
 
-  recordCostStop(run, budget, "exceeded", { kind: "gate", stepId: "a" });
-  recordCostStop(run, budget, "exceeded", { kind: "gate", stepId: "b" });
-  recordCostStop(run, budget, "exceeded", { kind: "gate", stepId: null });
+  recordCostStop(run, budget, "budget-exceeded", { kind: "gate", stepId: "a" });
+  recordCostStop(run, budget, "budget-exceeded", { kind: "gate", stepId: "b" });
+  recordCostStop(run, budget, "budget-exceeded", { kind: "gate", stepId: null });
   expect(eventsOf(run, "run.budget.exceeded")).toHaveLength(1);
   expect(eventsOf(run, "run.budget.exceeded")[0]).toMatchObject({ stepId: "a" });
 
   const resumed: RunBudget = { cumulative: 1.5 };
-  recordCostStop(run, resumed, "exceeded", { kind: "gate", stepId: "b" });
+  recordCostStop(run, resumed, "budget-exceeded", { kind: "gate", stepId: "b" });
   expect(eventsOf(run, "run.budget.exceeded")).toHaveLength(2);
 });
 
@@ -130,9 +130,9 @@ test("cost stop: both stops recorded for one attempt are two facts, each journal
   const budget: RunBudget = { cumulative: 0.2, costUnknown: true };
   const origin = { kind: "live-guard", stepId: "a" } as const;
 
-  recordCostStop(run, budget, "exceeded", origin);
-  recordCostStop(run, budget, "unaccounted", origin);
-  recordCostStop(run, budget, "unaccounted", { kind: "gate", stepId: "b" });
+  recordCostStop(run, budget, "budget-exceeded", origin);
+  recordCostStop(run, budget, "cost-unaccounted", origin);
+  recordCostStop(run, budget, "cost-unaccounted", { kind: "gate", stepId: "b" });
 
   expect(budget.exceeded).toBe(true);
   expect(budget.unaccountedStop).toBe(true);
@@ -167,7 +167,7 @@ test("ledger stops: the accounting latch names the stop only once a gate withhel
 
   // Once a gate withheld work over the same uncertainty, the uncertainty is the
   // reason the run ended.
-  recordCostStop(run, latched, "unaccounted", { kind: "gate", stepId: "b" });
+  recordCostStop(run, latched, "cost-unaccounted", { kind: "gate", stepId: "b" });
   expect(ledgerStops(run, latched, true)).toEqual({
     budgetExceeded: false,
     costUnaccounted: true,

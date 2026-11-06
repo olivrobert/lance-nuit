@@ -132,7 +132,7 @@ function TakeawayLine({ takeaway }: { takeaway: Takeaway }): JSX.Element {
           <span aria-hidden="true">$</span>
           <span>
             <b>{takeaway.stepId}</b>
-            {` took ${percent(takeaway.share)} of the cost: ${fmtCost({ usd: takeaway.costUsd, estimated: false })}${takeaway.model ? ` on ${fmtModel(takeaway.model)}` : ""}`}
+            {` took ${percent(takeaway.share)} of the cost: ${fmtCost(takeaway.cost)}${takeaway.model ? ` on ${fmtModel(takeaway.model)}` : ""}`}
           </span>
         </li>
       );
@@ -167,7 +167,7 @@ export interface RunSummaryProps {
 }
 
 export function RunSummary({ item, recap, journey, timeline }: RunSummaryProps): JSX.Element {
-  const found = takeaways(timeline, item.cost?.usd);
+  const found = takeaways(timeline, item.cost);
   return (
     <section className={styles.summary} aria-label="Run summary">
       <Headline item={item} timeline={timeline} />

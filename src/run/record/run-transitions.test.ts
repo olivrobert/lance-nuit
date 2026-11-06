@@ -28,7 +28,6 @@ const outcome: RunOutcome = {
   costUnaccounted: false,
   costUnaccountedStop: false,
   untilStop: false,
-  cumulativeCost: 0.3,
 };
 
 test("report: validates the integration contract", () => {
@@ -81,7 +80,7 @@ function reportOf(failKind: "verdict" | "technical"): string {
       ),
     ],
   };
-  finalizeRun(run, { failed: true, stopped: false, budgetExceeded: false, cumulativeCost: 0 });
+  finalizeRun(run, { failed: true, stopped: false, budgetExceeded: false });
 
   let output = "";
   new ConsoleRunReporter(
@@ -91,7 +90,7 @@ function reportOf(failKind: "verdict" | "technical"): string {
       },
     },
     runDir,
-  ).report(buildRunReport(run, { failed: true, stopped: false, budgetExceeded: false, cumulativeCost: 0 }));
+  ).report(buildRunReport(run, { failed: true, stopped: false, budgetExceeded: false }));
   return output;
 }
 
@@ -131,7 +130,7 @@ test("report: validates the integration contract", () => {
   expect(step.errors).toBeUndefined();
   updateStep(run, step, "failed", "AC-4 is not satisfied");
 
-  finalizeRun(run, { failed: true, stopped: false, budgetExceeded: false, cumulativeCost: 0 });
+  finalizeRun(run, { failed: true, stopped: false, budgetExceeded: false });
   const saved = JSON.parse(readFileSync(join(runDir, "state.json"), "utf-8"));
   expect(saved.outcome.reason).toBe("AC-4 is not satisfied");
   expect(Date.parse(saved.outcome.at)).toBeGreaterThan(0);
@@ -154,7 +153,7 @@ test("report: fail_cause reaches the run outcome, the journal, and the resumed g
   const changed = readRunEvents(runDir).filter((event) => event.type === "step.status.changed");
   expect(changed.at(-1)).toMatchObject({ stepId: "deploy", status: "failed", failCause: "blocked" });
 
-  finalizeRun(run, { failed: true, stopped: false, budgetExceeded: false, cumulativeCost: 0 });
+  finalizeRun(run, { failed: true, stopped: false, budgetExceeded: false });
   const saved = JSON.parse(readFileSync(join(runDir, "state.json"), "utf-8"));
   expect(saved.outcome.failCause).toBe("blocked");
   expect(saved.steps[0].fail_cause).toBe("blocked");
@@ -189,7 +188,7 @@ test("report: a run STOPPED by a block keeps the cause, the kind and the stop", 
     detail: "the release branch is missing",
   });
 
-  finalizeRun(run, { failed: false, stopped: true, budgetExceeded: false, cumulativeCost: 0 });
+  finalizeRun(run, { failed: false, stopped: true, budgetExceeded: false });
 
   const saved = JSON.parse(readFileSync(join(runDir, "state.json"), "utf-8"));
   expect(saved.status).toBe("STOPPED");
@@ -238,7 +237,7 @@ function unaccountedReport(overrides: Partial<RunOutcome> = {}): string {
     // run ended, which is what earns the headline and the recovery command.
     costUnaccountedStop: true,
     untilStop: false,
-    cumulativeCost: 0,
+
     ...overrides,
   };
   finalizeRun(run, outcome);
@@ -323,7 +322,7 @@ function finalizedStop(overrides: Partial<RunOutcome>): {
     failed: true,
     stopped: false,
     budgetExceeded: false,
-    cumulativeCost: 0.02,
+
     ...overrides,
   });
   const saved = JSON.parse(readFileSync(join(runDir, "state.json"), "utf-8"));
@@ -457,7 +456,7 @@ test("updateStep: a skipped step drops the failure of the pass it abandons and k
   expect(report.statusCounts.skipped).toBe(1);
   expect(report.statusCounts.done).toBe(0);
   expect(report.steps[0]!.detail).toBeUndefined();
-  expect(report.totalControl.total_cost_usd).toBe(0.3);
+  expect(report.spend.usd).toBe(0.3);
 });
 
 test("absorbStepFailure: the step is done, the reason stays, the journal event is unchanged", () => {

@@ -129,7 +129,7 @@ test("step detail: attempts come from the journal, in order, with what each one 
       startedAt: "2026-09-05T07:02:01.000Z",
       finishedAt: "2026-09-05T07:03:00.000Z",
       durationMs: 59000,
-      costUsd: 0.4,
+      cost: { usd: 0.4, estimated: false },
       model: "claude-opus-5-5",
       logPath: `runs/feature/r-1/${logPath("tests", 2)}`,
     },

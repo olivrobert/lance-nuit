@@ -11,6 +11,7 @@ import { join } from "node:path";
 import type { AgentCapabilities, AgentRequest } from "../../src/contracts/backends.js";
 import { createDefaultAgentBackendRegistry } from "../../src/agents/default-registry.js";
 import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
+import { runSpend } from "../../src/run/record/cost-accounting.js";
 import { finalizeRun } from "../../src/run/record/run-transitions.js";
 import { loadOrCreateRun } from "../../src/execution/step/load-or-create-run.js";
 import { NULL_RUN_OUTPUT } from "../../src/execution/run-output.js";
@@ -175,7 +176,7 @@ export default ({ pipeline, llmStep, actionStep }) => pipeline("costly")
   expect(approved.max_cost_usd).toBe(20);
   expect(approved.status).toBe("PASS");
   // The paid step keeps its cost and is not charged twice.
-  expect(approvedOutcome.cumulativeCost).toBe(0.5);
+  expect(runSpend(approved).usd).toBe(0.5);
   expect(trace(root)).toEqual(["rest"]);
 });
 

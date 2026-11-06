@@ -164,8 +164,8 @@ export function settleAttempt(
   // retry loops stop and the report names the cost stop instead of the process
   // the guard had to kill to reach it.
   const origin = { kind: "live-guard", stepId: step.id } as const;
-  if (result.budgetExceeded) recordCostStop(run, budget, "exceeded", origin);
-  if (result.costUnaccounted === true) recordCostStop(run, budget, "unaccounted", origin);
+  if (result.budgetExceeded) recordCostStop(run, budget, "budget-exceeded", origin);
+  if (result.costUnaccounted === true) recordCostStop(run, budget, "cost-unaccounted", origin);
   const control = result.costUnaccounted === true ? { ...settled.control, cost_unknown: true } : settled.control;
   // Once per attempt, on the uncertainty itself rather than on the strict stop:
   // silence would read as a free attempt, whose spend the ceiling never sees.

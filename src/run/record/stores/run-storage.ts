@@ -3,6 +3,10 @@
 //
 //   <ticket>/runs/<pipeline>/<runId>/state.json
 //   <ticket>/runs/<pipeline>/latest -> <runId>
+//
+// This file is the one place that knows that layout: code outside the run record
+// asks for a run by intention (the latest run, the runs of a work item, the run
+// a composed node launched), never by joining these names itself.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -16,7 +20,7 @@ import {
   symlinkSync,
   unlinkSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   acquireLock,
   defaultIsAlive,
@@ -43,6 +47,8 @@ import {
 
 export const RUNS_DIRECTORY = "runs";
 export const STATE_FILE = "state.json";
+/** The selector of a pipeline's current run: a relative symlink to its directory. */
+const LATEST_LINK = "latest";
 
 function safePipelineName(name: string): string {
   if (!isLogicalSegment(name)) throw new Error(`Invalid pipeline name: ${name}`);
@@ -53,6 +59,15 @@ function safePipelineName(name: string): string {
 export function createRunId(pipelineName: string, now = new Date(), uuid = randomUUID()): string {
   const stamp = now.toISOString().replace(/[-:]/g, "");
   return `${stamp}-${safePipelineName(pipelineName)}-${uuid.replace(/-/g, "").slice(0, 6)}`;
+}
+
+/** A fresh run id under `pipelineDir`, suffixed when a directory already holds it. */
+export function allocateRunId(pipelineDir: string, pipelineName: string): string {
+  const base = createRunId(pipelineName);
+  let runId = base;
+  let collision = 1;
+  while (existsSync(join(pipelineDir, runId))) runId = `${base}-${collision++}`;
+  return runId;
 }
 
 export function baseRunsDir(ticket?: string, context?: PipelineContext): string {
@@ -75,6 +90,11 @@ function runsDirAt({ cwd, specPath }: RunsLocation, ticket?: string): string {
   return kitPath(cwd, TICKETLESS_RUNS_DIR);
 }
 
+/** The snapshot file of the run at `runDir`. */
+export function runSnapshotFile(runDir: string): string {
+  return join(runDir, STATE_FILE);
+}
+
 export function pipelineRunsDir(pipelineName: string, ticket?: string, context?: PipelineContext): string {
   return join(baseRunsDir(ticket, context), safePipelineName(pipelineName));
 }
@@ -85,8 +105,20 @@ export function pointLatestTo(pipelineDir: string, runDir: string): void {
   updateLatestSymlink(pipelineDir, runDir);
 }
 
+/** The run `latest` selects in `pipelineDir`, or `null` when the link is missing
+ *  or broken. The tolerant read: the strict one, which tells a missing selector
+ *  from a damaged one, is `resolveLatestRunSnapshot`. */
+function latestRunDirAt(pipelineDir: string): string | null {
+  try {
+    return realpathSync(join(pipelineDir, LATEST_LINK));
+  } catch {
+    // No link, or one whose target is gone: this pipeline has no current run.
+    return null;
+  }
+}
+
 function updateLatestSymlink(pipelineDir: string, target: string): void {
-  const link = join(pipelineDir, "latest");
+  const link = join(pipelineDir, LATEST_LINK);
   // Atomic replacement: symlink to a temp name, then rename over `latest`.
   // An unlink+symlink pair would leave a window where concurrent readers see
   // no latest link and silently start a fresh run instead of resuming.
@@ -306,7 +338,7 @@ export function resolveLatestRunSnapshot(
   context?: PipelineContext,
   reader?: RunSnapshotReader,
 ): LatestRunSnapshot | null {
-  const link = join(pipelineRunsDir(pipelineName, ticket, context), "latest");
+  const link = join(pipelineRunsDir(pipelineName, ticket, context), LATEST_LINK);
   try {
     lstatSync(link);
   } catch (error) {
@@ -406,27 +438,99 @@ export function resolveRunDirSelection(
     }
   }
 
-  const rootRunId = createRunId(pipelineName);
-  let runId = rootRunId;
-  let collision = 1;
-  while (existsSync(join(pipelineDir, runId))) {
-    runId = `${rootRunId}-${collision++}`;
-  }
-  const dir = join(pipelineDir, runId);
+  const dir = join(pipelineDir, allocateRunId(pipelineDir, pipelineName));
   mkdirSync(dir, { recursive: true });
   claimRunDir(dir);
   updateLatestSymlink(pipelineDir, dir);
   return { dir, selectedSnapshot: false, acquiredRunLock: false };
 }
 
-/** Snapshot path for the latest run of this pipeline and ticket. */
-export function latestRunFile(pipelineName: string, ticket?: string, context?: PipelineContext): string | null {
-  const latestLink = join(pipelineRunsDir(pipelineName, ticket, context), "latest");
-  if (!existsSync(latestLink)) return null;
+/** Directory of the latest run of this pipeline and ticket, or `null` when no
+ *  run is selected or the selector is broken. */
+export function latestRunDir(pipelineName: string, ticket?: string, context?: PipelineContext): string | null {
+  return latestRunDirAt(pipelineRunsDir(pipelineName, ticket, context));
+}
+
+/**
+ * pid of a live runner already holding the run the next invocation would resume,
+ * or `null`. A damaged selector reads as no holder: the run that resolves it
+ * reports it, with its remedy.
+ */
+export function latestRunHolder(pipelineName: string, ticket?: string, context?: PipelineContext): number | null {
   try {
-    return statePath(realpathSync(latestLink));
+    const latest = resolveLatestRunSnapshot(pipelineName, ticket, context);
+    return latest ? runLockHolder(latest.runDir) : null;
   } catch {
-    // A missing or broken latest link has no usable snapshot to report.
+    // Policy above: the damage is reported where the run is resolved.
     return null;
+  }
+}
+
+/** One pipeline's runs inside a work item. */
+export interface PipelineRuns {
+  pipeline: string;
+  /** Every run directory, by name; the `latest` link is not one of them. */
+  runDirs: string[];
+  /** The run `latest` selects, or `null` without a usable link. */
+  latest: string | null;
+}
+
+/** The runs a work item holds, pipeline by pipeline, in name order. An absent or
+ *  unreadable directory holds none. */
+export function listWorkItemRuns(workItemDir: string): PipelineRuns[] {
+  const runsDir = join(workItemDir, RUNS_DIRECTORY);
+  return subdirectories(runsDir).map((pipeline) => {
+    const pipelineDir = join(runsDir, pipeline);
+    return {
+      pipeline,
+      runDirs: subdirectories(pipelineDir).map((name) => join(pipelineDir, name)),
+      latest: latestRunDirAt(pipelineDir),
+    };
+  });
+}
+
+/** Real subdirectories of `dir`, by name; a symlink is not followed. */
+function subdirectories(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    // Enumeration is opportunistic: a work item that never ran has no runs.
+    return [];
+  }
+}
+
+/**
+ * Directory of the run a composed node launched, or `undefined` when the child
+ * reference cannot name one safely (its names come from a file). A child on its
+ * parent's ticket sits beside the parent, under the same pipeline directories; a
+ * child on another ticket sits under that ticket's work item, resolved the way
+ * the runner resolved it.
+ */
+export function composedRunDir(
+  parent: { runDir: string; ticket?: string },
+  child: { pipeline: string; runId?: string; ticket?: string },
+  location: RunsLocation,
+): string | undefined {
+  if (!isLogicalSegment(child.pipeline) || child.runId === undefined || !isLogicalSegment(child.runId)) {
+    return undefined;
+  }
+  if (!child.ticket || child.ticket === parent.ticket) {
+    return join(dirname(dirname(parent.runDir)), child.pipeline, child.runId);
+  }
+  return join(runsDirAt(location, child.ticket), child.pipeline, child.runId);
+}
+
+/** Whether `pipelineDir`'s `latest` selects `runDir`. */
+export function isLatestRunDir(pipelineDir: string, runDir: string): boolean {
+  const latest = latestRunDirAt(pipelineDir);
+  if (latest === null) return false;
+  try {
+    return latest === realpathSync(runDir);
+  } catch {
+    // A run removed during discovery is not the latest of anything.
+    return false;
   }
 }

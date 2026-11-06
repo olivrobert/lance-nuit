@@ -12,41 +12,41 @@ import { expect, test } from "bun:test";
 import { costDecision as decide } from "./budget.js";
 
 test("strict cost: an unknown closed attempt blocks a capped run", () => {
-  expect(decide(5, { cumulative: 1, costUnknown: true })).toBe("unaccounted");
+  expect(decide(5, { cumulative: 1, costUnknown: true })).toBe("cost-unaccounted");
 });
 
 test("strict cost: an uncapped run continues despite unknown spend", () => {
-  expect(decide(undefined, { cumulative: 1, costUnknown: true })).toBe("continue");
+  expect(decide(undefined, { cumulative: 1, costUnknown: true })).toBeUndefined();
 });
 
 test("strict cost: explicit unmetered authorization continues under a cap", () => {
-  expect(decide(5, { cumulative: 1, costUnknown: true, allowUnmetered: true })).toBe("continue");
+  expect(decide(5, { cumulative: 1, costUnknown: true, allowUnmetered: true })).toBeUndefined();
 });
 
 test("strict cost: known spending still stops at the cap", () => {
-  expect(decide(5, { cumulative: 5 })).toBe("exceeded");
+  expect(decide(5, { cumulative: 5 })).toBe("budget-exceeded");
 });
 
 test("strict cost: unmetered authorization does not lift the known-cost ceiling", () => {
-  expect(decide(5, { cumulative: 5, costUnknown: true, allowUnmetered: true })).toBe("exceeded");
+  expect(decide(5, { cumulative: 5, costUnknown: true, allowUnmetered: true })).toBe("budget-exceeded");
 });
 
 test("strict cost: a raised cap alone does not bypass uncertainty", () => {
   // `--budget 20` only changes the amount; the unpriced attempt is still unpriced.
-  expect(decide(20, { cumulative: 1, costUnknown: true })).toBe("unaccounted");
+  expect(decide(20, { cumulative: 1, costUnknown: true })).toBe("cost-unaccounted");
 });
 
 test("strict cost: a live guard kill still reports an exceeded budget", () => {
-  expect(decide(5, { cumulative: 1, exceeded: true })).toBe("exceeded");
+  expect(decide(5, { cumulative: 1, exceeded: true })).toBe("budget-exceeded");
 });
 
 test("strict cost: a fully priced run under its cap continues", () => {
-  expect(decide(5, { cumulative: 1 })).toBe("continue");
+  expect(decide(5, { cumulative: 1 })).toBeUndefined();
 });
 
 test("strict cost: an unknown attempt over the cap reports the reached ceiling", () => {
   // Precedence, settled in Lot 2: a reached ceiling outranks uncertainty. The
   // known lower bound is the harder fact, and it is the one an operator can act
   // on with `--budget`.
-  expect(decide(5, { cumulative: 6, costUnknown: true })).toBe("exceeded");
+  expect(decide(5, { cumulative: 6, costUnknown: true })).toBe("budget-exceeded");
 });

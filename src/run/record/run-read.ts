@@ -19,7 +19,7 @@
 // Attempts are not in the snapshot at all: `readRunHistory` projects them, with
 // the contracted events, for the readers that open a step or the run's timeline.
 
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { PipelineContext } from "../../shared/language/context.js";
 import type { RawJournalEvent, RunJournalEvent, RunJournalKnownEvent } from "../journal.js";
 import type { PersistedAttempt, PersistedRun, PersistedStepState } from "../persisted.js";
@@ -31,7 +31,7 @@ import { projectRunState } from "./run-projection.js";
 import { readRunSnapshot } from "./run-snapshot.js";
 import { type EffectiveRunStatus, effectiveStatus } from "./run-status.js";
 import { FileRunEventStore } from "./stores/file-run-event-store.js";
-import { isRunHeld, latestRunFile, type RunsLocation, runsLocationOf, STATE_FILE } from "./stores/run-storage.js";
+import { isRunHeld, latestRunDir, type RunsLocation, runsLocationOf, STATE_FILE } from "./stores/run-storage.js";
 
 /** A run as every reader sees it. */
 export interface RunRead {
@@ -83,8 +83,8 @@ export function readRun(runDir: string, location: RunsLocation): RunRead | null 
 
 /** The run `latest` points at for `pipeline` and `ticket`, or `null`. */
 export function readLatestRun(pipeline: string, ticket?: string, context?: PipelineContext): RunRead | null {
-  const file = latestRunFile(pipeline, ticket, context);
-  return file ? readRun(dirname(file), runsLocationOf(context)) : null;
+  const runDir = latestRunDir(pipeline, ticket, context);
+  return runDir ? readRun(runDir, runsLocationOf(context)) : null;
 }
 
 /** A run a store listed (`RunStateStore.listSnapshots`), read like `readRun`. A

@@ -17,12 +17,7 @@ import { useSheetNavigation } from "./sheet-context.js";
 import styles from "./StepPanel.module.css";
 
 function attemptCost(attempt: StepAttemptView): string {
-  if (typeof attempt.costUsd !== "number" && !attempt.costUnknown) return "—";
-  return fmtCost({
-    ...(typeof attempt.costUsd === "number" ? { usd: attempt.costUsd } : {}),
-    estimated: attempt.costEstimated === true,
-    ...(attempt.costUnknown ? { unknown: true } : {}),
-  });
+  return attempt.cost ? fmtCost(attempt.cost) : "—";
 }
 
 /** First line of a reason, for the table; the whole text is printed below it

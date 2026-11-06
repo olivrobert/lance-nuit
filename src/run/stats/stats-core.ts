@@ -10,7 +10,7 @@
 //     costUsd? }   <- written by the runner (exact CLI cost); estimated from
 //                    pricing.json when absent.
 
-import { projectPricingForModel, tokenCostUsd } from "../../contracts/pricing.js";
+import { type ProjectPricing, projectPricingForModel, tokenCostUsd } from "../../contracts/pricing.js";
 import type { RunOutcomeState } from "../persisted.js";
 
 export interface TokenCounts {
@@ -79,19 +79,6 @@ export interface RunStatsEntry {
   costUsd?: number;
 }
 
-export interface PricingRate {
-  in?: number;
-  out?: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-}
-
-// `_currency` shares the table with per-model rates; readers must skip
-// non-object values when iterating models.
-export type PricingTable = { _currency?: string } & {
-  [model: string]: PricingRate | string;
-};
-
 /** What `entryCost` reads of a history entry. */
 export interface CostedEntry {
   models?: Record<string, TokenCounts>;
@@ -119,24 +106,6 @@ const STATUS_BADGES: Readonly<Record<string, string>> = {
 export const statusBadge = (s?: string): string =>
   s !== undefined && Object.hasOwn(STATUS_BADGES, s) ? (STATUS_BADGES[s] as string) : `⚪ ${s || "?"}`;
 
-// Symbol displayed before amounts; pricing.json rates use the
-// currency entered by the project ("_currency": "€" for euro pricing), default "$".
-// Read as `pricingTable()` and the runner's rate lookup read it, so an empty
-// string is a currency other than the dollar there and here alike.
-export const currencyOf = (pricing?: PricingTable | null): string =>
-  pricing && typeof pricing._currency === "string" ? pricing._currency : "$";
-
-/**
- * A pricing table these helpers may actually use, or null.
- *
- * A non-USD table is dropped exactly as `pricingTable()` drops it at the command
- * boundary: the runner's `costUsd` is always in dollars and takes precedence over
- * any estimate, so keeping a euro table would label dollar amounts "€". `costOf`
- * funnels through here, so a direct caller cannot reintroduce the mismatch.
- */
-export const usablePricing = (pricing?: PricingTable | null): PricingTable | null =>
-  pricing && currencyOf(pricing) === "$" ? pricing : null;
-
 const spentTokens = (t: TokenCounts): number => (t.in || 0) + (t.out || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0);
 
 // Cost of a run from its model breakdown. Prices are never hardcoded because they
@@ -150,9 +119,10 @@ const spentTokens = (t: TokenCounts): number => (t.in || 0) + (t.out || 0) + (t.
 //
 // A model the table cannot price makes the whole run unpriceable, not cheaper: a
 // silent skip returned $0.00 for a table that simply did not list the model, and
-// the run then read as "priced, estimated" in every total.
-export function costOf(models?: Record<string, TokenCounts> | null, pricing?: PricingTable | null): number | null {
-  const table = usablePricing(pricing);
+// the run then read as "priced, estimated" in every total. A table in another
+// currency prices no model (`projectPricingForModel`): the runner's `costUsd` is
+// always in dollars, and a total mixing the two would be in no currency at all.
+export function costOf(models?: Record<string, TokenCounts> | null, table?: ProjectPricing | null): number | null {
   if (!table) return null;
   let usd = 0;
   let unpriced = 0;
@@ -174,7 +144,7 @@ export function costOf(models?: Record<string, TokenCounts> | null, pricing?: Pr
 
 // Entry cost: costUsd written by the runner (the exact Claude CLI cost, including
 // subagents) takes precedence over the token × pricing estimate.
-export function entryCost(entry: CostedEntry | null | undefined, pricing?: PricingTable | null): number | null {
+export function entryCost(entry: CostedEntry | null | undefined, pricing?: ProjectPricing | null): number | null {
   if (entry && typeof entry.costUsd === "number") return entry.costUsd;
   return costOf(entry?.models, pricing);
 }

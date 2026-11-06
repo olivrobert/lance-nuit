@@ -149,7 +149,7 @@ export function Run({ item, recap, steps, tree }: RunProps): JSX.Element {
         <>
           <RunSummary item={item} recap={recap} journey={journey} timeline={timeline} />
           <Journey item={item} timeline={timeline} onHighlight={setHighlight} />
-          <RunTimelineCard item={item} recap={recap} timeline={timeline} highlight={highlight} />
+          <RunTimelineCard item={item} timeline={timeline} highlight={highlight} />
         </>
       ) : stepless ? null : (
         <Steps steps={steps} />

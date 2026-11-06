@@ -20,17 +20,7 @@ import type { PersistedAttempt } from "../persisted.js";
 import type { Run, RunStep } from "./run.js";
 import { chargeClosedAttempt, type SettledSpend } from "./cost-accounting.js";
 import { appendRunEvent } from "./run-journal.js";
-import { splitAttemptStats } from "./cost-figures.js";
-
-/** True when the backend measured anything at all: a token count or a price. */
-export function hasSpendFigures(stats?: AttemptStats): boolean {
-  return (
-    stats?.input_tokens != null ||
-    stats?.output_tokens != null ||
-    stats?.cache_read_tokens != null ||
-    stats?.total_cost_usd != null
-  );
-}
+import { measuredAnything, splitAttemptStats } from "./cost-figures.js";
 
 /**
  * Normalize the stats of one attempt before they reach the ledger or the step.
@@ -48,7 +38,7 @@ export function settleAttemptStats(
   stats?: AttemptStats,
 ): { control: StepControl; usage?: StepUsage } {
   const metered = kind === "fix" || isAgentStep(step.def);
-  if (!ok && metered && !hasSpendFigures(stats)) {
+  if (!ok && metered && !measuredAnything(stats)) {
     return splitAttemptStats({ ...(stats ?? { duration_ms: 0 }), cost_unknown: true });
   }
   return splitAttemptStats(stats);

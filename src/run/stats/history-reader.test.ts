@@ -2,15 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  aggregateHistory,
-  filterHistory,
-  type HistoryEntry,
-  pricingTable,
-  readHistory,
-  summarizeHistory,
-} from "./history-reader.js";
-import type { PricingTable } from "./stats-core.js";
+import { aggregateHistory, filterHistory, type HistoryEntry, readHistory, summarizeHistory } from "./history-reader.js";
+import type { ProjectPricing } from "../../contracts/pricing.js";
 
 function historyRoot(lines: readonly string[]): string {
   const projRoot = mkdtempSync(join(tmpdir(), "history-reader-"));
@@ -114,7 +107,7 @@ test("aggregateHistory: sums tokens and per-pipeline status without inventing a 
 });
 
 test("aggregateHistory: a cost derived from pricing.json is flagged as an estimate", () => {
-  const pricing: PricingTable = { opus: { in: 1_000_000, out: 1_000_000 } };
+  const pricing: ProjectPricing = { opus: { in: 1_000_000, out: 1_000_000 } };
 
   const aggregate = aggregateHistory(
     [entry({ runId: "a", models: { opus: { in: 2, out: 3, cacheRead: 0, cacheWrite: 0 } } })],
@@ -127,7 +120,7 @@ test("aggregateHistory: a cost derived from pricing.json is flagged as an estima
 });
 
 test("aggregateHistory: a written cost outranks the pricing estimate", () => {
-  const pricing: PricingTable = { opus: { in: 1_000_000 } };
+  const pricing: ProjectPricing = { opus: { in: 1_000_000 } };
 
   const aggregate = aggregateHistory(
     [entry({ runId: "a", costUsd: 0.25, models: { opus: { in: 99, out: 0, cacheRead: 0, cacheWrite: 0 } } })],
@@ -198,14 +191,12 @@ test("aggregateHistory: a runner figure computed from a rate table is an estimat
   expect(aggregate.byPipeline.feature?.costEstimated).toBe(1);
 });
 
-test("pricingTable: a non-USD pricing.json is dropped, as the runtime drops it", () => {
+test("aggregateHistory: a non-USD pricing.json prices nothing, as the runtime prices nothing with it", () => {
   // The runner's `costUsd` is always in dollars; estimating the remaining runs in
   // euros and summing the two printed a total in no currency at all.
-  expect(pricingTable({ _currency: "€", opus: { in: 1, out: 2 } })).toBeNull();
-  expect(pricingTable({ _currency: "$", opus: { in: 1, out: 2 } })).toEqual({
-    _currency: "$",
-    opus: { in: 1, out: 2 },
-  });
-  expect(pricingTable({ opus: { in: 1, out: 2 } })).toEqual({ opus: { in: 1, out: 2 } });
-  expect(pricingTable(null)).toBeNull();
+  const entries = [
+    entry({ runId: "r", pipeline: "feature", models: { opus: { in: 10, out: 0, cacheRead: 0, cacheWrite: 0 } } }),
+  ];
+  const aggregate = aggregateHistory(entries, { _currency: "€", opus: { in: 1, out: 2 } });
+  expect(aggregate.costMissing).toBe(1);
 });
