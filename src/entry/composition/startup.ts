@@ -28,7 +28,7 @@ import { CliError, type RunnerArgs } from "../cli-options.js";
 import { parseRunnerArgs } from "../cli/parse.js";
 import { log } from "../../shared/runtime/logging.js";
 import { type ApprovalDecision, type RecordedApproval, recordApproval } from "../../work-items/index.js";
-import { FileRunStateStore, resolveLatestRunSnapshot, runLockHolder } from "../../run/index.js";
+import { FileRunStateStore, latestRunHolder } from "../../run/index.js";
 import { composeRunnerRegistries } from "./registries.js";
 
 /** A ticket reaches the filesystem (context paths, worktree directory) before any
@@ -179,7 +179,10 @@ function resumeAfterDecision(
   args: RunnerArgs,
   context: PipelineContext,
 ): ApprovalOutcome {
-  const holder = latestRunHolder(pipelineDef.name, args, context);
+  // The same gate is often lifted from two places — the dashboard, an agent, a
+  // terminal. Resolving a held run fails (`resolveRunDir`), which for a repeated
+  // approval is a false error: the decision is recorded and the holder resumes.
+  const holder = args.fresh ? null : latestRunHolder(pipelineDef.name, args.ticket, context);
   if (holder) {
     log(`The run is already being resumed (pid ${holder}): ${verb} recorded, no second run started.`);
     return { kind: "done" };
@@ -187,24 +190,6 @@ function resumeAfterDecision(
   // Only a decision this invocation wrote is journaled: a kept one was recorded,
   // and possibly consumed, by whoever wrote it.
   return { kind: "ok", ...(recorded.written ? { decision: recorded.decision } : {}) };
-}
-
-/**
- * pid of a live runner already holding the run `--approve` would resume.
- *
- * The same gate is often lifted from two places — the dashboard, an agent, a
- * terminal. Resolving a held run fails (`resolveRunDir`), which for a repeated
- * approval is a false error: the decision is recorded and the holder resumes.
- */
-function latestRunHolder(pipelineName: string, args: RunnerArgs, context: PipelineContext): number | null {
-  if (args.fresh) return null;
-  try {
-    const latest = resolveLatestRunSnapshot(pipelineName, args.ticket, context);
-    return latest ? runLockHolder(latest.runDir) : null;
-  } catch {
-    // A damaged selector is reported by the run that resolves it, with its remedy.
-    return null;
-  }
 }
 
 /**

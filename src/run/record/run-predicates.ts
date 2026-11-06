@@ -1,5 +1,5 @@
-import type { PersistedRun, StepStatus } from "../persisted.js";
-import type { DeepReadonly, RunAttemptView } from "../run.js";
+import type { PersistedRun, RunStatus, StepStatus } from "../persisted.js";
+import type { RunAttemptView } from "../run.js";
 import { isCompleted, isProvisionalStatus } from "./run-status.js";
 
 /**
@@ -55,50 +55,53 @@ export interface ResumeDecision {
   rejection?: ResumeRejection;
 }
 
-/**
- * Every step is settled but no verdict was ever stamped: the run still owes a
- * `finalizeRun`. `hydrate` applies the same rule on its own hydrated steps, so
- * such a snapshot loads as a live run instead of a terminal one — a terminal
- * load leaves nobody able to finalize it.
- *
- * An `ABORTED` snapshot whose outcome opted out of resuming is excluded by the
- * `resumable === false` guard in `resumeDecision`, which runs first. The
- * explicit `--run` path has no such guard: naming a run is the decision.
- */
-export function settledButUnfinalized(run: PersistedRun | null): boolean {
-  if (!run) return false;
-  if (!isProvisionalStatus(run.status)) return false;
-  return allStepsSettled(run.steps);
-}
-
-/** Steps still to execute, which determines resumability. */
+/** Steps still to execute. */
 export function pendingSteps<S extends { readonly status: StepStatus }>(
   run: { readonly steps: readonly S[] } | null,
 ): S[] {
   return run?.steps?.filter((step) => owesWork(step.status)) ?? [];
 }
 
+/** What a run still owes, read once from its status, its outcome and its steps. */
+export interface RemainingWork<S> {
+  /** Steps with executable work left. */
+  steps: S[];
+  /** The run has steps and every one of them is settled. */
+  settled: boolean;
+  /** Every step is settled but no verdict was ever stamped: a crash left the run
+   *  `RUNNING`, or an interruption with no step in flight left it `ABORTED`. The
+   *  run still owes a `finalizeRun`. */
+  verdictOwed: boolean;
+  /** The outcome opted out of automatic resume (`resumable: false`). Naming the
+   *  run with `--run` still reaches it: naming a run is the decision. */
+  discarded: boolean;
+  /** An automatic resume has something to do: steps to execute, or a verdict to
+   *  stamp on a run that did not opt out. */
+  owed: boolean;
+}
+
 /**
- * Work this run still owes, pending steps AND composed work.
+ * The one reading of what is left to do in a run. Resume, `--run`, the step loop,
+ * the opening of a run, a composing parent and the dashboard all take it from
+ * here.
  *
- * A `pendingSteps` read alone misses a fan-out stopped mid-list: an orchestration
- * node keeps its remaining items and children inside its own state, and its step
- * can even read `done` from an earlier generation. Anything the run could still
- * execute counts, which is what makes "a completed run is not failed after the
- * fact" safe to apply to the cost stops.
+ * Work is read from the step statuses only. An orchestration node keeps its items
+ * and children inside its own state, but its status already says whether it owes
+ * them: it turns `done` only once its last child settled
+ * (`execution/step/pipeline-orchestration.ts`), a fan-out stopped mid-list leaves
+ * it failed, running or aborted, and a node `--skip` set aside is a decision that
+ * its remaining children are not owed.
  */
-export function hasUnfinishedWork(run: DeepReadonly<PersistedRun> | null): boolean {
-  if (!run) return false;
-  if (pendingSteps(run).length > 0) return true;
-  return (run.steps ?? []).some((step) => {
-    const state = step.orchestration;
-    if (!state) return false;
-    if (state.children.some((child) => owesWork(child.status))) return true;
-    // A `forEachPipeline` creates one child per item as it walks the list: items
-    // it never reached have no child reference at all.
-    const launched = state.children.filter((child) => child.kind === "main").length;
-    return (state.items?.length ?? 0) > launched;
-  });
+export function remainingWork<S extends { readonly status: StepStatus }>(run: {
+  readonly status?: RunStatus;
+  readonly outcome?: { readonly resumable?: boolean };
+  readonly steps: readonly S[];
+}): RemainingWork<S> {
+  const steps = pendingSteps(run);
+  const settled = allStepsSettled(run.steps);
+  const verdictOwed = settled && isProvisionalStatus(run.status);
+  const discarded = run.outcome?.resumable === false;
+  return { steps, settled, verdictOwed, discarded, owed: steps.length > 0 || (verdictOwed && !discarded) };
 }
 
 /**
@@ -108,21 +111,15 @@ export function hasUnfinishedWork(run: DeepReadonly<PersistedRun> | null): boole
  * A manually interrupted run (SIGINT/SIGTERM → ABORTED) resumes by default:
  * completed steps are kept, and the step that was running is replayed from
  * scratch. Only an outcome that explicitly opted out (`resumable: false`, which
- * includes snapshots aborted before this policy) is discarded.
+ * includes snapshots aborted before this policy) is discarded. A run whose steps
+ * are all settled but which never received its verdict stays the latest one, so
+ * the next invocation finalizes it instead of replaying every step in a new run.
  */
 export function resumeDecision(run: PersistedRun | null): ResumeDecision {
   if (!run) return { resume: false, rejection: "unreadable" };
-  if (run.outcome?.resumable === false) {
-    return { resume: false, rejection: "discarded" };
-  }
-  // A run can lose its process after the final step snapshot is written but
-  // before finalizeRun stamps the verdict: a crash leaves it RUNNING, a manual
-  // SIGINT with no step in flight leaves it ABORTED with every step settled.
-  // Both describe the same gap — all the work is done, only the verdict is
-  // missing — so keep the run as the latest one and let the next invocation
-  // finalize it instead of creating a new run and replaying every step.
-  if (settledButUnfinalized(run)) return { resume: true };
-  return run.steps.some((step) => owesWork(step.status)) ? { resume: true } : { resume: false, rejection: "settled" };
+  const remaining = remainingWork(run);
+  if (remaining.discarded) return { resume: false, rejection: "discarded" };
+  return remaining.owed ? { resume: true } : { resume: false, rejection: "settled" };
 }
 
 export function isPersistedRunResumable(run: PersistedRun | null): boolean {
@@ -133,5 +130,5 @@ export function isPersistedRunResumable(run: PersistedRun | null): boolean {
 export function isPersistedRunComplete(run: PersistedRun | null): boolean {
   if (!run || run.aborted) return false;
   if (run.status !== undefined && !isCompleted(run.status)) return false;
-  return run.steps.length > 0 && pendingSteps(run).length === 0;
+  return remainingWork(run).settled;
 }

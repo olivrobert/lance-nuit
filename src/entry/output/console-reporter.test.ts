@@ -11,7 +11,7 @@ import {
 } from "./console-reporter.js";
 import { buildRunReport } from "./run-report.js";
 
-const outcome = { failed: true, stopped: false, budgetExceeded: false, cumulativeCost: 12.34 };
+const outcome = { failed: true, stopped: false, budgetExceeded: false };
 
 // Color is process-global: a test that turns it on must not leak into the next.
 afterEach(() => setColorEnabled(false));
@@ -188,7 +188,8 @@ test("an unpriced attempt turns the budget line into a warning", () => {
   const run = sampleRun();
   run.max_cost_usd = 20;
   run.steps[0]!.control = { duration_ms: 1_000, cost_unknown: true };
-  const report = buildRunReport(run, { ...outcome, cumulativeCost: 12.34 });
+  run.total_control = { duration_ms: 1_000, total_cost_usd: 12.34 };
+  const report = buildRunReport(run, outcome);
 
   expect(report.budget).toMatchObject({ spent: 12.34, limit: 20, costUnknown: true });
   expect(renderConsoleReport(report)).toContain("spend is under-counted");

@@ -4,7 +4,7 @@ import type { RunJournalEvent } from "../journal.js";
 import type { PersistedAttempt } from "../persisted.js";
 import type { DeepReadonly, RunStepView, RunView } from "../run.js";
 import { createLogRef, type RunEventStore, type RunLogStore, runRefFromRun } from "../storage-ports.js";
-import { relativeRunPath } from "../record/index.js";
+import { measuredTokens, relativeRunPath } from "../record/index.js";
 import type { PhaseStats, RunStatsEntry, TokenCounts, UsageStatus } from "./stats-core.js";
 import { addTokens, zeroTokens } from "./stats-core.js";
 
@@ -23,7 +23,6 @@ export interface ProjectionAccumulator {
   totals: TokenCounts;
   usageStatus?: UsageStatus;
   costStatus?: UsageStatus;
-  costUsd?: number;
 }
 
 /**
@@ -180,7 +179,7 @@ export function projectStepStats(
 
   const tokens = tokensOf(step.usage);
   const phaseUsageStatus: UsageStatus | undefined = hasAbortedAttempt
-    ? Object.values(tokens).some((value) => value > 0)
+    ? measuredTokens(step.usage) > 0
       ? "partial"
       : "unavailable"
     : undefined;
@@ -221,9 +220,6 @@ export function projectStepStats(
     // Snapshots without attempt detail remain grouped under the last known model;
     // do not reconstruct retries.
     addModelUsage(aggregate.models, step.control.model, step.usage);
-  }
-  if (step.control?.total_cost_usd != null) {
-    aggregate.costUsd = (aggregate.costUsd ?? 0) + step.control.total_cost_usd;
   }
 }
 

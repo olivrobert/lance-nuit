@@ -35,6 +35,11 @@ test("cost_unknown marks tokens spent at an unknown price", () => {
   expect(unpriced.control.cost_unknown).toBe(true);
   expect(unpriced.control.total_cost_usd).toBeUndefined();
 
+  // Cache writes alone are tokens too: an attempt that reports only them without a
+  // price is no more free than one that reports output.
+  const cacheOnly = splitAttemptStats({ duration_ms: 100, cache_creation_tokens: 4000 });
+  expect(cacheOnly.control.cost_unknown).toBe(true);
+
   // A bash step has no tokens at all: absence of cost is not an unknown cost.
   expect(splitAttemptStats(undefined).control.cost_unknown).toBeUndefined();
   expect(

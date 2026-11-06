@@ -13,6 +13,7 @@
 // (an archived run) says so by passing its own answer.
 
 import type { PersistedRun, RunStatus } from "../persisted.js";
+import { type CostStop, costStopOf } from "./budget.js";
 
 /** Final verdict; an active run is never derived and remains `RUNNING`. */
 export type RunVerdict = Exclude<RunStatus, "RUNNING">;
@@ -141,16 +142,6 @@ export function isResumableStatus(status: RunVerdict): boolean {
   return meaningOf(status)?.resumable === true;
 }
 
-/**
- * The snapshot owes a verdict once its steps are all settled: a crash left it
- * `RUNNING`, or an interruption left it `ABORTED` without opting out of resuming.
- * A `RUNNING` snapshot carries no outcome (a live resume drops it), so the
- * opt-out only ever reads an `ABORTED` one.
- */
-export function awaitsFinalization(state: Pick<PersistedRun, "status" | "outcome">): boolean {
-  return isProvisionalStatus(state.status) && state.outcome?.resumable !== false;
-}
-
 /** The statuses a reader shows: `UNKNOWN` is read as a run nobody finished. */
 export type EffectiveRunStatus = Exclude<RunStatus, "UNKNOWN">;
 
@@ -211,7 +202,11 @@ export interface RunEnding {
   exit: RunExit;
 }
 
-type Facts = Required<RunEndingFacts>;
+/** The facts a row of `ENDINGS` reads: the two cost stops are read through their
+ *  one precedence (`costStopOf`) instead of side by side. */
+type Facts = Required<Omit<RunEndingFacts, "budgetExceeded" | "costUnaccountedStop">> & {
+  costStop: CostStop | undefined;
+};
 
 interface EndingRow {
   kind: RunEndingKind;
@@ -240,8 +235,7 @@ const quietExit = (facts: Facts): RunExit =>
  *   steps it cut short cannot be judged.
  * - A budget stop outranks a failed step: the step that carries the guard's kill
  *   is the consequence of the stop, and calling it a technical error would send
- *   an operator to a fix loop. `budget` also outranks `cost`, the precedence
- *   `costDecision` settled.
+ *   an operator to a fix loop. `budget` also outranks `cost` (`costStopOf`).
  * - The accounting stop ranks below a genuine failure: a step that failed for its
  *   own reason on an unpriced attempt is a failure. It wins only when the gate
  *   itself withheld the work, and then the failed step (an orchestration node
@@ -249,15 +243,20 @@ const quietExit = (facts: Facts): RunExit =>
  */
 const ENDINGS: readonly EndingRow[] = [
   { kind: "aborted", when: (f) => f.aborted, status: () => "ABORTED", exit: () => "interrupted" },
-  { kind: "budget", when: (f) => f.budgetExceeded, status: stoppedOrFailed, exit: () => "failure" },
+  { kind: "budget", when: (f) => f.costStop === "budget-exceeded", status: stoppedOrFailed, exit: () => "failure" },
   {
     kind: "verdict",
-    when: (f) => f.failed && !f.costUnaccountedStop && f.verdictFailure,
+    when: (f) => f.failed && f.costStop === undefined && f.verdictFailure,
     status: stoppedOrFailed,
     exit: () => "failure",
   },
-  { kind: "failure", when: (f) => f.failed && !f.costUnaccountedStop, status: stoppedOrFailed, exit: () => "failure" },
-  { kind: "cost", when: (f) => f.costUnaccountedStop, status: stoppedOrFailed, exit: () => "failure" },
+  {
+    kind: "failure",
+    when: (f) => f.failed && f.costStop === undefined,
+    status: stoppedOrFailed,
+    exit: () => "failure",
+  },
+  { kind: "cost", when: (f) => f.costStop === "cost-unaccounted", status: stoppedOrFailed, exit: () => "failure" },
   { kind: "stopped", when: (f) => f.stopped, status: () => "STOPPED", exit: quietExit },
   // A lower-bound ledger with no stop to show for it: the work is not proven
   // finished, so it is no pass, and nothing names a cause either.
@@ -274,9 +273,8 @@ export function runEnding(facts: RunEndingFacts): RunEnding {
     stopped: facts.stopped === true,
     failed: facts.failed === true,
     verdictFailure: facts.verdictFailure === true,
-    budgetExceeded: facts.budgetExceeded === true,
+    costStop: costStopOf({ budgetExceeded: facts.budgetExceeded, costUnaccounted: facts.costUnaccountedStop }),
     costUnaccounted: facts.costUnaccounted === true,
-    costUnaccountedStop: facts.costUnaccountedStop === true,
     untilStop: facts.untilStop === true,
     settled: facts.settled === true,
   };

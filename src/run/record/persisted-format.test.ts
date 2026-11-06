@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, join, relative } from "node:path";
 import { loadOrCreateRun } from "../../execution/step/load-or-create-run.js";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
@@ -23,7 +32,7 @@ import { cleanLogs, inspectTicket, logsForTicket } from "../../entry/commands/di
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
 import { emitRunStats } from "../stats/index.js";
 import { saveRun } from "./run-repository.js";
-import { createRunId, latestRunFile, readRunFile, resolveRunDir } from "./stores/run-storage.js";
+import { createRunId, latestRunDir, readRunFile, resolveRunDir } from "./stores/run-storage.js";
 
 const refactoringArtifact = textArtifact("refactoring.md");
 const lotsArtifact = artifact("lots.json", (value) => value);
@@ -115,8 +124,8 @@ test("persisted format: a damaged latest snapshot is never replaced implicitly",
   expect(qualityDir).not.toBe(featureDir);
   expect(readlinkSync(join(root, ".lance-nuit/work-items/PROJ-1/runs/feature/latest"))).toBe(basename(featureDir));
   expect(readlinkSync(join(root, ".lance-nuit/work-items/PROJ-1/runs/quality/latest"))).toBe(basename(qualityDir));
-  expect(latestRunFile("feature", "PROJ-1", ctx)).toBe(join(featureDir, "state.json"));
-  expect(latestRunFile("quality", "PROJ-1", ctx)).toBe(join(qualityDir, "state.json"));
+  expect(latestRunDir("feature", "PROJ-1", ctx)).toBe(realpathSync(featureDir));
+  expect(latestRunDir("quality", "PROJ-1", ctx)).toBe(realpathSync(qualityDir));
   expect(existsSync(join(featureDir, "feature.json"))).toBe(false);
   expect(readRunFile(join(featureDir, "state.json"))?.schemaVersion).toBe(1);
 });

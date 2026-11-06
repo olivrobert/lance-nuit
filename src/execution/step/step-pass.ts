@@ -16,6 +16,7 @@ import { emitRunnerEvent } from "../../shared/runtime/events.js";
 import {
   inheritChildBudgetStop,
   latestAttemptLog,
+  logicalAttemptLogPath,
   recordAbsorbedInputs,
   type RunBudget,
   updateStep,
@@ -137,7 +138,7 @@ async function runInitialAttempt(input: {
     executeStep: input.executeStep,
     spawn: { session: step.session },
   });
-  return { result, stepLog: latestAttemptLog(run, step) ?? join(stepLogDir, "attempt-001", "output.log") };
+  return { result, stepLog: latestAttemptLog(run, step) ?? join(run.run_dir, logicalAttemptLogPath(step.id, 1)) };
 }
 
 /** Run one admitted step to its verdict. Returns the stop it asks of the loop, or

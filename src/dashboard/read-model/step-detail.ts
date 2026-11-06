@@ -14,7 +14,8 @@
 import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PersistedAttempt } from "../../run/index.js";
-import { ATTEMPT_COMMAND_FILE, readRunHistory } from "../../run/index.js";
+import { attemptCommandPath, figuresSpend, readRunHistory } from "../../run/index.js";
+import { reportedCost } from "./cost.js";
 import { isInFlight, standingOf, workItemLayout } from "../../work-items/index.js";
 import { isPathWithin } from "../../shared/lib/path-safety.js";
 import { isSafeRelativePath, runTreePath } from "./explorer.js";
@@ -53,6 +54,7 @@ function safeLogPath(attempt: PersistedAttempt): string | undefined {
 export function attemptView(attempt: PersistedAttempt, treePathOf: (inRun: string) => string): StepAttemptView {
   const control = attempt.control;
   const logPath = safeLogPath(attempt);
+  const cost = reportedCost(figuresSpend(control));
   return {
     attempt: attempt.attempt,
     kind: attempt.kind === "fix" ? "fix" : "step",
@@ -60,9 +62,7 @@ export function attemptView(attempt: PersistedAttempt, treePathOf: (inRun: strin
     ...(attempt.started_at ? { startedAt: attempt.started_at } : {}),
     ...(attempt.finished_at ? { finishedAt: attempt.finished_at } : {}),
     ...(typeof control?.duration_ms === "number" ? { durationMs: control.duration_ms } : {}),
-    ...(typeof control?.total_cost_usd === "number" ? { costUsd: control.total_cost_usd } : {}),
-    ...(control?.cost_estimated ? { costEstimated: true as const } : {}),
-    ...(control?.cost_unknown ? { costUnknown: true as const } : {}),
+    ...(cost ? { cost } : {}),
     ...(control?.model ? { model: control.model } : {}),
     ...(attempt.errors ? { reason: attempt.errors } : {}),
     ...(logPath ? { logPath: treePathOf(logPath) } : {}),
@@ -229,7 +229,7 @@ function fileExcerpts(
   // The journal is trusted to name its own files, but a path is still checked
   // against the run before it is opened.
   if (!isPathWithin(runDir, logFile)) return {};
-  const commandPath = join(dirname(logPath), ATTEMPT_COMMAND_FILE);
+  const commandPath = attemptCommandPath(logPath);
   const command = excerpt(join(runDir, commandPath), COMMAND_EXCERPT_BYTES, "head");
   const output = excerpt(logFile, OUTPUT_EXCERPT_BYTES, "tail");
   return {

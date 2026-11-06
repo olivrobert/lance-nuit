@@ -5,7 +5,6 @@
 // they write one file beside the snapshot and never touch the snapshot itself.
 // A run that moves afterwards invalidates the closure on its own (run/record/closure.ts).
 
-import { dirname } from "node:path";
 import type { RunnerArgs } from "../cli-options.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import { buildPipelineContext } from "../../definition/index.js";
@@ -13,7 +12,7 @@ import { log } from "../../shared/runtime/logging.js";
 import {
   awaitsHuman,
   closureOf,
-  latestRunFile,
+  latestRunDir,
   readClosureAt,
   readLatestRun,
   removeClosureAt,
@@ -59,9 +58,8 @@ export function closeLatestRun(cwd: string, ticket: string, pipeline: string, ac
 
 /** Remove the closure of the latest run of `pipeline`, if it has one. */
 export function reopenLatestRun(cwd: string, ticket: string, pipeline: string): ClosureResult {
-  const file = latestRunFile(pipeline, ticket, contextFor(cwd, ticket));
-  if (!file) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
-  const runDir = dirname(file);
+  const runDir = latestRunDir(pipeline, ticket, contextFor(cwd, ticket));
+  if (!runDir) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
   if (!readClosureAt(runDir)) return { ok: true, message: `Run of ${ticket} was not closed.` };
   removeClosureAt(runDir);
   return { ok: true, message: `Run of ${ticket} reopened.` };

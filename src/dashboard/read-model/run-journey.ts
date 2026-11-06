@@ -60,6 +60,15 @@ function pausesOf(events: readonly RunJournalEvent[]): RunPause[] {
   return pauses;
 }
 
+/** The model the attempts spent the most on, from the figures each one settled. */
+function mainModelOf(attempts: readonly RunJourneyAttempt[]): string | undefined {
+  const costs = new Map<string, number>();
+  for (const attempt of attempts) {
+    if (attempt.model) costs.set(attempt.model, (costs.get(attempt.model) ?? 0) + (attempt.cost?.usd ?? 0));
+  }
+  return [...costs].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
 /**
  * Attempts and pauses of the run `project/ticket` is currently about.
  *
@@ -84,6 +93,7 @@ export function readRunJourney(
   }
   attempts.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
   const startedAt = text(state.createdAt);
+  const mainModel = mainModelOf(attempts);
 
   return {
     pipeline,
@@ -91,6 +101,7 @@ export function readRunJourney(
     status: resolved.status,
     ...(startedAt ? { startedAt } : {}),
     ...(typeof state.max_cost_usd === "number" ? { maxCostUsd: state.max_cost_usd } : {}),
+    ...(mainModel ? { mainModel } : {}),
     attempts,
     pauses: pausesOf(history.events),
   };

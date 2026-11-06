@@ -173,8 +173,8 @@ const RAW_READS =
  * Opening a run to execute it is the run record's (`openRun`): boot names none.
  */
 const ALLOWED: Record<string, string[]> = {
-  "entry/composition/startup.ts": ["FileRunStateStore", "resolveLatestRunSnapshot"],
-  "execution/step/pipeline-orchestration-child.ts": ["FileRunStateStore", '"state.json"'],
+  "entry/composition/startup.ts": ["FileRunStateStore"],
+  "execution/step/pipeline-orchestration-child.ts": ["FileRunStateStore"],
   // The journal of the run this process just executed, handed to the statistics
   // projection as its event store.
   "run/stats/run-stats.ts": ["FileRunEventStore"],
@@ -182,10 +182,6 @@ const ALLOWED: Record<string, string[]> = {
   // each listed snapshot is then read through `readListedRun`.
   "entry/commands/diagnostics-readers.ts": ["FileRunStateStore"],
   "entry/commands/diagnostics.ts": ["FileRunStateStore"],
-  // The tmux watcher greps the verdict out of the file to close its pane.
-  "entry/output/watcher.ts": ['"state.json"'],
-  // The console report prints where the journal is, for a human to open.
-  "entry/output/run-report.ts": ['"events.jsonl"'],
 };
 
 function sourceFiles(dir: string): string[] {

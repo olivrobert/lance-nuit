@@ -19,17 +19,16 @@ import type { Run, RunStep } from "./run.js";
 import type { RunBudget } from "./budget.js";
 import {
   aggregateControl,
-  aggregateUsage,
   chargeAttemptToLedger,
   chargeChildReconciliation,
   chargeClosedAttempt,
-  controlForRun,
   isUnpricedSpend,
-  measuredRunCost,
   projectStepSpend,
   restoreAttemptSpend,
   restoreRunTotals,
   runProvesUnpricedSpend,
+  runSpend,
+  runUsage,
   stepProvesUnpricedSpend,
 } from "./cost-accounting.js";
 import { readRunEvents } from "./run-journal.js";
@@ -196,15 +195,42 @@ test("cost accounting: a run total is the sum of its steps", () => {
     { control: { duration_ms: 5, total_cost_usd: 0.1, cost_estimated: true }, usage: { output_tokens: 5 } },
   ] as RunStep[];
   const control = aggregateControl(steps);
-  const usage = aggregateUsage(steps);
+  const usage = runUsage({ steps });
   expect(control.total_cost_usd).toBeCloseTo(0.6, 8);
   expect(control.cost_estimated).toBe(true);
   expect(usage?.output_tokens).toBe(15);
 });
 
-test("measuredRunCost: the fallback stands in only when nothing was measured", () => {
-  expect(measuredRunCost({ steps: [], total_control: { duration_ms: 1, total_cost_usd: 2 } }, 5)).toBe(2);
-  expect(measuredRunCost({ steps: [] }, 5)).toBe(5);
+test("runSpend: the materialized total stands for the run, the steps otherwise, and any floor is kept", () => {
+  const steps = [{ control: { duration_ms: 3, total_cost_usd: 0.5 } }] as RunStep[];
+  expect(runSpend({ steps, total_control: { duration_ms: 1, total_cost_usd: 2 } })).toEqual({
+    usd: 2,
+    estimated: false,
+    lowerBound: false,
+    durationMs: 1,
+  });
+  expect(runSpend({ steps })).toEqual({ usd: 0.5, estimated: false, lowerBound: false, durationMs: 3 });
+  // The run-level latch makes the figure a floor even when no step carries the flag.
+  expect(runSpend({ steps, cost_unaccounted: true }).lowerBound).toBe(true);
+  expect(runSpend({ steps: [] }).usd).toBeUndefined();
+});
+
+test("runSpend: a finalized run that took no time reads 0, a run nothing accounted yet reads none", () => {
+  expect(runSpend({ steps: [], total_control: { duration_ms: 0 } }).durationMs).toBe(0);
+  expect(runSpend({ steps: [{ control: { duration_ms: 0 } }] as RunStep[] }).durationMs).toBe(0);
+  expect(runSpend({ steps: [{}] as RunStep[] }).durationMs).toBeUndefined();
+});
+
+test("runSpend: a composed child still out makes the parent's figure a floor", () => {
+  // The child's spend reaches its node only once the child's loop returns: a
+  // parent read meanwhile, or whose runner died during the child, lacks it.
+  const node = (status: string) => ({
+    control: { duration_ms: 1, total_cost_usd: 0.5 },
+    orchestration: { children: [{ status }] },
+  });
+  expect(runSpend({ steps: [node("running")] })).toMatchObject({ usd: 0.5, lowerBound: true });
+  expect(runSpend({ steps: [node("done")] })).toMatchObject({ usd: 0.5, lowerBound: false });
+  expect(runSpend({ steps: [node("failed")] }).lowerBound).toBe(false);
 });
 
 test("chargeAttemptToLedger: the ledger advances by the attempt cost alone", () => {
@@ -261,7 +287,7 @@ test("chargeChildReconciliation: a child is charged once, by difference", () => 
   child.total_control = { duration_ms: 40, total_cost_usd: 1.5 };
   child.total_usage = { output_tokens: 200 };
 
-  expect(chargeChildReconciliation({ parent, step, ref, child, budget, fallbackCost: 0 })).toBeCloseTo(1.5, 8);
+  expect(chargeChildReconciliation({ parent, step, ref, child, budget })).toBeCloseTo(1.5, 8);
   expect(step.control?.total_cost_usd).toBeCloseTo(1.5, 8);
   expect(step.control?.duration_ms).toBe(40);
   expect(step.usage?.output_tokens).toBe(200);
@@ -271,7 +297,7 @@ test("chargeChildReconciliation: a child is charged once, by difference", () => 
 
   // The resumed child re-reports its whole history: the delta is zero and nothing
   // is paid a second time — no dollars, no milliseconds, no tokens.
-  expect(chargeChildReconciliation({ parent, step, ref, child, budget, fallbackCost: 0 })).toBe(0);
+  expect(chargeChildReconciliation({ parent, step, ref, child, budget })).toBe(0);
   expect(step.control?.total_cost_usd).toBeCloseTo(1.5, 8);
   expect(step.control?.duration_ms).toBe(40);
   expect(step.usage?.output_tokens).toBe(200);
@@ -289,7 +315,7 @@ test("chargeChildReconciliation: the parent node takes no model from its child",
   const child = makeRun();
   child.total_control = { duration_ms: 10, total_cost_usd: 7.4, model: "claude-haiku-4-5" };
 
-  chargeChildReconciliation({ parent, step, ref: childRef(), child, budget: { cumulative: 0 }, fallbackCost: 0 });
+  chargeChildReconciliation({ parent, step, ref: childRef(), child, budget: { cumulative: 0 } });
 
   expect(step.control?.total_cost_usd).toBeCloseTo(7.4, 8);
   expect(step.control?.model).toBeUndefined();
@@ -303,7 +329,7 @@ test("chargeChildReconciliation: a child that could not price itself latches the
   child.total_control = { duration_ms: 10, total_cost_usd: 0, cost_unknown: true };
   child.total_usage = { output_tokens: 900 };
 
-  chargeChildReconciliation({ parent, step, ref: childRef(), child, budget, fallbackCost: 0 });
+  chargeChildReconciliation({ parent, step, ref: childRef(), child, budget });
   expect(step.control?.cost_unknown).toBe(true);
   expect(budget.costUnknown).toBe(true);
   expect(parent.cost_unaccounted).toBe(true);
@@ -357,8 +383,8 @@ test("restoreRunTotals: a terminal snapshot keeps its totals, a live resume deri
   const steps = [
     { control: { duration_ms: 1, total_cost_usd: 1 }, usage: { output_tokens: 2 } },
   ] as unknown as RunStep[];
-  expect(controlForRun({ steps, ...restoreRunTotals(persisted, false) }).total_cost_usd).toBe(1);
-  expect(controlForRun({ steps, ...restoreRunTotals(persisted, true) }).total_cost_usd).toBe(3);
+  expect(runSpend({ steps, ...restoreRunTotals(persisted, false) }).usd).toBe(1);
+  expect(runSpend({ steps, ...restoreRunTotals(persisted, true) }).usd).toBe(3);
 });
 
 test("chargeChildReconciliation: a reconciled child invalidates the parent's materialized totals", () => {
@@ -368,8 +394,8 @@ test("chargeChildReconciliation: a reconciled child invalidates the parent's mat
   parent.total_usage = { output_tokens: 70 };
   const child = makeRun();
   child.total_control = { duration_ms: 40, total_cost_usd: 1.5 };
-  chargeChildReconciliation({ parent, step, ref: childRef(), child, budget: { cumulative: 0 }, fallbackCost: 0 });
+  chargeChildReconciliation({ parent, step, ref: childRef(), child, budget: { cumulative: 0 } });
   expect(parent.total_control).toBeUndefined();
   expect(parent.total_usage).toBeUndefined();
-  expect(controlForRun(parent).total_cost_usd).toBe(1.5);
+  expect(runSpend(parent).usd).toBe(1.5);
 });

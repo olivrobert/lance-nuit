@@ -8,7 +8,7 @@
 // attempt and is the keyboard path to the same panel.
 
 import { type CSSProperties, type JSX, type PointerEvent, useRef, useState } from "react";
-import type { Item, RunRecap, RunRecapStep } from "../../api/types.js";
+import type { Item } from "../../api/types.js";
 import { fmtClock, fmtCost, fmtDuration, fmtModel } from "../../lib/format.js";
 import {
   type AttemptTone,
@@ -57,13 +57,10 @@ function spanStyle(scale: TimeScale, from: number, to: number, minPct = 0, index
   return { "--l": left, "--s": width / 100, "--i": index } as CSSProperties;
 }
 
-function stepCost(step: TimelineStep, ledger: RunRecapStep | undefined): string {
-  if (step.costUsd === 0 && !ledger?.costUnknown) return "—";
-  return fmtCost({
-    usd: step.costUsd,
-    estimated: ledger?.costEstimated === true,
-    ...(ledger?.costUnknown ? { unknown: true } : {}),
-  });
+function stepCost(step: TimelineStep): string {
+  const { cost } = step;
+  if (!cost || (cost.usd === 0 && !cost.unknown)) return "—";
+  return fmtCost(cost);
 }
 
 function failedStep(item: Item, timeline: RunTimeline): OpenStep | null {
@@ -80,7 +77,7 @@ interface Tip {
 
 function TipBody({ timeline, tip }: { timeline: RunTimeline; tip: Tip }): JSX.Element {
   const { attempt, from, to, tone } = tip.entry;
-  const cost = typeof attempt.costUsd === "number" ? fmtCost({ usd: attempt.costUsd, estimated: false }) : "";
+  const cost = attempt.cost ? fmtCost(attempt.cost) : "";
   const figures = [fmtDuration(to - from), cost, attempt.model ? fmtModel(attempt.model) : ""].filter(Boolean);
   const kind = attempt.kind === "fix" ? ", fix pass" : "";
   return (
@@ -166,14 +163,13 @@ interface LaneProps {
   timeline: RunTimeline;
   scale: TimeScale;
   step: TimelineStep;
-  ledger: RunRecapStep | undefined;
   open: OpenStep | null;
   highlight: EpisodeHighlight | null;
   firstBar: number;
   onTip: (tip: Tip | null) => void;
 }
 
-function Lane({ item, timeline, scale, step, ledger, open, highlight, firstBar, onTip }: LaneProps): JSX.Element {
+function Lane({ item, timeline, scale, step, open, highlight, firstBar, onTip }: LaneProps): JSX.Element {
   const opened = open?.stepId === step.id;
   const meta = [step.model ? fmtModel(step.model) : "command"];
   if (step.attempts.length > 1) meta.push(`${step.passes} ${step.passes === 1 ? "pass" : "passes"}`);
@@ -211,7 +207,7 @@ function Lane({ item, timeline, scale, step, ledger, open, highlight, firstBar, 
         </Track>
       </div>
       <div className={`${styles.cell} ${styles.num}`}>{`${fmtDuration(step.workMs)}${step.running ? "…" : ""}`}</div>
-      <div className={`${styles.cell} ${styles.num}`}>{stepCost(step, ledger)}</div>
+      <div className={`${styles.cell} ${styles.num}`}>{stepCost(step)}</div>
       {opened && open ? (
         <div className={styles.detail}>
           <StepPanel item={item} stepId={step.id} {...(open.attempt !== undefined ? { attempt: open.attempt } : {})} />
@@ -300,12 +296,11 @@ function Legend({ timeline }: { timeline: RunTimeline }): JSX.Element {
 
 export interface RunTimelineCardProps {
   item: Item;
-  recap: RunRecap | null;
   timeline: RunTimeline;
   highlight: EpisodeHighlight | null;
 }
 
-export function RunTimelineCard({ item, recap, timeline, highlight }: RunTimelineCardProps): JSX.Element {
+export function RunTimelineCard({ item, timeline, highlight }: RunTimelineCardProps): JSX.Element {
   // Screen state of this card alone: the axis mode and the hovered attempt.
   const [compressed, setCompressed] = useState(true);
   const [tip, setTip] = useState<Tip | null>(null);
@@ -314,7 +309,6 @@ export function RunTimelineCard({ item, recap, timeline, highlight }: RunTimelin
   // A failed run opens on the step that failed, until the reader picks another.
   const open = chosen === undefined ? failedStep(item, timeline) : chosen;
   const scale = timeScale(timeline, compressed && timeline.pauses.length > 0);
-  const ledger = new Map((recap?.steps ?? []).map((step) => [step.id, step]));
 
   // The tooltip follows the pointer through its style, not through state: a
   // render per pixel of movement would repaint every lane.
@@ -337,7 +331,6 @@ export function RunTimelineCard({ item, recap, timeline, highlight }: RunTimelin
       timeline={timeline}
       scale={scale}
       step={step}
-      ledger={ledger.get(step.id)}
       open={open}
       highlight={highlight}
       firstBar={firstBars[index] ?? 0}

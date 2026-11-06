@@ -14,10 +14,9 @@ export {
   type HistoryEntry,
   type HistoryFilter,
   type PipelineTotals,
-  pricingTable,
   readHistory,
   summarizeHistory,
 } from "./history-reader.js";
 
 // Rendering.
-export { currencyOf, fmtInt, statusBadge } from "./stats-core.js";
+export { fmtInt, statusBadge } from "./stats-core.js";

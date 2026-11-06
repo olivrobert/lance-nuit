@@ -568,7 +568,41 @@ result event.
 
 The console report is the human-facing projection. The run-stats projector derives
 phase, model, profile, token, cost, and outcome facts without reading provider state.
-Pricing is optional; exact provider-reported cost wins over token estimation.
+Pricing is optional; exact provider-reported cost wins over token estimation. One
+rate table type (`ProjectPricing`) and one currency rule
+(`projectPricingForModel`, `contracts/pricing.ts`: a table in another currency
+than the dollar prices nothing) serve the runner and the history readers alike.
+
+What a run spent is read in one place, `runSpend` (`run/record/cost-accounting.ts`):
+the amount the ledger is seeded from — the total a finalization materialized, or
+the step totals of a run still in flight — with whether it is an estimate and
+whether it is a floor (`≥`: `costIsLowerBound`, or a composed child still
+running, whose spend reaches its node only once it returns). The console report, the history
+entry, the dashboard's sheet and recap and the statistics page print that reading;
+a step or an attempt is read the same way from its own figures (`figuresSpend`),
+and its tokens with `runUsage` and `measuredTokens` (`cost-figures.ts`), which
+also defines once what "an attempt measured something" means. The dashboard read
+model hands each screen a ready cost (`ItemCost`: amount, estimate, floor); the
+browser prints the cost of a run, a step or an attempt as served. The one sum
+left in the browser is the stats page's summary cards, which add the costs of
+the tickets its filters keep. The precedence between the two cost
+stops — the budget before unpriced spend — is `costStopOf` (`budget.ts`), which
+the run's ending, its outcome and every gate read.
+
+What a run still owes is read in one place too, `remainingWork`
+(`run/record/run-predicates.ts`): the steps not yet settled, and whether a
+settled run still owes its verdict. The step loop, the resume decision, the
+opening of a run, `--run` and the dashboard all ask it. It reads step statuses
+only: a composed node is `done` once its last child settled, and a skipped node
+is an operator's decision, whatever its orchestration state still lists.
+
+The layout of `runs/` — its pipeline directories, the `latest` link, the snapshot
+file name — is known only to `run/record/stores/run-storage.ts`. Readers ask it by
+intention: `latestRunDir` and `latestRunHolder` for the run the next invocation
+would resume, `listWorkItemRuns` for every run a work item holds,
+`composedRunDir` for where a composed child's run sits, `bindChildRunDir` to
+allocate and bind a child run, and `attemptCommandPath` for the command kept
+beside an attempt log.
 
 The run record — snapshot, journal, attempt logs, transitions, cost ledger and
 budget — is the `src/run/record/` module: code outside it imports
@@ -656,8 +690,8 @@ persisted shape rather than from the mutable one. `openRun`, `openAttempt`,
 `openOrchestration` and `declareChild` hand views out; each operation of the
 entry takes a view back and recovers the run it shows with `writable`, the one
 place the module turns a view into its record. The run's figures leave the
-module read-only too (`aggregateControl`, `aggregateUsage`): a total summed from
-a single step is that step's own usage. The `RunBudget` ledger an execution
+module read-only too (`runUsage`): a total summed from a single step is that
+step's own usage. The `RunBudget` ledger an execution
 spends against is not part of the run and stays a plain object.
 
 Three checks hold the rule, and each covers what the one before cannot:

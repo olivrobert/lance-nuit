@@ -31,19 +31,19 @@ function recapOf(steps: RunRecapStep[]): RunRecap {
 function gatedRun(): RunJourney {
   return journeyOf(
     [
-      attempt("implement", 0, 8, { model: "opus", costUsd: 3 }),
+      attempt("implement", 0, 8, { model: "opus", cost: { usd: 3, estimated: false } }),
       attempt("static", 8, 10),
       attempt("static", 130, 132, { attempt: 2 }),
-      attempt("review", 132, 140, { model: "haiku", costUsd: 0.2 }),
+      attempt("review", 132, 140, { model: "haiku", cost: { usd: 0.2, estimated: false } }),
     ],
-    { pauses: [{ stoppedAt: at(10), resumedAt: at(130), decision: "approved" }] },
+    { mainModel: "opus", pauses: [{ stoppedAt: at(10), resumedAt: at(130), decision: "approved" }] },
   );
 }
 
 describe("buildTimeline", () => {
   test("steps keep the pipeline's order and their own attempts, waits excluded from work", () => {
     const recap = recapOf([
-      { id: "implement", status: "done", costUsd: 3.5 },
+      { id: "implement", status: "done", cost: { usd: 3.5, estimated: false, unknown: true } },
       { id: "static", status: "done" },
       { id: "review", status: "done" },
       { id: "plan", status: "skipped" },
@@ -56,11 +56,11 @@ describe("buildTimeline", () => {
     expect(timeline.workMs).toBe(20 * MIN);
     expect(timeline.attempts).toBe(4);
     expect(timeline.skipped).toEqual(["plan"]);
-    // The ledger's figure wins over the attempts' sum.
-    expect(timeline.steps[0]?.costUsd).toBe(3.5);
+    // The ledger's figure, floor included, as the read model served it.
+    expect(timeline.steps[0]?.cost).toEqual({ usd: 3.5, estimated: false, unknown: true });
   });
 
-  test("a step run again after it passed is a replay; the costliest model sets the main tone", () => {
+  test("a step run again after it passed is a replay; the journey's main model sets the main tone", () => {
     const timeline = buildTimeline(gatedRun(), null, 0);
     const tones = timeline.steps.map((step) => step.attempts.map((entry) => entry.tone));
 
@@ -71,7 +71,7 @@ describe("buildTimeline", () => {
   test("a refused attempt followed by a fix pass is a refusal, not a replay", () => {
     const journey = journeyOf([
       attempt("tests", 0, 2, { status: "failed", reason: "1 fail" }),
-      attempt("tests", 2, 5, { attempt: 2, kind: "fix", model: "opus", costUsd: 1 }),
+      attempt("tests", 2, 5, { attempt: 2, kind: "fix", model: "opus", cost: { usd: 1, estimated: false } }),
     ]);
     const [step] = buildTimeline(journey, null, 0).steps;
 
@@ -155,11 +155,21 @@ describe("takeaways", () => {
   test("names the longest and the costliest step, the replayed time and the refusals", () => {
     const journey = gatedRun();
     journey.attempts.push(attempt("tests", 140, 141, { status: "failed" }), attempt("tests", 141, 142, { attempt: 2 }));
-    const found = takeaways(buildTimeline(journey, null, 0), 4);
+    const recap = recapOf([
+      { id: "implement", status: "done", cost: { usd: 3, estimated: true, unknown: true } },
+      { id: "review", status: "done", cost: { usd: 0.2, estimated: false } },
+    ]);
+    const found = takeaways(buildTimeline(journey, recap, 0), { usd: 4, estimated: false });
 
     expect(found).toEqual([
       { kind: "longest", stepId: "implement", workMs: 8 * MIN, share: 8 / 22, passes: 1 },
-      { kind: "priciest", stepId: "implement", costUsd: 3, share: 0.75, model: "opus" },
+      {
+        kind: "priciest",
+        stepId: "implement",
+        cost: { usd: 3, estimated: true, unknown: true },
+        share: 0.75,
+        model: "opus",
+      },
       { kind: "replayed", workMs: 2 * MIN, stepIds: ["static"] },
       { kind: "refused", count: 1, stepIds: ["tests"] },
     ]);

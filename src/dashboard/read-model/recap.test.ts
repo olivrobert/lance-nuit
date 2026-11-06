@@ -78,14 +78,19 @@ test("recap: run-wide figures come from the ledger, not from a sum of the steps"
         id: "plan",
         status: "done",
         durationMs: 60_000,
-        costUsd: 1.5,
-        costEstimated: true,
+        cost: { usd: 1.5, estimated: true },
         model: "opus",
         profile: "planner",
         retries: 1,
         tokens: { input: 4, output: 8, cacheRead: 100, cacheWrite: 16 },
       },
-      { id: "review", status: "done", durationMs: 20_000, costUsd: 0, costUnknown: true, model: "local-model" },
+      {
+        id: "review",
+        status: "done",
+        durationMs: 20_000,
+        cost: { usd: 0, estimated: false, unknown: true },
+        model: "local-model",
+      },
       { id: "revise", status: "skipped" },
     ],
   });
@@ -191,7 +196,7 @@ test("recap: a node composing pipelines shows its children's models, not the las
     status: "done",
     durationMs: 3000,
     // The node's own figure stays the ledger's; the split only explains it.
-    costUsd: 7.25,
+    cost: { usd: 7.25, estimated: false },
     models: [
       { model: "opus", costUsd: 7 },
       { model: "haiku", costUsd: 0.25 },
@@ -234,6 +239,6 @@ test("recap: a child reference that cannot name a run safely is skipped", () => 
     id: "implement-lots",
     status: "done",
     durationMs: 3000,
-    costUsd: 1,
+    cost: { usd: 1, estimated: false },
   });
 });

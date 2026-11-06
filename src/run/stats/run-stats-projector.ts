@@ -8,7 +8,7 @@ import type { AgentSession } from "../../contracts/backends.js";
 import { backendSpecForStep } from "../../contracts/backends.js";
 import type { RunOutcomeState } from "../persisted.js";
 import type { RunStepView, RunView } from "../run.js";
-import { costIsLowerBound, isResumableStatus, recordedVerdict, relativeRunPath } from "../record/index.js";
+import { isResumableStatus, recordedVerdict, relativeRunPath, runSpend } from "../record/index.js";
 import {
   type ProjectionAccumulator,
   projectStepStats,
@@ -83,6 +83,7 @@ export function projectRunStatsEntry(run: RunView, options: RunStatsProjectionOp
   const runId = run.runId ?? basename(run.run_dir);
   const lastAgentSession = lastFinishedAgentSession(run);
 
+  const spend = runSpend(run);
   return {
     schemaVersion: 1,
     runId,
@@ -104,9 +105,8 @@ export function projectRunStatsEntry(run: RunView, options: RunStatsProjectionOp
     totals: aggregate.totals,
     ...(aggregate.usageStatus ? { usageStatus: aggregate.usageStatus } : {}),
     ...(aggregate.costStatus ? { costStatus: aggregate.costStatus } : {}),
-    // The `≥` the dashboard prints for the same run: the run-level latch counts
-    // as much as the steps.
-    ...(costIsLowerBound(run) ? { costUnknown: true } : {}),
+    // The `≥` the dashboard prints for the same run.
+    ...(spend.lowerBound ? { costUnknown: true } : {}),
     models: aggregate.models,
     profiles: aggregate.profiles,
     // Emission metadata is filled by emitRunStats.
@@ -115,6 +115,6 @@ export function projectRunStatsEntry(run: RunView, options: RunStatsProjectionOp
     fixEvents: runnerFixEvents(run, eventStore, logStore),
     sourceRunDir: null,
     ...(warnings.length > 0 ? { warnings } : {}),
-    ...(aggregate.costUsd != null ? { costUsd: aggregate.costUsd } : {}),
+    ...(spend.usd !== undefined ? { costUsd: spend.usd } : {}),
   };
 }

@@ -40,11 +40,12 @@
 // other caller: a snapshot of an aborted run must carry `ABORTED`.
 
 import type { StepControl, StepFailCause, StepFailKind } from "../../contracts/backends.js";
-import type { RunOutcomeStopKind, RunStopState } from "../persisted.js";
+import type { RunStopState } from "../persisted.js";
 import type { RunStepView, RunView } from "../run.js";
 import type { Run, RunStep } from "./run.js";
 import { writable } from "./run.js";
 import { closeAttempt } from "./attempt-closure.js";
+import { type CostStop, costStopOf } from "./budget.js";
 import { aggregateControl, sumStepUsage } from "./cost-accounting.js";
 import { appendRunEvent, relativeRunPath } from "./run-journal.js";
 import { isSettledStatus } from "./run-predicates.js";
@@ -343,7 +344,6 @@ export interface RunOutcome {
    *  after it; `stopped` is set too. Kept apart so the exit code can tell a stop
    *  the operator asked for from one that needs them. */
   untilStop: boolean;
-  cumulativeCost: number;
   /** Steps this invocation's selectors left out in reconcile mode, in run order.
    *  Reported, never persisted: the next invocation admits them again. */
   setAside?: readonly string[];
@@ -355,21 +355,23 @@ export interface RunOutcome {
 export type RunFinalizationSignals = Partial<RunOutcome>;
 
 /**
- * The cost policy that ended the run, as a value.
- *
- * `budget-exceeded` wins over `cost-unaccounted`, the precedence `costDecision`
- * settled: the known lower bound is the harder fact of the two. Only a run whose
- * work was actually WITHHELD takes a kind — `costUnaccountedStop`, not
- * `costUnaccounted`: an unpriced ledger beside a step that failed for its own
- * reason is a caveat on the total, and labelling that run "stopped for cost"
- * would send a post-mortem to `--allow-unmetered` for a defect in the code.
- * `reportKind` ranks the two stops the same way.
+ * The cost policy that ended the run, as a value. Only a run whose work was
+ * actually WITHHELD takes a kind — `costUnaccountedStop`, not `costUnaccounted`:
+ * an unpriced ledger beside a step that failed for its own reason is a caveat on
+ * the total, and labelling that run "stopped for cost" would send a post-mortem
+ * to `--allow-unmetered` for a defect in the code.
  */
-function stopKindOf(outcome: RunFinalizationSignals | undefined): RunOutcomeStopKind | undefined {
-  if (outcome?.budgetExceeded) return "budget-exceeded";
-  if (outcome?.costUnaccountedStop) return "cost-unaccounted";
-  return undefined;
+function stopKindOf(outcome: RunFinalizationSignals | undefined): CostStop | undefined {
+  return costStopOf({ budgetExceeded: outcome?.budgetExceeded, costUnaccounted: outcome?.costUnaccountedStop });
 }
+
+/** The sentence a failed run's outcome carries for its cost stop when no step
+ *  wrote one. An operator reading "budget exceeded" would raise the ceiling,
+ *  which does nothing for a spend nobody could price. */
+const COST_STOP_REASON: Readonly<Record<CostStop, string>> = {
+  "budget-exceeded": "budget exceeded",
+  "cost-unaccounted": "cost unaccounted",
+};
 
 /**
  * The last transition of a run: its verdict, its normalized outcome, its totals,
@@ -443,19 +445,7 @@ export function finalizeRun(runView: RunView, outcome?: RunFinalizationSignals):
   } else if (status === "FAIL") {
     run.outcome = {
       phase: failed?.id ?? run.outcome?.phase ?? null,
-      // The two cost stops keep their own words: an operator reading "budget
-      // exceeded" would raise the ceiling, which does nothing for a spend nobody
-      // could price. `exceeded` still wins when both hold, as in `costDecision`.
-      // Only a run STOPPED for accounting takes that sentence: an unknown ledger
-      // beside some other failure is a caveat on the total, not the reason.
-      reason:
-        failed?.errors ??
-        run.outcome?.reason ??
-        (outcome?.budgetExceeded
-          ? "budget exceeded"
-          : (outcome?.costUnaccountedStop ?? outcome?.costUnaccounted)
-            ? "cost unaccounted"
-            : "run failed"),
+      reason: failed?.errors ?? run.outcome?.reason ?? (stopKind ? COST_STOP_REASON[stopKind] : "run failed"),
       logPath: logPath ?? run.outcome?.logPath ?? null,
       resumable,
       at,

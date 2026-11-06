@@ -7,10 +7,10 @@
 // pipeline the ticket ran on — lives here once, and every entry point of the read
 // model resolves through it.
 
-import { readdirSync, realpathSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { PersistedRun } from "../../run/index.js";
-import { type RunRead, readRun, type RunsLocation } from "../../run/index.js";
+import { listWorkItemRuns, type RunRead, readRun, type RunsLocation } from "../../run/index.js";
 import { type ProjectEntry, type ReadModelOptions, readProjects, workItemsRoot } from "./projects.js";
 import type { ItemStatus } from "./types.js";
 
@@ -36,16 +36,7 @@ export function directoryNames(dir: string): string[] {
  */
 export function ticketDirectories(project: ProjectEntry): string[] {
   const root = workItemsRoot(project);
-  return directoryNames(root).filter((name) => directoryNames(join(root, name, "runs")).length > 0);
-}
-
-function latestRunDir(pipelineDir: string): string | null {
-  try {
-    return realpathSync(join(pipelineDir, "latest"));
-  } catch {
-    // No `latest` link, or a broken one: this pipeline has no current run.
-    return null;
-  }
+  return directoryNames(root).filter((name) => listWorkItemRuns(join(root, name)).length > 0);
 }
 
 function updatedMs(state: PersistedRun): number {
@@ -74,13 +65,11 @@ export function runsLocationOfProject(project: ProjectEntry): RunsLocation {
  * start from. The dashboard and a later `lancenuit run` agree on what is live.
  */
 export function latestRuns(project: ProjectEntry, ticket: string): SelectedRun[] {
-  const runsDir = join(workItemsRoot(project), ticket, "runs");
   const location = runsLocationOfProject(project);
   const runs: SelectedRun[] = [];
-  for (const pipeline of directoryNames(runsDir)) {
-    const runDir = latestRunDir(join(runsDir, pipeline));
-    if (!runDir) continue;
-    const run = readRun(runDir, location);
+  for (const { pipeline, latest } of listWorkItemRuns(workItemDirOf(project, ticket))) {
+    if (!latest) continue;
+    const run = readRun(latest, location);
     if (run) runs.push({ pipeline, ...run });
   }
   return runs.sort((a, b) => updatedMs(b.state) - updatedMs(a.state));

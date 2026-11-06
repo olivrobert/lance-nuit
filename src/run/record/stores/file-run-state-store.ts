@@ -8,7 +8,7 @@ import { createRunRef, type RunStateSnapshot, type RunStateStore } from "../../s
 import { readRunSnapshot } from "../run-snapshot.js";
 import { FileRunSnapshotCatalog } from "./file-run-snapshot-catalog.js";
 import {
-  latestRunFile,
+  latestRunDir,
   pipelineRunsDir,
   resolveRunDir as resolveStoredRunDir,
   resolveRunDirSelection,
@@ -69,8 +69,8 @@ export class FileRunStateStore implements RunStateStore {
   }
 
   loadLatest(pipeline: string, ticket?: string): PersistedRun | null {
-    const path = latestRunFile(pipeline, ticket ?? this.ticket, this.context);
-    return path ? readRunSnapshot(path) : null;
+    const runDir = latestRunDir(pipeline, ticket ?? this.ticket, this.context);
+    return runDir ? readRunSnapshot(this.pathFor(runDir)) : null;
   }
 
   listSnapshots(ticket?: string, context?: PipelineContext): RunStateSnapshot[] {

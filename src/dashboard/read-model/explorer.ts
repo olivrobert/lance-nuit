@@ -17,7 +17,7 @@
 import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RunStopState } from "../../run/index.js";
-import { isFailure } from "../../run/index.js";
+import { isFailure, runSnapshotFile } from "../../run/index.js";
 import { isValidSubjectToken, readDecisionIn } from "../../work-items/index.js";
 import { isPathWithin } from "../../shared/lib/path-safety.js";
 import type { ReadModelOptions } from "./projects.js";
@@ -286,9 +286,10 @@ export function readTree(
   if (gate) gate.gate = true;
 
   const failed = isFailure(resolved.status);
+  const snapshotName = basename(runSnapshotFile(runDir));
   const stateCandidate = detached
-    ? `${RUN_PREFIX}/state.json`
-    : `${treePath(realRoot(root) ?? root, runDir)}/state.json`;
+    ? `${RUN_PREFIX}/${snapshotName}`
+    : `${treePath(realRoot(root) ?? root, runDir)}/${snapshotName}`;
   const fallback = failed ? findFile(children, stateCandidate) : undefined;
 
   const defaultFile = gate ?? fallback;

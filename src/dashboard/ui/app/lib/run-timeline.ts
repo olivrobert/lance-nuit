@@ -3,9 +3,10 @@
 // Everything here is a pure function of the run's journey (every attempt and
 // pause, from the journal) and its recap (step order and the ledger's costs).
 // Times are milliseconds from the run's start, positions percentages of the
-// track: nothing here knows about pixels or clocks.
+// track: nothing here knows about pixels or clocks. Nothing here adds up money
+// either: every cost is the read model's, ready to print, floor included.
 
-import type { RunJourney, RunJourneyAttempt, RunPause, RunRecap } from "../api/types.js";
+import type { ItemCost, RunJourney, RunJourneyAttempt, RunPause, RunRecap } from "../api/types.js";
 
 /** Under this, a step is plumbing — a gate, a guard, a copy — and giving it a
  *  lane of its own would bury the steps that actually took the time. */
@@ -42,8 +43,8 @@ export interface TimelineStep {
   attempts: TimelineAttempt[];
   /** Time spent in its attempts, waits excluded. */
   workMs: number;
-  /** The ledger's figure when the recap has one, the attempts' sum otherwise. */
-  costUsd: number;
+  /** The ledger's figure for the step, as the recap serves it. */
+  cost?: ItemCost;
   model?: string;
   /** Attempts that passed, and that were refused. */
   passes: number;
@@ -91,16 +92,12 @@ function epoch(iso: string | undefined): number | undefined {
 }
 
 function isAgent(attempt: RunJourneyAttempt): boolean {
-  return Boolean(attempt.model) || (attempt.costUsd ?? 0) > 0;
+  return Boolean(attempt.model) || (attempt.cost?.usd ?? 0) > 0;
 }
 
-/** The model that cost the most over the run's attempts. */
-function mainModelOf(attempts: RunJourneyAttempt[]): string | undefined {
-  const costs = new Map<string, number>();
-  for (const attempt of attempts) {
-    if (attempt.model) costs.set(attempt.model, (costs.get(attempt.model) ?? 0) + (attempt.costUsd ?? 0));
-  }
-  return [...costs].sort((a, b) => b[1] - a[1])[0]?.[0];
+/** Dollars a cost names, `0` when it names none: for ranking only, never printed. */
+function usdOf(cost: ItemCost | undefined): number {
+  return cost?.usd ?? 0;
 }
 
 function toneOf(
@@ -131,13 +128,13 @@ function episodesOf(pauses: TimelinePause[], endMs: number): RunEpisode[] {
   return episodes;
 }
 
-function stepOf(id: string, attempts: TimelineAttempt[], ledgerCost: number | undefined): TimelineStep {
+function stepOf(id: string, attempts: TimelineAttempt[], cost: ItemCost | undefined): TimelineStep {
   const model = attempts.find((entry) => entry.attempt.model)?.attempt.model;
   return {
     id,
     attempts,
     workMs: attempts.reduce((sum, entry) => sum + (entry.to - entry.from), 0),
-    costUsd: ledgerCost ?? attempts.reduce((sum, entry) => sum + (entry.attempt.costUsd ?? 0), 0),
+    ...(cost ? { cost } : {}),
     ...(model ? { model } : {}),
     passes: attempts.filter((entry) => entry.attempt.status === "done").length,
     fails: attempts.filter((entry) => entry.tone === "fail").length,
@@ -146,7 +143,9 @@ function stepOf(id: string, attempts: TimelineAttempt[], ledgerCost: number | un
 }
 
 function isNotable(step: TimelineStep): boolean {
-  return step.workMs >= NOTABLE_MS || step.costUsd > 0 || step.fails > 0 || step.running;
+  return (
+    step.workMs >= NOTABLE_MS || usdOf(step.cost) > 0 || step.cost?.unknown === true || step.fails > 0 || step.running
+  );
 }
 
 /**
@@ -165,7 +164,7 @@ export function buildTimeline(journey: RunJourney, recap: RunRecap | null, now: 
     const value = epoch(iso);
     return value === undefined ? undefined : Math.max(value - startMs, 0);
   };
-  const main = mainModelOf(journey.attempts);
+  const main = journey.mainModel;
 
   const byStep = new Map<string, TimelineAttempt[]>();
   let lastEnd = 0;
@@ -193,7 +192,7 @@ export function buildTimeline(journey: RunJourney, recap: RunRecap | null, now: 
   }
   const endMs = live ? Math.max(now - startMs, lastEnd) : lastEnd;
 
-  const ledger = new Map((recap?.steps ?? []).map((step) => [step.id, step.costUsd]));
+  const ledger = new Map((recap?.steps ?? []).map((step) => [step.id, step.cost]));
   const order = new Set([...(recap?.steps ?? []).map((step) => step.id), ...byStep.keys()]);
   const steps: TimelineStep[] = [];
   const minor: TimelineStep[] = [];
@@ -323,7 +322,7 @@ export function placeSpan(scale: TimeScale, from: number, to: number, minPct = 0
 /** What a reader should take away from the run, at most one of each kind. */
 export type Takeaway =
   | { kind: "longest"; stepId: string; workMs: number; share: number; passes: number }
-  | { kind: "priciest"; stepId: string; costUsd: number; share: number; model?: string }
+  | { kind: "priciest"; stepId: string; cost: ItemCost; share: number; model?: string }
   | { kind: "replayed"; workMs: number; stepIds: string[] }
   | { kind: "refused"; count: number; stepIds: string[] };
 
@@ -334,9 +333,10 @@ function replayedMs(step: TimelineStep): number {
 /**
  * The run's notable facts: the step that took the most work time, the one that
  * cost the most, the time spent replaying steps that had passed, and the
- * refusals. `totalCostUsd` is the ledger's total, which the cost share divides.
+ * refusals. `total` is the run's cost as the read model serves it, which the
+ * cost share divides; without a figure there is no share to give.
  */
-export function takeaways(timeline: RunTimeline, totalCostUsd: number | undefined): Takeaway[] {
+export function takeaways(timeline: RunTimeline, total: ItemCost | undefined): Takeaway[] {
   const all = [...timeline.steps, ...timeline.minor];
   const found: Takeaway[] = [];
 
@@ -346,11 +346,11 @@ export function takeaways(timeline: RunTimeline, totalCostUsd: number | undefine
     found.push({ kind: "longest", stepId, workMs, share: workMs / timeline.workMs, passes });
   }
 
-  const priciest = [...all].sort((a, b) => b.costUsd - a.costUsd)[0];
-  const costTotal = totalCostUsd ?? all.reduce((sum, step) => sum + step.costUsd, 0);
-  if (priciest && priciest.costUsd > 0 && costTotal > 0) {
-    const { id: stepId, costUsd, model } = priciest;
-    found.push({ kind: "priciest", stepId, costUsd, share: costUsd / costTotal, ...(model ? { model } : {}) });
+  const priciest = [...all].sort((a, b) => usdOf(b.cost) - usdOf(a.cost))[0];
+  const costTotal = usdOf(total);
+  if (priciest?.cost && usdOf(priciest.cost) > 0 && costTotal > 0) {
+    const { id: stepId, cost, model } = priciest;
+    found.push({ kind: "priciest", stepId, cost, share: usdOf(cost) / costTotal, ...(model ? { model } : {}) });
   }
 
   const replayed = all

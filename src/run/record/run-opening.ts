@@ -22,12 +22,11 @@ import type { RunEventStore, RunLogStore, RunStateStore } from "../storage-ports
 import { log } from "../../shared/runtime/logging.js";
 import { restoreRunTotals } from "./cost-accounting.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
-import { allStepsSettled } from "./run-predicates.js";
+import { remainingWork } from "./run-predicates.js";
 import { type ProjectedRunState, projectRunState, settleCrashedAttempts } from "./run-projection.js";
 import { saveRun } from "./run-repository.js";
 import { describeRunSnapshotProblem, hasRunSnapshotEntry, readRunSnapshotDiagnostic } from "./run-snapshot.js";
 import { makeRunStep, type StepStateInput } from "./run-step.js";
-import { awaitsFinalization } from "./run-status.js";
 import { FileRunEventStore } from "./stores/file-run-event-store.js";
 import { FileRunLogStore } from "./stores/file-run-log-store.js";
 import { FileRunStateStore } from "./stores/file-run-state-store.js";
@@ -164,7 +163,7 @@ function hydrate(
       attempts: state?.attempts,
     });
   });
-  const allSettled = allStepsSettled(steps);
+  const remaining = remainingWork({ status: persisted.status, outcome: persisted.outcome, steps });
   // A settled snapshot that never received a verdict is not terminal, it is a
   // run that still owes a `finalizeRun`: RUNNING is a crash in that window, and
   // ABORTED with no step left in flight is a SIGINT in the same window. Loading
@@ -174,8 +173,8 @@ function hydrate(
   // it now: the verdict on disk judged that work, so it cannot stand for the run
   // the selection leaves. Loaded as terminal, `--skip` of the step it ended on
   // would change nothing and leave a run no later invocation resumes.
-  const awaitingVerdict = allSettled && (selectionTookWork || awaitsFinalization(persisted));
-  const terminal = persisted.status !== undefined && allSettled && !awaitingVerdict;
+  const awaitingVerdict = remaining.settled && (selectionTookWork || remaining.owed);
+  const terminal = persisted.status !== undefined && remaining.settled && !awaitingVerdict;
   return {
     name: persisted.name,
     ticket: persisted.ticket,

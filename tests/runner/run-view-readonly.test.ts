@@ -51,18 +51,18 @@ const WRITES = [
   `child.accountedCostUsd = 0;`,
   `node.children.splice(0);`,
   // A run total summed from a single step is that step's own usage.
-  `aggregateUsage(run.steps)!.input_tokens = 0;`,
-  `aggregateUsage(run.steps)!.tools_used!.push("Bash");`,
+  `runUsage(run)!.input_tokens = 0;`,
+  `runUsage(run)!.tools_used!.push("Bash");`,
 ];
 
 const PROBE_SOURCE = `
 import type { RunStepView, RunView } from "../../run/run.js";
 import {
-  aggregateUsage,
   type declareChild,
   type OpenedAttempt,
   type OpenedRun,
   type openOrchestration,
+  runUsage,
 } from "../../run/record/index.js";
 
 export function probe(
@@ -285,7 +285,6 @@ const HANDED_OUT: Record<string, string[]> = {
   readRun: RUN_COPY,
   readLatestRun: RUN_COPY,
   readListedRun: RUN_COPY,
-  resolveLatestRunSnapshot: RUN_COPY,
   // Attempts and events read back from the journal for the call.
   RunHistory: [...EVENT_VALUES, "PersistedAttempt"].sort(),
   readRunHistory: [...EVENT_VALUES, "PersistedAttempt"].sort(),

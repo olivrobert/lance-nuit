@@ -27,17 +27,9 @@ test("statusBadge: validates the contract", () => {
   expect(core.statusBadge(undefined)).toBe("⚪ ?");
 });
 
-test("currencyOf: validates the contract", () => {
-  expect(core.currencyOf(null)).toBe("$");
-  expect(core.currencyOf({})).toBe("$");
-  expect(core.currencyOf({ _currency: "€" })).toBe("€");
-});
-
-test("currencyOf: an empty currency is not the dollar, as for the runner's rate lookup", () => {
+test("costOf: an empty currency is not the dollar, as for the runner's rate lookup", () => {
   const table = { _currency: "", "claude-opus-4-8": { in: 5 } };
   expect(projectPricingForModel("claude-opus-4-8", table)).toBeNull();
-  expect(core.currencyOf(table)).toBe("");
-  expect(core.usablePricing(table)).toBeNull();
   expect(core.costOf({ "claude-opus-4-8": { in: 1e6, out: 0, cacheRead: 0, cacheWrite: 0 } }, table)).toBeNull();
 });
 
@@ -102,13 +94,6 @@ test("entryCost: validates the contract", () => {
   expect(core.entryCost({ models }, PRICING)).toBeCloseTo(15, 10);
   expect(core.entryCost({ models }, null)).toBeNull();
   expect(core.entryCost({}, null)).toBeNull();
-});
-
-test("usablePricing: validates the contract", () => {
-  expect(core.usablePricing(PRICING)).toBe(PRICING);
-  expect(core.usablePricing(null)).toBeNull();
-  // A euro table cannot price a run whose cost the runner reports in dollars.
-  expect(core.usablePricing({ _currency: "€", "claude-opus-4-8": { in: 5 } })).toBeNull();
 });
 
 test("costOf: rejects a non-USD table and unusable rates", () => {

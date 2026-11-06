@@ -5,7 +5,8 @@ import { join } from "node:path";
 import type { PipelineStep } from "../../definition/definition.ts";
 import type { Run, RunStep } from "./run.ts";
 import { makeRunStep, type StepStateInput } from "./run-step.ts";
-import { closeAttempt, hasSpendFigures, settleAttemptStats } from "./attempt-closure.ts";
+import { closeAttempt, settleAttemptStats } from "./attempt-closure.ts";
+import { measuredAnything } from "./cost-figures.ts";
 import { readRunEvents } from "./run-journal.ts";
 import { allocateAttempt } from "./attempt-lifecycle.ts";
 
@@ -32,12 +33,13 @@ function finishedEvents(run: Run) {
   return readRunEvents(run.run_dir).filter((event) => event.type === "step.attempt.finished");
 }
 
-test("hasSpendFigures: any token count or price counts as a measurement", () => {
-  expect(hasSpendFigures(undefined)).toBe(false);
-  expect(hasSpendFigures({ duration_ms: 5 })).toBe(false);
-  expect(hasSpendFigures({ duration_ms: 5, input_tokens: 1 })).toBe(true);
-  expect(hasSpendFigures({ duration_ms: 5, cache_read_tokens: 1 })).toBe(true);
-  expect(hasSpendFigures({ duration_ms: 5, total_cost_usd: 0 })).toBe(true);
+test("measuredAnything: any token count or price counts as a measurement", () => {
+  expect(measuredAnything(undefined)).toBe(false);
+  expect(measuredAnything({})).toBe(false);
+  expect(measuredAnything({ input_tokens: 1 })).toBe(true);
+  expect(measuredAnything({ cache_read_tokens: 1 })).toBe(true);
+  expect(measuredAnything({ cache_creation_tokens: 1 })).toBe(true);
+  expect(measuredAnything({ total_cost_usd: 0 })).toBe(true);
 });
 
 test("settleAttemptStats: an unmeasured failed agent attempt is flagged cost_unknown", () => {

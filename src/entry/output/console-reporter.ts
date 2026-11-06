@@ -1,6 +1,6 @@
 import { relative, resolve } from "node:path";
 import type { AgentBackendRegistry, StepControl, StepUsage } from "../../contracts/backends.js";
-import type { DeepReadonly, RunStepView, RunView } from "../../run/index.js";
+import { type DeepReadonly, figuresSpend, type RunStepView, type RunView, type Spend } from "../../run/index.js";
 import { log, writeStderr } from "../../shared/runtime/logging.js";
 import { bold, cyan, dim, gray, green, red, type Style, yellow } from "./color.js";
 import { formatContextShare, formatDuration } from "./format.js";
@@ -67,17 +67,21 @@ export function fmtContextShare(control?: DeepReadonly<StepControl>): string | u
   return formatContextShare(tokens / window);
 }
 
-function metrics(control?: DeepReadonly<StepControl>, usage?: DeepReadonly<StepUsage>): string[] {
+function metrics(durationMs: number | undefined, spend: Spend, usage?: DeepReadonly<StepUsage>): string[] {
   const parts: string[] = [];
-  const duration = formatDuration(control?.duration_ms);
+  const duration = formatDuration(durationMs);
   if (duration) parts.push(duration);
   // An unpriced attempt makes every figure it feeds a floor. `≥` is the one
   // convention for that across the console, `lancenuit stats`, and the dashboard:
   // an unknown spend is never printed as an exact amount, least of all as `$0.00`.
-  if (control?.total_cost_usd != null)
-    parts.push(`${control.cost_unknown ? "≥ " : ""}$${control.total_cost_usd.toFixed(2)}`);
+  if (spend.usd != null) parts.push(`${spend.lowerBound ? "≥ " : ""}$${spend.usd.toFixed(2)}`);
   if (usage?.output_tokens) parts.push(`${formatNumber(usage.output_tokens)} tok`);
   return parts;
+}
+
+/** The metrics of one step or one attempt, from the figures it settled. */
+function figureMetrics(control?: DeepReadonly<StepControl>, usage?: DeepReadonly<StepUsage>): string[] {
+  return metrics(control?.duration_ms, figuresSpend(control), usage);
 }
 
 /** Metrics are background information and read as dim — except an occupancy that
@@ -111,7 +115,7 @@ function withContext(parts: string[], control?: DeepReadonly<StepControl>): stri
 }
 
 export function fmtInlineStats(control?: DeepReadonly<StepControl>, usage?: DeepReadonly<StepUsage>): string {
-  const painted = paintMetrics(withContext(metrics(control, usage), control), contextHighlight(control));
+  const painted = paintMetrics(withContext(figureMetrics(control, usage), control), contextHighlight(control));
   return painted ? ` ${dim("·")} ${painted}` : "";
 }
 
@@ -159,7 +163,7 @@ function displayPath(path: string, cwd: string): string {
 
 function stepMetrics(step: RunReportStep): string {
   const control = step.control ?? (step.durationMs != null ? { duration_ms: step.durationMs } : undefined);
-  const parts = withContext(metrics(control, step.usage), control);
+  const parts = withContext(figureMetrics(control, step.usage), control);
   if (step.retries > 0) parts.push(plural(step.retries, "retry"));
   const painted = paintMetrics(parts, contextHighlight(control));
   return painted ? `  ${painted}` : "";
@@ -182,7 +186,7 @@ export function renderConsoleReport(report: RunReport, options: { cwd?: string }
   const cwd = options.cwd ?? process.cwd();
   const status = STATUS[report.kind];
   const identity = [report.pipeline, report.ticket].filter(Boolean).join(" · ");
-  const total = metrics(report.totalControl, report.totalUsage);
+  const total = metrics(report.spend.durationMs ?? 0, report.spend, report.totalUsage);
   const bar = dim("│");
   const lines = [
     "",

@@ -73,9 +73,7 @@ test("stats: a ticket sums its root runs across pipelines, each run read once de
     ticket: "DEMO-1",
     ticketUrl: "https://tracker.example/browse/DEMO-1",
     source: "live",
-    costUsd: 7.5,
-    costEstimated: false,
-    costUnknown: false,
+    cost: { usd: 7.5, estimated: false },
     activeMs: 480_000,
     firstAt: "2026-09-01T08:00:00.000Z",
     lastAt: "2026-09-04T08:00:00.000Z",
@@ -93,7 +91,7 @@ test("stats: a child run is already inside its parent's total and is not summed 
 
   const [ticket] = readStats().tickets;
 
-  expect(ticket?.costUsd).toBe(30);
+  expect(ticket?.cost.usd).toBe(30);
   expect(ticket?.runs.map((run) => run.runId)).toEqual(["p-1"]);
 });
 
@@ -108,7 +106,7 @@ test("stats: an estimated or unpriced run marks the ticket's total", () => {
 
   const [ticket] = readStats().tickets;
 
-  expect(ticket).toMatchObject({ costUsd: 3, costEstimated: true, costUnknown: true });
+  expect(ticket?.cost).toEqual({ usd: 3, estimated: true, unknown: true });
 });
 
 test("stats: a run kept in a folder renamed aside belongs to the ticket it recorded", () => {
@@ -124,7 +122,7 @@ test("stats: a run kept in a folder renamed aside belongs to the ticket it recor
   const { tickets } = readStats();
 
   expect(tickets.map((ticket) => ticket.key)).toEqual(["demo-app/DEMO-4"]);
-  expect(tickets[0]?.costUsd).toBe(3);
+  expect(tickets[0]?.cost.usd).toBe(3);
 });
 
 test("stats: without rules every ticket is `other`", () => {
@@ -195,7 +193,7 @@ test("stats: the outcome is the most recent delivery run, a later triage does no
   ]);
   const triaged = byTicket.get("DEMO-21");
   expect(triaged?.outcome).toBeUndefined();
-  expect(triaged?.costUsd).toBe(0.4);
+  expect(triaged?.cost.usd).toBe(0.4);
 });
 
 test("stats: without a delivery rule every run delivers, so the latest one is the outcome", () => {
@@ -302,14 +300,13 @@ test("stats: archived runs are merged, and a run present in both is read live", 
 
   expect(archive).toEqual({ status: "ok", generatedAt: "2026-09-20T00:00:00.000Z", runs: 3 });
   const live = tickets.find((ticket) => ticket.ticket === "DEMO-11");
-  expect(live).toMatchObject({ costUsd: 6, source: "mixed", kind: "feature" });
+  expect(live).toMatchObject({ cost: { usd: 6 }, source: "mixed", kind: "feature" });
   const old = tickets.find((ticket) => ticket.ticket === "OLD-1");
   expect(old).toMatchObject({
     project: "gone-app",
     source: "archive",
     kind: "bug",
-    costUsd: 2,
-    costEstimated: true,
+    cost: { usd: 2, estimated: true },
     activeMs: 60_000,
     // A status the archive cannot vouch for, on a run nothing holds any more:
     // an interrupted run, as the morning box would serve it live.
@@ -356,5 +353,5 @@ test("stats: a stray link to a run of another pipeline does not count it twice",
   mkdirSync(join(workItemDir(project, "DEMO-D"), "runs", "alias"), { recursive: true });
   symlinkSync(runDir, join(workItemDir(project, "DEMO-D"), "runs", "alias", "a-copy"));
 
-  expect(readStats().tickets[0]?.costUsd).toBe(2);
+  expect(readStats().tickets[0]?.cost.usd).toBe(2);
 });

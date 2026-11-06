@@ -20,8 +20,7 @@ function ticket(key: string, fields: Partial<StatsTicket> = {}): StatsTicket {
     ticket: id,
     kind: "other",
     source: "live",
-    costEstimated: false,
-    costUnknown: false,
+    cost: { estimated: false },
     outcome: "PASS",
     pipelines: [],
     runs: [],
@@ -29,11 +28,16 @@ function ticket(key: string, fields: Partial<StatsTicket> = {}): StatsTicket {
   };
 }
 
-const a = ticket("app/T-2", { kind: "bug", costUsd: 5, activeMs: 1000 });
-const b = ticket("app/T-10", { kind: "feature", costUsd: 20, activeMs: 3000, source: "archive" });
+const a = ticket("app/T-2", { kind: "bug", cost: { usd: 5, estimated: false }, activeMs: 1000 });
+const b = ticket("app/T-10", {
+  kind: "feature",
+  cost: { usd: 20, estimated: false },
+  activeMs: 3000,
+  source: "archive",
+});
 const c = ticket("web/T-1", { kind: "bug", source: "mixed", outcome: "FAIL" });
-const d = ticket("web/T-3", { kind: "feature", costUsd: 1, costEstimated: true, costUnknown: true });
-const { outcome: _, ...triagedOnly } = ticket("web/T-4", { kind: "other", costUsd: 0.2 });
+const d = ticket("web/T-3", { kind: "feature", cost: { usd: 1, estimated: true, unknown: true } });
+const { outcome: _, ...triagedOnly } = ticket("web/T-4", { kind: "other", cost: { usd: 0.2, estimated: false } });
 const e: StatsTicket = triagedOnly;
 
 describe("sortTickets", () => {
@@ -114,7 +118,7 @@ describe("totalsOf", () => {
   });
 
   test("a pass that shipped nothing is unfinished, never passed", () => {
-    const unshipped = ticket("app/T-5", { outcome: "UNSHIPPED", costUsd: 3 });
+    const unshipped = ticket("app/T-5", { outcome: "UNSHIPPED", cost: { usd: 3, estimated: false } });
     const totals = totalsOf([a, unshipped]);
     expect(totals.passed).toMatchObject({ tickets: 1, costUsd: 5 });
     expect(totals.unfinished).toMatchObject({ tickets: 1, costUsd: 3 });

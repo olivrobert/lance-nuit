@@ -6,22 +6,47 @@
 
 import type { AttemptStats, StepControl, StepUsage } from "../../contracts/backends.js";
 
-/** Tokens an attempt is known to have consumed. Zero means "measured nothing",
- *  which is why an exact $0 alongside it stays exact. */
-function spentTokens(stats?: AttemptStats): number {
+/** The token counters an attempt is measured in. `reasoning_tokens` is not one of
+ *  them: backends report it inside `output_tokens`. */
+interface TokenFigures {
+  readonly input_tokens?: number;
+  readonly output_tokens?: number;
+  readonly cache_read_tokens?: number;
+  readonly cache_creation_tokens?: number;
+}
+
+/** Tokens a provider counted. Zero means it counted none, which is why an exact
+ *  $0 alongside it stays exact. */
+export function measuredTokens(figures?: TokenFigures): number {
   return (
-    (stats?.input_tokens ?? 0) +
-    (stats?.output_tokens ?? 0) +
-    (stats?.cache_read_tokens ?? 0) +
-    (stats?.cache_creation_tokens ?? 0)
+    (figures?.input_tokens ?? 0) +
+    (figures?.output_tokens ?? 0) +
+    (figures?.cache_read_tokens ?? 0) +
+    (figures?.cache_creation_tokens ?? 0)
   );
+}
+
+/** The provider reported a token counter, whatever its value. */
+function reportsTokens(figures?: TokenFigures): boolean {
+  return (
+    figures?.input_tokens != null ||
+    figures?.output_tokens != null ||
+    figures?.cache_read_tokens != null ||
+    figures?.cache_creation_tokens != null
+  );
+}
+
+/** Whether an attempt measured anything at all: a token counter or an amount.
+ *  The one definition every rule about a measurement reads. */
+export function measuredAnything(stats?: TokenFigures & { readonly total_cost_usd?: number }): boolean {
+  return reportsTokens(stats) || stats?.total_cost_usd != null;
 }
 
 /** Split an attempt before persisting it in resumable state. */
 export function splitAttemptStats(stats?: AttemptStats): { control: StepControl; usage?: StepUsage } {
   // Tokens without a price mean an unaccounted spend, not a free attempt: flag it
   // here, where control and usage are still side by side.
-  const metered = stats?.input_tokens != null || stats?.output_tokens != null || stats?.cache_read_tokens != null;
+  const metered = reportsTokens(stats);
   const rawCost = stats?.total_cost_usd;
   const validCost = rawCost != null && Number.isFinite(rawCost) && rawCost >= 0 ? rawCost : undefined;
   const invalidCost = rawCost != null && validCost == null;
@@ -35,7 +60,7 @@ export function splitAttemptStats(stats?: AttemptStats): { control: StepControl;
   // tokens at all — a shell step, an agent that never called its provider) and a
   // zero a pricing table produced from explicit zero rates, which arrives here
   // already marked `cost_estimated`.
-  const freeOverSpentTokens = validCost === 0 && spentTokens(stats) > 0 && stats?.cost_estimated !== true;
+  const freeOverSpentTokens = validCost === 0 && measuredTokens(stats) > 0 && stats?.cost_estimated !== true;
   // The flag also survives beside a price: a backend that sums the discarded
   // transport attempts under a final attempt it could not measure reports a lower
   // bound, the same shape a merged step total produces for a step mixing priced

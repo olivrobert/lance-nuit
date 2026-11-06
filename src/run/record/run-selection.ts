@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { errorMessage } from "../../shared/lib/errors.js";
 import { createRunRef } from "../storage-ports.js";
 import type { PipelineContext } from "../../shared/language/context.js";
-import { pendingSteps, resumeDecision, settledButUnfinalized } from "./run-predicates.js";
+import { remainingWork, resumeDecision } from "./run-predicates.js";
 import { readListedRun } from "./run-read.js";
 import { describeRunSnapshotProblem, readRunSnapshotDiagnostic } from "./run-snapshot.js";
 import {
@@ -101,7 +101,8 @@ export function selectExplicitRun(
   // What is left to do is read as every reader reads it: a runner that died
   // after the journal recorded a step finished left that step done.
   const { state } = readListedRun({ state: snapshot, runDir }, runsLocationOf(context));
-  if (options.replay !== true && pendingSteps(state).length === 0 && !settledButUnfinalized(state)) {
+  const remaining = remainingWork(state);
+  if (options.replay !== true && remaining.steps.length === 0 && !remaining.verdictOwed) {
     throw new Error(`--run: run "${runId}" has no remaining step to execute — nothing to resume.`);
   }
 
@@ -167,10 +168,11 @@ export function discardedResumeNotice(
   const decision = resumeDecision(snapshot);
   if (decision.resume) return undefined;
 
-  const remaining = pendingSteps(snapshot).length;
+  const work = remainingWork(snapshot);
+  const remaining = work.steps.length;
   // A discarded run with no pending step can still owe its verdict, and `--run`
   // accepts it: staying silent would leave the only way to reach it unadvertised.
-  const owesVerdict = remaining === 0 && settledButUnfinalized(snapshot);
+  const owesVerdict = work.verdictOwed;
   if (remaining === 0 && !owesVerdict) return undefined;
 
   const runId = snapshot.runId;

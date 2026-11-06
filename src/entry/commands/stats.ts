@@ -7,13 +7,11 @@
 import type { RunnerArgs } from "../cli-options.js";
 import {
   isCompleted,
-  currencyOf,
   fmtInt,
   type HistoryAggregate,
   type HistoryEntry,
   type HistoryFilter,
   type PipelineTotals,
-  pricingTable,
   statusBadge,
   summarizeHistory,
 } from "../../run/index.js";
@@ -28,8 +26,10 @@ type StatsArgs = Pick<RunnerArgs, "ticket" | "pipelinePath" | "since" | "failure
 /** Runs listed individually before the aggregate, unless `--limit` says otherwise. */
 const DEFAULT_RUN_ROWS = 10;
 
-function money(amount: number, currency: string): string {
-  return `${currency}${amount.toFixed(2)}`;
+/** Every figure the history holds is in dollars: the runner's own, or one priced
+ *  from a dollar table (`projectPricingForModel` prices nothing in another). */
+function money(amount: number): string {
+  return `$${amount.toFixed(2)}`;
 }
 
 function humanDuration(ms: number): string {
@@ -54,13 +54,12 @@ function statusLine(byStatus: Record<string, number>): string {
  *  or leaving runs out entirely, must not read as an exact one. */
 function costLine(
   totals: Pick<PipelineTotals, "costUsd" | "costMissing" | "costEstimated" | "costUnderCounted" | "runs">,
-  currency: string,
 ): string {
   if (totals.costMissing === totals.runs) return "cost unavailable (no provider cost, no pricing.json)";
   const priced = totals.runs - totals.costMissing;
   // A total containing a lower bound is itself a lower bound.
-  const parts = [`${totals.costUnderCounted > 0 ? "≥ " : ""}${money(totals.costUsd, currency)}`];
-  if (priced > 0) parts.push(`avg ${money(totals.costUsd / priced, currency)}`);
+  const parts = [`${totals.costUnderCounted > 0 ? "≥ " : ""}${money(totals.costUsd)}`];
+  if (priced > 0) parts.push(`avg ${money(totals.costUsd / priced)}`);
   if (totals.costEstimated > 0) parts.push(`${totals.costEstimated} estimated from pricing.json`);
   if (totals.costUnderCounted > 0) parts.push(`${totals.costUnderCounted} under-counted (unpriced attempts)`);
   if (totals.costMissing > 0) parts.push(`${totals.costMissing} unpriced, excluded`);
@@ -77,12 +76,11 @@ function describeFilter(filter: HistoryFilter, since?: string): string {
   return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
-function renderRunRows(entries: readonly HistoryEntry[], currency: string, limit: number): string[] {
+function renderRunRows(entries: readonly HistoryEntry[], limit: number): string[] {
   const rows: string[] = [];
   for (const entry of entries.slice(0, limit)) {
     const started = entry.startedAt ? entry.startedAt.slice(0, 16).replace("T", " ") : "?";
-    const cost =
-      typeof entry.costUsd === "number" ? `${entry.costUnknown ? "≥" : ""}${money(entry.costUsd, currency)}` : "-";
+    const cost = typeof entry.costUsd === "number" ? `${entry.costUnknown ? "≥" : ""}${money(entry.costUsd)}` : "-";
     const target = entry.ticket ?? "-";
     const failure = !isCompleted(entry.status) && entry.failPhase ? `  fail: ${entry.failPhase}` : "";
     rows.push(
@@ -99,7 +97,6 @@ function renderRunRows(entries: readonly HistoryEntry[], currency: string, limit
 export function renderStats(
   entries: readonly HistoryEntry[],
   aggregate: HistoryAggregate,
-  currency: string,
   options: { filterLabel?: string; runRows?: number } = {},
 ): string {
   const label = options.filterLabel ?? "";
@@ -118,7 +115,7 @@ export function renderStats(
       : "";
   lines.push(`${aggregate.runs} run(s)${label}${window}`);
   lines.push(`  ${statusLine(aggregate.byStatus)}`);
-  lines.push(`  ${costLine(aggregate, currency)}`);
+  lines.push(`  ${costLine(aggregate)}`);
   const { in: input, out, cacheRead, cacheWrite } = aggregate.tokens;
   lines.push(
     `  tokens  in ${fmtInt(input)}  out ${fmtInt(out)}  cache read ${fmtInt(cacheRead)}  cache write ${fmtInt(cacheWrite)}`,
@@ -138,7 +135,7 @@ export function renderStats(
       const average =
         totals.durationSamples > 0 ? `  avg ${humanDuration(totals.durationMs / totals.durationSamples)}` : "";
       lines.push(`  ${name}  ${totals.runs} run(s)  ${statusLine(totals.byStatus)}${average}`);
-      lines.push(`    ${costLine(totals, currency)}`);
+      lines.push(`    ${costLine(totals)}`);
     }
   } else if (pipelines[0]?.[1].durationSamples) {
     const [, totals] = pipelines[0];
@@ -157,12 +154,12 @@ export function renderStats(
     for (const [role, totals] of profiles) {
       // Per-profile cost is only present when the projection attributed one; the
       // step count stays meaningful either way.
-      const cost = totals.costUsd > 0 ? `  ${money(totals.costUsd, currency)}` : "";
+      const cost = totals.costUsd > 0 ? `  ${money(totals.costUsd)}` : "";
       lines.push(`  ${role}  ${totals.steps} step(s)  ${fmtInt(totals.tokens.out)} out${cost}`);
     }
   }
 
-  const rows = renderRunRows(entries, currency, options.runRows ?? DEFAULT_RUN_ROWS);
+  const rows = renderRunRows(entries, options.runRows ?? DEFAULT_RUN_ROWS);
   if (rows.length > 0) lines.push("", "Runs", ...rows);
 
   return lines.join("\n");
@@ -194,10 +191,9 @@ export const statsCommand: RunnerCommand = {
       ...(args.includeChildren ? { includeChildren: true } : {}),
     };
 
-    const pricing = pricingTable();
-    const { entries, aggregate } = summarizeHistory(process.cwd(), filter, pricing);
+    const { entries, aggregate } = summarizeHistory(process.cwd(), filter);
     log(
-      renderStats(entries, aggregate, currencyOf(pricing), {
+      renderStats(entries, aggregate, {
         filterLabel: describeFilter(filter, args.since),
         ...(args.limit ? { runRows: args.limit } : {}),
       }),
