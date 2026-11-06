@@ -287,6 +287,11 @@ const ALLOWED: ReadonlyArray<{ file: string; snippet: string; reason: string }> 
     snippet: `const order = ["PASS", "FAIL", "STOPPED", "ABORTED", "UNKNOWN"];`,
     reason: "the order `stats` prints its counts in",
   },
+  {
+    file: "dashboard/read-model/read-api.schema.ts",
+    snippet: `export const API_RUN_STATUSES = ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED"] as const;`,
+    reason: "the values the read API schema and its `status` filter accept",
+  },
 ];
 
 function productionSources(directory: string): string[] {

@@ -20,6 +20,7 @@ export { isValidSubjectToken, MAX_REJECTION_REASON } from "../../work-items/inde
 export type { ProjectEntry, ReadModelOptions } from "./projects.js";
 export type { ApiRunFilters } from "./read-api.js";
 export {
+  API_RUN_STATUSES,
   type ApiRunDetail,
   type ApiRunList,
   type ApiRunStatus,

@@ -105,6 +105,8 @@ export interface RunnerArgs {
   /** With --ui, the TCP port to bind on 127.0.0.1. `0` asks the kernel for a
    *  free one, which is how a test starts a server without picking a number. */
   port?: number;
+  /** With --ui, the browser origins allowed to read the read API (`/api/v1/`). */
+  corsOrigin?: string[];
   runId?: string;
   step?: string;
   logsOnly: boolean;
@@ -364,6 +366,12 @@ export const FLAGS: FlagSpec[] = [
     key: "port",
     kind: "port",
     desc: `TCP port for --ui on ${UI_HOST} (default: ${DEFAULT_UI_PORT}; 0 picks a free one).`,
+  },
+  {
+    long: "--cors-origin",
+    key: "corsOrigin",
+    kind: "list",
+    desc: "With --ui, browser origins allowed to read /api/v1, comma-separated (e.g. http://localhost:3000).",
   },
   { long: "--since", key: "since", kind: "string", desc: "Minimum recency for --stats (e.g. 30d, 12h)." },
   { long: "--failures", key: "failures", kind: "boolean", desc: "With --stats, keep only runs that did not pass." },

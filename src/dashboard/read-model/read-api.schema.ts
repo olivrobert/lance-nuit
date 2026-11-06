@@ -20,9 +20,13 @@ import type { AssertAssignable, Plain } from "../../shared/lib/type-assertions.j
 
 export const READ_API_VERSION = 1;
 
+/** Every status the read API serves: the values its schema and its `status`
+ *  filter accept. */
+export const API_RUN_STATUSES = ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED"] as const;
+
 /** The status a later `lancenuit run` would judge: a snapshot without a verdict
  *  that no live process holds is `ABORTED`, never `RUNNING`. */
-export type ApiRunStatus = "RUNNING" | "PASS" | "FAIL" | "STOPPED" | "ABORTED";
+export type ApiRunStatus = (typeof API_RUN_STATUSES)[number];
 
 /** Expected recovery of a clean stop, as the runner recorded it. */
 export type ApiStopKind = "needs-info" | "needs-decision" | "needs-human" | "blocked" | "until";
@@ -165,7 +169,7 @@ export interface ApiRunDetail {
   reportError?: string;
 }
 
-const RunStatusSchema = z.enum(["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED"]);
+const RunStatusSchema = z.enum(API_RUN_STATUSES);
 const StopKindSchema = z.enum(["needs-info", "needs-decision", "needs-human", "blocked", "until"]);
 const ApprovalStateSchema = z.enum(["absent", "fresh", "stale", "rejected", "reworked"]);
 const StepStatusSchema = z.enum(["pending", "running", "done", "failed", "skipped", "aborted"]);

@@ -31,4 +31,6 @@ export interface UiDeps {
   terminals: TerminalDeps;
   /** Work-item providers used to validate a ticket reference. */
   workItems: WorkItemGatewayRegistry;
+  /** Browser origins allowed to read the read API (`/api/v1/`), normalized. */
+  corsOrigins: readonly string[];
 }

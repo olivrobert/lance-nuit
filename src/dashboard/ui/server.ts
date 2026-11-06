@@ -26,6 +26,7 @@ import { DEFAULT_UI_PORT, UI_HOST } from "../../shared/lib/ui-defaults.js";
 import { openDashboardHome } from "../home/index.js";
 import { createReadModel, type ProjectEntry } from "../read-model/index.js";
 import type { UiDeps } from "./deps.js";
+import { parseCorsOrigins } from "./http/cors.js";
 import { sendError } from "./http/respond.js";
 import { VerbLauncher } from "./launcher.js";
 import { route } from "./router.js";
@@ -59,6 +60,9 @@ export interface UiServerOptions {
   paneCommand?: PaneCommandBuilder;
   /** Pipeline names of a project; defaults to the kit chain's list. */
   listPipelines?: (project: ProjectEntry) => string[];
+  /** Browser origins allowed to read the read API (`--cors-origin`). An
+   *  invalid one stops the server before it binds. */
+  corsOrigins?: readonly string[];
 }
 
 export interface RunningUiServer {
@@ -79,6 +83,8 @@ export interface RunningUiServer {
  * ones purged at the same moment (spec 5.2, H1).
  */
 function composeDeps(options: UiServerOptions, env: NodeJS.ProcessEnv): UiDeps {
+  // Checked first: a refused origin must not leave the dashboard files touched.
+  const corsOrigins = parseCorsOrigins(options.corsOrigins ?? []);
   const home = openDashboardHome(env);
   home.users.ensure();
   home.projects.ensure();
@@ -100,6 +106,7 @@ function composeDeps(options: UiServerOptions, env: NodeJS.ProcessEnv): UiDeps {
       shell: paneShell(env),
     },
     workItems: options.workItems,
+    corsOrigins,
   };
 }
 
@@ -108,7 +115,14 @@ export function startUiServer(options: UiServerOptions): Promise<RunningUiServer
   const env = options.env ?? process.env;
   const host = options.host ?? UI_HOST;
   const requestedPort = options.port ?? DEFAULT_UI_PORT;
-  const deps = composeDeps(options, env);
+  let deps: UiDeps;
+  try {
+    deps = composeDeps(options, env);
+  } catch (error) {
+    // A start-up refusal (an invalid origin) reaches the caller the way a busy
+    // port does: as a rejected start, not as a throw from a promise-returning call.
+    return Promise.reject(error);
+  }
 
   const server = createServer((req, res) => {
     const port = (server.address() as AddressInfo | null)?.port ?? requestedPort;
