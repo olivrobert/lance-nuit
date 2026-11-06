@@ -28,7 +28,12 @@
           "type": "string"
         }
       },
-      "required": ["schemaVersion", "generatedAt", "run", "steps"],
+      "required": [
+        "schemaVersion",
+        "generatedAt",
+        "run",
+        "steps"
+      ],
       "title": "lance-nuit read API v1: GET /api/v1/runs/<project>/<ticket>/<runId>"
     },
     "Run": {
@@ -57,7 +62,13 @@
         },
         "status": {
           "type": "string",
-          "enum": ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED"]
+          "enum": [
+            "RUNNING",
+            "PASS",
+            "FAIL",
+            "STOPPED",
+            "ABORTED"
+          ]
         },
         "interrupted": {
           "type": "boolean",
@@ -105,7 +116,17 @@
           "$ref": "#/$defs/Closure"
         }
       },
-      "required": ["project", "ticket", "pipeline", "runId", "current", "status", "awaitsHuman", "cost", "worktree"]
+      "required": [
+        "project",
+        "ticket",
+        "pipeline",
+        "runId",
+        "current",
+        "status",
+        "awaitsHuman",
+        "cost",
+        "worktree"
+      ]
     },
     "Stop": {
       "type": "object",
@@ -115,7 +136,13 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["needs-info", "needs-decision", "needs-human", "blocked", "until"]
+          "enum": [
+            "needs-info",
+            "needs-decision",
+            "needs-human",
+            "blocked",
+            "until"
+          ]
         },
         "detail": {
           "type": "string"
@@ -125,7 +152,9 @@
           "const": true
         }
       },
-      "required": ["detail"]
+      "required": [
+        "detail"
+      ]
     },
     "Failure": {
       "type": "object",
@@ -138,14 +167,20 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["verdict", "technical"]
+          "enum": [
+            "verdict",
+            "technical"
+          ]
         },
         "cause": {
           "type": "string",
           "const": "blocked"
         }
       },
-      "required": ["phase", "reason"]
+      "required": [
+        "phase",
+        "reason"
+      ]
     },
     "Approval": {
       "type": "object",
@@ -155,7 +190,13 @@
         },
         "state": {
           "type": "string",
-          "enum": ["absent", "fresh", "stale", "rejected", "reworked"]
+          "enum": [
+            "absent",
+            "fresh",
+            "stale",
+            "rejected",
+            "reworked"
+          ]
         },
         "decidedAt": {
           "type": "string"
@@ -170,7 +211,10 @@
           "type": "number"
         }
       },
-      "required": ["subject", "state"]
+      "required": [
+        "subject",
+        "state"
+      ]
     },
     "Cost": {
       "type": "object",
@@ -185,7 +229,10 @@
           "type": "boolean"
         }
       },
-      "required": ["estimated", "lowerBound"]
+      "required": [
+        "estimated",
+        "lowerBound"
+      ]
     },
     "Closure": {
       "type": "object",
@@ -197,7 +244,10 @@
           "type": "string"
         }
       },
-      "required": ["at", "by"]
+      "required": [
+        "at",
+        "by"
+      ]
     },
     "Step": {
       "type": "object",
@@ -207,7 +257,14 @@
         },
         "status": {
           "type": "string",
-          "enum": ["pending", "running", "done", "failed", "skipped", "aborted"]
+          "enum": [
+            "pending",
+            "running",
+            "done",
+            "failed",
+            "skipped",
+            "aborted"
+          ]
         },
         "profile": {
           "type": "string"
@@ -234,7 +291,10 @@
           "$ref": "#/$defs/Tokens"
         }
       },
-      "required": ["id", "status"]
+      "required": [
+        "id",
+        "status"
+      ]
     },
     "ModelCost": {
       "type": "object",
@@ -246,7 +306,9 @@
           "type": "number"
         }
       },
-      "required": ["model"]
+      "required": [
+        "model"
+      ]
     },
     "Tokens": {
       "type": "object",
@@ -264,7 +326,12 @@
           "type": "number"
         }
       },
-      "required": ["input", "output", "cacheRead", "cacheWrite"]
+      "required": [
+        "input",
+        "output",
+        "cacheRead",
+        "cacheWrite"
+      ]
     },
     "Report": {
       "type": "object",
@@ -274,7 +341,9 @@
           "const": 1
         }
       },
-      "required": ["version"]
+      "required": [
+        "version"
+      ]
     }
   }
 }

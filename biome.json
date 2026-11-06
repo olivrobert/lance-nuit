@@ -13,6 +13,7 @@
       "!!src/dashboard/ui/static/app.js",
       "!!src/dashboard/ui/static/app.css",
       "!!.dependency-cruiser-known-violations.json",
+      "!!docs/read-api",
       "!!.dependency-cruiser-known-folder-cycles.json"
     ]
   },
