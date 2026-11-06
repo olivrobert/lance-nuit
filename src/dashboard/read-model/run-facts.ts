@@ -1,7 +1,7 @@
 //
 // How a run ended, read once from its snapshot for every view of the read
-// model: the morning box item today, the external read API next. Each view
-// renders these facts in its own words; none re-reads the snapshot for them.
+// model: the morning box item and the external read API. Each view renders
+// these facts in its own words; none re-reads the snapshot for them.
 //
 // The facts stay in the runner's vocabulary (`verdict` / `technical`,
 // `blocked`, the stop kinds): naming them for a reader is the view's choice.
@@ -19,7 +19,11 @@ import {
   runProvesUnpricedSpend,
   strictCostAccountingFor,
 } from "../../run/index.js";
-import type { ItemStatus } from "./types.js";
+import { createArtifactRef } from "../../shared/language/artifact-ports.js";
+import { FileWorkItemArtifactStore, gateDecisionStatus, isValidSubjectToken } from "../../work-items/index.js";
+import type { ProjectEntry } from "./projects.js";
+import { workItemDirOf } from "./runs.js";
+import type { ItemApproval, ItemStatus } from "./types.js";
 
 /** Structured cause of a clean stop. `detail` is always present: a run stopped
  *  before `outcome.stop` existed still carries its raw `stopped_reason`. */
@@ -129,6 +133,48 @@ export function costUnaccountedOf(state: PersistedRun): boolean {
   if (state.outcome?.stopKind) return state.outcome.stopKind === "cost-unaccounted";
   if (state.cost_unaccounted === true || runProvesUnpricedSpend(state)) return true;
   return /cost unaccounted/i.test(`${state.outcome?.reason ?? ""} ${state.stopped_reason ?? ""}`);
+}
+
+/**
+ * The single pending approval of a stopped run.
+ *
+ * Gates are sequential, so a stopped run has exactly one. Its state is the
+ * runner's own reading (`gateDecisionStatus`), judged on the artifact as it
+ * stands NOW in the effective directory: an artifact rewritten since the approval
+ * makes the decision stale, and a rejection the rework answered is `reworked`,
+ * exactly as the gate and `--inspect` will say. That reading is about the work
+ * item today, so it only describes the run the ticket is currently about.
+ */
+export async function approvalOf(
+  project: ProjectEntry,
+  ticket: string,
+  subject: string,
+): Promise<ItemApproval | undefined> {
+  // The subject reaches a file path; an invalid one is dropped rather than
+  // joined, so a corrupt snapshot cannot steer the read out of `decisions/`.
+  if (!isValidSubjectToken(subject)) return undefined;
+
+  const store = new FileWorkItemArtifactStore({
+    cwd: project.cwd,
+    config: { specPath: project.specPath },
+    ticket,
+    ticketDir: ticket,
+  });
+  const status = await gateDecisionStatus(workItemDirOf(project, ticket), subject, (name) =>
+    store.readText(createArtifactRef(ticket, name)),
+  );
+  if (status.state === "absent") return { subject, state: "absent" };
+  const { decision } = status;
+  return {
+    subject,
+    state: status.state,
+    decidedAt: decision.decidedAt,
+    decidedBy: decision.decidedBy,
+    ...(status.state === "rejected" && decision.reason ? { reason: decision.reason } : {}),
+    ...((status.state === "rejected" || status.state === "reworked") && decision.round
+      ? { round: decision.round }
+      : {}),
+  };
 }
 
 /**

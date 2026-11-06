@@ -18,6 +18,14 @@ export type {
 // The dashboard must refuse a reason or a subject the runner would refuse, before spawning.
 export { isValidSubjectToken, MAX_REJECTION_REASON } from "../../work-items/index.js";
 export type { ProjectEntry, ReadModelOptions } from "./projects.js";
+export type { ApiRunFilters } from "./read-api.js";
+export {
+  type ApiRunDetail,
+  type ApiRunList,
+  type ApiRunStatus,
+  READ_API_VERSION,
+  readApiJsonSchemas,
+} from "./read-api.schema.js";
 export { createReadModel, type ReadModel } from "./read-model.js";
 export type { ReportRead } from "./report.js";
 export { isTicketToken, ticketPrefixOf, validateTicketRef } from "./tickets.js";

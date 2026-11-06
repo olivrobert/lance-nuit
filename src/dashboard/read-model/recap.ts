@@ -151,6 +151,19 @@ function modelsOf(steps: RunRecapStep[]): string[] {
   return [...models];
 }
 
+/** Every step of one run, a composed node with the models of its children. */
+export function recapStepsOf(
+  project: ProjectEntry,
+  runDir: string,
+  state: PersistedRun,
+  interrupted: boolean,
+): RunRecapStep[] {
+  const location: RunLocation = { project, runDir, state };
+  return state.steps.map((step) =>
+    recapStep(step, step.orchestration ? childModels(location, step) : undefined, interrupted),
+  );
+}
+
 /**
  * Recap of the run `project/ticket` is currently about.
  *
@@ -167,10 +180,7 @@ export function readRecap(projectName: string, ticket: string, options: ReadMode
   const tokens = tokensOf(runUsage(state));
   const startedAt = text(state.createdAt);
   const endedAt = text(state.updatedAt);
-  const location: RunLocation = { project: resolved.project, runDir: resolved.run.runDir, state };
-  const steps = state.steps.map((step) =>
-    recapStep(step, step.orchestration ? childModels(location, step) : undefined, resolved.interrupted),
-  );
+  const steps = recapStepsOf(resolved.project, resolved.run.runDir, state, resolved.interrupted);
   return {
     pipeline: resolved.run.pipeline,
     runId: state.runId ?? "",

@@ -57,6 +57,7 @@
     "security:semgrep": "semgrep scan --config .semgrep.yml --metrics off",
     "security": "bun run security:secrets && bun run security:semgrep",
     "docs:dsl": "bun scripts/generate-dsl-api.ts",
+    "docs:read-api": "bun scripts/generate-read-api-schema.ts",
     "pack:audit": "bun run build && bun scripts/audit-pack.mjs",
     "smoke:standalone": "bun run build && bun scripts/smoke-standalone.mjs",
     "verify:production": "bun run build && bun scripts/verify-production-install.mjs",

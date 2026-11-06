@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/RunList",
+  "$defs": {
+    "RunList": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "generatedAt": {
+          "type": "string"
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Run"
+          }
+        }
+      },
+      "required": ["schemaVersion", "generatedAt", "runs"],
+      "title": "lance-nuit read API v1: GET /api/v1/runs"
+    },
+    "Run": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "ticket": {
+          "type": "string"
+        },
+        "pipeline": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "current": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        },
+        "ticketUrl": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED"]
+        },
+        "interrupted": {
+          "type": "boolean",
+          "const": true
+        },
+        "awaitsHuman": {
+          "type": "boolean"
+        },
+        "stop": {
+          "$ref": "#/$defs/Stop"
+        },
+        "failure": {
+          "$ref": "#/$defs/Failure"
+        },
+        "approval": {
+          "$ref": "#/$defs/Approval"
+        },
+        "budgetExceeded": {
+          "type": "boolean",
+          "const": true
+        },
+        "costUnaccounted": {
+          "type": "boolean",
+          "const": true
+        },
+        "cost": {
+          "$ref": "#/$defs/Cost"
+        },
+        "activeMs": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "worktree": {
+          "type": "boolean"
+        },
+        "closed": {
+          "$ref": "#/$defs/Closure"
+        }
+      },
+      "required": ["project", "ticket", "pipeline", "runId", "current", "status", "awaitsHuman", "cost", "worktree"]
+    },
+    "Stop": {
+      "type": "object",
+      "properties": {
+        "subject": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["needs-info", "needs-decision", "needs-human", "blocked", "until"]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "reworkable": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": ["detail"]
+    },
+    "Failure": {
+      "type": "object",
+      "properties": {
+        "phase": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["verdict", "technical"]
+        },
+        "cause": {
+          "type": "string",
+          "const": "blocked"
+        }
+      },
+      "required": ["phase", "reason"]
+    },
+    "Approval": {
+      "type": "object",
+      "properties": {
+        "subject": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["absent", "fresh", "stale", "rejected", "reworked"]
+        },
+        "decidedAt": {
+          "type": "string"
+        },
+        "decidedBy": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "round": {
+          "type": "number"
+        }
+      },
+      "required": ["subject", "state"]
+    },
+    "Cost": {
+      "type": "object",
+      "properties": {
+        "usd": {
+          "type": "number"
+        },
+        "estimated": {
+          "type": "boolean"
+        },
+        "lowerBound": {
+          "type": "boolean"
+        }
+      },
+      "required": ["estimated", "lowerBound"]
+    },
+    "Closure": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "by": {
+          "type": "string"
+        }
+      },
+      "required": ["at", "by"]
+    }
+  }
+}

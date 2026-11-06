@@ -15,8 +15,8 @@ import {
   statusBadge,
   summarizeHistory,
 } from "../../run/index.js";
+import { parseAge } from "../../shared/lib/durations.js";
 import { log } from "../../shared/runtime/logging.js";
-import { parseAge } from "./diagnostics-readers.js";
 import type { RunnerCommand } from "./runner-command.js";
 import { errorMessage } from "./shared.js";
 
