@@ -75,7 +75,7 @@ export interface AuthoringContext {
   readonly config?: ExtensionOptions;
 }
 
-export type PipelineFactory<TDsl = unknown, TPipeline = unknown> = (dsl: TDsl) => TPipeline;
+export type PipelineFactory<TDsl = unknown, TPipeline = unknown> = (dsl: TDsl, context: AuthoringContext) => TPipeline;
 
 export type {
   AgentBackend,

@@ -145,11 +145,11 @@ export async function loadPipelineDefinition(pipelinePath: string, context?: Pip
     throw new Error(`Invalid pipeline (${pipelinePath}): missing default export`);
   }
   if (typeof mod.default !== "function") {
-    throw new Error(`Invalid pipeline (${pipelinePath}): default export must be a factory (dsl) => Pipeline`);
+    throw new Error(`Invalid pipeline (${pipelinePath}): default export must be a factory (dsl, context) => Pipeline`);
   }
   const buildContext = context ?? buildPipelineContext();
   const projectDsl = createProjectDsl(buildContext, dirname(abs));
-  const pipeline = (mod.default as PipelineFactory)(projectDsl);
+  const pipeline = (mod.default as PipelineFactory)(projectDsl, buildContext);
   // All consistency validation must precede option materialization: a profile
   // incompatible with the backend must never be silently rendered inert by
   // applyProfileOverrides().

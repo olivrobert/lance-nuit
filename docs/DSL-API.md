@@ -54,7 +54,7 @@ export interface Dsl {
     freshness: typeof freshness;
 }
 
-export type PipelineFactory = (dsl: Dsl) => Pipeline;
+export type PipelineFactory = (dsl: Dsl, context: PipelineContext) => Pipeline;
 
 export type PipelineEntry = StepBuilder | readonly StepBuilder[];
 
