@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { bashStep, llmStep, pipeline } from "../../definition/dsl.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
 import { formatPipelineLintReport, lintPipeline, lintPipelineDefinition } from "./lint-pipeline.ts";
@@ -19,6 +22,20 @@ test("lancenuit lint: generic builtin without execution", async () => {
   expect(formatted.text).toContain("Pipeline lint: default");
   expect(formatted.text).toMatch(/ID\s+RUNNER\s+PROFILE\s+BACKEND\s+WHEN\s+OUTPUTS/);
   expect(formatted.text).toContain("ready");
+});
+
+test("lancenuit lint: a factory reading the execution context at load time loads", async () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "lint-ctx-")));
+  const file = join(dir, "pipeline.ts");
+  writeFileSync(
+    file,
+    `export default (dsl: any, ctx: any) =>
+  dsl.pipeline("ctx").desc(ctx.cwd).add(dsl.bashStep({ id: "step", name: "Step", command: "true" })).build();\n`,
+  );
+
+  const report = await lintPipeline(file, { context: context() });
+
+  expect(report.findings.filter((finding) => finding.rule === "load")).toEqual([]);
 });
 
 test("lancenuit lint: duplicate escalation IDs rejected", () => {

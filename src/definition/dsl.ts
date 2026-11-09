@@ -27,7 +27,7 @@ import type {
   stopUnlessCommand,
 } from "./dsl/input.js";
 import type { reject } from "./dsl/preconditions.js";
-import type { FixContext } from "../shared/language/context.js";
+import type { FixContext, PipelineContext } from "../shared/language/context.js";
 import type { Pipeline } from "./definition.js";
 import type { decisionMatchesArtifact, freshness, pendingRejection } from "../work-items/index.js";
 
@@ -178,6 +178,6 @@ export interface Dsl {
   freshness: typeof freshness;
 }
 
-export type PipelineFactory = (dsl: Dsl) => Pipeline;
+export type PipelineFactory = (dsl: Dsl, context: PipelineContext) => Pipeline;
 export type { WorkQueue } from "../contracts/work-items.js";
 export type { Artifact, Source } from "./dsl/artifact.js";
