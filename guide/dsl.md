@@ -723,6 +723,9 @@ export default ({ pipeline, llmStep }: Dsl) =>
     .build();
 ```
 
+At load time, read only `cwd` and `config` from the context; ticket-specific data
+belongs in step callbacks, which run per ticket.
+
 The loader does not accept a directly-built object or a named pipeline export.
 Built-in agent steps use `llmStep({ backend, ... })`, and admission uses `when`.
 
