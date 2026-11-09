@@ -416,6 +416,25 @@ test("setupWorktreeAsync light: project hook runs on every setup", async () => {
   expect(log).toBe("run\nrun\n");
 });
 
+test("setupWorktreeAsync: a failed setup hook throws with its output tail, and a re-run reuses the worktree", async () => {
+  const repo = gitRepo();
+  mkdirSync(join(repo, ".lance-nuit"), { recursive: true });
+  const hook = join(repo, ".lance-nuit", "worktree-setup-light.sh");
+  writeFileSync(hook, `echo run >> "$(dirname "$0")/setup.calls"\necho 'createdb: connection refused'\nexit 3\n`);
+  const spec = freshSpec(repo);
+  const opts = { baseBranch: "main", mode: "light" as const };
+
+  await expect(setupWorktreeAsync(spec, opts)).rejects.toThrow(
+    /worktree-setup failed[\s\S]*worktree is kept[\s\S]*connection refused/,
+  );
+  expect(existsSync(join(spec.path, "a.txt"))).toBe(true);
+  await expect(setupWorktreeAsync(spec, opts)).rejects.toThrow(/worktree-setup failed/);
+
+  writeFileSync(hook, `echo run >> "$(dirname "$0")/setup.calls"\n`);
+  expect((await setupWorktreeAsync(spec, opts)).reused).toBe(true);
+  expect(readFileSync(join(repo, ".lance-nuit", "setup.calls"), "utf-8")).toBe("run\nrun\nrun\n");
+});
+
 test("setupWorktreeAsync: existing wt/ branch (deleted worktree) → reattached without -b", async () => {
   const repo = gitRepo();
   const spec = freshSpec(repo);

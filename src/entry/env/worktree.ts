@@ -350,8 +350,12 @@ async function runPipedHookAsync(
   return { ok: r.status === 0, tail: tailLines(raw, SETUP_FAILURE_TAIL) };
 }
 
-/** Run the optional setup hook without probing or starting a stack. */
-async function runSetupScriptAsync(spec: WorktreeSpec, mode: WorktreeMode, warnings: string[]): Promise<void> {
+/** Run the optional setup hook without probing or starting a stack.
+ *
+ * A failure throws: the steps would otherwise run, and be paid for, in a
+ * half-provisioned worktree. The worktree is kept, so a re-run reuses it and
+ * replays the hook, which is idempotent like on every entry. */
+async function runSetupScriptAsync(spec: WorktreeSpec, mode: WorktreeMode): Promise<void> {
   const script =
     setupScriptFor(spec.path, mode) ??
     firstExistingPath(
@@ -362,8 +366,8 @@ async function runSetupScriptAsync(spec: WorktreeSpec, mode: WorktreeMode, warni
   if (!script) return;
   const r = await runPipedHookAsync("worktree-setup", script, spec, SETUP_ASYNC_TIMEOUT_MS);
   if (!r.ok) {
-    warnings.push(`project hook worktree-setup failed (${script})`);
-    for (const line of r.tail) log(`  │ ${line}`);
+    const tail = r.tail.map((line) => `\n  │ ${line}`).join("");
+    throw new Error(`project hook worktree-setup failed (${script}); the worktree is kept for a re-run${tail}`);
   }
 }
 
@@ -418,7 +422,7 @@ export async function setupWorktreeAsync(spec: WorktreeSpec, opts: WorktreeSetup
   const { reused } = await ensureWorktreeAsync(spec, opts.baseBranch);
   if (mode === "full") await runInitScriptAsync(spec, warnings);
   provisionLocalFiles(spec, opts.ticketDir, opts.specPath);
-  if ((opts.stack ?? "auto") === "auto") await runSetupScriptAsync(spec, mode, warnings);
+  if ((opts.stack ?? "auto") === "auto") await runSetupScriptAsync(spec, mode);
   unshareRunDir(spec.path);
   return { reused, warnings };
 }
