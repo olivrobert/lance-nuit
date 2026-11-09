@@ -729,7 +729,7 @@ each is looked up in the worktree first, then in the main clone:
 | Hook | When | On failure |
 |---|---|---|
 | `worktree-init.sh` | worktree created or reused, `full` mode only | warning, run continues |
-| `worktree-setup.sh` / `worktree-setup-light.sh` | before the lock and the stack preflight | warning, run continues |
+| `worktree-setup.sh` / `worktree-setup-light.sh` | before the lock and the stack preflight | run stops, worktree kept |
 | `worktree-ready.sh` | after the stack preflight, before the first step | run stops |
 | `worktree-stop.sh` | run ends without `PASS` (gate stop, failure, budget, interruption) | warning, run outcome and exit code unchanged |
 | `worktree-teardown.sh` | `lancenuit worktree clean` | worktree kept |
@@ -742,7 +742,10 @@ or hide that work in a pipeline step. It runs on every entry into the worktree,
 resumes included, so keep it idempotent. Only the runner that entered the
 worktree runs it; child runners inherit a ready worktree. Setup and ready hooks
 show only their marker lines (`→`, `⚠`, `✓`, `✗`) live and print the last lines
-of their output when they fail.
+of their output when they fail. A failed setup hook stops the run before the
+first step, since every step would otherwise run against a half-provisioned
+worktree; the worktree is kept, and a re-run reuses it and runs the setup hook
+again, so keep that hook idempotent too.
 
 `worktree-stop.sh` lets a stopped work item release the RAM and ports its stack
 holds. It runs once, after the final report, and must only stop services (for
