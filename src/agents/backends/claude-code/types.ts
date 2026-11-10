@@ -41,6 +41,10 @@ export interface RawClaudeExecutionResult {
   /** Session ledger the LAST executed attempt resumed from, when it resumed one.
    *  The mapper charges the cumulative figures by difference against it. */
   resumeBaseline?: ClaudeResumeBaseline;
+  /** Session ledger read once the LAST executed attempt exited without a cost of
+   *  the CLI's own (no `result` event). The mapper charges what it holds beyond
+   *  `resumeBaseline` in place of the token estimate. */
+  settledLedgerUsd?: number;
 }
 export type ClaudeSpawnEvent = BackendSpawnEvent<"claude">;
 export interface ClaudeBackendHost {

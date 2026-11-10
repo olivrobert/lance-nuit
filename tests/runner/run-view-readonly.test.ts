@@ -482,6 +482,8 @@ const NOT_A_RUN: Record<string, string[]> = {
     "parsed.stats.total_cost_usd = netCumulative(parsed.stats.total_cost_usd, baseline.costUsd)",
     "parsed.stats.duration_api_ms = netCumulative(parsed.stats.duration_api_ms, baseline.apiDurationMs)",
     "parsed.stats.num_turns = parsed.turnsInProcess",
+    "parsed.stats.total_cost_usd = settledSpend",
+    "parsed.stats.cost_estimated = true",
     "parsed.stats.cost_unknown = true",
     "parsed.stats.total_cost_usd = (parsed.stats.total_cost_usd ?? 0) + raw.priorAttemptsCostUsd",
   ],

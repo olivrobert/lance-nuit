@@ -57,6 +57,16 @@ export function mapClaudeExecutionResult(
     }
     if (parsed.turnsInProcess > 0) parsed.stats.num_turns = parsed.turnsInProcess;
   }
+  // No `result` event: what the ledger gained is the CLI's own price for every
+  // message this process completed, where the token estimate undercounts output
+  // and depends on a rate table. It still misses the message in flight at the
+  // kill, so the figure stays flagged. A ledger that did not move (killed during
+  // its first message, or before the CLI could write it) leaves the estimate.
+  const settledSpend = (raw.settledLedgerUsd ?? 0) - (baseline?.costUsd ?? 0);
+  if (settledSpend > 0) {
+    parsed.stats.total_cost_usd = settledSpend;
+    parsed.stats.cost_estimated = true;
+  }
   // Fold in the spend of transport attempts discarded before an overload retry,
   // so budget enforcement and stats account for the full real cost.
   if (raw.priorAttemptsCostUsd) {
