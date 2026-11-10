@@ -103,6 +103,15 @@ new process added, so a fix loop resuming an earlier step's session does not
 repay that step on every pass, and an overload retry does not repay the attempt
 it replaces. Tokens are always read per process and need no reconciliation.
 
+The same ledger prices a Claude process killed before its result (a timeout, the
+live cost guard). The CLI still writes the ledger on its way out, so the runner
+reads it again once the process has exited and charges what it gained: the CLI's
+own price for every message the process completed. The token estimate is kept
+only when the ledger did not move, as for a process killed during its first
+message. The figure stays marked as estimated, because the message in flight at
+the kill is in neither the ledger nor the charge. An attempt closed by an
+interruption of the runner itself (Ctrl-C) is still charged the live estimate.
+
 A running agent is also watched live: as usage arrives, the runner compares the
 attempt's cost against the remaining budget and kills the process when it crosses
 it. The report then names the ceiling rather than reporting a technical error,

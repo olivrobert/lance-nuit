@@ -64,13 +64,19 @@ export function resumeSessionIdOf(args: readonly string[]): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 
+/** Session a spawn runs on, resumed or created; undefined when the CLI names it. */
+function sessionIdOf(args: readonly string[]): string | undefined {
+  const i = args.indexOf("--session-id");
+  return resumeSessionIdOf(args) ?? (i >= 0 ? args[i + 1] : undefined);
+}
+
 export async function executeClaudeWithTransportRetry(
   options: ClaudeExecutionOptions,
   execute: (o: ClaudeExecutionOptions) => Promise<RawClaudeExecutionResult>,
-  parse: (raw: string) => Pick<ClaudeParsedEvents, "transportError" | "stats">,
+  parse: (raw: string) => Pick<ClaudeParsedEvents, "transportError" | "stats" | "sessionId">,
   delays = transportBackoffDelays(),
   sessionExists: (id: string) => boolean = () => false,
-  readBaseline: (id: string) => ClaudeResumeBaseline | null = (id) => readSessionCostBaseline(id),
+  readLedger: (id: string) => ClaudeResumeBaseline | null = (id) => readSessionCostBaseline(id),
   rateLimit: RateLimitWait = defaultRateLimitWait(),
 ): Promise<RawClaudeExecutionResult> {
   let attempt = options;
@@ -109,7 +115,7 @@ export async function executeClaudeWithTransportRetry(
     // session's history, and a floor below it would charge the discarded attempt a
     // second time through the difference.
     const resumeId = resumeSessionIdOf(attempt.args);
-    const persisted = resumeId ? readBaseline(resumeId) : null;
+    const persisted = resumeId ? readLedger(resumeId) : null;
     const baseline: ClaudeResumeBaseline | undefined = resumeId
       ? {
           costUsd: Math.max(persisted?.costUsd ?? 0, expectedLedger),
@@ -119,12 +125,20 @@ export async function executeClaudeWithTransportRetry(
     const result = await execute(baseline ? { ...attempt, sessionCostBaselineUsd: baseline.costUsd } : attempt),
       parsed = parse(result.output),
       error = parsed.transportError;
-    const finish = (): RawClaudeExecutionResult => ({
-      ...result,
-      ...(priorCost > 0 ? { priorAttemptsCostUsd: priorCost } : {}),
-      ...(priorDuration > 0 ? { priorAttemptsDurationMs: priorDuration } : {}),
-      ...(baseline ? { resumeBaseline: baseline } : {}),
-    });
+    const finish = (): RawClaudeExecutionResult => {
+      // A process killed before its `result` event (timeout, budget guard) priced
+      // nothing on the stream, but the CLI still wrote its ledger on the way out.
+      const unreported = parsed.stats.total_cost_usd == null || parsed.stats.cost_estimated === true;
+      const sessionId = sessionIdOf(attempt.args) ?? parsed.sessionId;
+      const settled = unreported && sessionId ? readLedger(sessionId) : null;
+      return {
+        ...result,
+        ...(priorCost > 0 ? { priorAttemptsCostUsd: priorCost } : {}),
+        ...(priorDuration > 0 ? { priorAttemptsDurationMs: priorDuration } : {}),
+        ...(baseline ? { resumeBaseline: baseline } : {}),
+        ...(settled ? { settledLedgerUsd: settled.costUsd } : {}),
+      };
+    };
     const pause = pauseAfter(error);
     if (pause === undefined) return finish();
     // What THIS attempt spent, not what the session has spent: a resumed attempt
@@ -138,8 +152,8 @@ export async function executeClaudeWithTransportRetry(
     if (attempt.budgetRemaining != null && attemptCost >= attempt.budgetRemaining) return finish();
     priorCost += attemptCost;
     priorDuration += result.durationMs + pause;
-    // An estimated cost was computed from tokens the CLI never wrote to its
-    // ledger (no `result` event), so the ledger did not move.
+    // A retried attempt did emit its `result`: an estimated cost means the CLI
+    // priced it at $0 there, so the ledger did not move.
     expectedLedger = (baseline?.costUsd ?? 0) + (estimated ? 0 : attemptCost);
     // Only a rate-limited error carries `resetsAt`; an overload pause is short and silent.
     if (error?.resetsAt != null)

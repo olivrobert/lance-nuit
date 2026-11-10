@@ -127,6 +127,55 @@ describe("Claude result mapping", () => {
     expect(netted).toBe(estimated);
   });
 
+  describe("an attempt killed before its result event", () => {
+    // The stream shows the usage a message started with: 2 output tokens for a
+    // message that then wrote thousands, which only the CLI's ledger priced.
+    const killed = {
+      output: JSON.stringify({
+        type: "assistant",
+        message: { id: "m1", model: "claude-sonnet-4-6", usage: { input_tokens: 1000, output_tokens: 2 } },
+      }),
+      code: null,
+      kill: { cause: "timeout" as const, afterMs: 900_000 },
+      durationMs: 900_000,
+    };
+    const estimate = mapClaudeExecutionResult(killed).stats.total_cost_usd;
+
+    test("is charged what the session ledger gained, still flagged as not the CLI's final figure", () => {
+      const fresh = mapClaudeExecutionResult({ ...killed, settledLedgerUsd: 1.8 }).stats;
+      expect(fresh.total_cost_usd).toBeCloseTo(1.8, 10);
+      expect(fresh.cost_estimated).toBe(true);
+
+      const resumed = mapClaudeExecutionResult({
+        ...killed,
+        resumeBaseline: { costUsd: 3 },
+        settledLedgerUsd: 3.5,
+      }).stats;
+      expect(resumed.total_cost_usd).toBeCloseTo(0.5, 10);
+    });
+
+    test("keeps the token estimate when the ledger did not move", () => {
+      const unmoved = mapClaudeExecutionResult({
+        ...killed,
+        resumeBaseline: { costUsd: 3 },
+        settledLedgerUsd: 3,
+      }).stats;
+      expect(unmoved.total_cost_usd).toBe(estimate);
+      expect(mapClaudeExecutionResult({ ...killed, settledLedgerUsd: 0 }).stats.total_cost_usd).toBe(estimate);
+    });
+
+    test("prices the spawn through the ledger when no usage reached the stream at all", () => {
+      const result = mapClaudeExecutionResult({
+        ...killed,
+        output: "",
+        priorAttemptsCostUsd: 0.4,
+        settledLedgerUsd: 0.6,
+      });
+      expect(result.stats.total_cost_usd).toBeCloseTo(1, 10);
+      expect(result.stats.cost_unknown).toBeUndefined();
+    });
+  });
+
   test.each([
     ["timeout", { cause: "timeout", afterMs: 900_000 }],
     ["budget", { cause: "budget", detail: "$1.20 estimated > $1.00 remaining" }],

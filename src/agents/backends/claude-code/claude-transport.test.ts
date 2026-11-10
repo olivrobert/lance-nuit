@@ -211,6 +211,48 @@ describe("Claude transport", () => {
     expect(result.resumeBaseline).toEqual({ costUsd: 3, apiDurationMs: 600 });
   });
 
+  test("reads the session ledger again when the spawn exited without a result event", async () => {
+    const killedOutput = JSON.stringify({
+      type: "assistant",
+      message: { id: "m1", usage: { input_tokens: 1000, output_tokens: 2 } },
+    });
+    const ledgers = [{ costUsd: 3 }, { costUsd: 3.5 }];
+    const reads: string[] = [];
+    const run = (args: string[], output: string) =>
+      executeClaudeWithTransportRetry(
+        { bin: "claude", args },
+        async () => ({ output, code: null, durationMs: 1 }),
+        (o) => parseClaudeEvents(o),
+        [],
+        undefined,
+        (id) => {
+          reads.push(id);
+          return ledgers.shift() ?? null;
+        },
+      );
+
+    // Before the spawn for the baseline, after it for what the killed CLI wrote.
+    const resumed = await run(["--resume", "s1", "-p", "x"], killedOutput);
+    expect(reads).toEqual(["s1", "s1"]);
+    expect(resumed.resumeBaseline).toEqual({ costUsd: 3 });
+    expect(resumed.settledLedgerUsd).toBe(3.5);
+    expect(mapClaudeExecutionResult(resumed).stats.total_cost_usd).toBeCloseTo(0.5, 10);
+
+    ledgers.push({ costUsd: 0.8 });
+    const fresh = await run(["--session-id", "s2", "-p", "x"], killedOutput);
+    expect(reads.slice(2)).toEqual(["s2"]);
+    expect(fresh.settledLedgerUsd).toBe(0.8);
+
+    // A cost the CLI reported itself needs no second source.
+    ledgers.push({ costUsd: 9 });
+    const reported = await run(
+      ["--session-id", "s3", "-p", "x"],
+      JSON.stringify({ type: "result", duration_ms: 1, total_cost_usd: 0.2 }),
+    );
+    expect(reads.slice(3)).toEqual([]);
+    expect(reported.settledLedgerUsd).toBeUndefined();
+  });
+
   test("does not charge an overload retry twice for the attempt it resumes", async () => {
     let calls = 0;
     const result = await executeClaudeWithTransportRetry(

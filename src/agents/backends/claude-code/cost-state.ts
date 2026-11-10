@@ -11,6 +11,10 @@
 // Reading the last one immediately before a resume spawn gives exactly the
 // baseline the CLI is about to restore, so the attempt can be charged by
 // difference — the same reconciliation the orchestrator applies to child runs.
+//
+// The CLI writes that record on its way out even when it is killed before its
+// `result` event. Reading it again once such a process has exited gives what the
+// CLI charged for the messages it completed, which the stream never priced.
 
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import type { ClaudeResumeBaseline } from "../../../contracts/backends/claude-code.js";
