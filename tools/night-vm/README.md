@@ -22,10 +22,11 @@ on the maintainer's machine.
 | `incus-docker-forward.service` | restores IPv4 egress on both bridges, which Docker's `FORWARD DROP` breaks | host |
 
 The reference template is a VM named `nuit-template` holding Debian 12, Docker,
-Node 22, bun, the three agent CLIs, `lancenuit`, and the Docker images of the
-pilot project. Runs never use it directly: each run is a throwaway copy of its
-`clean` snapshot. `/etc/nuit-template.json` inside it records what was installed
-and when.
+Node 22, bun, the three agent CLIs, `lancenuit`, the Docker images of the pilot
+project, and `nuit` (UID/GID 1001, member of `docker`), the unprivileged user
+the agent runs as. Runs never use it directly: each run is a throwaway copy of
+its `clean` snapshot. `/etc/nuit-template.json` inside it records what was
+installed and when.
 
 ## Basic gestures
 
@@ -66,14 +67,21 @@ its source commit (see [package verification](../../CONTRIBUTING.md#package-read
 ```sh
 ./provision-template.sh --tarball /path/to/lance-nuit-0.1.0.tgz \
   --commit <git-sha> --sha256 <verified-sha256> \
-  --image php:8.4-fpm --image mysql:8.0 ...
+  --image php:8.4-fpm --image mysql:8.0 ... \
+  --compose-bundle /tmp/project.bundle --compose-ref main --compose-service php
 ```
 
 The script checks the inputs before changing the VM, installs the latest Claude
-Code CLI, and removes the system-wide `core.hooksPath` that earlier templates
-set: the VM has no remote, so a `pre-push` guard protected nothing and silenced
-the project's own hooks. It preserves the previous `clean` snapshot under a
-dated name.
+Code CLI, creates the `nuit` user, and removes the system-wide `core.hooksPath`
+that earlier templates set: the VM has no remote, so a `pre-push` guard
+protected nothing and silenced the project's own hooks. It preserves the
+previous `clean` snapshot under a dated name.
+
+`nuit` runs the agent because Claude Code expects a non-root user for
+`bypassPermissions`, and because Compose files commonly run their containers as
+`${UID:-1001}`: files the stack writes in the project stay the agent's.
+Membership of `docker` makes it root-equivalent inside the VM; the VM itself is
+the boundary.
 
 Each `--image` is pulled into the template, so a run VM finds it locally instead
 of pulling it every night (minutes, and Docker Hub's anonymous rate limit). Pass
@@ -84,6 +92,19 @@ the base images of the project's Compose file, including the `FROM` and
 docker compose -f <project>/docker-compose.yml config --images   # image: services
 grep -h '^FROM\|--from=' <project>/docker/*/Dockerfile           # built services
 ```
+
+`--compose-bundle` goes one step further for the services the project builds:
+the bundle is cloned at `/srv/project`, where run VMs put the project, each
+`--compose-service` is built there, then the clone is removed. The night still
+runs `docker compose up --build`, which now hits the layer cache. The clone is a
+fresh checkout, so no `vendor/` or `node_modules/` is baked into the template.
+
+```sh
+git -C <project> bundle create /tmp/project.bundle main
+```
+
+`harden.sh` writes the agents' settings under `/home/nuit`, so it runs after
+`provision-template.sh`.
 
 ```sh
 ./harden.sh                    # hardening + gh shim + new 'clean' snapshot
@@ -152,7 +173,7 @@ otherwise `http://10.174.226.1:8099/gh`). A port already taken fails the startup
 two runs do not share one credential scope.
 
 Each run also generates a random broker credential, installed only in that VM
-at `/etc/lance-nuit/gh-broker.token` with mode `0600`. The broker requires it on
+at `/etc/lance-nuit/gh-broker.token` with mode `0600`, owned by `nuit`. The broker requires it on
 every request, so reaching another run's port does not grant access to its
 repository. This credential is not a GitHub token. The host's temporary copy is
 removed on exit; a new run rotates it. `GH_BROKER_TOKEN_FILE` overrides the shim's
