@@ -120,7 +120,8 @@ trap cleanup EXIT
 
 TOKEN_FILE=$(mktemp)
 python3 -c 'import secrets; print(secrets.token_hex(32))' >"$TOKEN_FILE"
-incus file push "$TOKEN_FILE" "$VM/etc/lance-nuit/gh-broker.token" --mode 0600
+# Owned by 'nuit' (1001), the user the agent and therefore the shim run as.
+incus file push "$TOKEN_FILE" "$VM/etc/lance-nuit/gh-broker.token" --mode 0600 --uid 1001 --gid 1001
 
 echo "== broker =="
 python3 "$HERE/broker/gh-broker.py" --repo "$REPO" --host "$GATEWAY" --port "$PORT" --token-file "$TOKEN_FILE" >>"$LOG" 2>&1 &

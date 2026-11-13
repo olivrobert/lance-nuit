@@ -165,6 +165,30 @@ cat >/dev/null
                                  "--commit", "1234567", "--sha256", hashlib.sha256(b"fixture").hexdigest())
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any("docker pull" in call for call in self.calls()))
+        self.assertFalse(any("compose build" in call for call in self.calls()))
+        self.assertTrue(any("useradd --uid 1001 --gid 1001" in call for call in self.calls()))
+
+    def test_provision_builds_compose_services_from_the_bundle(self):
+        tarball = self.root / "package.tgz"
+        tarball.write_bytes(b"fixture")
+        bundle = self.root / "project.bundle"
+        bundle.write_bytes(b"bundle")
+        result = self.run_script("provision-template.sh", "--tarball", str(tarball),
+                                 "--commit", "1234567", "--sha256", hashlib.sha256(b"fixture").hexdigest(),
+                                 "--compose-bundle", str(bundle), "--compose-service", "php")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"file push {bundle} nuit-template/root/compose.bundle", self.calls())
+        self.assertIn("exec nuit-template --cwd /srv/project -- docker compose build php", self.calls())
+        self.assertIn("exec nuit-template -- rm -rf /srv/project /root/compose.bundle", self.calls())
+
+    def test_provision_refuses_a_service_without_a_bundle(self):
+        tarball = self.root / "package.tgz"
+        tarball.write_bytes(b"fixture")
+        result = self.run_script("provision-template.sh", "--tarball", str(tarball),
+                                 "--commit", "1234567", "--sha256", hashlib.sha256(b"fixture").hexdigest(),
+                                 "--compose-service", "php")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.calls(), [])
 
 
 class SshProbeTests(unittest.TestCase):

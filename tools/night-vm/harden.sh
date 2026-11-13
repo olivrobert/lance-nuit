@@ -32,22 +32,24 @@ echo "== 3. cut the web tools of the agent CLIs =="
 # Defence in depth only. The real lock is the network ACL: a destination that is
 # not reachable is not reachable whatever the tool. These settings just stop the
 # agent from wasting the night retrying.
-incus exec "$VM" -- mkdir -p /root/.claude /root/.codex /root/.config/opencode
+# They belong to 'nuit', the user the agent runs as; earlier templates wrote
+# them under /root, where they are removed.
+incus exec "$VM" -- id nuit >/dev/null || { echo "no 'nuit' user: run provision-template.sh first" >&2; exit 1; }
+incus exec "$VM" -- rm -f /root/.claude/settings.json /root/.codex/config.toml /root/.config/opencode/opencode.json
 
-incus exec "$VM" -- bash -lc 'cat > /root/.claude/settings.json <<JSON
+incus exec "$VM" -- su - nuit -c 'mkdir -p ~/.claude ~/.codex ~/.config/opencode
+cat > ~/.claude/settings.json <<JSON
 {
   "permissions": {
     "deny": ["WebFetch", "WebSearch"]
   }
 }
-JSON'
-
-incus exec "$VM" -- bash -lc 'cat > /root/.codex/config.toml <<TOML
+JSON
+cat > ~/.codex/config.toml <<TOML
 [tools]
 web_search = false
-TOML'
-
-incus exec "$VM" -- bash -lc 'cat > /root/.config/opencode/opencode.json <<JSON
+TOML
+cat > ~/.config/opencode/opencode.json <<JSON
 {
   "\$schema": "https://opencode.ai/config.json",
   "tools": {
@@ -56,7 +58,7 @@ incus exec "$VM" -- bash -lc 'cat > /root/.config/opencode/opencode.json <<JSON
 }
 JSON'
 
-incus exec "$VM" -- bash -lc 'echo "--- claude ---"; cat /root/.claude/settings.json; echo "--- codex ---"; cat /root/.codex/config.toml; echo "--- opencode ---"; cat /root/.config/opencode/opencode.json'
+incus exec "$VM" -- su - nuit -c 'echo "--- claude ---"; cat ~/.claude/settings.json; echo "--- codex ---"; cat ~/.codex/config.toml; echo "--- opencode ---"; cat ~/.config/opencode/opencode.json'
 
 echo "== 4. snapshot =="
 incus stop "$VM"
