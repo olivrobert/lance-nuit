@@ -9,7 +9,8 @@
 # WHAT THIS DOES AND DOES NOT DO
 # Incus ACLs filter on address, protocol and port -- not on domain names. The
 # agent APIs sit behind CDNs with rotating addresses, so an address allowlist is
-# not maintainable. This ACL therefore keeps 80/443 open to the world and closes
+# not maintainable. This ACL therefore keeps 80/443 open to public addresses,
+# refuses private ranges (LAN, host bridges, Docker networks) and closes
 # everything else, which already removes outbound SSH (so `git@github.com:` is
 # dead) and every non-web protocol. Restricting *which* HTTPS hosts are
 # reachable needs a filtering proxy on the host; see the ticket.
@@ -28,6 +29,8 @@ BRIDGE=nuitbr0
 GATEWAY=10.174.226.1
 SUBNET=10.174.226.1/24
 BROKER_PORTS=8099-8199
+# RFC 1918, CGNAT (100.64/10, used by Tailscale) and link-local, minus the gateway.
+PRIVATE_RANGES=10.0.0.0-10.174.226.0,10.174.226.2-10.255.255.255,100.64.0.0/10,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16
 
 create() {
 	incus network acl show "$ACL" >/dev/null 2>&1 || incus network acl create "$ACL"
@@ -46,6 +49,16 @@ create() {
 	# broker once the ACL is applied, and every `gh` call exits 127.
 	incus network acl rule add "$ACL" egress action=allow protocol=tcp \
 		destination="$GATEWAY" destination_port="$BROKER_PORTS"
+
+	# Private and link-local ranges are refused before web egress opens: the
+	# LAN, the router, the host's other bridges and its Docker containers all
+	# answer on 80/443 too. Incus applies reject before allow whatever the rule
+	# order, so the gateway is cut out of 10/8 to keep DNS and the broker, and
+	# its own web ports are refused separately.
+	incus network acl rule add "$ACL" egress action=reject \
+		destination="$PRIVATE_RANGES"
+	incus network acl rule add "$ACL" egress action=reject protocol=tcp \
+		destination="$GATEWAY" destination_port=80,443
 
 	# Web egress: agent APIs, Docker registry, npm, apt.
 	incus network acl rule add "$ACL" egress action=allow protocol=tcp \
@@ -124,6 +137,19 @@ test_vm() {
 		|| echo "gateway:8199 refused connection (expected when no broker listens; a TIMEOUT here means the ACL blocks it)"
 	echo "-- refused: arbitrary port --"
 	incus exec "$vm" -- timeout 8 curl -4 -sS -o /dev/null --max-time 6 http://deb.debian.org:8888 2>&1 | tail -1 || echo "port 8888 blocked (expected)"
+
+	# The host's router usually serves its admin page on 80: a target that does
+	# answer, so a refusal proves the ACL rather than an idle port.
+	local router failed=0 target
+	router=$(ip -4 route show default | awk '{ print $3; exit }')
+	for target in "http://$router" "https://$router" "http://$GATEWAY" "https://$GATEWAY"; do
+		echo "-- refused: private address $target --"
+		if incus exec "$vm" -- curl -4 -k -sS -o /dev/null --max-time 6 "$target"; then
+			echo "FAIL: $target is reachable" >&2
+			failed=1
+		fi
+	done
+	return "$failed"
 }
 
 case "${1:-}" in

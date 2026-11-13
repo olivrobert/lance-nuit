@@ -7,24 +7,25 @@ forge credential, a network ACL, and a broker that lends the VM a handful of
 
 This file is the operating manual — **what to type**. The design notes, the
 tickets, and the current state of the local VM fleet live outside the repository,
-under `.scratch/pipelines-nuit-vm/` on the maintainer's machine.
+on the maintainer's machine.
 
 ## The pieces
 
 | File | Role | Runs on |
 |---|---|---|
-| `provision-template.sh` | (re)installs `lancenuit` and the `pre-push` hook, refreshes the `clean` snapshot | host |
+| `provision-template.sh` | (re)installs `lancenuit`, updates Claude Code, pre-pulls Docker images, refreshes the `clean` snapshot | host |
 | `harden.sh` | removes `gh`/`glab`/`acli`, installs the `gh` shim, denies the agents' web tools, refreshes `clean` | host |
 | `network-acl.sh` | creates / applies / tests the `nuit` ACL | host |
 | `night-run.sh` | keeps the broker alive for exactly the length of one run | host |
 | `broker/gh-broker.py` | relays five `gh issue` shapes using the host's credential | host |
 | `broker/gh-shim` | the fake `gh` installed in the VM; talks to the broker | VM |
-| `pre-push` | refuses pushes to `main`/`master`/`develop`/`production` | VM |
 | `incus-docker-forward.service` | restores IPv4 egress on both bridges, which Docker's `FORWARD DROP` breaks | host |
 
 The reference template is a VM named `nuit-template` holding Debian 12, Docker,
-Node 22, bun, the three agent CLIs, `lancenuit`, and the `pre-push` hook. Runs
-never use it directly: each run is a throwaway copy of its `clean` snapshot.
+Node 22, bun, the three agent CLIs, `lancenuit`, and the Docker images of the
+pilot project. Runs never use it directly: each run is a throwaway copy of its
+`clean` snapshot. `/etc/nuit-template.json` inside it records what was installed
+and when.
 
 ## Basic gestures
 
@@ -64,11 +65,25 @@ its source commit (see [package verification](../../CONTRIBUTING.md#package-read
 
 ```sh
 ./provision-template.sh --tarball /path/to/lance-nuit-0.1.0.tgz \
-  --commit <git-sha> --sha256 <verified-sha256>
+  --commit <git-sha> --sha256 <verified-sha256> \
+  --image php:8.4-fpm --image mysql:8.0 ...
 ```
 
-The script checks the inputs before changing the VM and installs `pre-push`
-from this directory. It preserves the previous `clean` snapshot under a dated name.
+The script checks the inputs before changing the VM, installs the latest Claude
+Code CLI, and removes the system-wide `core.hooksPath` that earlier templates
+set: the VM has no remote, so a `pre-push` guard protected nothing and silenced
+the project's own hooks. It preserves the previous `clean` snapshot under a
+dated name.
+
+Each `--image` is pulled into the template, so a run VM finds it locally instead
+of pulling it every night (minutes, and Docker Hub's anonymous rate limit). Pass
+the base images of the project's Compose file, including the `FROM` and
+`COPY --from` images of the Dockerfiles it builds:
+
+```sh
+docker compose -f <project>/docker-compose.yml config --images   # image: services
+grep -h '^FROM\|--from=' <project>/docker/*/Dockerfile           # built services
+```
 
 ```sh
 ./harden.sh                    # hardening + gh shim + new 'clean' snapshot
@@ -79,7 +94,7 @@ Then, on every run VM:
 
 ```sh
 ./network-acl.sh apply nuit-run-01     # before `incus start`
-./network-acl.sh test  nuit-run-01     # HTTPS passes, outbound SSH is blocked
+./network-acl.sh test  nuit-run-01     # HTTPS passes; SSH and private addresses are blocked
 ```
 
 `create` builds two things: the `nuit` ACL, and `nuitbr0`, the bridge that
@@ -95,9 +110,16 @@ boot**: the VM's address changes with the bridge, and the gateway becomes
 `10.174.226.1`.
 
 The ACL filters on address, protocol and port, not on domain names: 80/443 stay
-open to the world, DNS and the broker port range (8099-8199) are allowed towards
-the gateway only, and everything else is refused. That already removes outbound
-SSH, so `git@github.com:` is dead inside the VM.
+open to public addresses, DNS and the broker port range (8099-8199) are allowed
+towards the gateway only, and everything else is refused. That already removes
+outbound SSH, so `git@github.com:` is dead inside the VM.
+
+Private ranges (`10/8`, `100.64/10`, `172.16/12`, `192.168/16`, `169.254/16`)
+are refused on every port, web included: without that, the VM would reach the
+LAN, the router, and the host's Docker containers through 80/443. Incus applies
+`reject` rules before `allow` rules regardless of their order, so the gateway is
+carved out of `10/8` and only its web ports are refused. `test` fails if the
+host's router or the gateway answers on 80/443.
 
 The broker rule is not optional: without it the shim cannot reach the host once
 the VM is on the ACL'd bridge, and every `gh` call exits 127. Docker's

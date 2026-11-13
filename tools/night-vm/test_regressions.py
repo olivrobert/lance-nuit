@@ -92,6 +92,7 @@ printf '%s\\n' "$*" >> "$CALL_LOG"
 case "$1" in
 copy) exit "${COPY_EXIT:-0}" ;;
 start) exit "${START_EXIT:-0}" ;;
+query) echo '{"created_at": "2026-08-30T20:08:22Z"}'; exit 0 ;;
 esac
 cat >/dev/null
 ''')
@@ -145,14 +146,25 @@ cat >/dev/null
         self.assertIn("SHA-256 mismatch", result.stderr)
         self.assertEqual(self.calls(), [])
 
-    def test_provision_uses_supplied_tarball_and_versioned_hook(self):
+    def test_provision_uses_supplied_tarball_and_pulls_images(self):
         tarball = self.root / "package with spaces.tgz"
+        tarball.write_bytes(b"fixture")
+        result = self.run_script("provision-template.sh", "--tarball", str(tarball),
+                                 "--commit", "1234567", "--sha256", hashlib.sha256(b"fixture").hexdigest(),
+                                 "--image", "mysql:8.0", "--image", "nginx:alpine")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"file push {tarball} nuit-template/root/lance-nuit-0.1.0.tgz", self.calls())
+        self.assertIn("exec nuit-template -- docker pull --quiet mysql:8.0", self.calls())
+        self.assertIn("exec nuit-template -- docker pull --quiet nginx:alpine", self.calls())
+        self.assertFalse(any("hooksPath /etc/git-hooks" in call for call in self.calls()))
+
+    def test_provision_without_images_pulls_nothing(self):
+        tarball = self.root / "package.tgz"
         tarball.write_bytes(b"fixture")
         result = self.run_script("provision-template.sh", "--tarball", str(tarball),
                                  "--commit", "1234567", "--sha256", hashlib.sha256(b"fixture").hexdigest())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"file push {tarball} nuit-template/root/lance-nuit-0.1.0.tgz", self.calls())
-        self.assertIn(f"file push {HERE / 'pre-push'} nuit-template/etc/git-hooks/pre-push --mode 0755", self.calls())
+        self.assertFalse(any("docker pull" in call for call in self.calls()))
 
 
 class SshProbeTests(unittest.TestCase):
