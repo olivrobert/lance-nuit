@@ -34,6 +34,7 @@ CLAUDE.local.md
 *.log
 logs/
 .cache/
+__pycache__/
 .bun/
 coverage/
 .vitest/
