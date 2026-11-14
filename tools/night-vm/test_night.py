@@ -211,6 +211,13 @@ class NightTests(unittest.TestCase):
         self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", "\n".join(self.calls()))
         self.assertNotIn("sk-ant-oat-fixture", "\n".join(self.calls()))
 
+    def test_the_agent_can_commit_in_the_project_clone(self):
+        run_id, _ = self.make_run()
+        self.night("_run", run_id, FETCH_DIR=self.fetched({}))
+        calls = "\n".join(self.calls())
+        self.assertLess(calls.index("git clone"), calls.index("config user.name lance-nuit"))
+        self.assertIn("config user.email", calls)
+
     def test_a_passed_run_deletes_the_vm_and_the_token(self):
         run_id, run_dir = self.make_run()
         result = self.night("_run", run_id, FETCH_DIR=self.fetched({}))
