@@ -19,7 +19,7 @@ on the maintainer's machine.
 | `night.sh` | runs one night end to end: VM, token, code, broker, preparation, run, fetch; `status`, `resume`, `clean` | host |
 | `night_report.py` | settles a finished night and prints `night.sh status` | host |
 | `vm-run.sh` | checks that Claude answers, then runs `lancenuit run --scan` as `nuit` | VM |
-| `broker/gh-broker.py` | relays five `gh issue` shapes using the host's credential | host |
+| `broker/gh-broker.py` | relays five `gh issue` shapes using the night's fine-grained token | host |
 | `broker/gh-shim` | the fake `gh` installed in the VM; talks to the broker | VM |
 | `publish-night-result.py` | turns the morning bundle into draft PRs, after checks | host |
 | `incus-docker-forward.service` | restores IPv4 egress on both bridges, which Docker's `FORWARD DROP` breaks | host |
@@ -229,7 +229,12 @@ empty queue passes too. Anything else keeps the VM, stopped, for inspection:
 
 ### The broker during a night
 
-The broker carries the forge credential, so it lives exactly as long as the
+The broker carries the forge credential: a fine-grained GitHub token limited to
+the project's repository with `Issues: Read and write`, in
+`~/.config/lance-nuit/gh-broker-token`, mode `0600` (`NIGHT_GH_TOKEN_FILE`
+overrides the path). `start` and `resume` refuse to run without it; the broker
+gets it as `GH_TOKEN`, so the host's own `gh` login is never lent to the night.
+The publisher, in the morning, still uses the host's login. The broker lives exactly as long as the
 host unit: `night.sh` starts it and kills it when the night ends, however it
 ends. It listens on the gateway, on the first free port of 8099-8199, recorded
 in `<run-dir>/broker.port`. `--repo` is imposed at startup, so two nights on two

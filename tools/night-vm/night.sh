@@ -21,6 +21,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 RUNS_DIR="${PIPELINE_HOME:-$HOME/.lance-nuit}/night-runs"
 TOKEN_SOURCE=${NIGHT_TOKEN_FILE:-$HOME/.config/lance-nuit/claude-oauth-token}
+GH_TOKEN_SOURCE=${NIGHT_GH_TOKEN_FILE:-$HOME/.config/lance-nuit/gh-broker-token}
 SECRETS_ROOT=${NIGHT_SECRETS_ROOT:-/dev/shm}
 GATEWAY=${NIGHT_GATEWAY:-10.174.226.1}
 POLL_SECONDS=${NIGHT_POLL_SECONDS:-60}
@@ -67,17 +68,22 @@ host_unit_active() {
 done_phase() { [ -f "$RUN_DIR/phases/$1" ]; }
 mark_phase() { date -Iseconds >"$RUN_DIR/phases/$1"; }
 
-check_token() {
-	[ -f "$TOKEN_SOURCE" ] && [ ! -L "$TOKEN_SOURCE" ] ||
-		die "no Claude token at $TOKEN_SOURCE (create it with 'claude setup-token', mode 0600)"
+check_secret_file() {
+	local file=$1 hint=$2
+	[ -f "$file" ] && [ ! -L "$file" ] || die "no $hint at $file"
 	local mode owner
-	read -r mode owner < <(stat -c '%a %u' "$TOKEN_SOURCE")
-	[ "$owner" = "$(id -u)" ] || die "$TOKEN_SOURCE is not yours"
+	read -r mode owner < <(stat -c '%a %u' "$file")
+	[ "$owner" = "$(id -u)" ] || die "$file is not yours"
 	case "$mode" in
 	600 | 400) ;;
-	*) die "$TOKEN_SOURCE has mode $mode: refusing a token others can read (chmod 600)" ;;
+	*) die "$file has mode $mode: refusing a token others can read (chmod 600)" ;;
 	esac
-	[ -s "$TOKEN_SOURCE" ] || die "$TOKEN_SOURCE is empty"
+	[ -s "$file" ] || die "$file is empty"
+}
+
+check_token() {
+	check_secret_file "$TOKEN_SOURCE" "Claude token (create it with 'claude setup-token', mode 0600)"
+	check_secret_file "$GH_TOKEN_SOURCE" "GitHub token for the broker (fine-grained, Issues: read and write on the project only, mode 0600)"
 }
 
 launch() {
@@ -86,6 +92,7 @@ launch() {
 		--setenv=PATH="$PATH" \
 		${PIPELINE_HOME:+--setenv=PIPELINE_HOME="$PIPELINE_HOME"} \
 		${NIGHT_TOKEN_FILE:+--setenv=NIGHT_TOKEN_FILE="$NIGHT_TOKEN_FILE"} \
+		${NIGHT_GH_TOKEN_FILE:+--setenv=NIGHT_GH_TOKEN_FILE="$NIGHT_GH_TOKEN_FILE"} \
 		--property=TimeoutStopSec=300 \
 		--property=StandardOutput="append:$RUN_DIR/night.log" \
 		--property=StandardError="append:$RUN_DIR/night.log" \
@@ -271,7 +278,8 @@ phase_broker() {
 	echo "http://$GATEWAY:$port/gh" | incus exec "$VM" -- tee /etc/lance-nuit/gh-broker.url >/dev/null
 	incus file push "$BROKER_TOKEN" "$VM/etc/lance-nuit/gh-broker.token" --mode 0600 --uid 1001 --gid 1001
 
-	python3 "$HERE/broker/gh-broker.py" --repo "$REPO" --host "$GATEWAY" --port "$port" \
+	# The broker answers with the night's fine-grained token, never the host's own gh login.
+	GH_TOKEN=$(<"$GH_TOKEN_SOURCE") python3 "$HERE/broker/gh-broker.py" --repo "$REPO" --host "$GATEWAY" --port "$port" \
 		--token-file "$BROKER_TOKEN" >>"$RUN_DIR/gh-broker.log" 2>&1 &
 	BROKER_PID=$!
 	local _
