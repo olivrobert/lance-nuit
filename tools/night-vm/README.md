@@ -19,6 +19,7 @@ on the maintainer's machine.
 | `night-run.sh` | keeps the broker alive for exactly the length of one run | host |
 | `broker/gh-broker.py` | relays five `gh issue` shapes using the host's credential | host |
 | `broker/gh-shim` | the fake `gh` installed in the VM; talks to the broker | VM |
+| `publish-night-result.py` | turns the morning bundle into draft PRs, after checks | host |
 | `incus-docker-forward.service` | restores IPv4 egress on both bridges, which Docker's `FORWARD DROP` breaks | host |
 
 The reference template is a VM named `nuit-template` holding Debian 12, Docker,
@@ -250,13 +251,11 @@ incus exec nuit-run-01 -- bash -lc '
 
 # 4. the secrets: read-only disk device from /dev/shm -- still to wire
 # 5. the run: lancenuit inside the VM
-# 6. in the morning
-incus exec nuit-run-01 -- bash -lc 'cd /srv/project && git bundle create /root/out.bundle <base>..nuit/<ticket>'
-incus file pull nuit-run-01/root/out.bundle /tmp/
-cd <project>
-git fetch /tmp/out.bundle nuit/<ticket>
-git log --stat FETCH_HEAD                       # look BEFORE publishing
-git push origin FETCH_HEAD:refs/heads/nuit/<ticket>
+# 6. in the morning: bring back the branches and the scan records, then publish
+incus exec nuit-run-01 -- bash -lc "cd /srv/project && git bundle create /root/out.bundle --branches='nuit/*' ^main"
+incus file pull nuit-run-01/root/out.bundle ~/.lance-nuit/night-runs/<run-id>/
+incus file pull -r nuit-run-01/srv/project/.lance-nuit/pipeline-history ~/.lance-nuit/night-runs/<run-id>/
+./publish-night-result.py <run-id> --repo owner/name
 
 # 7. cleanup
 incus delete nuit-run-01 --force
@@ -270,6 +269,72 @@ carries only `HEAD` clones into a detached state, with no branch for the run to
 build on. And `git bundle verify` needs a repository to compare prerequisites
 against, hence the throwaway one above — it must come before the clone to be a
 gate rather than a formality.
+
+## Publishing in the morning
+
+What comes back from the VM is untrusted: a branch can add a GitHub workflow
+that runs on push, or a hook, a `.claude/` setting or a `.envrc` that runs on a
+later checkout. So the bundle is never fetched into a working clone, and only
+the host, holding the forge credential, publishes.
+
+```sh
+./publish-night-result.py <run-id> --repo owner/name --dry-run   # checks only
+./publish-night-result.py <run-id> --repo owner/name             # push + draft PRs
+```
+
+It reads `~/.lance-nuit/night-runs/<run-id>/`: `out.bundle`, holding the
+`nuit/<ticket>` branches above the base branch (`--base`, `main` by default),
+and `pipeline-history/scans/*.json`, the scan records of the run.
+
+```mermaid
+flowchart LR
+  B["out.bundle<br>frozen copy"] --> R["bare repo of the run<br>fsck, no hooks, no user config"]
+  G["base branch<br>fetched from GitHub"] --> R
+  R --> C{"per branch"}
+  C -- "fixed, in bounds,<br>no protected path" --> P["push nuit/&lt;ticket&gt;<br>draft PR: Closes #&lt;ticket&gt;"]
+  C -- otherwise --> X["refused or skipped<br>nothing pushed"]
+```
+
+The whole run is refused, before any push, when the bundle is a link, exceeds
+`--max-bundle-bytes` (20 MiB), carries a ref other than `refs/heads/nuit/<n>`,
+does not apply to the base branch as it is on GitHub, or holds objects
+`git fsck --strict` rejects. Then each branch is checked on its own:
+
+| Check | Outcome when it fails |
+|---|---|
+| its ticket is `done` with outcome `fixed` in a scan record of `--repo` | skipped |
+| it shares history with the base branch and adds 1 to `--max-commits` (50) commits, none a merge | refused |
+| no commit touches a protected path (below), no submodule | refused |
+| at most `--max-files` (200) files and `--max-lines` (20000) changed lines | refused |
+| `nuit/<ticket>` is absent on GitHub or already at the same commit | refused |
+
+Protected paths, compared case-insensitively: `.github/`, `.gitmodules`,
+`.lance-nuit/`, `.claude/`, `.codex/`, `.opencode/`, `.mcp.json`, `CLAUDE.md`,
+`CLAUDE.local.md` and `AGENTS.md` at any depth, hook managers (`.husky/`,
+`.githooks/`, `.git-hooks/`, `lefthook*.yml`, `.pre-commit-config.yaml`), and
+what an editor or shell runs on its own (`.vscode/`, `.idea/`, `.envrc`). Every
+commit is checked, not only the final diff: a workflow added and then removed
+still refuses the branch. A refused branch is never pushed, since pushing
+alone triggers workflows; read it without checking it out:
+
+```sh
+git -C ~/.lance-nuit/night-runs/<run-id>/publish/repo.git show --stat refs/night/<ticket>
+```
+
+An accepted branch is pushed without force, then opened as a draft PR whose
+title is the issue's and whose body closes it and lists the commits and files.
+The PR is where the code gets reviewed. Running the command again is safe: a
+branch already at the same commit is not pushed again, an existing PR is not
+duplicated, and a PR whose creation failed after the push is created.
+
+Git runs with the user and system configuration ignored, hooks disabled, and
+`gh auth git-credential` as the only credential helper, so `GH_TOKEN`, if set,
+is the credential used for both the push and the PR. Each verdict is appended
+to `<run-dir>/publish.jsonl` with the run, ticket, commit, ref and PR URL. The
+exit status is 0 when nothing was refused or failed.
+
+The base branch must be on GitHub as the VM saw it: a run started from a local
+`main` with unpushed commits is refused, because the PR could not be based on it.
 
 ## Troubleshooting
 
