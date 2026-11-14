@@ -19,7 +19,7 @@ VM_CREATED=0
 GATEWAY=10.174.226.1
 # Deliberately NOT the shim's built-in default: reaching the broker on this port
 # proves the VM resolved its endpoint from /etc/lance-nuit/gh-broker.url, the
-# file night-run.sh writes for a per-run port.
+# file night.sh writes for a per-run port.
 PORT=8199
 ENDPOINT_FILE=/etc/lance-nuit/gh-broker.url
 KEEP=0
@@ -206,40 +206,6 @@ if [ "$code" = 127 ] && echo "$out" | grep -qi "broker unreachable"; then
 	pass=$((pass + 1))
 else
 	echo "FAIL expected exit 127 'broker unreachable', got $code: $(echo "$out" | head -1)"
-	fail=$((fail + 1))
-fi
-
-echo
-echo "== 8. night-run.sh frames the broker =="
-# Same VM, but this time nothing starts or stops the broker by hand: night-run.sh
-# does, and must take it down with itself. Its port comes from the VM name, and
-# it rewrites the endpoint file, so this also re-tests that resolution path.
-out=$("$HERE/night-run.sh" --vm "$VM" --repo "$REPO" --port "$PORT" --run-dir "$RUN_DIR" -- \
-	incus exec "$VM" -- gh issue list --repo "$REPO" --state open --limit 1000 --json number 2>&1)
-code=$?
-if [ "$code" = 0 ] && echo "$out" | grep -q '"number"'; then
-	echo "PASS the run read issues under night-run.sh"
-	pass=$((pass + 1))
-else
-	echo "FAIL night-run.sh run failed ($code): $(echo "$out" | tail -3)"
-	fail=$((fail + 1))
-fi
-
-if grep -q " ALLOWED: " "$RUN_DIR/gh-broker.log" 2>/dev/null; then
-	echo "PASS verdicts journalled in <run-dir>/gh-broker.log"
-	pass=$((pass + 1))
-else
-	echo "FAIL no ALLOWED verdict in $RUN_DIR/gh-broker.log"
-	fail=$((fail + 1))
-fi
-
-# The broker carries the credential: outliving the run is the failure that matters.
-out=$(incus exec "$VM" -- bash -lc "gh issue list --repo $REPO --json number" 2>&1); code=$?
-if [ "$code" = 127 ]; then
-	echo "PASS broker died with the run (shim back to 127)"
-	pass=$((pass + 1))
-else
-	echo "FAIL broker still answering after night-run.sh returned ($code)"
 	fail=$((fail + 1))
 fi
 

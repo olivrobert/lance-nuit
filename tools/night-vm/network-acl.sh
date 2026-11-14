@@ -44,9 +44,9 @@ create() {
 	incus network acl rule add "$ACL" egress action=allow protocol=tcp \
 		destination="$GATEWAY" destination_port=53
 
-	# The gh broker, on the host, one port per run (see night-run.sh: 8099 plus
-	# the VM's numeric suffix). Without this rule the shim cannot reach the
-	# broker once the ACL is applied, and every `gh` call exits 127.
+	# The gh broker, on the host, one port per run (night.sh takes the first
+	# free one). Without this rule the shim cannot reach the broker once the
+	# ACL is applied, and every `gh` call exits 127.
 	incus network acl rule add "$ACL" egress action=allow protocol=tcp \
 		destination="$GATEWAY" destination_port="$BROKER_PORTS"
 
