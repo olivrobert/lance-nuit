@@ -83,9 +83,13 @@ class NightTests(unittest.TestCase):
         self.token = self.root / "claude-oauth-token"
         self.token.write_text("sk-ant-oat-fixture\n")
         self.token.chmod(0o600)
+        self.gh_token = self.root / "gh-broker-token"
+        self.gh_token.write_text("github_pat_fixture\n")
+        self.gh_token.chmod(0o600)
         self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", CALL_LOG=str(self.log),
                         INCUS_STATE=str(self.state), PIPELINE_HOME=str(self.home),
-                        NIGHT_TOKEN_FILE=str(self.token), NIGHT_SECRETS_ROOT=str(self.secrets),
+                        NIGHT_TOKEN_FILE=str(self.token), NIGHT_GH_TOKEN_FILE=str(self.gh_token),
+                        NIGHT_SECRETS_ROOT=str(self.secrets),
                         NIGHT_GATEWAY="127.0.0.1", NIGHT_POLL_SECONDS="0",
                         GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
         self.executable("incus", FAKE_INCUS)
@@ -160,6 +164,18 @@ class NightTests(unittest.TestCase):
         self.assertIn("mode 644", result.stderr)
         self.assertEqual(self.calls(), [])
         self.assertFalse((self.home / "night-runs").exists())
+
+    def test_start_refuses_a_night_without_the_broker_token(self):
+        self.gh_token.unlink()
+        result = self.night("start", "--project", str(self.project), "--pipeline", "claude")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no GitHub token for the broker", result.stderr)
+        self.assertEqual(self.calls(), [])
+
+    def test_the_broker_token_never_reaches_the_vm(self):
+        run_id, _ = self.make_run()
+        self.night("_run", run_id, FETCH_DIR=self.fetched({}))
+        self.assertNotIn("github_pat_fixture", "\n".join(self.calls()))
 
     def test_start_refuses_a_base_branch_github_does_not_have(self):
         (self.project / "README").write_text("local only\n")

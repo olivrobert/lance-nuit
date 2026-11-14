@@ -2,8 +2,9 @@
 """Host-side broker: runs a fixed, tiny set of `gh issue` commands for the night VM.
 
 The VM has no credentials and no `gh` binary. It calls this broker through the
-Incus bridge gateway; the broker runs the real `gh` with the host user's
-credentials and returns stdout/stderr/exit code.
+Incus bridge gateway; the broker runs the real `gh` with the `GH_TOKEN` it
+was started with (night.sh passes a fine-grained token, never the host's gh
+login) and returns stdout/stderr/exit code.
 
 The whole point is that the VM gets *operations*, never the token. So the broker
 never trusts what it receives:
