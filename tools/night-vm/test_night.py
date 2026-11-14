@@ -58,6 +58,8 @@ elif args[0] == "exec":
         sys.exit(1)
     if "vm-prepare.sh" in line:
         sys.exit(int(os.environ.get("PREPARE_EXIT", "0")))
+    if "tar czf - " in line and os.environ.get("LIVE_TGZ"):
+        sys.stdout.buffer.write(Path(os.environ["LIVE_TGZ"]).read_bytes())
     if "systemctl show" in line:
         print("SubState=" + os.environ.get("VM_UNIT_SUB", "exited"))
         print("Result=" + os.environ.get("VM_UNIT_RESULT", "success"))
@@ -145,15 +147,24 @@ class NightTests(unittest.TestCase):
             (run_dir / "phases" / phase).write_text("")
         return run_id, run_dir
 
-    def fetched(self, scan_tickets):
-        fetch = self.root / "fetch"
+    def fetched(self, scan_tickets, states=(), name="fetch", archive_name="lance-nuit.tgz"):
+        fetch = self.root / name
         (fetch / "pipeline-history/scans").mkdir(parents=True)
         (fetch / "pipeline-history/scans/20261114T213500000Z-claude-1.json").write_text(json.dumps(
             {"project": "owner/hypnose", "finishedAt": "2026-11-14T22:00:00Z", "abort": None,
-             "tickets": scan_tickets}))
-        with tarfile.open(fetch / "lance-nuit.tgz", "w:gz") as archive:
-            archive.add(fetch / "pipeline-history", arcname="pipeline-history")
+             "discovered": list(scan_tickets), "tickets": scan_tickets}))
+        for state in states:
+            folder = fetch / "work-items" / state["ticket"] / "runs/claude" / state["runId"]
+            folder.mkdir(parents=True)
+            (folder / "state.json").write_text(json.dumps(state))
+        with tarfile.open(fetch / archive_name, "w:gz") as archive:
+            for top in ("pipeline-history", "work-items"):
+                if (fetch / top).exists():
+                    archive.add(fetch / top, arcname=top)
         return str(fetch)
+
+    def live(self, run_dir):
+        return json.loads((run_dir / "live.json").read_text())
 
     # -- start --------------------------------------------------------------
 
@@ -204,7 +215,64 @@ class NightTests(unittest.TestCase):
         self.assertIn("REPO=owner/hypnose", run_env)
         self.assertIn("PIPELINE=claude", run_env)
 
+    def test_start_records_the_origin_its_caller_names(self):
+        result = self.night("start", "--project", str(self.project), "--pipeline", "claude",
+                            LANCENUIT_ORIGIN="chief:f-42")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [run_dir] = (self.home / "night-runs").iterdir()
+        self.assertEqual((run_dir / "origin").read_text(), "chief:f-42\n")
+
+    def test_start_ignores_an_origin_that_is_not_a_plain_name(self):
+        result = self.night("start", "--project", str(self.project), "--pipeline", "claude",
+                            LANCENUIT_ORIGIN="../x; rm -rf /")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ignoring LANCENUIT_ORIGIN", result.stderr)
+        [run_dir] = (self.home / "night-runs").iterdir()
+        self.assertFalse((run_dir / "origin").exists())
+
+    def test_resume_hands_the_night_to_its_new_origin_and_keeps_the_old_one_without(self):
+        run_id, run_dir = self.make_run(phases=("vm", "code"))
+        (run_dir / "origin").write_text("chief:first\n")
+        self.night("resume", run_id)
+        self.assertEqual((run_dir / "origin").read_text(), "chief:first\n")
+        self.night("resume", run_id, LANCENUIT_ORIGIN="chief:second")
+        self.assertEqual((run_dir / "origin").read_text(), "chief:second\n")
+
     # -- the unit -----------------------------------------------------------
+
+    def test_live_json_follows_the_vm_during_the_run_then_settles_on_the_fetch(self):
+        run_id, run_dir = self.make_run()
+        running = {"runId": "r1", "ticket": "18", "name": "claude", "status": "RUNNING",
+                   "updatedAt": "2026-11-14T21:40:00Z",
+                   "steps": [{"id": "triage", "status": "done", "control": {"duration_ms": 38000}},
+                             {"id": "tests", "status": "running", "last_attempt": 2},
+                             {"id": "commit", "status": "pending"}]}
+        pulled = Path(self.fetched({"18": {"state": "running", "startedAt": "2026-11-14T21:36:00Z"}, "19": {"state": "pending"}},
+                                   [running], name="vm", archive_name="live.tgz")) / "live.tgz"
+        done = dict(running, status="DONE", steps=[dict(step, status="done") for step in running["steps"]])
+        result = self.night("_run", run_id, LIVE_TGZ=str(pulled),
+                            FETCH_DIR=self.fetched({"18": {"state": "done", "outcome": "fixed", "runId": "r1"}}, [done]),
+                            VM_UNIT_RESULT="exit-code", VM_UNIT_STATUS="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(json.loads((run_dir / "live/work-items/18/runs/claude/r1/state.json").read_text())["status"],
+                         "RUNNING")
+        live = self.live(run_dir)
+        self.assertEqual(live["format"], "night-live/1")
+        self.assertEqual(live["phase"]["name"], "run")
+        self.assertEqual([phase["name"] for phase in live["phasesDone"]],
+                         ["vm", "secrets", "boot", "code", "broker", "prepare"])
+        self.assertEqual(live["result"]["state"], "failed")
+        [ticket] = live["tickets"]
+        self.assertEqual((ticket["ticket"], ticket["outcome"], ticket["run"]["status"]), ("18", "fixed", "DONE"))
+        self.assertIsNotNone(live["contactAt"])
+
+    def test_a_stuck_or_silent_vm_leaves_live_json_without_contact(self):
+        run_id, run_dir = self.make_run()
+        result = self.night("_run", run_id, PREPARE_EXIT="1")
+        self.assertNotEqual(result.returncode, 0)
+        live = self.live(run_dir)
+        self.assertEqual((live["phase"]["name"], live["contactAt"], live["tickets"]), ("prepare", None, []))
+        self.assertEqual(live["result"]["reason"], "phase prepare failed")
 
     def test_acl_and_token_are_in_place_before_the_first_boot(self):
         run_id, run_dir = self.make_run()
@@ -342,6 +410,38 @@ class ReportTests(unittest.TestCase):
     def test_a_fixed_ticket_needs_a_verified_bundle(self):
         self.scan("1.json", {"18": {"state": "done", "outcome": "fixed"}})
         self.assertEqual(night_report.classify(self.run_dir, "", "success", "0", "0")[0], "failed")
+
+    def test_a_running_ticket_reads_its_root_run_touched_since_it_started(self):
+        states = [
+            {"runId": "old", "ticket": "18", "updatedAt": "2026-11-14T20:00:00Z"},
+            {"runId": "resumed", "ticket": "18", "updatedAt": "2026-11-14T21:50:00Z"},
+            {"runId": "child", "rootRunId": "resumed", "ticket": "18", "updatedAt": "2026-11-14T21:55:00Z"},
+            {"runId": "other", "ticket": "19", "updatedAt": "2026-11-14T21:59:00Z"},
+        ]
+        entry = {"state": "running", "startedAt": "2026-11-14T21:30:00Z"}
+        self.assertEqual(night_report.ticket_run("18", entry, states)["runId"], "resumed")
+        self.assertIsNone(night_report.ticket_run("18", {"state": "pending"}, states))
+        self.assertEqual(night_report.ticket_run("18", {"state": "done", "runId": "old"}, states)["runId"], "old")
+
+    def test_live_lists_the_tickets_found_and_drops_names_that_could_be_paths(self):
+        self.scan("1.json", {"18": {"state": "running"}, "../x": {"state": "done"}}, finished=False)
+        records = json.loads((self.run_dir / "pipeline-history/scans/1.json").read_text())
+        records["discovered"] = ["17", "18"]
+        (self.run_dir / "pipeline-history/scans/1.json").write_text(json.dumps(records))
+        self.assertEqual([(t["ticket"], t["state"]) for t in night_report.live(self.run_dir)["tickets"]],
+                         [("17", "pending"), ("18", "running")])
+
+    def test_a_pull_with_a_link_leaves_the_previous_live_folder(self):
+        (self.run_dir / "live").mkdir()
+        (self.run_dir / "live/kept").write_text("")
+        archive = self.run_dir / "pulled.tgz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("work-items/evil")
+            link.type, link.linkname = tarfile.SYMTYPE, "/etc"
+            tar.addfile(link)
+        self.assertFalse(night_report.unpack_live(self.run_dir, archive))
+        self.assertTrue((self.run_dir / "live/kept").exists())
+        self.assertFalse((self.run_dir / "live.part").exists())
 
     def test_cost_counts_root_runs_once_at_their_latest_line(self):
         lines = [

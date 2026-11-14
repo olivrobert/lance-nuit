@@ -17,7 +17,7 @@ on the maintainer's machine.
 | `harden.sh` | removes `gh`/`glab`/`acli`, installs the `gh` shim, denies the agents' web tools, refreshes `clean` | host |
 | `network-acl.sh` | creates / applies / tests the `nuit` ACL | host |
 | `night.sh` | runs one night end to end: VM, token, code, broker, preparation, run, fetch; `status`, `resume`, `clean` | host |
-| `night_report.py` | settles a finished night and prints `night.sh status` | host |
+| `night_report.py` | settles a finished night, prints `night.sh status`, writes `live.json` ([LIVE.md](LIVE.md)) | host |
 | `vm-run.sh` | checks that Claude answers, then runs `lancenuit run --scan` as `nuit` | VM |
 | `broker/gh-broker.py` | relays five `gh issue` shapes using the night's fine-grained token | host |
 | `broker/gh-shim` | the fake `gh` installed in the VM; talks to the broker | VM |

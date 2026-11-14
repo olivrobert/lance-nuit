@@ -3,22 +3,36 @@
 
     night_report.py classify <run-dir> <failed-phase> <vm-result> <exit-status> <interrupted>
     night_report.py status <runs-dir> [<run-id>]
+    night_report.py live <run-dir> [<live-archive>]
 
 `classify` settles a finished run into `result.json` (passed, failed or cut) and
 prints its state. `status` prints one line per run, or the detail of one run.
-Everything read under `pipeline-history/` came back from the VM: it is parsed,
-never executed, and a malformed file reads as absent.
+`live` unpacks the archive pulled from the VM, if given, into `live/`, then
+writes `live.json`: where the night and each of its tickets stand (format in
+LIVE.md). Everything read under `pipeline-history/`, `work-items/` and `live/`
+came back from the VM: it is parsed, never executed, and a malformed file reads
+as absent.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
 import subprocess
 import sys
+import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 MAX_RECORD_BYTES = 4 * 1024 * 1024
+MAX_LIVE_MEMBERS = 1000
+MAX_LIVE_BYTES = 32 * 1024 * 1024
+MAX_TEXT = 2000
+LIVE_FORMAT = "night-live/1"
+NIGHT_PHASES = ("vm", "secrets", "boot", "code", "broker", "prepare", "run")
+SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def read_json(path: Path) -> object:
@@ -108,6 +122,190 @@ def classify(run_dir: Path, failed_phase: str, vm_result: str, exit_status: str,
     return "passed", ", ".join(f"#{ticket} fixed" for ticket in sorted(outcomes)) or "queue empty"
 
 
+def iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def mtime_iso(path: Path) -> str | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+    except OSError:
+        return None
+
+
+def text(value: object, limit: int = MAX_TEXT) -> str | None:
+    return value[:limit] if isinstance(value, str) else None
+
+
+def number(value: object) -> float | int | None:
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def mapping(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def unpack_live(run_dir: Path, archive: Path) -> bool:
+    """Swaps `live/` for what the VM sent, or leaves the previous one untouched."""
+    if archive.is_symlink() or not archive.is_file() or archive.stat().st_size > MAX_LIVE_BYTES:
+        return False
+    part = run_dir / "live.part"
+    shutil.rmtree(part, ignore_errors=True)
+    part.mkdir()
+    try:
+        with tarfile.open(archive) as tar:
+            members = tar.getmembers()
+            if (len(members) > MAX_LIVE_MEMBERS or sum(member.size for member in members) > MAX_LIVE_BYTES
+                    or not all(member.isfile() or member.isdir() for member in members)):
+                raise tarfile.TarError("refused archive")
+            tar.extractall(part, filter="data")
+    except (OSError, tarfile.TarError):
+        shutil.rmtree(part, ignore_errors=True)
+        return False
+    os.utime(part)
+    live, old = run_dir / "live", run_dir / "live.old"
+    shutil.rmtree(old, ignore_errors=True)
+    if live.is_dir() and not live.is_symlink():
+        live.rename(old)
+    part.rename(live)
+    shutil.rmtree(old, ignore_errors=True)
+    return True
+
+
+def latest_source(run_dir: Path) -> tuple[Path, Path | None]:
+    """The last word on the night, and what dates it: the fetch, or a later pull from the VM."""
+    fetched, live = run_dir / "lance-nuit.tgz", run_dir / "live"
+    live_ok = live.is_dir() and not live.is_symlink()
+    fetched_ok = fetched.is_file() and not fetched.is_symlink()
+    if live_ok and (not fetched_ok or live.stat().st_mtime > fetched.stat().st_mtime):
+        return live, live
+    return run_dir, fetched if fetched_ok else None
+
+
+def scan_tickets(records: list[dict]) -> list[tuple[str, dict]]:
+    """Each ticket the night found, in the order found, with the latest scan's word on it."""
+    entries: dict[str, dict] = {}
+    for record in records:
+        discovered = record.get("discovered")
+        for ticket in discovered if isinstance(discovered, list) else []:
+            if isinstance(ticket, str):
+                entries.setdefault(ticket, {"state": "pending"})
+        for ticket, entry in mapping(record.get("tickets")).items():
+            if isinstance(entry, dict):
+                entries[str(ticket)] = entry
+    return [(ticket, entry) for ticket, entry in entries.items() if SAFE_NAME.match(ticket)]
+
+
+def run_states(source: Path) -> list[dict]:
+    items = source / "work-items"
+    if items.is_symlink() or not items.is_dir():
+        return []
+    states = []
+    for path in sorted(items.glob("*/runs/*/*/state.json"))[:MAX_LIVE_MEMBERS]:
+        if path.parent.is_symlink():
+            continue
+        state = read_json(path)
+        if isinstance(state, dict) and isinstance(state.get("runId"), str):
+            states.append(state)
+    return states
+
+
+def ticket_run(ticket: str, entry: dict, states: list[dict]) -> dict | None:
+    """The root run of a ticket: named by the scan once done, the latest one touched since it started otherwise."""
+    run_id = entry.get("runId")
+    if isinstance(run_id, str):
+        return next((state for state in states if state["runId"] == run_id), None)
+    if entry.get("state") != "running":
+        return None
+    started = entry.get("startedAt") if isinstance(entry.get("startedAt"), str) else ""
+    mine = [state for state in states
+            if state.get("ticket") == ticket and state.get("rootRunId", state["runId"]) == state["runId"]
+            and str(state.get("updatedAt", "")) >= started]
+    return max(mine, key=lambda state: str(state.get("updatedAt", "")), default=None)
+
+
+def step_view(step: dict) -> dict:
+    control = mapping(step.get("control"))
+    return {
+        "id": text(step.get("id"), 128),
+        "status": text(step.get("status"), 32),
+        "attempt": number(step.get("last_attempt")),
+        "startedAt": text(step.get("started_at"), 40),
+        "finishedAt": text(step.get("finished_at"), 40),
+        "durationMs": number(control.get("duration_ms")),
+        "costUsd": number(control.get("total_cost_usd")),
+    }
+
+
+def run_view(state: dict) -> dict:
+    control = mapping(state.get("total_control"))
+    stop = mapping(mapping(state.get("outcome")).get("stop"))
+    steps = state.get("steps") if isinstance(state.get("steps"), list) else []
+    return {
+        "runId": text(state.get("runId"), 128),
+        "pipeline": text(state.get("name"), 128),
+        "status": text(state.get("status"), 32),
+        "updatedAt": text(state.get("updatedAt"), 40),
+        "durationMs": number(control.get("duration_ms")),
+        "costUsd": number(control.get("total_cost_usd")),
+        "stoppedReason": text(state.get("stopped_reason")),
+        "stop": {
+            "subject": text(stop.get("subject"), 128),
+            "kind": text(stop.get("kind"), 64),
+            "detail": text(stop.get("detail")),
+        } if stop else None,
+        "steps": [step_view(step) for step in steps[:200] if isinstance(step, dict) and isinstance(step.get("id"), str)],
+    }
+
+
+def night_phase(run_dir: Path) -> dict | None:
+    path = run_dir / "phase"
+    if path.is_symlink() or not path.is_file():
+        return None
+    name = path.read_text()[:64].strip()
+    return {"name": name, "since": mtime_iso(path)} if name in NIGHT_PHASES else None
+
+
+def live(run_dir: Path) -> dict:
+    source, dated_by = latest_source(run_dir)
+    states = run_states(source)
+    result = read_json(run_dir / "result.json")
+    result = result if isinstance(result, dict) else None
+    return {
+        "format": LIVE_FORMAT,
+        "night": run_dir.name,
+        "writtenAt": iso_now(),
+        "contactAt": None if dated_by is None else mtime_iso(dated_by),
+        "phase": night_phase(run_dir),
+        "phasesDone": [
+            {"name": name, "at": text((run_dir / "phases" / name).read_text().strip(), 40)}
+            for name in NIGHT_PHASES if (run_dir / "phases" / name).is_file()
+        ],
+        "result": None if result is None else {
+            "state": text(result.get("state"), 16),
+            "reason": text(result.get("reason")),
+            "at": text(result.get("at"), 40),
+        },
+        "tickets": [
+            {
+                "ticket": ticket,
+                "state": text(entry.get("state"), 32),
+                "outcome": text(entry.get("outcome"), 64),
+                "run": None if (state := ticket_run(ticket, entry, states)) is None else run_view(state),
+            }
+            for ticket, entry in scan_tickets(scan_records(source))
+        ],
+    }
+
+
+def write_live(run_dir: Path, archive: Path | None) -> None:
+    if archive is not None:
+        unpack_live(run_dir, archive)
+    part = run_dir / "live.json.part"
+    part.write_text(json.dumps(live(run_dir), ensure_ascii=False) + "\n")
+    os.replace(part, run_dir / "live.json")
+
+
 def host_unit_active(run_id: str) -> bool:
     return subprocess.run(["systemctl", "--user", "is-active", "--quiet", f"nuit-{run_id}"],
                           check=False).returncode == 0
@@ -129,7 +327,8 @@ def summary(run_dir: Path) -> dict:
     markers = (run_dir / "phases").glob("*") if (run_dir / "phases").is_dir() else []
     phases = [path.name for path in sorted(markers, key=lambda path: path.stat().st_mtime)]
     if host_unit_active(run_id):
-        state = f"running ({phases[-1] if phases else 'starting'})"
+        phase = night_phase(run_dir)
+        state = f"running ({phase['name'] if phase else 'starting'})"
     else:
         state = str(result.get("state") or "cut")
     cost = cost_usd(run_dir)
@@ -174,6 +373,9 @@ def main(argv: list[str]) -> int:
             "state": state, "reason": reason, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }) + "\n")
         print(state)
+        return 0
+    if argv and argv[0] == "live" and len(argv) in (2, 3):
+        write_live(Path(argv[1]), Path(argv[2]) if len(argv) == 3 else None)
         return 0
     if argv and argv[0] == "status" and len(argv) in (2, 3):
         runs_dir = Path(argv[1])

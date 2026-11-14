@@ -14,7 +14,8 @@
 # results back to ~/.lance-nuit/night-runs/<run-id>/ whatever happened.
 #
 # Each phase leaves a marker in <run-dir>/phases/; `resume` skips the phases
-# already marked. The VM is deleted when the run passed with a verified bundle,
+# already marked. <run-dir>/live.json says where the night and its tickets
+# stand, for a reader outside the VM (LIVE.md). The VM is deleted when the run passed with a verified bundle,
 # stopped and kept otherwise, until `clean`.
 set -euo pipefail
 
@@ -67,6 +68,24 @@ host_unit_active() {
 
 done_phase() { [ -f "$RUN_DIR/phases/$1" ]; }
 mark_phase() { date -Iseconds >"$RUN_DIR/phases/$1"; }
+
+# Who started or resumed the night, as the caller's environment names it (an
+# app's thread, say), so that the app finds its nights. The last one wins; a
+# caller without the variable leaves the previous origin.
+write_origin() {
+	local origin=${LANCENUIT_ORIGIN:-}
+	[ -n "$origin" ] || return 0
+	if [[ "$origin" =~ ^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$ ]]; then
+		printf '%s\n' "$origin" >"$RUN_DIR/origin"
+	else
+		echo "night.sh: ignoring LANCENUIT_ORIGIN, not a plain name: $origin" >&2
+	fi
+}
+
+# live.json never stops a night: a failure to write it only leaves it stale.
+snapshot() {
+	python3 "$HERE/night_report.py" live "$RUN_DIR" "$@" >/dev/null 2>&1 || echo "live.json not written" >&2
+}
 
 check_secret_file() {
 	local file=$1 hint=$2
@@ -151,6 +170,7 @@ cmd_start() {
 		printf 'BASE=%q\n' "$base"
 		printf 'REPO=%q\n' "$repo"
 	} >"$RUN_DIR/run.env"
+	write_origin
 	launch
 }
 
@@ -169,6 +189,7 @@ cmd_resume() {
 	[ ! -f "$RUN_DIR/phases/cleaned" ] || die "night $RUN_ID was cleaned: its VM is gone"
 	check_token
 	rm -f "$RUN_DIR/result.json"
+	write_origin
 	echo "--- resume $(date -Iseconds) ---" >>"$RUN_DIR/night.log"
 	launch "${replay[@]}"
 }
@@ -313,6 +334,21 @@ phase_prepare() {
 		tee -a "$RUN_DIR/prepare.log"
 }
 
+# The night's state as the VM has it, for live.json: scan records and run
+# states only, read as nuit, bounded in time so a stuck VM cannot hold the poll.
+pull_live() {
+	local archive=$RUN_DIR/live.tgz
+	if timeout 30 incus exec "$VM" --user 1001 --group 1001 --env HOME=/home/nuit --cwd "$PROJECT_DIR" -- bash -c '
+		cd .lance-nuit 2>/dev/null || exit 0
+		{
+			find pipeline-history/scans -maxdepth 1 -type f -name "*.json"
+			find work-items -mindepth 5 -maxdepth 5 -type f -name state.json -path "*/runs/*"
+		} 2>/dev/null | head -n 1000 | tar czf - --no-recursion -T -' >"$archive" 2>/dev/null; then
+		snapshot "$archive"
+	fi
+	rm -f -- "$archive"
+}
+
 vm_unit_state() {
 	incus exec "$VM" -- systemctl show "$VM_UNIT" -p SubState -p Result -p ExecMainStatus
 }
@@ -335,6 +371,7 @@ phase_run() {
 	while :; do
 		sleep "$POLL_SECONDS" &
 		wait $! || true
+		pull_live
 		if ! state=$(vm_unit_state 2>/dev/null); then
 			misses=$((misses + 1))
 			[ "$misses" -lt 5 ] || { echo "the VM stopped answering" >&2; VM_RESULT=unreachable; return 1; }
@@ -413,6 +450,7 @@ finish() {
 	state=$(python3 "$HERE/night_report.py" classify "$RUN_DIR" "$FAILED_PHASE" "$VM_RESULT" "${EXIT_STATUS:-none}" "$INTERRUPTED")
 	say "night $state"
 	cat "$RUN_DIR/result.json"
+	snapshot
 
 	if incus info "$VM" >/dev/null 2>&1; then
 		if [ "$state" = passed ]; then
@@ -434,6 +472,8 @@ run_phase() {
 	CURRENT_PHASE=$1
 	shift
 	say "$CURRENT_PHASE"
+	printf '%s\n' "$CURRENT_PHASE" >"$RUN_DIR/phase"
+	snapshot
 	"phase_$CURRENT_PHASE" "$@"
 	mark_phase "$CURRENT_PHASE"
 }
