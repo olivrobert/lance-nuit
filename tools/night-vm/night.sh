@@ -248,7 +248,9 @@ phase_code() {
 		git -C /tmp/verify bundle verify /tmp/in.bundle
 		rm -rf /tmp/verify
 		git clone -q -b "$1" /tmp/in.bundle "$2"
-		git -C "$2" remote remove origin' _ "$BASE" "$PROJECT_DIR"
+		git -C "$2" remote remove origin
+		git -C "$2" config user.name lance-nuit
+		git -C "$2" config user.email nuit@lance-nuit.invalid' _ "$BASE" "$PROJECT_DIR"
 	incus exec "$VM" -- rm -f /tmp/in.bundle
 }
 
