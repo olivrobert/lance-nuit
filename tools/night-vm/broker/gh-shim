@@ -9,7 +9,7 @@
 // One broker runs per night run, on its own port, so the endpoint cannot be
 // hardcoded. It is resolved in this order:
 //   1. GH_BROKER_URL              -- for testing from the host
-//   2. /etc/lance-nuit/gh-broker.url  -- written into the VM by night-run.sh
+//   2. /etc/lance-nuit/gh-broker.url  -- written into the VM by night.sh
 //   3. the single-run default
 // A missing file is not an error here: it degrades to the default, and an
 // unreachable broker is reported below as exit 127.

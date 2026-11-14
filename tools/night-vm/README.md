@@ -16,7 +16,9 @@ on the maintainer's machine.
 | `provision-template.sh` | (re)installs `lancenuit`, updates Claude Code, pre-pulls Docker images, refreshes the `clean` snapshot | host |
 | `harden.sh` | removes `gh`/`glab`/`acli`, installs the `gh` shim, denies the agents' web tools, refreshes `clean` | host |
 | `network-acl.sh` | creates / applies / tests the `nuit` ACL | host |
-| `night-run.sh` | keeps the broker alive for exactly the length of one run | host |
+| `night.sh` | runs one night end to end: VM, token, code, broker, preparation, run, fetch; `status`, `resume`, `clean` | host |
+| `night_report.py` | settles a finished night and prints `night.sh status` | host |
+| `vm-run.sh` | checks that Claude answers, then runs `lancenuit run --scan` as `nuit` | VM |
 | `broker/gh-broker.py` | relays five `gh issue` shapes using the host's credential | host |
 | `broker/gh-shim` | the fake `gh` installed in the VM; talks to the broker | VM |
 | `publish-night-result.py` | turns the morning bundle into draft PRs, after checks | host |
@@ -149,42 +151,102 @@ the VM is on the ACL'd bridge, and every `gh` call exits 127. Docker's
 `incus-docker-forward.service` — which now covers both bridges — must be
 reinstalled if it predates it.
 
-## The broker during a run
-
-`night-run.sh` does one thing: keep the broker alive for exactly the length of
-the run. The broker carries the credential, so it must not outlive the run — it
-is started as a child process and killed by the `EXIT` trap, including on Ctrl-C
-and on a failing command.
+## A night
 
 ```sh
-./night-run.sh --vm nuit-run-01 --repo owner/name -- <run command>
-./night-run.sh --vm nuit-run-01 --repo owner/name       # no command: holds
-                                                        # until Ctrl-C
+./night.sh start --project ~/www/hypnose --pipeline claude   # returns at once
+./night.sh status                                            # one line per night
+./night.sh status <run-id>                                   # detail of one night
+./night.sh resume <run-id> [--replay-interrupted]
+./night.sh clean <run-id>                                    # deletes a kept VM
 ```
 
-Before starting, it checks the three things that would otherwise only surface in
-the morning: the host `gh` is authenticated, the VM answers, the port is free.
+`start` refuses before anything is created when the base branch (`--base`,
+otherwise `baseBranch` of `.lance-nuit/config.json`) lacks the pipeline or
+`.lance-nuit/vm-prepare.sh`, differs from the same branch on `origin` (the
+morning's PRs are based on GitHub's copy), when the Claude token is missing or
+readable by others, or when the host `gh` is not authenticated. The repository
+the broker serves is `workItem.project` unless `--repo` names it.
 
-**One broker per run.** `--repo` is imposed when the broker starts, so two runs
-on two repositories need two instances, hence two ports. The port is derived from
-the numeric suffix of the VM name — `nuit-run-01` → 8100, `nuit-run-02` → 8101 —
-and `--port` overrides it. The endpoint is written into the VM at
-`/etc/lance-nuit/gh-broker.url`, which the shim reads (`GH_BROKER_URL` overrides it,
-otherwise `http://10.174.226.1:8099/gh`). A port already taken fails the startup:
-two runs do not share one credential scope.
+It then hands the night to a systemd user unit, `nuit-<run-id>`, held under
+`systemd-inhibit --what=sleep`, and returns. Turn lingering on
+(`loginctl enable-linger`), or logging out stops the night.
 
-Each run also generates a random broker credential, installed only in that VM
+```mermaid
+flowchart LR
+  subgraph H["host: unit nuit-run-id"]
+    A["vm: clone + ACL"] --> S["secrets: token in /dev/shm,<br>read-only share"] --> B["boot"] --> C["code: bundle of the base"]
+    C --> K["broker: first free port<br>8099-8199"] --> P["prepare: vm-prepare.sh<br>as nuit, 15 min max"]
+    F["fetch: nuit/* bundle,<br>work-items, history, logs"] --> X["passed: VM deleted<br>otherwise: VM stopped, kept"]
+  end
+  subgraph V["VM: unit night-run, uid nuit, 7 h max"]
+    Q["claude check"] --> L["lancenuit run --scan"]
+  end
+  P --> Q
+  L --> F
+```
+
+Every phase leaves a marker in `<run-dir>/phases/`. `resume` skips `vm` and
+`code` when they are marked, and runs the rest again: after a reboot the token
+is gone from `/dev/shm`, the VM is stopped and its containers with it, and
+`vm-prepare.sh` is idempotent. `lancenuit` resumes its own runs. A step cut in
+flight is refused on resume without `--replay-interrupted`, which `--scan`
+rejects: with that option, the ticket the latest scan record left `running` is
+replayed alone first, then the scan runs.
+
+**The Claude token** is `~/.config/lance-nuit/claude-oauth-token`, made with
+`claude setup-token`, mode `0600` (`NIGHT_TOKEN_FILE` overrides the path). Each
+start copies it into `/dev/shm/nuit-<run-id>/`, shared read-only with the VM
+before it boots. In the VM, systemd loads it as the run unit's credential and
+`vm-run.sh` exports it as `CLAUDE_CODE_OAUTH_TOKEN`: it is never written to the
+VM's disk. The host copy and the share are removed when the night ends,
+whatever the outcome. The home of `nuit` holds no Claude configuration; the
+pipeline's steps read the project's (`settingSources: "project"`).
+
+**The Claude check.** Before the scan, `vm-run.sh` asks Claude (haiku) for one
+word, with stdin closed: a token that does not authenticate, or a prompt for
+onboarding or permissions, fails the night there, in seconds.
+
+**What comes back**, in `~/.lance-nuit/night-runs/<run-id>/`, whatever ended the
+night — success, failure, the 7-hour limit, or a stopped host unit:
+
+| File | Content |
+|---|---|
+| `out.bundle` | the `nuit/<ticket>` branches above the base, verified against the project |
+| `pipeline-history/`, `work-items/` | lance-nuit's scan records, run statistics and run directories |
+| `worktree.patch`, `worktree.status` | uncommitted work left in the VM, if any |
+| `night.log`, `prepare.log`, `run.log`, `gh-broker.log` | the unit, the preparation, the VM run, the broker's verdicts |
+| `result.json` | `passed`, `failed` or `cut`, and why |
+
+The archive from the VM is unpacked with Python's `data` filter and nothing in
+it is executed. A night **passes** when the run exited 0, its last scan reached
+its report, every ticket it touched is `fixed`, and the bundle verifies; an
+empty queue passes too. Anything else keeps the VM, stopped, for inspection:
+`night.sh clean` deletes it; run directories are never removed.
+
+`status` reads the run directories: state, cost (root runs of
+`pipeline-history/runs.jsonl`), branches of the bundle, and the VM if kept.
+
+### The broker during a night
+
+The broker carries the forge credential, so it lives exactly as long as the
+host unit: `night.sh` starts it and kills it when the night ends, however it
+ends. It listens on the gateway, on the first free port of 8099-8199, recorded
+in `<run-dir>/broker.port`. `--repo` is imposed at startup, so two nights on two
+repositories never share one credential scope. The endpoint is written into the
+VM at `/etc/lance-nuit/gh-broker.url`, which the shim reads (`GH_BROKER_URL`
+overrides it, otherwise `http://10.174.226.1:8099/gh`).
+
+Each night also generates a random broker credential, installed only in that VM
 at `/etc/lance-nuit/gh-broker.token` with mode `0600`, owned by `nuit`. The broker requires it on
-every request, so reaching another run's port does not grant access to its
+every request, so reaching another night's port does not grant access to its
 repository. This credential is not a GitHub token. The host's temporary copy is
-removed on exit; a new run rotates it. `GH_BROKER_TOKEN_FILE` overrides the shim's
+removed at the end; a resume rotates it. `GH_BROKER_TOKEN_FILE` overrides the shim's
 credential path for local tests. Restarting with an older shim requires running
 `harden.sh` or installing the updated shim first.
 
-**Journal.** The `ALLOWED`/`REFUSED` verdicts go to `<run-dir>/gh-broker.log`,
-under `~/.lance-nuit/night-runs/<vm>-<timestamp>/` by default. On shutdown the
-script prints the counts and the last five refusals: that is the first thing to
-read in the morning.
+**Journal.** The `ALLOWED`/`REFUSED` verdicts go to `<run-dir>/gh-broker.log`;
+`night.log` ends with their counts.
 
 ## Checking the `gh` shim from inside a VM
 
@@ -203,9 +265,8 @@ shim; `gh auth token`, `gh api`, `gh repo clone`, another repository,
 `issue delete` and `issue edit --body` are refused; no token-looking string is
 left in the VM; and with the broker down the shim exits **127** with a clear
 message — the code lance-nuit reads as "binary missing", so a clean failure
-rather than a retry loop. A last round runs the same read under `night-run.sh`
-and checks that the verdicts were journalled and that the broker died with the
-run.
+rather than a retry loop. That the broker dies with the night is covered by the
+local tests below.
 
 Options: `--repo owner/name` to target another repository, `--acl` to apply the
 `nuit` ACL to the throwaway VM first — the only way to prove the ACL lets the VM
@@ -221,54 +282,24 @@ Local regression tests need Python 3 and Node.js, but no VM or GitHub access:
 python3 -B -m unittest discover -s tools/night-vm -p 'test_*.py'
 ```
 
-## A night, end to end
+## What a project provides
 
-The sequence below is still manual; the `lancenuit` wrapper is meant to
-encapsulate it. Steps 2 to 6 run under `night-run.sh`, which frames the broker,
-so there is no `kill` to do by hand.
+`night.sh` knows nothing of the project's stack. The base branch carries:
 
-```sh
-# 1. the VM
-incus copy nuit-template/clean nuit-run-01
-./network-acl.sh apply nuit-run-01              # before the first boot
-incus start nuit-run-01
+- `.lance-nuit/vm-prepare.sh`, run as `nuit` in the project's clone before the
+  agent: start the stack, install dependencies, create the test database.
+  Idempotent, since a resume runs it again. A non-zero exit ends the night
+  before any token is spent.
+- the pipeline, whose first step puts each ticket on `nuit/<ticket>`: only those
+  branches come back, and the publisher refuses any other ref. Its steps never
+  push.
+- the project's agent context (`CLAUDE.md`, `.claude/skills/`), versioned: the
+  VM receives the base branch and the token, nothing else.
 
-# 2. the code (a bundle) and the unversioned context
-cd <project>
-BASE=$(git branch --show-current)        # the branch the run starts from
-git bundle create /tmp/run.bundle "$BASE"
-tar czf /tmp/payload.tgz CLAUDE.md .lance-nuit/work-items/<ticket>
-incus file push /tmp/run.bundle /tmp/payload.tgz nuit-run-01/root/
-
-# 3. inside the VM
-incus exec nuit-run-01 -- bash -lc '
-  git init -q /tmp/verify &&
-  git -C /tmp/verify bundle verify /root/run.bundle &&
-  rm -rf /tmp/verify &&
-  git clone -b <base> /root/run.bundle /srv/project &&
-  cd /srv/project && git remote remove origin &&
-  tar xzf /root/payload.tgz -C /srv/project'
-
-# 4. the secrets: read-only disk device from /dev/shm -- still to wire
-# 5. the run: lancenuit inside the VM
-# 6. in the morning: bring back the branches and the scan records, then publish
-incus exec nuit-run-01 -- bash -lc "cd /srv/project && git bundle create /root/out.bundle --branches='nuit/*' ^main"
-incus file pull nuit-run-01/root/out.bundle ~/.lance-nuit/night-runs/<run-id>/
-incus file pull -r nuit-run-01/srv/project/.lance-nuit/pipeline-history ~/.lance-nuit/night-runs/<run-id>/
-./publish-night-result.py <run-id> --repo owner/name
-
-# 7. cleanup
-incus delete nuit-run-01 --force
-```
-
-A bundle is used rather than a copy of the clone on purpose: a copy carries the
-GitHub remote with it, which is exactly what the confinement forbids.
-
-Name the base branch explicitly, in the bundle and in the clone: a bundle that
-carries only `HEAD` clones into a detached state, with no branch for the run to
-build on. And `git bundle verify` needs a repository to compare prerequisites
-against, hence the throwaway one above — it must come before the clone to be a
-gate rather than a formality.
+The code travels as a bundle of the base branch rather than a copy of the
+clone: a copy carries the GitHub remote with it, which is exactly what the
+confinement forbids. The bundle is verified in a throwaway repository before
+the clone, and the clone loses its `origin`.
 
 ## Publishing in the morning
 
@@ -358,6 +389,10 @@ QEMU.
 
 **The `gh` shim answers "broker unreachable"**: the broker is not running on the
 host, the ACL blocks the port, or the VM points at the wrong port. Check, in that
-order, `cat /etc/lance-nuit/gh-broker.url` inside the VM and the port announced
-by `night-run.sh`. The shim exits 127, which lance-nuit reads as "binary
+order, `cat /etc/lance-nuit/gh-broker.url` inside the VM and
+`<run-dir>/broker.port`. The shim exits 127, which lance-nuit reads as "binary
 missing".
+
+**`docker: unknown command: docker compose` as `nuit`**: the CLI fails on a
+plugin directory it cannot read, such as a `/usr/local/libexec` that
+`incus file push --create-dirs` created with mode `0750`. Make it `0755`.
