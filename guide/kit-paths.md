@@ -64,6 +64,14 @@ A set of ready-made review steps is available as a TypeScript example in
 [`examples/builtin-reviews`](../examples/builtin-reviews/README.md). It is not
 loaded from kit paths; project pipelines own their quality steps directly.
 
+**Run origins.** When the caller's environment carries `LANCENUIT_ORIGIN` (a
+plain name such as `chief:<thread id>`), every run it starts or resumes writes
+`<user kit>/run-origins/<runId>.json` = `{ origin, runId, runDir, recordedAt }`.
+An app that launched runs finds them there, whatever the project or `specPath`,
+then reads `<runDir>/state.json`. The last caller wins; a caller without the
+variable leaves the record as it was. A night in the VM keeps its own `origin`
+file instead (`tools/night-vm/LIVE.md`).
+
 **Run a pipeline by name.** `--pipeline` accepts both forms, separated by
 `^[a-z][a-z0-9-]*$`: a matching value is a NAME resolved through the chain; a value
 containing `/`, `.`, or an uppercase letter is a PATH used as-is. This is the same

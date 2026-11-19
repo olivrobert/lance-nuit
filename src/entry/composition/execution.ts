@@ -8,6 +8,7 @@
 import { dirname } from "node:path";
 import { startLiveFeed } from "./feed.js";
 import { enforceCleanTree } from "../boot/gitguard.js";
+import { recordRunOrigin } from "../env/run-origin.js";
 import { RUNNER_STEP_ENV } from "../../shared/env/runner-env.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { PipelineContext } from "../../shared/language/context.js";
@@ -134,6 +135,7 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) =
   }
   target.explicit?.commit();
   onRunCreated(run);
+  recordRunOrigin(run);
   if (ready.recordedDecision) recordDecision(run, ready.recordedDecision);
   if (run.specPath !== context.config.specPath) {
     context = buildPipelineContext({
