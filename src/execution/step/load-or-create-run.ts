@@ -111,8 +111,9 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
   const buildContext = context ?? buildPipelineContext({ ticket });
   const pipeline = await loadPipelineDefinition(pipelinePath, buildContext);
 
-  // --start-at makes preceding steps effective skips, and requeues the target
-  // and every later step even when an earlier pass finished them.
+  // --start-at skips the preceding steps that still owe work (`excludedSteps`; a
+  // done one meets the usual resume re-check), and requeues the target and every
+  // later step even when an earlier pass finished them.
   let replayIds: ReadonlySet<string> = new Set();
   if (startAt) {
     const ids = pipeline.steps.map((step) => step.id);
