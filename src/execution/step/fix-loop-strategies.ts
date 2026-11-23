@@ -4,12 +4,20 @@ import { performFixAttempt, runStepCommandFresh } from "./fix-loop-pass.js";
 import type { FixRun } from "./fix-loop-runtime.js";
 import { settleStepFailure } from "./non-blocking.js";
 
+/** Outcome of the repair loop. `blocked` is set, step left unsettled, when a replay
+ * declared an obstacle outside the code: the outcome phase stops the run on it as
+ * it does for a first attempt. */
+export interface FixLoopOutcome {
+  failed: boolean;
+  blocked?: { failReason?: string };
+}
+
 /** Repair pass then command replay, looping up to `max_retries`, with escalation. */
 export async function runFixRetryLoop(
   fx: FixRun,
   output: string,
   initialFailReason: string | undefined,
-): Promise<{ failed: boolean }> {
+): Promise<FixLoopOutcome> {
   const { run, step, budget, opts } = fx;
   const failure = step.def.on_failure!;
   const maxRetries = failure.max_retries;
@@ -135,6 +143,7 @@ export async function runFixRetryLoop(
       costStopped = true;
       break;
     }
+    if (retry.failCause === "blocked") return { failed: false, blocked: { failReason: retry.failReason } };
 
     // Exit status remains authoritative: a silent extractor after a crash cannot
     // turn the retry into success. Full output feeds the next fix.

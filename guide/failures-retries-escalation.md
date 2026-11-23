@@ -35,6 +35,9 @@ directions: `"blocked": false` with a `reason` that quotes `BLOCKED:` is not a b
 `"blocked": true` alongside `success: true` is ignored, with a warning: a step that
 succeeded has nothing to stop.
 
+The same holds for the replay that follows a repair: a block declared there stops
+the run the same way, without another repair pass, even with quota left.
+
 The cause is read from the signal the runner retains, never from a stray one. A
 blocked verdict left in the output of an attempt a timeout or the cost guard killed
 does not stop the run as blocked: the kill is what ended the attempt.

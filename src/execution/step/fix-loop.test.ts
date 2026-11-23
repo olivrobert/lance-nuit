@@ -130,6 +130,7 @@ function fakes(opts: {
         session: r.session,
         timedOut: r.timedOut,
         failReason: r.failReason,
+        failCause: r.failCause,
         budgetExceeded: r.budgetExceeded,
       };
     },
@@ -664,6 +665,37 @@ test("a fix policy with retries: 1 records step, fix, step and one retry", async
   expect(step.retries).toBe(1);
   expect(calls.fix.length).toBe(1);
   expect(calls.retry).toBe(1);
+});
+
+test("a replay that declares a block stops the run cleanly without another repair", async () => {
+  const step = makeRunStep({
+    id: "verify",
+    name: "Verify",
+    command: "make test",
+    runner: "bash",
+    on_failure: { fix_prompt: "fix", max_retries: 2 },
+  });
+  const run = makeRun(step);
+  const { deps: fixDeps, calls } = fakes({
+    fix: [{ ok: true }, { ok: true }],
+    retry: [{ ok: false, failReason: "staging unreachable", failCause: "blocked" }, { ok: true }],
+  });
+  const loopDeps: StepLoopDeps = {
+    executeStep: async () => ({ output: "", ok: false, stats: { duration_ms: 1 }, failReason: "make test failed" }),
+    extractErrors: async () => ({ hasErrors: true, errors: "err" }),
+    runFixLoop: (r, s, command, output, ctx, budget, reason, opts) =>
+      runFixLoop(r, s, command, output, ctx, budget, reason, { ...opts, deps: fixDeps }),
+    output: NULL_RUN_OUTPUT,
+  };
+
+  const outcome = await executeRunSteps(run, { resuming: false }, loopDeps, buildPipelineContext({}));
+
+  expect(outcome.stopped).toBe(true);
+  expect(calls.fix.length).toBe(1);
+  expect(calls.retry).toBe(1);
+  expect(step.status).toBe("failed");
+  expect(run.outcome?.stop).toEqual({ kind: "blocked", detail: "staging unreachable" });
+  expect(run.outcome?.resumable).toBe(true);
 });
 
 // `resumeSession` names a step that exists (the load-time rule), but the run may
