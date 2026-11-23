@@ -187,27 +187,7 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<Outcom
   // `failCause: "blocked"` means a fix cannot resolve an obstacle outside the
   // code. The signal is a field, decided at the two boundaries that read agent
   // and extension text; this loop never parses prose.
-  if (result.failCause === "blocked") {
-    // A backend may report the cause without a message. The stop still needs a
-    // detail: the reader is told what happened, not left with an empty reason.
-    const blockedReason = lastFailReason ?? "blocked by an obstacle outside the code";
-    if (step.def.blocking === false) {
-      absorbNonBlocking(run, step, input.output, blockedReason);
-      return "continue";
-    }
-    // The step ran and failed: keep it visible as a failure so the report names it
-    // and a resume replays it once the external obstacle is lifted. `stopRun` then
-    // overrides the run verdict, since a clean stop outranks the failure.
-    updateStep(run, step, "failed", blockedReason);
-    stopRun(run, step, blockedReason, { kind: "blocked", detail: blockedReason });
-    input.output.emit({
-      type: "runner.message",
-      level: "info",
-      message: `⏹ ${step.def.name} — non-code block, stopping without repair: ${blockedReason}`,
-    });
-    emitOutputPath(input.output, stepLog);
-    return "stopped";
-  }
+  if (result.failCause === "blocked") return stopOnBlock(input, lastFailReason, stepLog);
 
   // Non-blocking checks remain visible in JSON and the timeline without stopping a
   // run that is otherwise valid.
@@ -254,5 +234,31 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<Outcom
     deps: { executeStep: deps.executeStep, runFixLoop: deps.runFixLoop },
   });
   if (run.aborted) return "stopped";
+  if (outcome.blocked) {
+    return stopOnBlock(input, outcome.blocked.failReason, latestAttemptLog(run, step) ?? stepLog);
+  }
   return outcome.failed ? "failed" : "continue";
+}
+
+function stopOnBlock(input: ResolveOutcomeInput, failReason: string | undefined, stepLog: string): OutcomeAction {
+  const { run, step } = input;
+  // A backend may report the cause without a message. The stop still needs a
+  // detail: the reader is told what happened, not left with an empty reason.
+  const blockedReason = failReason ?? "blocked by an obstacle outside the code";
+  if (step.def.blocking === false) {
+    absorbNonBlocking(run, step, input.output, blockedReason);
+    return "continue";
+  }
+  // The step ran and failed: keep it visible as a failure so the report names it
+  // and a resume replays it once the external obstacle is lifted. `stopRun` then
+  // overrides the run verdict, since a clean stop outranks the failure.
+  updateStep(run, step, "failed", blockedReason);
+  stopRun(run, step, blockedReason, { kind: "blocked", detail: blockedReason });
+  input.output.emit({
+    type: "runner.message",
+    level: "info",
+    message: `⏹ ${step.def.name} — non-code block, stopping without repair: ${blockedReason}`,
+  });
+  emitOutputPath(input.output, stepLog);
+  return "stopped";
 }
