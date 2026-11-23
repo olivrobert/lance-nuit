@@ -51,6 +51,7 @@ import {
   inputsReadBeforeAttempt,
   markInFlight,
   mergeProvenance,
+  pureInputsOf,
   readInputs,
   revisedInPlace,
   writeProvenance,
@@ -374,6 +375,33 @@ export async function runAttempt(run: RunView, step: RunStepView, options: RunAt
       return result;
     },
   });
+}
+
+/**
+ * Record, for the outputs `step` revises in place, the revision a successful
+ * repair without replay (`replayAfterFix: false`) made of them. The author
+ * settles the step on that repair, so it vouches for its revision as a succeeded
+ * attempt would; without this, the mark of the failed command would outlive it,
+ * and the steps producing those outputs would replay on every later admission.
+ * An output produced from scratch keeps its mark: only the command produces it.
+ * Returns why each revised output the repair left unreadable stays marked.
+ */
+export async function recordRepairRevision(context: PipelineContext, step: RunStepView): Promise<string[]> {
+  const revised = revisedInPlace(step.def);
+  if (revised.size === 0) return [];
+  const fingerprints = await fingerprintInputs(context, pureInputsOf(step.def));
+  const unreadable: string[] = [];
+  for (const output of step.def.outputs ?? []) {
+    if (!revised.has(output.name)) continue;
+    try {
+      await output.require(context);
+    } catch (error) {
+      unreadable.push(`${output.name}: ${errorMessage(error)}`);
+      continue;
+    }
+    await mergeProvenance(context, output, step.id, fingerprints);
+  }
+  return unreadable;
 }
 
 /** One `capture` of a step and the value the agent returned for it, accepted by

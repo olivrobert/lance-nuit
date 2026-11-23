@@ -296,6 +296,12 @@ suffixed with `(fix applied, not replayed)`: nothing re-checked the code, so
 reports never read the repair as a verified success. A failed repair keeps the
 original reason unchanged.
 
+A repair that rewrites an output its step revises in place (declared as both
+`input` and `output`, like a plan the fix corrects in the session of the step
+that wrote it) is recorded as a successful revision of that output: the step
+that produced the output stays fresh and does not replay on the next resume.
+See [persistence.md](persistence.md#output-provenance).
+
 The single check and its single repair also hold across resumes: the runner
 records the step's inputs as the repair left them, so a later resume — a raised
 budget, an interruption, a failure further down — does not check again unless

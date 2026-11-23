@@ -183,7 +183,9 @@ inputs of the record that vouched for them. Outside the mark, `producedBy` and
 While the artifact still holds those bytes, the revision changed nothing and
 `previous` stands for the record; once they differ, the output is `unfinished`.
 On success, the revision merges its fingerprints into `previous` and the mark
-goes.
+goes. A repair without replay (`replayAfterFix: false`) that succeeds does the
+same once the output still reads: the step settles on that repair, so the
+revision it wrote stands as a successful attempt's would.
 
 When the bytes a revision finds are themselves `unfinished`, its mark carries no
 `revision` but `"unguaranteed": { "revisedBy": [] }`. A successful revision keeps

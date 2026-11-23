@@ -3,6 +3,7 @@ import { EscalationLatch, escalationLadderFor } from "./escalation.js";
 import { performFixAttempt, runStepCommandFresh } from "./fix-loop-pass.js";
 import type { FixRun } from "./fix-loop-runtime.js";
 import { settleStepFailure } from "./non-blocking.js";
+import { recordRepairRevision } from "./step-attempt.js";
 import { headCommit, snapshotTree, type TreeSnapshot, treeChanges } from "./tree-snapshot.js";
 
 interface WorkState {
@@ -132,6 +133,9 @@ export async function runFixRetryLoop(
     if (failure.replay_after_fix === false) {
       fx.output.emit({ type: "runner.message", level: "info", message: `  Fix applied, command not replayed` });
       lastFailReason = `${lastFailReason ?? "failure"} (fix applied, not replayed)`;
+      for (const reason of await recordRepairRevision(fx.baseCtx, step)) {
+        fx.output.emit({ type: "runner.message", level: "warn", message: `  Fix output kept unfinished: ${reason}` });
+      }
       break;
     }
 

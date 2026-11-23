@@ -449,7 +449,11 @@ The rules:
   listed reviser is judged by its inputs as usual, since running it again
   would vouch for nothing more. A step that revises an output it produces
   itself (its `input` and `output` both list it) is listed once its own
-  revision succeeds, so it does not replay itself on every run.
+  revision succeeds, so it does not replay itself on every run. A successful
+  repair without replay (`replayAfterFix: false`) counts as a successful
+  revision of the outputs its step revises in place: the step settles on it,
+  so the producer stays fresh. An output that step produces from scratch keeps
+  the mark of the failed command.
 - **Adoption.** An output that exists without any record adopts the inputs
   present now and is skipped. Without this, the feature would regenerate the
   deliverables of every work item already waiting for a human decision.

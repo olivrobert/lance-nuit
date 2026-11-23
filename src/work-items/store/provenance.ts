@@ -80,7 +80,8 @@ export interface VouchingRecord {
 
 /** The attempt that may be writing an artifact. Its presence on a record means
  *  that attempt has not succeeded: it is running, failed, was absorbed by
- *  `blocking: false`, or the runner died in it. */
+ *  `blocking: false`, or the runner died in it. A repair without replay that
+ *  succeeds clears it on the outputs its step revises in place. */
 export interface InFlightAttempt {
   runId: string;
   stepId: string;
@@ -107,7 +108,9 @@ export interface ArtifactProvenance {
    *  reads it as `stale` for that step, and runs it. */
   inputs: Record<string, InputFingerprint>;
   /** Set before the spawn of every attempt that declares the artifact as output,
-   *  cleared only when that attempt succeeds. Optional and additive: no schema bump. */
+   *  cleared only when that attempt succeeds, or when a repair without replay of
+   *  it succeeds over an artifact it revises in place. Optional and additive: no
+   *  schema bump. */
   inFlight?: InFlightAttempt;
   /** Set when a revision in place succeeded over bytes an unfinished attempt left.
    *  The artifact stays `unfinished` to every step declaring it except those in
