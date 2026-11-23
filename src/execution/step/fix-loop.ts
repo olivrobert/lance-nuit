@@ -5,9 +5,10 @@
 import type { PipelineContext } from "../../shared/language/context.js";
 import type { RunStepView, RunView, RunBudget } from "../../run/index.js";
 import { type FixLoopOpts, prepareFixRun } from "./fix-loop-runtime.js";
-import { runFixRetryLoop } from "./fix-loop-strategies.js";
+import { type FixLoopOutcome, runFixRetryLoop } from "./fix-loop-strategies.js";
 
 export type { FixLoopDeps, FixLoopOpts } from "./fix-loop-runtime.js";
+export type { FixLoopOutcome } from "./fix-loop-strategies.js";
 export { buildFixContext } from "./fix-loop-runtime.js";
 
 /**
@@ -24,7 +25,7 @@ export async function runFixLoop(
   budget: RunBudget,
   initialFailReason: string | undefined,
   opts: FixLoopOpts,
-): Promise<{ failed: boolean }> {
+): Promise<FixLoopOutcome> {
   const fx = prepareFixRun(run, step, command, baseCtx, budget, opts);
   return runFixRetryLoop(fx, output, initialFailReason);
 }

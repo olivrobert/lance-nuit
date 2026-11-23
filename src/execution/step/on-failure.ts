@@ -13,7 +13,7 @@ import type { RunOutput } from "../run-output.js";
 import type { AbortScope } from "../abort.js";
 import { consumeRetry, costGate, type RetryQuota, type RunBudget, refundRetry, updateStep } from "../../run/index.js";
 import { type EscalationLadder, EscalationLatch, escalationLadderFor } from "./escalation.js";
-import type { runFixLoop } from "./fix-loop.js";
+import type { FixLoopOutcome, runFixLoop } from "./fix-loop.js";
 import { settleStepFailure } from "./non-blocking.js";
 import { runAttempt, startFreshSession } from "./step-attempt.js";
 
@@ -49,6 +49,8 @@ export interface OnFailureContext {
 export interface OnFailureOutcome {
   /** True when the run stops for a blocking failure. */
   failed: boolean;
+  /** A replay after a repair declared a block; the outcome phase settles it. */
+  blocked?: FixLoopOutcome["blocked"];
 }
 
 export type OnFailureHandler = (ctx: OnFailureContext) => Promise<OnFailureOutcome>;
@@ -322,8 +324,9 @@ function fixHandler(opts: { resumeSession?: string }): OnFailureHandler {
       abort,
     });
     if (abort.isRunAborted(run)) return { failed: false };
-    // The fix loop settles blocking vs non-blocking itself (settleStepFailure).
-    return { failed: result.failed };
+    // The fix loop settles blocking vs non-blocking itself (settleStepFailure),
+    // except a blocked replay, which the outcome phase stops on.
+    return result;
   };
 }
 
