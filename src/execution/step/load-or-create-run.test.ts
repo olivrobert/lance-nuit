@@ -1698,6 +1698,36 @@ test("resume: --start-at refuses to replay a composed step whose children alread
   expect(existsSync(join(dir, "runner.lock"))).toBe(false);
 });
 
+test("resume: a definition that dropped a persisted step refuses and gives the run lock back", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-removed-step-lock-"));
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-removed" });
+  const path = pipelineFile(root);
+  const dir = resolveRunDir("p", "T-removed", undefined, true, ctx);
+  const { run } = await loadOrCreateRun({
+    pipelinePath: path,
+    ticket: "T-removed",
+    runDir: dir,
+    fresh: false,
+    context: ctx,
+    worktree: false,
+  });
+  updateStep(run, run.steps[0]!, "failed", "interrupted");
+  unlinkSync(join(dir, "runner.lock"));
+  const trimmed = join(root, "p-trimmed.ts");
+  writeFileSync(
+    trimmed,
+    `export default ({ pipeline, actionStep }) => pipeline("p")
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
+  .build();`,
+  );
+
+  await expect(
+    loadOrCreateRun({ pipelinePath: trimmed, ticket: "T-removed", fresh: false, context: ctx, worktree: false }),
+  ).rejects.toThrow(/removed or renamed persisted step\(s\): c/);
+  expect(existsSync(join(dir, "runner.lock"))).toBe(false);
+});
+
 test("a new run started with --start-at marks the target and later steps as replays", async () => {
   const root = mkdtempSync(join(tmpdir(), "new-run-start-at-"));
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-new-start" });

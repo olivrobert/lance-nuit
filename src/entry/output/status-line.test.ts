@@ -90,6 +90,41 @@ test("the line is erased before it is repainted and once the step ends", () => {
   expect(writes).toHaveLength(before);
 });
 
+test("parallel siblings: the first to finish hands the line back to the one still running", () => {
+  const { writes, stream } = capture(true);
+  const line = new StatusLineOutput(stream, clock().now);
+  line.attach();
+  const sibling = makeRunStep({ id: "review", name: "Review", command: "true", runner: "agent" });
+  const paint = () => (line as unknown as { paint(): void }).paint();
+
+  line.emit({ type: "step.started", step, index: 1, total: 2 });
+  line.emit({ type: "step.started", step: sibling, index: 2, total: 2 });
+  paint();
+  expect(writes.at(-1)).toContain("Review");
+
+  line.emit({ type: "step.done", step: sibling });
+  line.emit({ type: "step.ended", step: sibling });
+  paint();
+  expect(writes.at(-1)).toContain("Implement");
+
+  line.emit({ type: "step.ended", step });
+  expect(writes.at(-1)).toBe("\r\x1b[K");
+  paint();
+  expect(writes.at(-1)).toBe("\r\x1b[K");
+});
+
+test("a step that ends without a verdict event still takes the line down", () => {
+  const { writes, stream } = capture(true);
+  const line = new StatusLineOutput(stream, clock().now);
+  line.attach();
+  line.emit({ type: "step.started", step, index: 1, total: 1 });
+  (line as unknown as { paint(): void }).paint();
+
+  line.emit({ type: "step.ended", step });
+
+  expect(writes.at(-1)).toBe("\r\x1b[K");
+});
+
 test("telemetry arriving outside a step never opens a line", () => {
   const { writes, stream } = capture(true);
   const line = new StatusLineOutput(stream, clock().now);

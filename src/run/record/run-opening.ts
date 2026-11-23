@@ -399,13 +399,7 @@ async function restore(request: OpenRunRequest, selected: SelectedDirectory, sav
   const projected = projectRunState(saved, readRunEvents({ run_dir: dir, runId: saved.runId, eventStore }));
   const states = [...projected.steps.values()].flatMap((step) => (step.state ? [step.state] : []));
   const reconcile = pipeline.reconcile === true;
-  let selection: ResumedSelection;
-  try {
-    selection = policy.selectResumed(states, reconcile);
-  } catch (error) {
-    selected.releaseLock();
-    throw error;
-  }
+  const selection = policy.selectResumed(states, reconcile);
   const selectionTookWork = applySelection(states, selection);
   const run = hydrate(pipeline, request.pipelinePath, saved, scope, projected, selectionTookWork);
   run.reconcile = reconcile;
@@ -488,8 +482,13 @@ function create(request: OpenRunRequest, selected: SelectedDirectory): Run {
 export async function openRun(request: OpenRunRequest): Promise<OpenedRun> {
   const selected = selectDirectory(request);
   const { saved } = selected;
-  if (saved?.schemaVersion === 1 && typeof saved.runId === "string" && Array.isArray(saved.steps)) {
-    return { run: await restore(request, selected, saved), resumed: true };
+  try {
+    if (saved?.schemaVersion === 1 && typeof saved.runId === "string" && Array.isArray(saved.steps)) {
+      return { run: await restore(request, selected, saved), resumed: true };
+    }
+    return { run: create(request, selected), resumed: false };
+  } catch (error) {
+    selected.releaseLock();
+    throw error;
   }
-  return { run: create(request, selected), resumed: false };
 }

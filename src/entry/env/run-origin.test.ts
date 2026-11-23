@@ -1,5 +1,14 @@
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RUN_ORIGINS_DIR, recordRunOrigin } from "./run-origin.ts";
@@ -21,6 +30,20 @@ test("records the caller's origin and the run directory under the user kit", () 
     runDir: run.run_dir,
     recordedAt: "2026-11-19T14:19:30.000Z",
   });
+});
+
+test("records the physical run directory, not a worktree symlink that dies with the worktree", () => {
+  const home = kit();
+  const clone = mkdtempSync(join(tmpdir(), "run-origin-clone-"));
+  const worktree = mkdtempSync(join(tmpdir(), "run-origin-worktree-"));
+  mkdirSync(join(clone, "runs", "r"), { recursive: true });
+  symlinkSync(join(clone, "runs"), join(worktree, "runs"));
+  const file = recordRunOrigin(
+    { runId: run.runId, run_dir: join(worktree, "runs", "r") },
+    { PIPELINE_HOME: home, LANCENUIT_ORIGIN: "chief:f-42" },
+    at,
+  );
+  expect(JSON.parse(readFileSync(file ?? "", "utf-8")).runDir).toBe(join(realpathSync(clone), "runs", "r"));
 });
 
 test("the last caller wins on resume", () => {

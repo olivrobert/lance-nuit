@@ -42,6 +42,14 @@ export interface StepFailedEvent {
   suffix?: string;
 }
 
+/** Closes every `step.started`, whatever the verdict: a composed step, a block
+ * stop or an interruption ends without `step.done`/`step.failed`, which belong to
+ * the console verdict, not to the lifetime of the pass. */
+export interface StepEndedEvent {
+  type: "step.ended";
+  step: RunStepView;
+}
+
 /** What a destination receives: the step events, plus what the bus carries. */
 export type RunOutputEvent =
   | RunnerEvent
@@ -49,7 +57,8 @@ export type RunOutputEvent =
   | StepSessionEvent
   | StepLogsEvent
   | StepDoneEvent
-  | StepFailedEvent;
+  | StepFailedEvent
+  | StepEndedEvent;
 
 /** A destination for structured run output. Implementations must be best effort:
  * output failures must never change the pipeline result. */

@@ -440,9 +440,14 @@ export function resolveRunDirSelection(
 
   const dir = join(pipelineDir, allocateRunId(pipelineDir, pipelineName));
   mkdirSync(dir, { recursive: true });
-  claimRunDir(dir);
-  updateLatestSymlink(pipelineDir, dir);
-  return { dir, selectedSnapshot: false, acquiredRunLock: false };
+  const claim = claimRunDir(dir);
+  try {
+    updateLatestSymlink(pipelineDir, dir);
+  } catch (error) {
+    if (claim.acquired) releaseRunDir(dir);
+    throw error;
+  }
+  return { dir, selectedSnapshot: false, acquiredRunLock: claim.acquired };
 }
 
 /** Directory of the latest run of this pipeline and ticket, or `null` when no

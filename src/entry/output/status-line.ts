@@ -13,6 +13,7 @@
 
 import type { RunnerEvent } from "../../shared/runtime/events.js";
 import type { RunOutputEvent } from "../../execution/index.js";
+import type { RunStepView } from "../../run/index.js";
 import { setLogInterceptor } from "../../shared/runtime/logging.js";
 import { cyan, dim, visibleLength, yellow } from "./color.js";
 import { formatContextShare } from "./format.js";
@@ -80,7 +81,9 @@ function clip(text: string, max: number): string {
  * interceptor registered here.
  */
 export class StatusLineOutput {
-  private state: StatusLineState | undefined;
+  /** Keyed by the step object, not its id: a composed child may reuse an id of
+   * its parent. Insertion order makes the last started step the one shown. */
+  private readonly running = new Map<RunStepView, StatusLineState>();
 
   private timer: NodeJS.Timeout | undefined;
 
@@ -111,12 +114,14 @@ export class StatusLineOutput {
     if (!this.enabled) return;
     switch (event.type) {
       case "step.started":
-        this.state = { step: event.step.def.name, startedAt: this.now() };
+        this.running.set(event.step, { step: event.step.def.name, startedAt: this.now() });
         this.start();
         break;
       case "step.done":
       case "step.failed":
-        this.stop();
+      case "step.ended":
+        this.running.delete(event.step);
+        if (this.running.size === 0) this.stop();
         break;
       case "runner-event":
         this.observe(event);
@@ -126,12 +131,18 @@ export class StatusLineOutput {
     }
   }
 
+  /** The step on the line: the last one started that is still running. */
+  private get state(): StatusLineState | undefined {
+    return [...this.running.values()].at(-1);
+  }
+
   /** Backend telemetry only refines the CURRENT step; it never opens a line of
    * its own, so late events from a finished step cannot resurrect the spinner. */
   private observe(event: Extract<RunnerEvent, { type: "runner-event" }>): void {
-    if (!this.state) return;
-    if (event.event === "context") this.state.pct = event.pct;
-    else if (event.event === "activity") this.state.activity = event.label;
+    const state = this.state;
+    if (!state) return;
+    if (event.event === "context") state.pct = event.pct;
+    else if (event.event === "activity") state.activity = event.label;
   }
 
   private start(): void {
@@ -145,17 +156,13 @@ export class StatusLineOutput {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     this.clear();
-    this.state = undefined;
+    this.running.clear();
   }
 
   private paint(): void {
-    if (!this.state) return;
-    const line = renderStatusLine(
-      this.state,
-      this.now() - this.state.startedAt,
-      this.frame++,
-      this.stream.columns ?? 0,
-    );
+    const state = this.state;
+    if (!state) return;
+    const line = renderStatusLine(state, this.now() - state.startedAt, this.frame++, this.stream.columns ?? 0);
     this.stream.write(`\r${line}\x1b[K`);
     this.painted = true;
   }

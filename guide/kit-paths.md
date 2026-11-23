@@ -66,7 +66,9 @@ loaded from kit paths; project pipelines own their quality steps directly.
 
 **Run origins.** When the caller's environment carries `LANCENUIT_ORIGIN` (a
 plain name such as `chief:<thread id>`), every run it starts or resumes writes
-`<user kit>/run-origins/<runId>.json` = `{ origin, runId, runDir, recordedAt }`.
+`<user kit>/run-origins/<runId>.json` = `{ origin, runId, runDir, recordedAt }`,
+where `runDir` is the physical path (symlinks resolved, so it outlives a cleaned
+`--worktree`).
 An app that launched runs finds them there, whatever the project or `specPath`,
 then reads `<runDir>/state.json`. The last caller wins; a caller without the
 variable leaves the record as it was. A night in the VM keeps its own `origin`

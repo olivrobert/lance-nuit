@@ -2460,3 +2460,20 @@ test("executeRunSteps: announces each step with its place in the pipeline", asyn
     { id: "b", index: 2, total: 2 },
   ]);
 });
+
+test("executeRunSteps: every started step is ended, even one that stops the run without a verdict event", async () => {
+  const run = makeRun([bashStep("a", "cmd"), bashStep("b", "cmd")]);
+  const { deps } = fakeDeps([{ ok: true }, { ok: false, output: "", failReason: "app down", failCause: "blocked" }]);
+  const seen: string[] = [];
+  const output: StepLoopDeps["output"] = {
+    emit: (event) => {
+      if (event.type.startsWith("step.") && event.type !== "step.logs" && "step" in event)
+        seen.push(`${event.type} ${event.step.id}`);
+    },
+  };
+
+  const outcome = await executeRunSteps(run, { resuming: false }, { ...deps, output }, buildPipelineContext({}));
+
+  expect(outcome.stopped).toBe(true);
+  expect(seen).toEqual(["step.started a", "step.done a", "step.ended a", "step.started b", "step.ended b"]);
+});

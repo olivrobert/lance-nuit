@@ -6,7 +6,7 @@
 // directories sit in each project under a configurable `specPath`: the app could
 // not list them. The last caller wins; a caller without the variable leaves the
 // previous record.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { userKitDir } from "../../shared/env/kit-paths.js";
 import { writeFileAtomic } from "../../shared/lib/atomic-write.js";
@@ -23,6 +23,16 @@ export interface RunOriginRecord {
   runId: string;
   runDir: string;
   recordedAt: string;
+}
+
+/** With `--worktree` the run directory is reached through a symlink inside the
+ *  worktree; the record must outlive `worktree clean`, so it names the target. */
+function physicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
 }
 
 /** Best effort: a run never stops because its origin could not be recorded. */
@@ -45,7 +55,7 @@ export function recordRunOrigin(
   const record: RunOriginRecord = {
     origin,
     runId,
-    runDir: resolve(run.run_dir),
+    runDir: physicalPath(run.run_dir),
     recordedAt: now().toISOString(),
   };
   try {

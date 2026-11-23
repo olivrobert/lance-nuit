@@ -146,11 +146,25 @@ async function runInitialAttempt(input: {
 export async function runStepPass(
   env: StepPassEnv,
   step: RunStepView,
-  { command, stepLogDir }: Extract<StepAdmission, { kind: "ready" }>,
+  admission: Extract<StepAdmission, { kind: "ready" }>,
 ): Promise<StepLoopStop | undefined> {
-  const { run, baseCtx, budget, abort, deps } = env;
+  const { run, deps } = env;
   const stepIndex = run.steps.indexOf(step) + 1;
   deps.output.emit({ type: "step.started", step, index: stepIndex, total: run.steps.length });
+  try {
+    return await passStartedStep(env, step, admission, stepIndex);
+  } finally {
+    deps.output.emit({ type: "step.ended", step });
+  }
+}
+
+async function passStartedStep(
+  env: StepPassEnv,
+  step: RunStepView,
+  { command, stepLogDir }: Extract<StepAdmission, { kind: "ready" }>,
+  stepIndex: number,
+): Promise<StepLoopStop | undefined> {
+  const { run, baseCtx, budget, abort, deps } = env;
   updateStep(run, step, "running");
   emitPipelineStep(run, step, stepIndex, run.steps.length);
 
