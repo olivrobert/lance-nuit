@@ -306,6 +306,37 @@ The option is refused at load time on a blocking step — an unverified repair
 must never open a gate — and with `retries` other than `1`, since a second
 repair would have no new failure to work from.
 
+## Stop when a repair changed nothing
+
+A repair may succeed without touching anything: on an acceptance check, the fix
+agent can answer that a criterion lies outside the code and leave the tree as it
+was. Replaying a costly check then buys the same verdict again, once per
+remaining retry. `stopIfUnchanged: true` skips that replay:
+
+```ts
+llmStep({
+  id: "acceptance",
+  name: "Acceptance criteria",
+  backend: "claude",
+  command: "/verify-acceptance",
+  onFail: { fix: (ctx) => `Fix the unmet criteria:\n${ctx.errors}`, retries: 2, stopIfUnchanged: true },
+});
+```
+
+Before and after each repair, the runner records the git tree — modified,
+added and deleted files, untracked files included, ignored files left out —
+and the commit `HEAD` points to; the run directory is not counted. When neither
+moved, it logs `Fix changed nothing, replay skipped` and stops the step as a
+[blocked](#blocked-a-failure-no-repair-can-clear) verdict: the run stops cleanly
+and stays resumable, and a non-blocking step is absorbed instead. The reason is
+the last failure reason suffixed with `(fix changed nothing)`. Outside a git
+repository nothing can be measured, and the command is replayed as usual.
+
+The option is off by default because a repair can work outside the tree — a
+migrated test database, dependencies installed in an ignored folder — and still
+deserve its replay. It requires `fix`, and is refused with
+`replayAfterFix: false`, which already skips every replay.
+
 ## Capacity escalation
 
 `onFail.escalate` changes only the agent attempt configuration:

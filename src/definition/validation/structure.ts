@@ -132,12 +132,15 @@ export class PipelineStructureValidator implements PipelineValidationRule {
         );
       }
       if (!step.on_failure) continue;
-      const { max_retries, fix_prompt, resume_session } = step.on_failure;
+      const { max_retries, fix_prompt, resume_session, stop_if_unchanged } = step.on_failure;
       if (typeof max_retries !== "number" || !Number.isInteger(max_retries) || max_retries < 0) {
         fail(`step "${id}": on_failure.max_retries must be a finite integer >= 0`);
       }
       if (resume_session !== undefined && !fix_prompt) {
         fail(`step "${id}": on_failure.resume_session requires fix_prompt`);
+      }
+      if (stop_if_unchanged !== undefined && !fix_prompt) {
+        fail(`step "${id}": on_failure.stop_if_unchanged requires fix_prompt`);
       }
       // A fix policy that never loops would fail the step without ever repairing it.
       if (fix_prompt && max_retries === 0) {

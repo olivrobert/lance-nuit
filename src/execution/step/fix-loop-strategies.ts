@@ -3,6 +3,23 @@ import { EscalationLatch, escalationLadderFor } from "./escalation.js";
 import { performFixAttempt, runStepCommandFresh } from "./fix-loop-pass.js";
 import type { FixRun } from "./fix-loop-runtime.js";
 import { settleStepFailure } from "./non-blocking.js";
+import { headCommit, snapshotTree, type TreeSnapshot, treeChanges } from "./tree-snapshot.js";
+
+interface WorkState {
+  tree: TreeSnapshot;
+  head: string | undefined;
+}
+
+async function workState(cwd: string): Promise<WorkState | undefined> {
+  const tree = await snapshotTree(cwd);
+  return tree && { tree, head: await headCommit(cwd) };
+}
+
+/** The run directory holds the runner's own logs and state, written by the fix pass
+ *  itself: a change there is not a repair. */
+function workStateChanged(before: WorkState, after: WorkState, runDir: string): boolean {
+  return before.head !== after.head || treeChanges(before.tree, after.tree, [runDir]).length > 0;
+}
 
 /** Outcome of the repair loop. `blocked` is set, step left unsettled, when a replay
  * declared an obstacle outside the code: the outcome phase stops the run on it as
@@ -88,6 +105,8 @@ export async function runFixRetryLoop(
       });
     }
     const label = `${step.retries}/${maxRetries}`;
+    const stateBeforeFix = failure.stop_if_unchanged ? await workState(fx.baseCtx.cwd) : undefined;
+    if (fx.abort.isRunAborted(run)) return { failed: false };
     const pass = await performFixAttempt(fx, {
       output: lastOutput,
       lastFailReason,
@@ -114,6 +133,16 @@ export async function runFixRetryLoop(
       fx.output.emit({ type: "runner.message", level: "info", message: `  Fix applied, command not replayed` });
       lastFailReason = `${lastFailReason ?? "failure"} (fix applied, not replayed)`;
       break;
+    }
+
+    // A replay after a repair that touched nothing would pay for the same verdict.
+    if (stateBeforeFix) {
+      const stateAfterFix = await workState(fx.baseCtx.cwd);
+      if (fx.abort.isRunAborted(run)) return { failed: false };
+      if (stateAfterFix && !workStateChanged(stateBeforeFix, stateAfterFix, run.run_dir)) {
+        fx.output.emit({ type: "runner.message", level: "info", message: `  Fix changed nothing, replay skipped` });
+        return { failed: false, blocked: { failReason: `${lastFailReason ?? "failure"} (fix changed nothing)` } };
+      }
     }
 
     const beforeRetry = costGate(run, budget, step.id);

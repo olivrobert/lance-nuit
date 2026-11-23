@@ -227,6 +227,7 @@ export abstract class StepBuilder {
     this.pendingFixClaudeOptions = undefined;
     if (policy.fix === undefined) {
       if (policy.resumeSession !== undefined) throw new Error("onFail: resumeSession requires fix");
+      if ("stopIfUnchanged" in policy) throw new Error("onFail: stopIfUnchanged requires fix");
       this.step.on_failure = applyEscalate({ max_retries: policy.retries ?? 1 }, policy.escalate);
       return this;
     }
@@ -248,6 +249,7 @@ export abstract class StepBuilder {
     if (policy.resumeSizeThresholdKb != null) failure.resume_size_threshold_kb = policy.resumeSizeThresholdKb;
     if (policy.fixOnlyWhenExtracted !== undefined) failure.fix_only_when_extracted = policy.fixOnlyWhenExtracted;
     if (policy.replayAfterFix !== undefined) failure.replay_after_fix = policy.replayAfterFix;
+    if (policy.stopIfUnchanged !== undefined) failure.stop_if_unchanged = policy.stopIfUnchanged;
     applyEscalate(failure, policy.escalate);
     this.step.on_failure = failure;
     return this;
@@ -324,6 +326,10 @@ function validatePipelineStep(step: PipelineStep): void {
     if (step.blocking !== false) throw new Error(`Step "${step.id}": replayAfterFix: false requires blocking: false`);
     if (step.on_failure.max_retries !== 1)
       throw new Error(`Step "${step.id}": replayAfterFix: false requires retries: 1`);
+    // The option decides whether to skip the replay; without one it has nothing to skip.
+    if (step.on_failure.stop_if_unchanged) {
+      throw new Error(`Step "${step.id}": stopIfUnchanged cannot be combined with replayAfterFix: false`);
+    }
   }
   if (step.runner === "pipeline" && !step.orchestration) {
     throw new Error(`Step "${step.id}": orchestration definition is missing`);

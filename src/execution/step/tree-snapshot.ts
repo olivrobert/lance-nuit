@@ -52,6 +52,16 @@ export async function snapshotTree(cwd: string): Promise<TreeSnapshot | undefine
   return { root, entries };
 }
 
+/** Commit `HEAD` points to, or `undefined` before the first commit or outside a
+ *  repository. A snapshot cannot see a commit: committing empties the status. */
+export async function headCommit(cwd: string): Promise<string | undefined> {
+  const head = await runSupervisedCommand("git", ["rev-parse", "--verify", "--quiet", "HEAD"], {
+    cwd,
+    timeoutMs: GIT_TIMEOUT_MS,
+  });
+  return head.status === 0 ? head.stdout.trim() : undefined;
+}
+
 function resolved(path: string): string {
   try {
     return realpathSync(path);

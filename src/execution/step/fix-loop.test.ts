@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentBackend, AgentBackendFactory, AgentSession } from "../../contracts/backends.ts";
@@ -92,7 +93,15 @@ function makeStep(onFailure: StepFailure, def: Partial<PipelineStep> = {}): RunS
 
 /** Programmable results and call counters. */
 function fakes(opts: {
-  fix?: Array<{ ok: boolean; sessionId?: string; cost?: number; failReason?: string; budgetExceeded?: boolean }>;
+  fix?: Array<{
+    ok: boolean;
+    sessionId?: string;
+    cost?: number;
+    failReason?: string;
+    budgetExceeded?: boolean;
+    /** What the repair does to the tree before answering. */
+    effect?: () => void;
+  }>;
   retry?: Array<Partial<StepResult>>;
   extract?: Array<{ hasErrors: boolean; errors: string }>;
   sizeKb?: number;
@@ -110,6 +119,7 @@ function fakes(opts: {
   const deps: FixLoopDeps = {
     runWithAgent: async (_p, spec, agentOptions, budget) => {
       const r = opts.fix?.[fi++] ?? { ok: true };
+      r.effect?.();
       calls.fix.push({ spec, agentOptions, budget });
       return {
         ok: r.ok,
@@ -697,6 +707,106 @@ test("a replay that declares a block stops the run cleanly without another repai
   expect(run.outcome?.stop).toEqual({ kind: "blocked", detail: "staging unreachable" });
   expect(run.outcome?.resumable).toBe(true);
 });
+
+function git(cwd: string, ...args: string[]): void {
+  const result = spawnSync(
+    "git",
+    ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args],
+    { cwd, encoding: "utf8" },
+  );
+  if (result.status !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+}
+
+/** A repository with one committed file and one uncommitted edit, the tree a repair works on. */
+function repo(): string {
+  const root = mkdtempSync(join(tmpdir(), "fixloop-repo-"));
+  git(root, "init", "-q");
+  writeFileSync(join(root, "tracked.txt"), "committed\n");
+  git(root, "add", ".");
+  git(root, "commit", "-qm", "init");
+  writeFileSync(join(root, "tracked.txt"), "work in progress\n");
+  return root;
+}
+
+function ctxIn(cwd: string): PipelineContext {
+  return buildPipelineContext({ ...builtinRegistries(), cwd, runnerBin: "", runnerDir: "" });
+}
+
+const STOP_IF_UNCHANGED: StepFailure = { fix_prompt: "fix", max_retries: 2, stop_if_unchanged: true };
+
+test("stopIfUnchanged: a repair that changed nothing stops the run as blocked without a replay", async () => {
+  const root = repo();
+  const step = makeRunStep({
+    id: "verify",
+    name: "Verify",
+    command: "make test",
+    runner: "bash",
+    on_failure: STOP_IF_UNCHANGED,
+  });
+  const run = makeRun(step);
+  const { deps: fixDeps, calls } = fakes({ fix: [{ ok: true }, { ok: true }], retry: [{ ok: false }, { ok: false }] });
+  const loopDeps: StepLoopDeps = {
+    executeStep: async () => ({
+      output: "",
+      ok: false,
+      stats: { duration_ms: 1 },
+      failReason: "acceptance criterion not met",
+    }),
+    extractErrors: async () => ({ hasErrors: true, errors: "err" }),
+    runFixLoop: (r, s, command, output, ctx, budget, reason, opts) =>
+      runFixLoop(r, s, command, output, ctx, budget, reason, { ...opts, deps: fixDeps }),
+    output: NULL_RUN_OUTPUT,
+  };
+
+  const outcome = await executeRunSteps(run, { resuming: false }, loopDeps, ctxIn(root));
+
+  expect(outcome.stopped).toBe(true);
+  expect(calls.fix.length).toBe(1);
+  expect(calls.retry).toBe(0);
+  expect(step.status).toBe("failed");
+  expect(run.outcome?.stop).toEqual({ kind: "blocked", detail: "acceptance criterion not met (fix changed nothing)" });
+  expect(run.outcome?.resumable).toBe(true);
+});
+
+test("without stopIfUnchanged, a repair that changed nothing is still replayed", async () => {
+  const root = repo();
+  const step = makeStep(FIX);
+  const run = makeRun(step);
+  const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
+
+  const res = await runFixLoop(run, step, "make test", "out", ctxIn(root), { cumulative: 0 }, "r0", {
+    deps,
+    output: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
+
+  expect(res).toEqual({ failed: false });
+  expect(calls.retry).toBe(1);
+  expect(step.status).toBe("done");
+});
+
+for (const [change, effect] of [
+  ["edits a file", (root: string) => writeFileSync(join(root, "tracked.txt"), "repaired\n")],
+  ["adds an untracked file", (root: string) => writeFileSync(join(root, "new.txt"), "new\n")],
+  ["commits", (root: string) => git(root, "commit", "-qam", "repair")],
+] as const) {
+  test(`stopIfUnchanged: a repair that ${change} is replayed`, async () => {
+    const root = repo();
+    const step = makeStep(STOP_IF_UNCHANGED);
+    const run = makeRun(step);
+    const { deps, calls } = fakes({ fix: [{ ok: true, effect: () => effect(root) }], retry: [{ ok: true }] });
+
+    const res = await runFixLoop(run, step, "make test", "out", ctxIn(root), { cumulative: 0 }, "r0", {
+      deps,
+      output: NULL_RUN_OUTPUT,
+      abort: createAbortScope(),
+    });
+
+    expect(res).toEqual({ failed: false });
+    expect(calls.retry).toBe(1);
+    expect(step.status).toBe("done");
+  });
+}
 
 // `resumeSession` names a step that exists (the load-time rule), but the run may
 // still reach the fix without a session — a target skipped by `when`, a first

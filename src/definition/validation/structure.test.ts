@@ -31,6 +31,13 @@ test("resume_session without a fix prompt has nothing to resume into", () => {
   ]);
 });
 
+test("stop_if_unchanged without a fix prompt has no repair to measure", () => {
+  expect(findings({ stop_if_unchanged: true, fix_prompt: "fix", max_retries: 2 })).toEqual([]);
+  expect(findings({ stop_if_unchanged: true, max_retries: 2 })).toEqual([
+    'step "verify": on_failure.stop_if_unchanged requires fix_prompt',
+  ]);
+});
+
 test("a fix policy bounded to zero attempts would never repair", () => {
   expect(findings({ fix_prompt: "fix", max_retries: 0 })).toEqual([
     'step "verify": on_failure.max_retries must be >= 1 when fix_prompt is set',

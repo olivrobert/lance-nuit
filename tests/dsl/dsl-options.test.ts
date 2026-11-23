@@ -227,6 +227,42 @@ test("onFail: replayAfterFix: false with several retries is refused", () => {
   ).toThrow(/replayAfterFix: false requires retries: 1/);
 });
 
+test("onFail: stopIfUnchanged reaches the canonical definition", () => {
+  const step = bashStep({
+    id: "acceptance",
+    name: "Acceptance",
+    command,
+    onFail: { fix: fixPrompt, retries: 2, stopIfUnchanged: true },
+  }).build();
+
+  expect(step.on_failure).toEqual({ fix_prompt: fixPrompt, max_retries: 2, stop_if_unchanged: true });
+});
+
+// Without a repair there is no change to measure.
+test("onFail: stopIfUnchanged without fix is refused", () => {
+  expect(() =>
+    bashStep({
+      id: "acceptance",
+      name: "Acceptance",
+      command,
+      onFail: { retries: 2, stopIfUnchanged: true } as never,
+    }).build(),
+  ).toThrow(/stopIfUnchanged requires fix/);
+});
+
+// Without a replay there is nothing to skip.
+test("onFail: stopIfUnchanged with replayAfterFix: false is refused", () => {
+  expect(() =>
+    bashStep({
+      id: "review",
+      name: "Review",
+      command,
+      blocking: false,
+      onFail: { fix: fixPrompt, retries: 1, replayAfterFix: false, stopIfUnchanged: true },
+    }).build(),
+  ).toThrow(/stopIfUnchanged cannot be combined with replayAfterFix: false/);
+});
+
 test("actionStep: options build the canonical definition", () => {
   const run = async () => "ok";
   const describe = () => "normalise result.json";
