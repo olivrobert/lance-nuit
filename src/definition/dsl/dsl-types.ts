@@ -57,6 +57,14 @@ interface FixPolicyBase {
    *  `blocking: false` — an unverified repair must never open a blocking gate —
    *  and a single repair (`retries: 1`). Default `true`. */
   replayAfterFix?: boolean;
+  /** `true`: a successful repair that changed nothing in the git tree — no edited,
+   *  added or deleted file outside `.gitignore`, no new commit — is not followed by
+   *  a replay; the step stops as blocked, with the last failure reason suffixed by
+   *  `(fix changed nothing)`. For a costly check whose repair may answer that the
+   *  failure lies outside the code. Refused with `replayAfterFix: false`. Default
+   *  `false`: a repair may work outside the tree (a test database, an ignored
+   *  dependency folder) and still deserve its replay. */
+  stopIfUnchanged?: boolean;
 }
 
 /** Failure policy. Without `fix`, the command is replayed `retries` times. With

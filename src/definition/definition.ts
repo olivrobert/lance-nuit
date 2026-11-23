@@ -51,6 +51,10 @@ export interface StepFailure {
   /** Opt-out: `false` settles the step right after a successful repair instead of
    *  replaying its command. Only on a non-blocking step with a single repair. */
   replay_after_fix?: boolean;
+  /** Opt-in: a successful repair that changed neither the git tree nor `HEAD`
+   *  stops the step as blocked instead of replaying its command. Requires
+   *  `fix_prompt`; refused with `replay_after_fix: false`. */
+  stop_if_unchanged?: boolean;
 }
 
 /** Child pipeline call declared by an orchestration node. */
