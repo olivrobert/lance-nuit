@@ -19,6 +19,7 @@ import {
   writeClosureAt,
 } from "../../run/index.js";
 import { decisionActor } from "../../work-items/index.js";
+import { pipelineNamesOf } from "./diagnostics-readers.js";
 import type { RunnerCommand } from "./runner-command.js";
 import { errorMessage, isValidTicket } from "./shared.js";
 
@@ -33,14 +34,30 @@ function contextFor(cwd: string, ticket: string): PipelineContext {
   return buildPipelineContext({ cwd, ticket });
 }
 
+type PipelineName = { ok: true; name: string } | { ok: false; message: string };
+
+/** A path designates the pipeline whose runs started from that file. */
+function pipelineNameOf(context: PipelineContext, ticket: string, pipeline: string): PipelineName {
+  const names = pipelineNamesOf(context, ticket, pipeline);
+  if (names.length === 1) return { ok: true, name: names[0]! };
+  if (names.length === 0) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
+  return {
+    ok: false,
+    message: `Pipeline "${pipeline}" matches the runs of several pipelines of ${ticket} (${names.join(", ")}): pass one of these names.`,
+  };
+}
+
 /**
- * Close the latest run of `pipeline`. Refused on a run nobody waits on.
+ * Close the latest run of `pipeline`, a name or the path of its file. Refused on a run nobody waits on.
  *
  * The status is the one the dashboard shows: a snapshot left `RUNNING` by a
  * runner that died is an interrupted run, which waits on somebody like any other.
  */
 export function closeLatestRun(cwd: string, ticket: string, pipeline: string, actor: string): ClosureResult {
-  const run = readLatestRun(pipeline, ticket, contextFor(cwd, ticket));
+  const context = contextFor(cwd, ticket);
+  const named = pipelineNameOf(context, ticket, pipeline);
+  if (!named.ok) return named;
+  const run = readLatestRun(named.name, ticket, context);
   if (!run) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
   const { runDir, state, status } = run;
   if (!awaitsHuman(status)) {
@@ -56,9 +73,12 @@ export function closeLatestRun(cwd: string, ticket: string, pipeline: string, ac
   };
 }
 
-/** Remove the closure of the latest run of `pipeline`, if it has one. */
+/** Remove the closure of the latest run of `pipeline`, a name or the path of its file, if it has one. */
 export function reopenLatestRun(cwd: string, ticket: string, pipeline: string): ClosureResult {
-  const runDir = latestRunDir(pipeline, ticket, contextFor(cwd, ticket));
+  const context = contextFor(cwd, ticket);
+  const named = pipelineNameOf(context, ticket, pipeline);
+  if (!named.ok) return named;
+  const runDir = latestRunDir(named.name, ticket, context);
   if (!runDir) return { ok: false, message: `No run of pipeline "${pipeline}" found for ${ticket}.` };
   if (!readClosureAt(runDir)) return { ok: true, message: `Run of ${ticket} was not closed.` };
   removeClosureAt(runDir);
@@ -71,7 +91,7 @@ function checkArgs(args: ClosureArgs, flag: string): { ticket: string; pipeline:
     return null;
   }
   if (!args.pipelinePath) {
-    log(`${flag} requires --pipeline <name>: a ticket keeps one latest run per pipeline.`);
+    log(`${flag} requires --pipeline <name|path>: a ticket keeps one latest run per pipeline.`);
     return null;
   }
   return { ticket: args.ticket, pipeline: args.pipelinePath };

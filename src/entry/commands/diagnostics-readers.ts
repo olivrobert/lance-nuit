@@ -382,6 +382,20 @@ function pipelineMatcher(context: PipelineContext, pipeline: string | undefined)
     (record.state.pipeline_path !== undefined && resolve(context.cwd, record.state.pipeline_path) === file);
 }
 
+/** The pipelines of `ticket` that `pipeline`, a name or a file path, designates.
+ *  A name is returned as is, whether it has runs or not. */
+export function pipelineNamesOf(
+  context: PipelineContext,
+  ticket: string,
+  pipeline: string,
+  options?: DiagnosticsOptions,
+): string[] {
+  if (isPipelineName(pipeline)) return [pipeline];
+  const ofPipeline = pipelineMatcher(context, pipeline);
+  const records = listRunRecords(context, ticket, options).filter(ofPipeline);
+  return [...new Set(records.map((record) => record.pipeline))].sort();
+}
+
 export async function inspectTicket(
   context: PipelineContext,
   ticket: string,
