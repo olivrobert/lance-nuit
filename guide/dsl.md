@@ -690,7 +690,8 @@ bashStep({ id: "quality-recheck", input: [tree], ... });
   admission reads the ignored sources either way. A failure of `R` moves
   nothing; a failure absorbed by `blocking: false` settles `done`, so it does.
 - **Build errors.** An ignored id that is not a step of the pipeline, a source
-  ignoring the step that reads it, and `ignoring` in `output`. Steps of child
+  ignoring the step that reads it, an ignored member of a parallel group (its
+  siblings change the source during its pass), and `ignoring` in `output`. Steps of child
   pipelines are not visible: the rule holds within one pipeline.
 
 ### Failure handling and retry escalation

@@ -397,16 +397,21 @@ export function ignoredSourcesByStep(steps: readonly Pick<PipelineStep, "id" | "
 
 /** Why the `ignoring` of a pipeline's sources names no step it could follow. */
 export function ignoringErrors(pipeline: Pick<Pipeline, "steps">): string[] {
-  const ids = new Set(pipeline.steps.map((step) => step.id));
+  const byId = new Map(pipeline.steps.map((step) => [step.id, step]));
   const errors: string[] = [];
   for (const consumer of pipeline.steps) {
     for (const source of ignoringSources(consumer)) {
       for (const stepId of source.ignoredSteps ?? []) {
         if (stepId === consumer.id) {
           errors.push(`step "${consumer.id}": source "${source.name}" cannot ignore the step that reads it`);
-        } else if (!ids.has(stepId)) {
+        } else if (!byId.has(stepId)) {
           errors.push(
             `step "${consumer.id}": source "${source.name}" ignores "${stepId}", which is not a step of the pipeline`,
+          );
+        } else if (byId.get(stepId)?.parallel_group) {
+          // Its siblings change the source during its pass: their changes would be ignored too.
+          errors.push(
+            `step "${consumer.id}": source "${source.name}" ignores "${stepId}", a member of a parallel group`,
           );
         }
       }

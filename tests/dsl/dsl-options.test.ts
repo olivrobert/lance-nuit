@@ -385,6 +385,20 @@ test("lock: two members of one parallel group producing one artifact are refused
   ).toThrow(TWO_PRODUCERS);
 });
 
+test("ignoring: a member of a parallel group is refused, its siblings would move the source too (L12)", () => {
+  const tree = externalSource("tree", { command: "git write-tree" });
+  const member = (id: string) =>
+    llmStep({ id, name: id, profile: "coder", backend: "claude", command, input: [tree] }, REGISTRY);
+  expect(() =>
+    pipeline("p")
+      .add(
+        bashStep({ id: "ui", name: "UI", command, input: [tree.ignoring("a")], output: [result] }),
+        ...parallelize({ id: "group", name: "Group", steps: [member("a"), member("b")] }),
+      )
+      .build(),
+  ).toThrow('step "ui": source "tree" ignores "a", a member of a parallel group');
+});
+
 test("lock: a capture and a review capture count as outputs for the one-producer rule", () => {
   const capturing = llmStep(
     { id: "a", name: "A", profile: "coder", backend: "claude", command, capture: { commit: commitMessage } },
