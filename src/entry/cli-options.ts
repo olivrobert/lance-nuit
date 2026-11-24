@@ -202,8 +202,8 @@ export const FLAGS: FlagSpec[] = [
     key: "startAt",
     kind: "string",
     desc:
-      "Replay from this step: it and every later step run again. Preceding steps that still owe work are skipped; " +
-      "done ones are re-checked as on any resume, so a rerunOnResume step runs again.",
+      "Fork the latest run (or --run <id>) into a new run that starts at this step: it runs again, later steps run " +
+      "when their inputs changed, preceding steps are kept. An unfinished source is closed SUPERSEDED.",
   },
   {
     long: "--until",

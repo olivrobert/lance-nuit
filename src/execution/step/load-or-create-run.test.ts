@@ -25,8 +25,6 @@ import { abortRun, finalizeRun, updateStep } from "../../run/record/run-transiti
 import { FileRunStateStore } from "../../run/record/stores/file-run-state-store.js";
 import { resolveRunDir } from "../../run/record/stores/run-storage.js";
 import type { PipelineContext } from "../../shared/language/context.js";
-import { sha256Text } from "../../work-items/store/hash.js";
-import { commitPass } from "../../work-items/store/step-lock.js";
 import { NULL_RUN_OUTPUT } from "../run-output.js";
 import { type LoadOrCreateRunOptions, loadOrCreateRun } from "./load-or-create-run.js";
 import { executeRunSteps, type StepLoopDeps } from "./step-loop.js";
@@ -42,18 +40,6 @@ function pipelineFile(root: string): string {
   .build();`,
   );
   return path;
-}
-
-/** Leave the outputs the fixture steps declare and their stamps, as their passes
- *  would have. */
-function writeOutputs(ctx: PipelineContext, ...ids: string[]): void {
-  for (const id of ids) {
-    const path = ctx.paths.artifact(`${id}.txt`);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, id);
-    const stamp = { pipeline: "p", runId: "r", stampedAt: "2026-01-01T00:00:00.000Z", inputs: {} };
-    commitPass(ctx, id, { ...stamp, outputs: { [`artifacts/${id}.txt`]: sha256Text(id) } }, []);
-  }
 }
 
 test("resume: a selected snapshot disappearing before the final read does not initialize a replacement", async () => {
@@ -371,58 +357,6 @@ for (const option of ["replayInterrupted", "rerunOnResume"]) {
     expect(resumed.steps[0]!.status).toBe("done");
   });
 }
-
-test("resume: a --start-at replay interrupted by a second crash stops the next resume that does not name it", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-interrupted-start-at-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6e" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-6e", undefined, true, ctx);
-  const initial = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-6e",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  for (const step of initial.steps) updateStep(initial, step, "done");
-  writeOutputs(ctx, "a", "b", "c");
-  saveRun(initial);
-
-  crashDuring(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-6e",
-        runDir: dir,
-        fresh: false,
-        startAt: "b",
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-    "b",
-  );
-
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-6e",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  // The persisted requeue outlives the invocation that asked for it.
-  expect(resumed.steps[1]!.replay).toBe(true);
-  const loop = countingDeps(ctx, []);
-  const outcome = await executeRunSteps(resumed, { resuming: true }, loop.deps, ctx);
-  expect(outcome.stopped).toBe(true);
-  expect(loop.spawned).toEqual([]);
-});
 
 /** Same three steps, under a `.maxCost()` ceiling declared by the pipeline
  *  itself rather than approved on the command line. */
@@ -761,40 +695,6 @@ test("resume: an authorized run still stops when the spend it could price reache
   expect(run.steps.map((step) => step.status)).toEqual(["done", "pending", "pending"]);
 }, 20_000);
 
-test("--start-at leaves the steps before it as they are at boot", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-start-at-done-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-start" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-start", undefined, true, ctx);
-  const run = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-start",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  updateStep(run, run.steps[0]!, "done");
-  saveRun(run);
-
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-start",
-    runDir: dir,
-    fresh: false,
-    startAt: "c",
-    context: ctx,
-    worktree: false,
-  });
-  // Boot leaves the steps before the target as they are: the loop applies the
-  // selection to this invocation only (step-loop.test.ts).
-  expect(resumed.steps.map((step) => step.status)).toEqual(["done", "pending", "pending"]);
-});
-
 // Resuming is idempotent: a second load of the same run reads the same spend and
 // allocates the same next attempt, and the journal grows by the resume marker only.
 test("resume: loading the same run twice neither adds spend nor reuses an attempt number", async () => {
@@ -848,194 +748,6 @@ test("resume: loading the same run twice neither adds spend nor reuses an attemp
   expect(events.filter((event) => event.type === "run.resumed")).toHaveLength(2);
 });
 
-test("resume: --start-at requeues the target and every later step, keeping their attempts and spend", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-start-at-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-start" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-start", undefined, true, ctx);
-  const run = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-start",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  updateStep(run, run.steps[0]!, "done");
-  writeOutputs(ctx, "a");
-  run.steps[1]!.retries = 1;
-  run.steps[1]!.attempts.push(
-    { attempt: 1, kind: "step", status: "failed", started_at: "t", log_path: "steps/b/attempt-001/output.log" },
-    { attempt: 2, kind: "fix", status: "done", started_at: "t", log_path: "steps/b/attempt-002/output.log" },
-  );
-  run.steps[1]!.control = { duration_ms: 1, total_cost_usd: 1 };
-  updateStep(run, run.steps[1]!, "done");
-  updateStep(run, run.steps[2]!, "failed", "publish refused");
-
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-start",
-    runDir: dir,
-    fresh: false,
-    startAt: "b",
-    context: ctx,
-    worktree: false,
-  });
-  expect(resumed.status).toBe("RUNNING");
-  expect(resumed.steps.map((step) => [step.status, step.replay])).toEqual([
-    ["done", undefined],
-    ["pending", true],
-    ["pending", true],
-  ]);
-  expect(resumed.steps[1]).toMatchObject({
-    retries: 1,
-    attempts: [{ attempt: 1 }, { attempt: 2 }],
-    control: { total_cost_usd: 1 },
-  });
-  expect(runSpend(resumed).usd).toBe(1);
-
-  const deps = countingDeps(ctx, [{ ok: true }, { ok: true }]);
-  await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
-  expect(deps.spawned).toEqual(["b", "c"]);
-  // Settled, the replay mark is gone: a later plain resume treats them as history.
-  expect(readRunSnapshot(join(dir, "state.json"))!.steps.map((step) => step.replay)).toEqual([
-    undefined,
-    undefined,
-    undefined,
-  ]);
-});
-
-test("resume: a step requeued by --start-at stays pending when the next invocation omits it", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-start-at-durable-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-durable" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-durable", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-durable",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  for (const step of run.steps) updateStep(run, step, "done");
-  writeOutputs(ctx, "a", "b", "c");
-
-  // Interrupted before the replay ran anything: the journal's last word on each
-  // step is still the `done` of the first pass.
-  await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-durable",
-    runDir: dir,
-    fresh: false,
-    startAt: "b",
-    context: ctx,
-    worktree: false,
-  });
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-durable",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(resumed.steps.map((step) => step.status)).toEqual(["done", "pending", "pending"]);
-
-  const deps = countingDeps(ctx, [{ ok: true }, { ok: true }]);
-  await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
-  expect(deps.spawned).toEqual(["b", "c"]);
-});
-
-test("resume: an explicitly selected PASS run opens read-only, even with --start-at, and nothing writes it", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-start-at-pass-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-pass" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-pass", undefined, true, ctx);
-  const run = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-pass",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  for (const step of run.steps) {
-    step.control = { duration_ms: 1, total_cost_usd: 1 };
-    updateStep(run, step, "done");
-  }
-  writeOutputs(ctx, "a", "b", "c");
-  finalizeRun(run);
-  unlinkSync(join(dir, "runner.lock"));
-  expect(readRunSnapshot(join(dir, "state.json"))?.status).toBe("PASS");
-
-  const selection = selectExplicitRun("p", "T-pass", run.runId!, ctx, { replay: true });
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-pass",
-    runDir: selection.dir,
-    fresh: false,
-    startAt: "c",
-    context: ctx,
-    strictSnapshot: selection.strictSnapshot,
-    worktree: false,
-  });
-  expect(resumed.readOnly).toBe(true);
-  expect(resumed.status).toBe("PASS");
-  expect(runSpend(resumed).usd).toBe(3);
-  expect(() => updateStep(resumed, resumed.steps[2]!, "running")).toThrow(/never written again/);
-  expect(readRunSnapshot(join(dir, "state.json"))?.status).toBe("PASS");
-  selection.release();
-});
-
-test("resume: --start-at refuses to replay a composed step whose children already settled", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-start-at-composed-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-comp" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-comp", undefined, true, ctx);
-  const run = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-comp",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  run.steps[1]!.orchestration = {
-    kind: "runPipeline",
-    children: [{ key: "main", kind: "main", pipeline: "child", status: "done", accountedCostUsd: 0 }],
-  };
-  for (const step of run.steps) updateStep(run, step, "done");
-  unlinkSync(join(dir, "runner.lock"));
-  const before = readRunSnapshot(join(dir, "state.json"));
-
-  // Selected through `latest`, which takes the run lock: the refusal must give it back.
-  await expect(
-    loadOrCreateRun({
-      pipelinePath: path,
-      ticket: "T-comp",
-      fresh: false,
-      startAt: "a",
-      context: ctx,
-      worktree: false,
-    }),
-  ).rejects.toThrow(/--start-at: step "b" composes pipelines .*--fresh/);
-  expect(readRunSnapshot(join(dir, "state.json"))).toEqual(before);
-  expect(existsSync(join(dir, "runner.lock"))).toBe(false);
-});
-
 test("resume: a definition that dropped a persisted step refuses and gives the run lock back", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-removed-step-lock-"));
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-removed" });
@@ -1064,27 +776,6 @@ test("resume: a definition that dropped a persisted step refuses and gives the r
     loadOrCreateRun({ pipelinePath: trimmed, ticket: "T-removed", fresh: false, context: ctx, worktree: false }),
   ).rejects.toThrow(/removed or renamed persisted step\(s\): c/);
   expect(existsSync(join(dir, "runner.lock"))).toBe(false);
-});
-
-test("a new run started with --start-at marks the target and later steps as replays", async () => {
-  const root = mkdtempSync(join(tmpdir(), "new-run-start-at-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-new-start" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-new-start", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-new-start",
-    runDir: dir,
-    fresh: false,
-    startAt: "b",
-    context: ctx,
-    worktree: false,
-  });
-  expect(run.steps.map((step) => [step.status, step.replay])).toEqual([
-    ["pending", undefined],
-    ["pending", true],
-    ["pending", true],
-  ]);
 });
 
 test("selectors persist nothing: a resume drops the exclusion an older runner left in the snapshot", async () => {

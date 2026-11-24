@@ -225,30 +225,6 @@ function interruptedStep(id: string, state: Parameters<typeof makeRunStep>[1] = 
   );
 }
 
-test("interrupted: the --start-at target of this invocation is ready without authorization, a step later in the requeue is not", async () => {
-  const runDir = mkdtempSync(join(tmpdir(), "admission-interrupted-"));
-  const target = interruptedStep("check", { replay: true });
-  // Requeued by the same --start-at, so it carries `replay` too, but the operator
-  // never named it.
-  const later = interruptedStep("later", { replay: true });
-  const run = { name: "p", pipeline: "p", pipeline_path: "p.ts", run_dir: runDir, steps: [target, later] } as Run;
-  const admit = (step: RunStep) =>
-    admitStep({
-      run,
-      step,
-      baseCtx: buildPipelineContext({ cwd: runDir }),
-      budget: { cumulative: 0 },
-      output: NULL_RUN_OUTPUT,
-      startAt: "check",
-    });
-
-  expect((await admit(target)).kind).toBe("ready");
-  const refused = await admit(later);
-  expect(refused.kind).toBe("stopped");
-  expect(refused.kind === "stopped" && refused.reason).toMatch(/LATER.*--replay-interrupted.*replayInterrupted: true/s);
-  expect(run.outcome).toMatchObject({ phase: "later", resumable: true, stop: { kind: "needs-decision" } });
-});
-
 // ── The freshness lock decides a stamped step ───────────────────────────────
 
 /** A step producing `plan.md` from nothing it declares, like a branch creation. */
@@ -256,15 +232,14 @@ function deliverableStep(state: Parameters<typeof makeRunStep>[1], def: Partial<
   return reworkStep({ rework_for: undefined, ...def }, state);
 }
 
-async function admitStamped(step: RunStep, ctx: PipelineContext, extra: { startAt?: string } = {}) {
-  const run = { name: "p", pipeline: "p", pipeline_path: "p.ts", run_dir: ctx.cwd, steps: [step] } as Run;
+async function admitStamped(step: RunStep, ctx: PipelineContext, fork: { startAt?: string } = {}) {
+  const run = { name: "p", pipeline: "p", pipeline_path: "p.ts", run_dir: ctx.cwd, steps: [step], ...fork } as Run;
   const admission = await admitStep({
     run,
     step,
     baseCtx: ctx,
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
-    ...extra,
   });
   return { admission, events: readRunEvents(run.run_dir) };
 }
@@ -311,12 +286,22 @@ test("lock: outputs present without a stamp run, and the reading travels with th
   });
 });
 
-test("lock: a step requeued by --start-at runs although its stamp holds", async () => {
+test("lock: the start step of a pending fork runs although its stamp holds (F5)", async () => {
   const { ctx } = reworkContext({ "plan.md": "v1" });
-  const step = deliverableStep({ status: "pending", replay: true, control: { duration_ms: 1 } });
+  const step = deliverableStep({ status: "pending" });
   await stampAsIs(ctx, step.def);
 
-  expect((await admitStamped(step, ctx)).admission.kind).toBe("ready");
+  expect((await admitStamped(step, ctx, { startAt: "plan" })).admission.kind).toBe("ready");
+});
+
+test("lock: once the start step of a fork left pending, its stamp decides again (F7)", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const failed = deliverableStep({ status: "failed" });
+  await stampAsIs(ctx, failed.def);
+  expect((await admitStamped(failed, ctx, { startAt: "plan" })).admission.kind).toBe("skip");
+
+  const skippedByWhen = deliverableStep({ status: "skipped" });
+  expect((await admitStamped(skippedByWhen, ctx, { startAt: "plan" })).admission.kind).toBe("skip");
 });
 
 test("lock: when decides before the stamp", async () => {

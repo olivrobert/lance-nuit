@@ -54,6 +54,7 @@ export const RUN_STATUSES = [
   "FAIL",
   "STOPPED",
   "ABORTED",
+  "SUPERSEDED",
   "UNKNOWN",
 ] as const satisfies readonly RunStatus[];
 export const STEP_STATUSES = [
@@ -195,7 +196,6 @@ export const PersistedStepStateSchema = z.looseObject({
   fail_kind: z.enum(FAIL_KINDS).optional(),
   fail_cause: z.enum(FAIL_CAUSES).optional(),
   timeout_retries: nonNegativeInt.optional(),
-  replay: z.literal(true).optional(),
   orchestration: PersistedPipelineOrchestrationStateSchema.optional(),
   attempts: z
     .array(PersistedAttemptSchema)
@@ -242,6 +242,10 @@ export const RunSnapshotSchema = z.looseObject({
   cost_unaccounted: z.boolean().optional(),
   allow_unmetered: z.boolean().optional(),
   specPath: z.string().optional(),
+  forkedFrom: z.string().optional(),
+  startAt: z.string().optional(),
+  inheritedSpendUsd: z.number().nonnegative().optional(),
+  supersededBy: z.string().optional(),
 });
 
 /** Persisted snapshot: what the disk may hold. Differs from `RunSnapshot` by the

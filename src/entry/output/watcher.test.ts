@@ -62,7 +62,7 @@ test("watcher remains persistent by default and closes only with the option", ()
 
   const automatic = buildWatcherCommand("/tmp/live feed", "/tmp/state.json", "formatter", true);
   expect(automatic).toContain("setsid bash -c");
-  expect(automatic).toContain("(PASS|FAIL|STOPPED|ABORTED)");
+  expect(automatic).toContain("(PASS|FAIL|STOPPED|ABORTED|SUPERSEDED)");
   expect(automatic).toContain('kill -TERM -- "-$watcher_pid"');
   expect(automatic).not.toContain("read -p");
 });

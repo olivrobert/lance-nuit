@@ -32,7 +32,6 @@ export function makeRunStep(def: PipelineStep, state: StepStateInput = {}): RunS
     errors: state.errors,
     fail_kind: state.fail_kind,
     fail_cause: state.fail_cause,
-    replay: state.replay,
     attempts: state.attempts ? state.attempts.map((attempt) => ({ ...attempt })) : [],
     orchestration: state.orchestration,
   };

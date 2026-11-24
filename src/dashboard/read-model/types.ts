@@ -10,7 +10,7 @@ import type { Launch } from "../home/index.js";
  *  and `UNKNOWN`, a snapshot that never received a verdict — is `RUNNING` only
  *  while a live process holds the run; once its runner is gone, the run is served
  *  as `ABORTED` (see `Item.interrupted`). */
-export type ItemStatus = "STOPPED" | "FAIL" | "ABORTED" | "RUNNING" | "PASS";
+export type ItemStatus = "STOPPED" | "FAIL" | "ABORTED" | "RUNNING" | "PASS" | "SUPERSEDED";
 
 /** Section of the morning box an item belongs to. Technical failures rank with
  *  gates: both wait for the same person. */

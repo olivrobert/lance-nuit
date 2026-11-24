@@ -324,7 +324,7 @@ test("latest selection exposes an injected read denial instead of treating it as
   expect(readlinkSync(join(pipelineRunsDir("feature", "DEMO-1", context), "latest"))).toBe("run-live");
 });
 
-test("selectExplicitRun: a finished run is selectable when --start-at asks for a replay", () => {
+test("selectExplicitRun: a finished run has nothing to resume", () => {
   const context = fixtureContext();
   const runDir = writeRun(context, "feature", "DEMO-1", "run-finished", {
     status: "PASS",
@@ -334,8 +334,6 @@ test("selectExplicitRun: a finished run is selectable when --start-at asks for a
     ],
   });
 
-  const selection = selectExplicitRun("feature", "DEMO-1", "run-finished", context, { replay: true });
-  expect(selection.dir).toBe(runDir);
-  selection.release();
+  expect(runDir).toContain("run-finished");
   expect(() => selectExplicitRun("feature", "DEMO-1", "run-finished", context)).toThrow(/no remaining step/);
 });

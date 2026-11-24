@@ -13,7 +13,7 @@ export type StepStatus = "pending" | "running" | "done" | "failed" | "skipped" |
 
 /** Durable run status. The snapshot is the source of truth for resuming; stats
  * reuse these exact uppercase values so persisted stats stay comparable. */
-export type RunStatus = "RUNNING" | "PASS" | "FAIL" | "STOPPED" | "ABORTED" | "UNKNOWN";
+export type RunStatus = "RUNNING" | "PASS" | "FAIL" | "STOPPED" | "ABORTED" | "SUPERSEDED" | "UNKNOWN";
 
 /**
  * Why a capped run was stopped by its own cost policy, as a value instead of a
@@ -151,11 +151,6 @@ export interface PersistedStepState {
   /** Reruns consumed while draining timeouts. Quota SEPARATE from `retries`:
    *  a drain that exhausted `retries` would deprive the step of every fix pass. */
   timeout_retries?: number;
-  /** Requeued by `--start-at`: the operator asked to run the step again, so
-   * admission runs it even when its declared outputs are fresh, and resume keeps
-   * it pending over the `done` its earlier pass journaled. Cleared when the step
-   * settles (`done` or `skipped`). Absent by default; the schema is unchanged. */
-  replay?: true;
   orchestration?: PersistedPipelineOrchestrationState;
   /** Every attempt of the step, numbered without reuse: the next one is the
    *  highest number plus one. */
@@ -225,4 +220,13 @@ export interface PersistedRun {
    *  scope. Absent means strict — a missing authorization is never permissive. */
   allow_unmetered?: boolean;
   specPath?: string;
+  /** The run this one was forked from by `--start-at`. */
+  forkedFrom?: string;
+  /** The step `--start-at` named when this run was forked. */
+  startAt?: string;
+  /** What the runs this one was forked from spent, counted against `max_cost_usd`
+   *  and never in this run's own totals or statistics. Absent reads as 0. */
+  inheritedSpendUsd?: number;
+  /** The fork that replaced this run (`SUPERSEDED`). */
+  supersededBy?: string;
 }

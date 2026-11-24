@@ -110,6 +110,36 @@ test("--start-at is refused under --scan", () => {
   expect(parseRunnerArgs(["FOO-1", "--start-at", "x"]).passthrough).toEqual([]);
 });
 
+test("--start-at, --steps and --skip are refused on an inspection command (A1, F4)", () => {
+  const inspections = [["--inspect"], ["--logs"], ["--clean"], ["--approve", "plan", "--approve-only"]];
+  for (const inspection of inspections) {
+    for (const selector of [
+      ["--start-at", "a"],
+      ["--steps", "a"],
+      ["--skip", "a"],
+    ]) {
+      expect(() => parseRunnerArgs(["FOO-1", ...inspection, ...selector])).toThrow(
+        "Options --start-at, --steps and --skip apply to a run, not to an inspection command.",
+      );
+    }
+  }
+  expect(() =>
+    parseRunnerArgs(["FOO-1", "--reject", "plan", "--reason", "no", "--reject-only", "--start-at", "a"]),
+  ).toThrow(/apply to a run/);
+});
+
+test("--start-at is refused with --fresh, --steps or --skip: a fork has one meaning (F4)", () => {
+  for (const other of [["--fresh"], ["--steps", "b"], ["--skip", "b"]]) {
+    expect(() => parseRunnerArgs(["FOO-1", "--start-at", "a", ...other])).toThrow(
+      "Option --start-at cannot be combined with --fresh, --steps or --skip.",
+    );
+  }
+  expect(() => parseRunnerArgs(["FOO-1", "--steps", "a", "--skip", "b"])).toThrow(
+    "Options --steps and --skip are mutually exclusive.",
+  );
+  expect(parseRunnerArgs(["FOO-1", "--run", "r1", "--start-at", "a"]).runId).toBe("r1");
+});
+
 test("--until is forwarded to dispatch children, exclusive with --steps, and refused on an inspection command", () => {
   // The bound of a sweep (a night of triage only) applies to every ticket.
   expect(parseRunnerArgs(["--scan", "--until", "triage"]).passthrough).toEqual(["--until", "triage"]);

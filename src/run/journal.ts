@@ -35,7 +35,18 @@ type AttemptStatus = PersistedAttempt["status"];
  */
 export type RunJournalKnownEvent =
   | (JournalBase & { type: "run.started"; pipeline: string; ticket: string | null })
-  | (JournalBase & { type: "run.resumed"; pipeline: string })
+  /** The selection of the invocation that resumed the run: `--steps`, `--skip`, `--until`. */
+  | (JournalBase & {
+      type: "run.resumed";
+      pipeline: string;
+      steps: string[] | null;
+      skip: string[] | null;
+      until: string | null;
+    })
+  /** `--start-at` created this run from `forkedFrom`. */
+  | (JournalBase & { type: "run.forked"; forkedFrom: string; startAt: string; inheritedSpendUsd: number })
+  /** `--start-at` replaced this unfinished run with the fork `supersededBy`. */
+  | (JournalBase & { type: "run.superseded"; supersededBy: string })
   | (JournalBase & { type: "run.finished"; status: RunStatus; outcome?: RunOutcomeState })
   | (JournalBase & {
       type: "run.stopped";

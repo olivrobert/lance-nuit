@@ -11,6 +11,7 @@ import {
   hasVerdict,
   isCompleted,
   isFailure,
+  isFinishedStatus,
   isHalted,
   isProvisionalStatus,
   isResumableStatus,
@@ -19,14 +20,14 @@ import {
   VERDICT_STATUSES,
 } from "./run-status.js";
 
-const STATUSES: readonly RunStatus[] = ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED", "UNKNOWN"];
+const STATUSES: readonly RunStatus[] = ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED", "SUPERSEDED", "UNKNOWN"];
 
 function holding(statuses: readonly RunStatus[], predicate: (status: RunStatus) => boolean): RunStatus[] {
   return statuses.filter(predicate);
 }
 
 test("meaning: each question about a status has one answer per status", () => {
-  expect(holding(STATUSES, hasVerdict)).toEqual(["PASS", "FAIL", "STOPPED", "ABORTED"]);
+  expect(holding(STATUSES, hasVerdict)).toEqual(["PASS", "FAIL", "STOPPED", "ABORTED", "SUPERSEDED"]);
   expect(holding(STATUSES, isCompleted)).toEqual(["PASS"]);
   expect(holding(STATUSES, isFailure)).toEqual(["FAIL", "ABORTED"]);
   expect(holding(STATUSES, isHalted)).toEqual(["STOPPED", "ABORTED"]);
@@ -38,7 +39,8 @@ test("meaning: each question about a status has one answer per status", () => {
     "ABORTED",
     "UNKNOWN",
   ]);
-  expect(VERDICT_STATUSES).toEqual(["PASS", "FAIL", "STOPPED", "ABORTED"]);
+  expect(holding(STATUSES, isFinishedStatus)).toEqual(["PASS", "SUPERSEDED"]);
+  expect(VERDICT_STATUSES).toEqual(["PASS", "FAIL", "STOPPED", "ABORTED", "SUPERSEDED"]);
 });
 
 test("meaning: a missing status, or one a newer runner wrote, means nothing", () => {

@@ -4,36 +4,50 @@
 // attempts settled, the fields a resume rewrites — or create it. Every snapshot
 // and journal write of the opening happens here, and the caller learns whether
 // it resumed instead of deriving it again. The journal is never read: the
-// snapshot is the whole execution record. A finished (`PASS`) run is opened
-// read-only and nothing here writes it.
+// snapshot is the whole execution record. A finished (`PASS` or `SUPERSEDED`)
+// run is opened read-only and nothing here writes it.
 //
-// What the invocation asks for stays with its caller (`execution/step/load-or-create-run.ts`): the
-// definition a snapshot runs against, and the `--start-at` requeue to apply to
-// the steps. They come in as a policy, called at the
-// one point of the opening where each applies; the caller reads the steps and
-// decides, and the opening writes them.
+// What the invocation asks for stays with its caller (`execution/step/load-or-create-run.ts`):
+// the definition a snapshot runs against comes in as a policy, called at the one
+// point of the opening where it applies.
+//
+// `--start-at` never reopens a run: `forkRun` writes a new one from the source,
+// and closes the source `SUPERSEDED` when it was unfinished. The caller has
+// already selected and checked the source (`selectForkSource`, `checkForkSource`).
 
-import { basename } from "node:path";
+import { mkdirSync } from "node:fs";
+import { basename, join } from "node:path";
 import { DEFAULT_SPEC_PATH } from "../../shared/env/tickets.js";
 import type { PipelineContext, PipelineLot } from "../../shared/language/context.js";
-import type { Pipeline, PipelineStep } from "../../definition/index.js";
-import type { PersistedRun, PersistedStepState, PipelineLineageEntry } from "../persisted.js";
+import type { Pipeline } from "../../definition/index.js";
+import type { PersistedRun, PipelineLineageEntry } from "../persisted.js";
 import type { DeepReadonly, RunView } from "../run.js";
 import type { Run, RunStep } from "./run.js";
 import type { RunEventStore, RunLogStore, RunStateStore } from "../storage-ports.js";
 import { log } from "../../shared/runtime/logging.js";
 import type { PersistedAttempt } from "../persisted.js";
 import { closeAttempt, journalAttemptClosed } from "./attempt-closure.js";
+import { runProvesUnpricedSpend, runSpend } from "./cost-accounting.js";
 import { appendRunEvent } from "./run-journal.js";
 import { remainingWork } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
 import { RUN_SNAPSHOT_VERSION } from "./schema.js";
 import { describeRunSnapshotProblem, hasRunSnapshotEntry, readRunSnapshotDiagnostic } from "./run-snapshot.js";
-import { makeRunStep, type StepStateInput } from "./run-step.js";
+import { makeRunStep } from "./run-step.js";
+import { isFinishedStatus } from "./run-status.js";
 import { FileRunEventStore } from "./stores/file-run-event-store.js";
 import { FileRunLogStore } from "./stores/file-run-log-store.js";
 import { FileRunStateStore } from "./stores/file-run-state-store.js";
-import { type RunDirResolution, releaseRunDir } from "./stores/run-storage.js";
+import {
+  allocateRunId,
+  claimRunDir,
+  pipelineRunsDir,
+  pointLatestTo,
+  type RunDirResolution,
+  releaseRunDir,
+  runLockHolder,
+  STATE_FILE,
+} from "./stores/run-storage.js";
 
 /** Where the invocation that opens the run reads artifacts and writes decisions. */
 export interface RunLocation {
@@ -69,24 +83,18 @@ export interface StrictSnapshotRead {
   expectedIdentity?: { runId: string; pipeline: string; ticket?: string };
 }
 
-/** What the invocation's selection does to the steps of a resumed run. The caller
- *  decides it on the persisted states; the opening applies it before the states
- *  become the run's steps. `--steps` and `--skip` are not here: they last
- *  one invocation, and the step loop applies them. */
-export interface ResumedSelection {
-  /** Steps requeued for replay, whatever their status: `pending`, marked `replay`. */
-  readonly replay: readonly string[];
-}
-
 /** What the invocation decides, called at the point of the opening where it applies. */
 export interface RunOpeningPolicy {
   /** The definition a snapshot about to be resumed runs against. */
   resumeDefinition(saved: DeepReadonly<PersistedRun>): Promise<Pipeline>;
-  /** The selection for a resumed run's steps. A throw refuses the resume, and
-   *  the run lock this opening took is released. */
-  selectResumed(states: readonly DeepReadonly<PersistedStepState>[]): ResumedSelection;
-  /** The initial state of one step of a new run. */
-  selectNew(def: PipelineStep): StepStateInput;
+}
+
+/** The selectors of this invocation, journaled with the resume they apply to. The
+ *  step loop applies them; nothing persists them. */
+export interface InvocationSelection {
+  steps?: readonly string[];
+  skip?: readonly string[];
+  until?: string;
 }
 
 export interface OpenRunRequest {
@@ -105,6 +113,7 @@ export interface OpenRunRequest {
   logStore?: RunLogStore;
   strictSnapshot?: StrictSnapshotRead;
   policy: RunOpeningPolicy;
+  selection?: InvocationSelection;
 }
 
 export interface OpenedRun {
@@ -149,7 +158,7 @@ function hydrate(pipeline: Pipeline, pipelinePath: string, persisted: PersistedR
   const stateById = new Map(persisted.steps.map((state) => [state.id, state]));
   const steps: RunStep[] = pipeline.steps.map((def) => makeRunStep(def, stateById.get(def.id)));
   const remaining = remainingWork({ status: persisted.status, outcome: persisted.outcome, steps });
-  const finished = persisted.status === "PASS";
+  const finished = isFinishedStatus(persisted.status);
   // A settled snapshot that never received a verdict is not terminal, it is a
   // run that still owes a `finalizeRun`: RUNNING is a crash in that window, and
   // ABORTED with no step left in flight is a SIGINT in the same window. Loading
@@ -378,18 +387,7 @@ function selectDirectory(request: OpenRunRequest): SelectedDirectory {
   return { dir, stateStore, eventStore, logStore, saved, releaseLock };
 }
 
-/** Apply the invocation's selection to the reconciled states. */
-function applySelection(states: readonly PersistedStepState[], selection: ResumedSelection): void {
-  const replay = new Set(selection.replay);
-  for (const state of states) {
-    if (!replay.has(state.id)) continue;
-    state.status = "pending";
-    state.replay = true;
-  }
-}
-
-/** Restore a snapshot: apply the invocation's selection, merge it with the
- *  definition, then record what this opening changed — its location, a new
+/** Restore a snapshot: merge it with the definition, then record what this opening changed — its location, a new
  *  authorization, the crashed attempts it settled — in one save, and journal
  *  the resume before the facts it settled. */
 async function restore(request: OpenRunRequest, selected: SelectedDirectory, saved: PersistedRun): Promise<Run> {
@@ -397,7 +395,6 @@ async function restore(request: OpenRunRequest, selected: SelectedDirectory, sav
   const { policy, scope, location } = request;
   const pipeline = await policy.resumeDefinition(saved);
   seedNewDefinitionSteps(pipeline, saved);
-  applySelection(saved.steps, policy.selectResumed(saved.steps));
   const run = hydrate(pipeline, request.pipelinePath, saved, scope);
   run.run_dir = dir;
   run.stateStore = selected.stateStore;
@@ -414,7 +411,15 @@ async function restore(request: OpenRunRequest, selected: SelectedDirectory, sav
   const settled = settleCrashedAttempts(run);
   const resumed = run.status === "RUNNING";
   if (resumed || moved || authorized || settled.length > 0) saveRun(run);
-  if (resumed) appendRunEvent(run, "run.resumed", { pipeline: run.pipeline });
+  if (resumed) {
+    const { selection } = request;
+    appendRunEvent(run, "run.resumed", {
+      pipeline: run.pipeline,
+      steps: selection?.steps ? [...selection.steps] : null,
+      skip: selection?.skip ? [...selection.skip] : null,
+      until: selection?.until ?? null,
+    });
+  }
   for (const { step, attempt } of settled) journalAttemptClosed(run, step, attempt);
   if (authorized) journalUnmeteredAuthorization(run);
   return run;
@@ -457,7 +462,7 @@ function create(request: OpenRunRequest, selected: SelectedDirectory): Run {
     stateStore: selected.stateStore,
     eventStore: selected.eventStore,
     logStore: selected.logStore,
-    steps: pipeline.steps.map((def) => makeRunStep(def, request.policy.selectNew(def))),
+    steps: pipeline.steps.map((def) => makeRunStep(def)),
   };
 
   saveRun(run);
@@ -479,5 +484,198 @@ export async function openRun(request: OpenRunRequest): Promise<OpenedRun> {
   } catch (error) {
     selected.releaseLock();
     throw error;
+  }
+}
+
+export interface ForkRunRequest {
+  pipeline: Pipeline;
+  pipelinePath: string;
+  ticket?: string;
+  context: PipelineContext;
+  location: RunLocation;
+  /** This invocation's flags: a fork takes none of them from its source. */
+  scope: Pick<RunScope, "maxCostUsd" | "budgetApproved" | "allowUnmetered">;
+  /** The source run, selected and checked by the caller before any write. */
+  sourceDir: string;
+  startAt: string;
+}
+
+interface SettledSource {
+  snapshot: PersistedRun;
+  /** The source with its crashed attempts settled in memory, so the spend it
+   *  hands down includes them. */
+  run: Run;
+  settled: { step: RunStep; attempt: PersistedAttempt }[];
+}
+
+function readSource(request: ForkRunRequest): SettledSource {
+  const diagnostic = readRunSnapshotDiagnostic(join(request.sourceDir, STATE_FILE));
+  if (diagnostic.kind !== "valid") {
+    throw new Error(`--start-at: the source run ${describeRunSnapshotProblem(diagnostic)} (${diagnostic.path}).`);
+  }
+  const snapshot = diagnostic.snapshot;
+  const run = hydrate(request.pipeline, request.pipelinePath, structuredClone(snapshot), {});
+  run.run_dir = request.sourceDir;
+  return { snapshot, run, settled: settleCrashedAttempts(run) };
+}
+
+function heldSourceError(sourceDir: string): Error {
+  const holder = runLockHolder(sourceDir);
+  return new Error(
+    `--start-at: run ${basename(sourceDir)} is held by another runner process${holder ? ` (pid ${holder})` : ""}.` +
+      ` Wait for it to finish, then fork it.`,
+  );
+}
+
+function forkSteps(pipeline: Pipeline, source: Run, startAt: string): RunStep[] {
+  const cut = pipeline.steps.findIndex((def) => def.id === startAt);
+  if (cut < 0) throw new Error(`--start-at: step "${startAt}" not found in pipeline "${pipeline.name}".`);
+  const sourceById = new Map(source.steps.map((step) => [step.id, step]));
+  return pipeline.steps.map((def, index) => {
+    const kept = index < cut ? sourceById.get(def.id) : undefined;
+    if (!kept) return makeRunStep(def);
+    return makeRunStep(def, {
+      status: kept.status,
+      session: kept.session,
+      profile: kept.profile,
+      orchestration: kept.orchestration,
+    });
+  });
+}
+
+function newFork(request: ForkRunRequest, source: Run, dir: string): Run {
+  const { pipeline, scope, location, context } = request;
+  const runId = basename(dir);
+  const now = new Date().toISOString();
+  return {
+    schemaVersion: RUN_SNAPSHOT_VERSION,
+    runId,
+    name: pipeline.name,
+    ticket: request.ticket,
+    pipeline: pipeline.name,
+    pipeline_path: request.pipelinePath,
+    run_dir: dir,
+    createdAt: now,
+    updatedAt: now,
+    status: "RUNNING",
+    max_cost_usd:
+      scope.maxCostUsd ?? source.max_cost_usd ?? pipeline.max_cost_usd ?? pipeline.max_cost_per_work_item_usd,
+    budget_approved: scope.budgetApproved ? true : undefined,
+    allow_unmetered: scope.allowUnmetered ? true : undefined,
+    // The fork has no attempt left to prove it: the latch is carried over.
+    cost_unaccounted: source.cost_unaccounted === true || runProvesUnpricedSpend(source) ? true : undefined,
+    rootRunId: runId,
+    budgetScopeId: runId,
+    lot: source.lot ?? context.lot,
+    worktree: location.worktree,
+    cwd: location.cwd,
+    specPath: source.specPath ?? context.config.specPath,
+    forkedFrom: source.runId,
+    startAt: request.startAt,
+    inheritedSpendUsd: (source.inheritedSpendUsd ?? 0) + (runSpend(source).usd ?? 0),
+    steps: forkSteps(pipeline, source, request.startAt),
+  };
+}
+
+/** Write `status: SUPERSEDED` into a snapshot as it was read, every other field
+ *  unchanged. */
+function writeSuperseded(dir: string, snapshot: PersistedRun, supersededBy: string, context: PipelineContext): void {
+  const store = new FileRunStateStore({ context, ticket: snapshot.ticket, pipeline: snapshot.pipeline });
+  store.saveAt({ ...snapshot, status: "SUPERSEDED", supersededBy }, dir);
+}
+
+/** The snapshot with the attempts the fork settled in memory. */
+function withSettledAttempts({ snapshot, run }: SettledSource): PersistedRun {
+  const steps = new Map(run.steps.map((step) => [step.id, step]));
+  return {
+    ...snapshot,
+    steps: snapshot.steps.map((state) => {
+      const step = steps.get(state.id);
+      return step ? { ...state, attempts: step.attempts, control: step.control, usage: step.usage } : state;
+    }),
+  };
+}
+
+/** Supersede the unfinished runs `snapshot` composed, and theirs. Their crashed
+ *  attempts stay as they are: no definition is loaded for them. A child held by
+ *  a live process is left alone. */
+function supersedeChildren(
+  snapshot: PersistedRun,
+  supersededBy: string,
+  context: PipelineContext,
+  visited: Set<string>,
+): void {
+  for (const step of snapshot.steps) {
+    for (const ref of step.orchestration?.children ?? []) {
+      if (ref.runId === undefined) continue;
+      const dir = join(pipelineRunsDir(ref.pipeline, ref.ticket, context), ref.runId);
+      if (visited.has(dir)) continue;
+      visited.add(dir);
+      const diagnostic = readRunSnapshotDiagnostic(join(dir, STATE_FILE));
+      if (diagnostic.kind !== "valid" || isFinishedStatus(diagnostic.snapshot.status)) continue;
+      const claim = claimRunDir(dir);
+      if (!claim.ok) {
+        log.warn(`Composed run ${ref.runId} is held by another runner process: it is not superseded.`);
+        continue;
+      }
+      try {
+        writeSuperseded(dir, diagnostic.snapshot, supersededBy, context);
+        appendRunEvent({ run_dir: dir, runId: ref.runId }, "run.superseded", { supersededBy });
+        supersedeChildren(diagnostic.snapshot, supersededBy, context, visited);
+      } finally {
+        if (claim.acquired) releaseRunDir(dir);
+      }
+    }
+  }
+}
+
+/** Close an unfinished source `SUPERSEDED` by the fork, with the attempts the
+ *  fork settled, then the unfinished runs it composed. */
+function supersedeRun(request: ForkRunRequest, source: SettledSource, supersededBy: string): void {
+  writeSuperseded(request.sourceDir, withSettledAttempts(source), supersededBy, request.context);
+  for (const { step, attempt } of source.settled) journalAttemptClosed(source.run, step, attempt);
+  appendRunEvent(source.run, "run.superseded", { supersededBy });
+  supersedeChildren(source.snapshot, supersededBy, request.context, new Set([request.sourceDir]));
+}
+
+/**
+ * Fork the source run at `startAt` (`--start-at`): a new run keeps the status,
+ * session and orchestration of every step before `startAt`, and starts that step
+ * and every later one blank. It inherits what the source spent, crashed attempts
+ * included, and becomes `latest`; an unfinished source is then closed
+ * `SUPERSEDED`. A crash before `latest` moves leaves an orphan directory, one
+ * after it a source still resumable with `--run`: neither loses spend.
+ */
+export function forkRun(request: ForkRunRequest): OpenedRun {
+  const { sourceDir, pipeline, ticket, context } = request;
+  const claim = claimRunDir(sourceDir);
+  if (!claim.ok) throw heldSourceError(sourceDir);
+  try {
+    const source = readSource(request);
+    const pipelineDir = pipelineRunsDir(pipeline.name, ticket, context);
+    const dir = join(pipelineDir, allocateRunId(pipelineDir, pipeline.name));
+    mkdirSync(dir, { recursive: true });
+    const forkClaim = claimRunDir(dir);
+    const fork = newFork(request, source.run, dir);
+    fork.stateStore = new FileRunStateStore({ context, ticket, pipeline: pipeline.name });
+    fork.eventStore = new FileRunEventStore({ runDir: dir });
+    fork.logStore = new FileRunLogStore({ runDir: dir });
+    try {
+      saveRun(fork);
+      pointLatestTo(pipelineDir, dir);
+    } catch (error) {
+      if (forkClaim.ok && forkClaim.acquired) releaseRunDir(dir);
+      throw error;
+    }
+    if (!isFinishedStatus(source.snapshot.status)) supersedeRun(request, source, fork.runId as string);
+    appendRunEvent(fork, "run.forked", {
+      forkedFrom: fork.forkedFrom as string,
+      startAt: request.startAt,
+      inheritedSpendUsd: fork.inheritedSpendUsd ?? 0,
+    });
+    if (fork.allow_unmetered === true) journalUnmeteredAuthorization(fork);
+    return { run: fork, resumed: true };
+  } finally {
+    if (claim.acquired) releaseRunDir(sourceDir);
   }
 }

@@ -17,3 +17,5 @@
 {"ts":"2026-01-01T09:10:04.000Z","type":"run.aborted","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","status":"ABORTED","reason":"SIGINT: run interrupted manually","logPath":"steps/review/attempt-001/output.log"}
 {"ts":"2026-01-01T09:10:05.000Z","type":"run.finished","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","status":"FAIL","outcome":{"phase":"tests","reason":"exit code 1","logPath":"steps/tests/attempt-001/output.log","resumable":true,"at":"2026-01-01T09:10:05.000Z","failKind":"technical","stopKind":"cost-unaccounted"}}
 {"ts":"2026-01-01T09:10:06.000Z","type":"run.resumed","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","pipeline":"parent-pipeline"}
+{"ts":"2026-01-01T09:10:07.000Z","type":"run.superseded","runId":"20260101T090000.000Z-parent-pipeline-a1b2c3","supersededBy":"20260101T091000.000Z-parent-pipeline-d4e5f6"}
+{"ts":"2026-01-01T09:10:07.000Z","type":"run.forked","runId":"20260101T091000.000Z-parent-pipeline-d4e5f6","forkedFrom":"20260101T090000.000Z-parent-pipeline-a1b2c3","startAt":"tests","inheritedSpendUsd":1.25}

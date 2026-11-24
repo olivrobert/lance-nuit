@@ -147,19 +147,6 @@ function writePipelineFixture(dir: string): string {
   return p;
 }
 
-function writeMultiStepFixture(dir: string): string {
-  const p = join(dir, "pipeline-multi.ts");
-  writeFileSync(
-    p,
-    `export default ({ pipeline, bashStep }) => pipeline("default")` +
-      `.add(bashStep({ id: "a", name: "A", command: "true", rerunOnResume: true }))` +
-      `.add(bashStep({ id: "b", name: "B", command: "true", rerunOnResume: true }))` +
-      `.add(bashStep({ id: "c", name: "C", command: "true", rerunOnResume: true }))` +
-      `.build();\n`,
-  );
-  return p;
-}
-
 function writeWorkItemBudgetFixture(dir: string): string {
   const p = join(dir, "pipeline-work-items.ts");
   writeFileSync(
@@ -170,44 +157,6 @@ function writeWorkItemBudgetFixture(dir: string): string {
   );
   return p;
 }
-
-test("loadOrCreateRun rejects an existing corrupt snapshot instead of initializing over it", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "startat-"));
-  const pipelinePath = writeMultiStepFixture(dir);
-  const runDir = join(dir, "run");
-  mkdirSync(runDir);
-
-  const { run } = await loadOrCreateRun({
-    pipelinePath,
-    runDir,
-    fresh: false,
-    startAt: "b",
-    context: buildPipelineContext(builtinRegistries()),
-    worktree: false,
-  });
-  const byId = Object.fromEntries(run.steps.map((s) => [s.id, s.status]));
-  // Boot requeues from the target on; the loop leaves the earlier steps out.
-  expect(byId).toEqual({ a: "pending", b: "pending", c: "pending" });
-  expect(run.steps.map((step) => step.replay)).toEqual([undefined, true, true]);
-});
-
-test("loadOrCreateRun: validates the contract", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "startat-bad-"));
-  const pipelinePath = writeMultiStepFixture(dir);
-  const runDir = join(dir, "run");
-  mkdirSync(runDir);
-
-  await expect(
-    loadOrCreateRun({
-      pipelinePath,
-      runDir,
-      fresh: false,
-      startAt: "nope",
-      context: buildPipelineContext(builtinRegistries()),
-      worktree: false,
-    }),
-  ).rejects.toThrow(/not found/);
-});
 
 test("matchesStepSelector: validates the contract", () => {
   expect(matchesStepSelector("quality.static-analysis", "quality")).toBe(true);

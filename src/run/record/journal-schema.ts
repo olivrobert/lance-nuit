@@ -66,7 +66,22 @@ const EVENT_SCHEMAS = {
     pipeline: z.string(),
     ticket: z.string().nullable(),
   }),
-  "run.resumed": z.looseObject({ ...base, type: z.literal("run.resumed"), pipeline: z.string() }),
+  "run.resumed": z.looseObject({
+    ...base,
+    type: z.literal("run.resumed"),
+    pipeline: z.string(),
+    steps: z.array(z.string()).nullable().default(null),
+    skip: z.array(z.string()).nullable().default(null),
+    until: z.string().nullable().default(null),
+  }),
+  "run.forked": z.looseObject({
+    ...base,
+    type: z.literal("run.forked"),
+    forkedFrom: z.string(),
+    startAt: z.string(),
+    inheritedSpendUsd: z.number(),
+  }),
+  "run.superseded": z.looseObject({ ...base, type: z.literal("run.superseded"), supersededBy: z.string() }),
   "run.finished": z.looseObject({
     ...base,
     type: z.literal("run.finished"),

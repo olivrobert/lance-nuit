@@ -68,7 +68,6 @@ async function main() {
       resuming,
       abort,
       replayInterrupted: started.ready.args.replayInterrupted,
-      startAt: started.ready.args.startAt,
       until: started.ready.args.until,
       stepFilter: started.ready.args.stepFilter,
       skipFilter: started.ready.args.skipFilter,

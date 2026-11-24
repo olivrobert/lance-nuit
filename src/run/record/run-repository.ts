@@ -15,7 +15,6 @@ function persistedStep(step: RunStep): PersistedStepState {
     status: step.status,
     retries: step.retries,
     timeout_retries: step.timeout_retries,
-    replay: step.replay,
     started_at: step.started_at,
     finished_at: step.finished_at,
     session: step.session,
@@ -67,6 +66,10 @@ function persistedRun(run: Run): PersistedRun {
     cost_unaccounted: run.cost_unaccounted,
     allow_unmetered: run.allow_unmetered,
     specPath: run.specPath,
+    forkedFrom: run.forkedFrom,
+    startAt: run.startAt,
+    inheritedSpendUsd: run.inheritedSpendUsd,
+    supersededBy: run.supersededBy,
   };
 }
 

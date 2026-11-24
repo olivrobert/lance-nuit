@@ -91,9 +91,17 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
     args.ticket = positionalTicket;
   }
 
-  const selectors = [args.stepFilter, args.skipFilter, args.startAt].filter((v) => v != null).length;
-  if (selectors > 1) {
-    throw new CliError("Options --steps, --skip, and --start-at are mutually exclusive.");
+  const inspection = args.inspect || args.logs || args.clean || args.approveOnly || args.rejectOnly;
+  if ((args.startAt !== undefined || args.stepFilter || args.skipFilter) && inspection) {
+    throw new CliError("Options --start-at, --steps and --skip apply to a run, not to an inspection command.");
+  }
+  // A fork runs its start step and lets the lock decide the rest: no other
+  // selector has a meaning on top of it.
+  if (args.startAt !== undefined && (args.fresh || args.stepFilter || args.skipFilter)) {
+    throw new CliError("Option --start-at cannot be combined with --fresh, --steps or --skip.");
+  }
+  if (args.stepFilter && args.skipFilter) {
+    throw new CliError("Options --steps and --skip are mutually exclusive.");
   }
   // --steps already names exactly what runs; a bound on top of it would either
   // repeat that selection or contradict it.
@@ -182,10 +190,9 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
       "Option --replay-interrupted authorizes one run: rerun that ticket explicitly instead of --scan.",
     );
   }
-  // Replaying done steps is a decision about one inspected run; --skip already
-  // excludes the earlier steps on every ticket a --scan sweeps.
+  // A fork is a decision about one inspected run.
   if (args.startAt !== undefined && args.scan) {
-    throw new CliError("Option --start-at replays one run: rerun that ticket explicitly instead of --scan.");
+    throw new CliError("Option --start-at forks one run: rerun that ticket explicitly instead of --scan.");
   }
   if (args.runId && args.fresh) {
     throw new CliError(

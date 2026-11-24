@@ -586,24 +586,6 @@ test("after an interruption, finalization keeps ABORTED and completes the outcom
   ]);
 });
 
-test("updateStep: a settled step drops its replay mark, an unsettled one keeps it", () => {
-  const run = twoStepRun("transitions-replay-");
-  const step = run.steps[1]!;
-
-  // Kept while the replay has not settled: the next invocation must still run it.
-  for (const status of ["running", "failed", "aborted"] as const) {
-    step.replay = true;
-    updateStep(run, step, status, "not yet");
-    expect(step.replay).toBe(true);
-  }
-  for (const status of ["done", "skipped"] as const) {
-    step.replay = true;
-    updateStep(run, step, status);
-    expect(step.replay).toBeUndefined();
-    expect(JSON.parse(snapshotOf(run)).steps[1].replay).toBeUndefined();
-  }
-});
-
 /** A step a dead runner left `running`, its last attempt settled as interrupted on resume. */
 function deadPass(id: string): ReturnType<typeof makeRunStep> {
   const step = makeRunStep({ id, name: id.toUpperCase(), command: "true", runner: "bash" }, { status: "running" });

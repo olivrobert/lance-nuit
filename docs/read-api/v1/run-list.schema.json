@@ -57,7 +57,8 @@
             "PASS",
             "FAIL",
             "STOPPED",
-            "ABORTED"
+            "ABORTED",
+            "SUPERSEDED"
           ]
         },
         "interrupted": {

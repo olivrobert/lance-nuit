@@ -17,7 +17,7 @@ import {
   resolveApprovableArtifact,
 } from "../commands/approval-subject.js";
 import { COMMANDS } from "../commands/command.js";
-import { runDispatch, selectDispatch, validateDispatchArgs } from "../../execution/index.js";
+import { checkForkSource, runDispatch, selectDispatch, validateDispatchArgs } from "../../execution/index.js";
 import { enclosingKitProjectRoot, KIT_DIR } from "../../shared/env/kit-paths.js";
 import type { WorktreeSpec } from "../env/worktree.js";
 import { errorMessage } from "../../shared/lib/errors.js";
@@ -28,7 +28,7 @@ import { CliError, type RunnerArgs } from "../cli-options.js";
 import { parseRunnerArgs } from "../cli/parse.js";
 import { log } from "../../shared/runtime/logging.js";
 import { type ApprovalDecision, type RecordedApproval, recordApproval } from "../../work-items/index.js";
-import { FileRunStateStore, latestRunHolder } from "../../run/index.js";
+import { FileRunStateStore, type ForkSource, latestRunHolder, selectForkSource } from "../../run/index.js";
 import { composeRunnerRegistries } from "./registries.js";
 
 /** A ticket reaches the filesystem (context paths, worktree directory) before any
@@ -43,6 +43,8 @@ export interface ReadyRun {
   pipelinePath: string;
   stateStore: FileRunStateStore;
   worktreeMode: boolean;
+  /** The run `--start-at` forks, checked before any decision was recorded. */
+  forkSource?: ForkSource;
   /** Set when `--approve` or `--reject` recorded a decision that the run must journal. */
   recordedDecision?: ApprovalDecision;
   /** Set only in the process that entered the worktree, which owns its stack. */
@@ -82,18 +84,21 @@ export function checkRunArgs(args: RunnerArgs): string | undefined {
 }
 
 /**
- * Check `--until` against the loaded pipeline, before anything is recorded or
- * spawned: under `--scan`, a typo would otherwise stop every child at boot.
- * The unknown-step message has the shape of the `--start-at` one.
+ * Check `--start-at` and `--until` against the loaded pipeline, before anything
+ * is recorded or spawned: under `--scan`, a typo would otherwise stop every
+ * child at boot, and an `--approve` would be written before the typo is seen.
  */
-export function checkUntil(args: RunnerArgs, pipelineDef: Pipeline): string | undefined {
-  if (args.until === undefined) return undefined;
+export function checkStepBounds(args: RunnerArgs, pipelineDef: Pipeline): string | undefined {
   const ids = pipelineDef.steps.map((step) => step.id);
+  if (args.startAt !== undefined && !ids.includes(args.startAt)) {
+    return `--start-at: step "${args.startAt}" not found in pipeline "${pipelineDef.name}" (steps: ${ids.join(", ")}).`;
+  }
+  if (args.until === undefined) return undefined;
   const bound = ids.indexOf(args.until);
   if (bound < 0) {
     return `--until: step "${args.until}" not found in pipeline "${pipelineDef.name}" (steps: ${ids.join(", ")}).`;
   }
-  // Every step before the --start-at target is skipped, so a bound among them is
+  // A fork keeps every step before its start as it is, so a bound among them is
   // already reached: the run would stop without running anything.
   const start = args.startAt === undefined ? -1 : ids.indexOf(args.startAt);
   if (start > bound) {
@@ -122,6 +127,37 @@ export function checkRunCwd(cwd: string = process.cwd()): string | undefined {
     `  cwd:      ${resolve(cwd)}\n` +
     (known ? `  run from: ${root}` : `  ${root} is not a project root either — cd to the project first.`)
   );
+}
+
+export type ForkOutcome = { kind: "ok"; source?: ForkSource } | { kind: "error"; message: string };
+
+/**
+ * Select and check the run `--start-at` forks. Read-only, and run before any
+ * decision is recorded: a refusal leaves no decision, no run directory, and the
+ * source untouched.
+ */
+export async function checkFork(
+  args: RunnerArgs,
+  pipelineDef: Pipeline,
+  context: PipelineContext,
+): Promise<ForkOutcome> {
+  if (args.startAt === undefined) return { kind: "ok" };
+  let source: ForkSource;
+  try {
+    source = selectForkSource(pipelineDef.name, args.ticket, args.runId, context);
+  } catch (error) {
+    return { kind: "error", message: errorMessage(error) };
+  }
+  const problems = await checkForkSource(pipelineDef, source, args.startAt, context);
+  if (problems.length > 0) {
+    return {
+      kind: "error",
+      message:
+        `--start-at: run ${source.snapshot.runId} cannot be forked at "${args.startAt}":\n` +
+        problems.map((problem) => `  - ${problem}`).join("\n"),
+    };
+  }
+  return { kind: "ok", source };
 }
 
 export type ApprovalOutcome =
@@ -236,9 +272,15 @@ export async function startup(argv: string[]): Promise<StartupOutcome> {
   const pipelineDef = await loadPipelineDefinition(pipelinePath, context);
   const stateStore = new FileRunStateStore({ context, pipeline: pipelineDef.name, ticket: args.ticket });
 
-  const untilError = checkUntil(args, pipelineDef);
+  const untilError = checkStepBounds(args, pipelineDef);
   if (untilError) {
     log(untilError);
+    return { kind: "exit", code: 1 };
+  }
+
+  const fork = await checkFork(args, pipelineDef, context);
+  if (fork.kind === "error") {
+    log(fork.message);
     return { kind: "exit", code: 1 };
   }
 
@@ -283,6 +325,7 @@ export async function startup(argv: string[]): Promise<StartupOutcome> {
       pipelinePath,
       stateStore,
       worktreeMode,
+      ...(fork.source ? { forkSource: fork.source } : {}),
       ...(recordedDecision ? { recordedDecision } : {}),
       ...(boot.enteredWorktree ? { enteredWorktree: boot.enteredWorktree } : {}),
     },

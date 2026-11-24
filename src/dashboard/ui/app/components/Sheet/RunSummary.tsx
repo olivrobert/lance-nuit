@@ -18,13 +18,14 @@ const HEADLINE: Record<Item["status"], string> = {
   ABORTED: "Aborted",
   STOPPED: "Stopped",
   RUNNING: "Running",
+  SUPERSEDED: "Superseded",
 };
 
 function percent(share: number): string {
   return `${Math.round(share * 100)} %`;
 }
 
-function Headline({ item, timeline }: { item: Item; timeline: RunTimeline }): JSX.Element {
+export function Headline({ item, timeline }: { item: Item; timeline: RunTimeline }): JSX.Element {
   const started = new Date(timeline.startMs).toISOString();
   const ended = new Date(timeline.startMs + timeline.endMs).toISOString();
   const running = timeline.steps.find((step) => step.running);
@@ -42,7 +43,15 @@ function Headline({ item, timeline }: { item: Item; timeline: RunTimeline }): JS
   );
 }
 
-function CostFact({ item, recap, journey }: { item: Item; recap: RunRecap | null; journey: RunJourney }): JSX.Element {
+export function CostFact({
+  item,
+  recap,
+  journey,
+}: {
+  item: Item;
+  recap: RunRecap | null;
+  journey: RunJourney;
+}): JSX.Element {
   const budget = journey.maxCostUsd;
   const spent = item.cost?.usd;
   const tokens = recap?.tokens;
@@ -80,14 +89,14 @@ function modelCounts(timeline: RunTimeline): string {
   return [...counts].map(([model, count]) => `${fmtModel(model)} ×${count}`).join(", ");
 }
 
-interface FactsProps {
+export interface FactsProps {
   item: Item;
   recap: RunRecap | null;
   journey: RunJourney;
   timeline: RunTimeline;
 }
 
-function Facts({ item, recap, journey, timeline }: FactsProps): JSX.Element {
+export function Facts({ item, recap, journey, timeline }: FactsProps): JSX.Element {
   const stepCount = timeline.steps.length + timeline.minor.length;
   const models = modelCounts(timeline);
   return (
@@ -114,7 +123,7 @@ function listed(ids: string[], limit = 3): string {
   return ids.length > limit ? `${ids.slice(0, limit).join(", ")}…` : ids.join(", ");
 }
 
-function TakeawayLine({ takeaway }: { takeaway: Takeaway }): JSX.Element {
+export function TakeawayLine({ takeaway }: { takeaway: Takeaway }): JSX.Element {
   switch (takeaway.kind) {
     case "longest":
       return (

@@ -38,6 +38,8 @@ interface StatusMeaning {
   provisional: boolean;
   /** A resume continues the run. Never asked of `RUNNING`, which is no verdict. */
   resumable: boolean;
+  /** The run is over and its snapshot is never written again. */
+  finished: boolean;
 }
 
 const MEANING: Readonly<Record<RunStatus, StatusMeaning>> = {
@@ -49,6 +51,7 @@ const MEANING: Readonly<Record<RunStatus, StatusMeaning>> = {
     awaitsHuman: false,
     provisional: true,
     resumable: false,
+    finished: false,
   },
   PASS: {
     verdict: true,
@@ -58,6 +61,7 @@ const MEANING: Readonly<Record<RunStatus, StatusMeaning>> = {
     awaitsHuman: false,
     provisional: false,
     resumable: false,
+    finished: true,
   },
   FAIL: {
     verdict: true,
@@ -67,6 +71,7 @@ const MEANING: Readonly<Record<RunStatus, StatusMeaning>> = {
     awaitsHuman: true,
     provisional: false,
     resumable: true,
+    finished: false,
   },
   STOPPED: {
     verdict: true,
@@ -76,6 +81,7 @@ const MEANING: Readonly<Record<RunStatus, StatusMeaning>> = {
     awaitsHuman: true,
     provisional: false,
     resumable: true,
+    finished: false,
   },
   ABORTED: {
     verdict: true,
@@ -85,6 +91,18 @@ const MEANING: Readonly<Record<RunStatus, StatusMeaning>> = {
     awaitsHuman: true,
     provisional: true,
     resumable: true,
+    finished: false,
+  },
+  // Replaced by the fork `--start-at` made of it: neither a failure nor work owed.
+  SUPERSEDED: {
+    verdict: true,
+    completed: false,
+    failure: false,
+    halted: false,
+    awaitsHuman: false,
+    provisional: false,
+    resumable: false,
+    finished: true,
   },
   UNKNOWN: {
     verdict: false,
@@ -94,6 +112,7 @@ const MEANING: Readonly<Record<RunStatus, StatusMeaning>> = {
     awaitsHuman: false,
     provisional: false,
     resumable: true,
+    finished: false,
   },
 };
 
@@ -131,6 +150,11 @@ export function isHalted(status: RunStatus | undefined): boolean {
  *  find under "Needs you". */
 export function awaitsHuman(status: RunStatus | undefined): boolean {
   return meaningOf(status)?.awaitsHuman === true;
+}
+
+/** `PASS` or `SUPERSEDED`: the snapshot is never written again. */
+export function isFinishedStatus(status: RunStatus | undefined): boolean {
+  return meaningOf(status)?.finished === true;
 }
 
 export function isProvisionalStatus(status: RunStatus | undefined): boolean {

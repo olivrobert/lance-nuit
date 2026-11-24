@@ -7,18 +7,18 @@
 import { extractErrors } from "../report-extraction.js";
 import { executeStep } from "../runners.js";
 import type { PipelineContext } from "../../shared/language/context.js";
-import { readmittedOnResume } from "../../definition/index.js";
+import { readmittedOnResume, rerunsOnResume } from "../../definition/index.js";
 import type { RunStepView, RunView } from "../../run/index.js";
 import type { RunOutput } from "../run-output.js";
 import { type AbortScope, createAbortScope } from "../abort.js";
 import {
+  forkPending,
   remainingWork,
   isSettledStatus,
   lastPassInterrupted,
   ledgerStops,
   matchesStepSelector,
   openRunLedger,
-  owesWork,
   type RunOutcome,
   stopRun,
 } from "../../run/index.js";
@@ -40,7 +40,7 @@ export function stepLoopDeps(output: RunOutput): StepLoopDeps {
 /** Re-exported for the entry point: the shape is owned by the run finalization
  *  it feeds (`run/record/run-transitions.ts`). */
 export type { RunOutcome } from "../../run/index.js";
-export { loadOrCreateRun } from "./load-or-create-run.js";
+export { checkForkSource, loadOrCreateRun } from "./load-or-create-run.js";
 
 export interface ExecuteRunStepsOptions {
   resuming: boolean;
@@ -51,14 +51,11 @@ export interface ExecuteRunStepsOptions {
   abort?: AbortScope;
   /** `--replay-interrupted` of this invocation; composed children inherit it. */
   replayInterrupted?: boolean;
-  /** `--start-at` of this invocation. It names a top-level step, so children do
-   *  not inherit it. */
-  startAt?: string;
   /** `--until` of this invocation: the step after which the loop stops. A
-   *  top-level step like `startAt`, never inherited, never persisted. */
+   *  top-level step, never inherited, never persisted. */
   until?: string;
   /** `--steps` of this invocation. It lasts this invocation only, so the loop
-   *  applies it, and `--skip`. Top-level steps only, like `startAt`. */
+   *  applies it, and `--skip`. Top-level steps only, like `until`. */
   stepFilter?: readonly string[];
   /** `--skip` of this invocation; see `stepFilter`. */
   skipFilter?: readonly string[];
@@ -72,15 +69,19 @@ export interface ExecuteRunStepsOptions {
  * invocation, so this is the one place that applies it, and nothing persists
  * it. `--steps` and `--skip` leave a step out
  * whatever its status: statuses no longer decide what runs, the operator's
- * selection does. `--start-at` keeps its scope: before the target, only work
- * still owed is left out, and a `done` step is re-admitted as usual.
+ * selection does.
  */
-function leftOutBySelection(run: RunView, step: RunStepView, opts: ExecuteRunStepsOptions): boolean {
+function leftOutBySelection(step: RunStepView, opts: ExecuteRunStepsOptions): boolean {
   if (opts.stepFilter && !opts.stepFilter.some((selector) => matchesStepSelector(step.id, selector))) return true;
-  if (opts.skipFilter?.some((selector) => matchesStepSelector(step.id, selector))) return true;
-  if (opts.startAt === undefined) return false;
-  const target = run.steps.findIndex((candidate) => candidate.id === opts.startAt);
-  return run.steps.indexOf(step) < target && owesWork(step.status);
+  return opts.skipFilter?.some((selector) => matchesStepSelector(step.id, selector)) === true;
+}
+
+/** Before the step a pending fork starts at, the copied steps keep their status:
+ *  only those that rerun on every resume are admitted, so that `branch` or
+ *  `preflight` put the tree back before the forced step runs. */
+function keptByPendingFork(run: RunView, step: RunStepView): boolean {
+  if (!forkPending(run) || rerunsOnResume(step.def)) return false;
+  return run.steps.indexOf(step) < run.steps.findIndex((candidate) => candidate.id === run.startAt);
 }
 
 /** The step `--until` names. Boot already refused an unknown id with the list of
@@ -166,7 +167,8 @@ export async function executeRunSteps(
           boundReached = true;
           break units;
         }
-        if (leftOutBySelection(run, step, opts)) {
+        if (keptByPendingFork(run, step)) continue;
+        if (leftOutBySelection(step, opts)) {
           if (skipForOperatorSelection(run, step, deps.output) === "unfinished") leftUnfinished ??= step;
           setAside.push(step.id);
           continue;
@@ -192,7 +194,6 @@ export async function executeRunSteps(
           budget,
           output: deps.output,
           replayInterrupted: opts.replayInterrupted,
-          startAt: opts.startAt,
           workItemSourceStepId: opts.workItemSourceStepId,
         });
         if (isAborted()) break units;

@@ -201,14 +201,17 @@ the definition and the persisted steps, or creates a new run; it never reads the
 journal. Every snapshot write and journal event of the opening is its own, and
 it tells its caller whether it resumed.
 `execution/step/load-or-create-run.ts` supplies the policy: it loads the definition — again, for a
-resume, under the snapshot's spec path and lot — validates `--start-at`, and
-decides the `--start-at` requeue of the persisted steps, which `openRun` hands
-it read-only before hydration and then applies. `--start-at X` requeues `X`
-and every later step, so the run is hydrated live; attempts, retries and spend
-are kept.
+resume, under the snapshot's spec path and lot — and validates `--start-at`
+(`checkForkSource`): the source run, its pre-check and the refusals all come
+before anything is written. `--start-at X` forks: `openRun` calls `forkRun`
+(`run/record/run-opening.ts`), which creates a new run directory with the steps
+before `X` copied as settled (no attempts, spend or errors, quotas reset) and
+`X` and every later step blank `pending`, repoints `latest`, and closes the
+source `SUPERSEDED` when it did not pass, with its unfinished composed child
+runs. Journal: `run.forked` in the fork, `run.superseded` in each superseded
+run.
 
-The `--steps`/`--skip` selectors, and the steps before a `--start-at` target,
-last one invocation, so the snapshot never holds an exclusion: boot excludes
+The `--steps`/`--skip` selectors last one invocation, so the snapshot never holds an exclusion: boot excludes
 nothing, and an `excluded` mark an older runner left is ignored. The step loop
 applies them instead (`execution/step/step-loop.ts`): a
 step they leave out is journaled as `step.skipped` with the reason
@@ -253,6 +256,17 @@ selector and old files unchanged. Inspect the named path and restore it, or use
 `--fresh` deliberately to create a separate run.
 
 A snapshot also records where and why the run stands where it does:
+
+- A fork records `forkedFrom` (the source runId), `startAt` (the step it forked
+  at) and `inheritedSpendUsd` (the source's inherited spend plus its own,
+  crashed attempts settled first). The ledger seeds with the inherited spend
+  plus the run's own and compares the sum to `max_cost_usd`; `total_control`,
+  the report and the statistics count the run's own spend only. A run closed by
+  a fork has the status `SUPERSEDED` and `supersededBy` (the fork's runId): a
+  verdict like `PASS`, never written again, not resumable, not a failure and not
+  awaiting a human. While `startAt` has never left `pending` in the fork, that
+  step is forced to run even when fresh in the lock, and only `rerunOnResume`
+  steps are admitted before it.
 
 - `worktree` and `cwd` say where the run executed — `cwd` is the effective
   working directory after the worktree `chdir`, which is the tree whose
@@ -322,7 +336,8 @@ existing run explicitly for inspection, logs, or resume.
 
 A `PASS` run is never written again: it is opened read-only, and `saveRun`
 refuses to write it. `--run <runId>` that would execute it fails and points to
-`--start-at <step>`, which runs steps again in a new run; a parent that
+`--start-at <step>`, which forks a new run from it; a `SUPERSEDED` run is
+never written again either, and `--run` on it fails the same way; a parent that
 re-enters a `PASS` child opens it read-only and settles its reference from the
 child's snapshot.
 
@@ -434,7 +449,8 @@ survive: an attempt's log directory is allocated before its save, so an orphan
 | Transition | Order |
 | --- | --- |
 | Run creation (`openRun`) | snapshot → `run.started` (→ `run.unmetered.authorized`) |
-| Run opening on resume (`openRun`) | one snapshot (location, a new authorization, crashed attempts settled, status back to `RUNNING`) → `run.resumed` when the run goes on → the settled attempts' `step.attempt.finished` → `run.unmetered.authorized` |
+| Fork (`forkRun`) | the fork's snapshot → `latest` → the source's snapshot (`SUPERSEDED`, crashed attempts settled) → `run.superseded` in the source, then in each unfinished composed child → `run.forked` in the fork |
+| Run opening on resume (`openRun`) | one snapshot (location, a new authorization, crashed attempts settled, status back to `RUNNING`) → `run.resumed` (carries `{ pipeline, steps, skip, until }`, null when absent) when the run goes on → the settled attempts' `step.attempt.finished` → `run.unmetered.authorized` |
 | Attempt start (`openAttempt`) | the attempt `running` in the snapshot, before the spawn → `step.attempt.started` |
 | Attempt end (`settleAttempt`) | closure, verdict and ledger charge in memory → snapshot → `step.attempt.finished` → live-guard stops → `step.cost.unaccounted` |
 | Step status (`updateStep`) | snapshot → `step.status.changed` |
@@ -460,7 +476,7 @@ What a crash leaves is resolved from the snapshot alone:
 - A `RUNNING` snapshot whose steps are all settled is a crash before
   `finalizeRun`: it is resumed and finalized.
 
-`run.status` is written by run creation, `openRun` (back to `RUNNING` when a
+`run.status` is written by run creation, a fork (`SUPERSEDED` on the source), `openRun` (back to `RUNNING` when a
 `FAIL`, `STOPPED` or `ABORTED` run is resumed), `abortRun` and `finalizeRun`
 only. A failed step does not fail the run by itself, and `stopRun` records
 `stopped_reason` and `outcome.stop` but leaves `RUNNING`: `finalizeRun` derives
@@ -524,7 +540,9 @@ kept and read on what it still says.
 | Event | Appended when |
 | --- | --- |
 | `run.started` | a run is created |
-| `run.resumed` | an existing `RUNNING` snapshot is resumed |
+| `run.resumed` | an existing `RUNNING` snapshot is resumed; carries `{ pipeline, steps, skip, until }`, the invocation's selectors (null when absent) |
+| `run.forked` | a run is created by `--start-at`; carries `{ forkedFrom, startAt, inheritedSpendUsd }` |
+| `run.superseded` | a run is closed by a fork; carries `{ supersededBy }` |
 | `run.finished` | the verdict is stamped; carries `status` and the full `outcome` |
 | `run.stopped` | a gate stopped the run cleanly; carries `phase`, `reason` and `outcome.stop` |
 | `run.aborted` | SIGINT/SIGTERM finalization |

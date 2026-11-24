@@ -274,7 +274,7 @@ const EXCLUDED: ReadonlyArray<[string, string]> = [
 const ALLOWED: ReadonlyArray<{ file: string; snippet: string; reason: string }> = [
   {
     file: "run/stats/history-schema.ts",
-    snippet: `const RUN_STATS_STATUSES = [\n  "PASS",\n  "FAIL",\n  "STOPPED",\n  "ABORTED",\n  "UNKNOWN",\n]`,
+    snippet: `const RUN_STATS_STATUSES = [\n  "PASS",\n  "FAIL",\n  "STOPPED",\n  "ABORTED",\n  "SUPERSEDED",\n  "UNKNOWN",\n]`,
     reason: "the values the history schema accepts",
   },
   {
@@ -289,7 +289,7 @@ const ALLOWED: ReadonlyArray<{ file: string; snippet: string; reason: string }> 
   },
   {
     file: "dashboard/read-model/read-api.schema.ts",
-    snippet: `export const API_RUN_STATUSES = ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED"] as const;`,
+    snippet: `export const API_RUN_STATUSES = ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED", "SUPERSEDED"] as const;`,
     reason: "the values the read API schema and its `status` filter accept",
   },
 ];

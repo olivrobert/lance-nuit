@@ -57,7 +57,7 @@ export interface RunStatsEntry {
   sessionProvider?: string;
   startedAt: string | null;
   endedAt: string | null;
-  status: "PASS" | "FAIL" | "STOPPED" | "ABORTED" | "UNKNOWN";
+  status: "PASS" | "FAIL" | "STOPPED" | "ABORTED" | "SUPERSEDED" | "UNKNOWN";
   outcome: RunOutcomeState;
   failPhase: string | null;
   failReason: string | null;

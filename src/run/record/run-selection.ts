@@ -14,7 +14,10 @@ import { join } from "node:path";
 import { errorMessage } from "../../shared/lib/errors.js";
 import { createRunRef } from "../storage-ports.js";
 import type { PipelineContext } from "../../shared/language/context.js";
+import type { PersistedRun } from "../persisted.js";
+import type { DeepReadonly } from "../run.js";
 import { remainingWork, resumeDecision } from "./run-predicates.js";
+import { isFinishedStatus } from "./run-status.js";
 import { readListedRun } from "./run-read.js";
 import { describeRunSnapshotProblem, readRunSnapshotDiagnostic } from "./run-snapshot.js";
 import {
@@ -51,28 +54,14 @@ function explicitSnapshotError(
   );
 }
 
-/**
- * Directory for the run selected by `--run`. Validation is strict: resuming the
- * wrong run costs more than failing immediately. The store validates identity via
- * `createRunRef` instead of sanitizing it.
- *
- * Naming a run is the decision, so this path does not consult `resumeDecision`:
- * a run whose outcome opted out of automatic resume is still accepted. It only
- * refuses a run with nothing left to do — no pending step and no missing
- * verdict. A settled-but-unfinalized run (crash between the last step and
- * `finalizeRun`) has no pending step yet still owes its verdict, and automatic
- * resume accepts it; refusing it here would leave it unreachable. A replay
- * request (`--start-at`) lifts that refusal too: it is the operator's decision
- * that the run has work again, and boot requeues the steps it names.
- */
-export function selectExplicitRun(
+/** The snapshot `--run` names, its identity checked. The store validates the
+ *  identity via `createRunRef` instead of sanitizing it. */
+function readNamedRun(
+  pipelineDir: string,
   pipelineName: string,
   ticket: string | undefined,
   runId: string,
-  context?: PipelineContext,
-  options: { replay?: boolean } = {},
-): ExplicitRunSelection {
-  const pipelineDir = pipelineRunsDir(pipelineName, ticket, context);
+): { runDir: string; path: string; snapshot: PersistedRun } {
   let ref: ReturnType<typeof createRunRef>;
   try {
     ref = createRunRef({ runId, pipeline: pipelineName, ticket });
@@ -98,11 +87,33 @@ export function selectExplicitRun(
   if (mismatches.length > 0) {
     throw new Error(`--run: snapshot identity mismatch for "${runId}": ${mismatches.join(", ")}`);
   }
+  return { runDir, path: diagnostic.path, snapshot };
+}
+
+/**
+ * Directory for the run selected by `--run`. Validation is strict: resuming the
+ * wrong run costs more than failing immediately.
+ *
+ * Naming a run is the decision, so this path does not consult `resumeDecision`:
+ * a run whose outcome opted out of automatic resume is still accepted. It only
+ * refuses a run with nothing left to do — no pending step and no missing
+ * verdict. A settled-but-unfinalized run (crash between the last step and
+ * `finalizeRun`) has no pending step yet still owes its verdict, and automatic
+ * resume accepts it; refusing it here would leave it unreachable.
+ */
+export function selectExplicitRun(
+  pipelineName: string,
+  ticket: string | undefined,
+  runId: string,
+  context?: PipelineContext,
+): ExplicitRunSelection {
+  const pipelineDir = pipelineRunsDir(pipelineName, ticket, context);
+  const { runDir, path, snapshot } = readNamedRun(pipelineDir, pipelineName, ticket, runId);
   // What is left to do is read as every reader reads it: a runner that died
   // after the journal recorded a step finished left that step done.
   const { state } = readListedRun({ state: snapshot, runDir }, runsLocationOf(context));
   const remaining = remainingWork(state);
-  if (options.replay !== true && remaining.steps.length === 0 && !remaining.verdictOwed) {
+  if (remaining.steps.length === 0 && !remaining.verdictOwed) {
     throw new Error(`--run: run "${runId}" has no remaining step to execute — nothing to resume.`);
   }
 
@@ -125,7 +136,7 @@ export function selectExplicitRun(
   return {
     dir: runDir,
     strictSnapshot: {
-      path: diagnostic.path,
+      path,
       releaseRunLock: claim.acquired,
       expectedIdentity: { runId, pipeline: pipelineName, ticket },
     },
@@ -137,6 +148,58 @@ export function selectExplicitRun(
       if (claim.acquired) releaseRunDir(runDir);
     },
   };
+}
+
+/** The run `--start-at` forks, read before anything is written. */
+export interface ForkSource {
+  dir: string;
+  snapshot: DeepReadonly<PersistedRun>;
+}
+
+/**
+ * Select the run `--start-at` forks: `--run <id>`, or else `latest`, whatever
+ * its status. Read-only: the lock is only asked who holds it, and `forkRun`
+ * claims it later. A composed child is refused (its parent owns its budget and
+ * its lineage), and so is an older run while a different unfinished one is
+ * `latest`, which forking the older run would strand.
+ */
+export function selectForkSource(
+  pipelineName: string,
+  ticket: string | undefined,
+  runId: string | undefined,
+  context?: PipelineContext,
+): ForkSource {
+  const pipelineDir = pipelineRunsDir(pipelineName, ticket, context);
+  const latest = resolveLatestRunSnapshot(pipelineName, ticket, context);
+  let source: ForkSource;
+  if (runId === undefined) {
+    if (!latest) {
+      throw new Error(`--start-at: pipeline "${pipelineName}" has no run to fork. Run it first.`);
+    }
+    source = { dir: latest.runDir, snapshot: latest.snapshot };
+  } else {
+    const named = readNamedRun(pipelineDir, pipelineName, ticket, runId);
+    source = { dir: named.runDir, snapshot: named.snapshot };
+    if (latest && latest.snapshot.runId !== runId && !isFinishedStatus(latest.snapshot.status)) {
+      throw new Error(
+        `--start-at: run ${latest.snapshot.runId} is the latest run of "${pipelineName}" and is unfinished. ` +
+          `Fork it (--start-at without --run) or finish it before forking ${runId}.`,
+      );
+    }
+  }
+  if (source.snapshot.parentRunId !== undefined) {
+    throw new Error(
+      `--start-at: run ${source.snapshot.runId} is composed by run ${source.snapshot.parentRunId}: fork the parent run instead.`,
+    );
+  }
+  const holder = runLockHolder(source.dir);
+  if (holder !== null) {
+    throw new Error(
+      `--start-at: run ${source.snapshot.runId} is held by another runner process (pid ${holder}). ` +
+        `Wait for it to finish, then fork it.`,
+    );
+  }
+  return source;
 }
 
 /** Convenience wrapper for callers that need only the selected directory.

@@ -474,8 +474,8 @@ and each rule they read has one owner:
 
 | Decision | Owner |
 | --- | --- |
-| **Re-admission**: whether a settled step goes through admission again, and whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `execution/step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). `execution/step/load-or-create-run.ts` decides the only selection a resume applies to the snapshot, the requeue of the `--start-at` target and the steps after it, and `openRun` applies it |
-| **Admission**: budget, `when`, a pending rejection, the stamp of a stamped step (skipped `up to date` when `fresh`, unless a pending rejection or a `--start-at` replay forces it), the interruption guard, then the environment guard | `execution/step/step-admission.ts` (`admitStep`; `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished). The reading admission makes travels with the `ready` admission to the pass |
+| **Re-admission**: whether a settled step goes through admission again, and whether this invocation's `--steps` or `--skip` leaves it out | `execution/step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). `execution/step/load-or-create-run.ts` decides the only selection a resume applies to the snapshot and, for `--start-at`, the fork source (`checkForkSource`: source choice, pre-check, refusals), and `openRun` applies it; a fork is created by `forkRun` in `run/record/run-opening.ts` |
+| **Admission**: budget, `when`, a pending rejection, the stamp of a stamped step (skipped `up to date` when `fresh`, unless a pending rejection forces it, or the target of a fork while it is still `pending`; before that target a fork admits only `rerunOnResume` steps), the interruption guard, then the environment guard | `execution/step/step-admission.ts` (`admitStep`; `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished). The reading admission makes travels with the `ready` admission to the pass |
 | **Freshness of a stamped step**: `none`, `fresh` or `stale` against its stamp | `work-items/store/step-lock.ts`, the only reader and writer of `artifacts/lock.json` (`stepFreshness`, `clearStamp`, `commitPass`, `readLock` for the dashboard). The pass (`execution/step/step-pass.ts`) is the only caller that writes: it clears the stamp before the first spawn, settles `done`, then writes the stamp |
 | **Resume classification**: which steps a resume re-admits (those declaring `input`, `output` or `rerunOnResume`), which of them are stamped, the build errors for a step declaring none and for two producers of one artifact, and the orchestration nodes and work-item source step that keep the authority of their status | `definition/definition.ts` (`isStamped`, `rerunsOnResume`, `readmittedOnResume`, `stepsWithoutDeliverable`, `producerConflicts`), shared by the build, the loader's validation (`definition/validation/structure.ts`), admission, the loop and the resume header |
 
@@ -676,7 +676,7 @@ location and a new unmetered authorization in one save, then journals
 reads instead of deriving it again. `execution/step/load-or-create-run.ts` keeps the policy:
 the definition a snapshot runs against and the selection, which `openRun`
 calls at the point where each applies; it reads the steps and says which to
-exclude or requeue, and `openRun` writes them. Admission journals its skips and the
+exclude, and `openRun` writes them; `forkRun` creates the run a `--start-at` forks and closes its source `SUPERSEDED`. Admission journals its skips and the
 sources it could not read through `recordSkip` and `recordUnavailableSource`
 (`run/record/step-bookkeeping.ts`), so nothing outside the module saves the run
 or appends to its journal: neither `saveRun` nor `appendRunEvent` is exported. Which of the snapshot and

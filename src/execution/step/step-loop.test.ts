@@ -1507,15 +1507,32 @@ test("lock: a run carrying a lot stamps its steps under <lot.id>/<stepId>", asyn
   expect(Object.keys(lockOf(ctx).steps)).toEqual(["LOT-1/spec"]);
 });
 
-test("resume: a step requeued by --start-at runs even when its stamp holds", async () => {
+test("fork: the start step runs even when its stamp holds, and only once (F5, F7)", async () => {
   const { values, ctx } = artifactContext({ "ticket.md": "one" });
   await producedOnce(ctx, values, derivedStep());
-  const run = makeRun([derivedStep({ status: "pending", replay: true, control: { duration_ms: 1 } })]);
+  const run = makeRun([derivedStep()]);
+  run.startAt = "spec";
+
+  const first = fakeDeps();
+  await executeRunSteps(run, { resuming: true }, writing(first.deps, values, { spec: [["spec.md", "again"]] }), ctx);
+  expect(first.calls.ids).toEqual(["spec"]);
+
+  const second = fakeDeps();
+  await executeRunSteps(run, { resuming: true }, writing(second.deps, values, { spec: [["spec.md", "again"]] }), ctx);
+  expect(second.calls.ids).toEqual([]);
+});
+
+test("fork: the steps after the start step are admitted by the lock, not forced (§9.6)", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  await producedOnce(ctx, values, derivedStep());
+  const run = makeRun([replayable("implement"), derivedStep()]);
+  run.startAt = "implement";
 
   const { deps, calls } = fakeDeps();
   await executeRunSteps(run, { resuming: true }, writing(deps, values, { spec: [["spec.md", "again"]] }), ctx);
 
-  expect(calls.ids).toEqual(["spec"]);
+  expect(calls.ids).toEqual(["implement"]);
+  expect(run.steps[1]!.status).toBe("skipped");
 });
 
 test("resume: a step skipped by its own admission is re-admitted", async () => {
@@ -2172,19 +2189,21 @@ test("reconcile: --steps sets aside every step it does not name, prefixes includ
   }
 });
 
-test("reconcile: --start-at sets aside the work still owed before its target, and re-admits a done step", async () => {
-  const { ctx } = artifactContext();
-  const done = replayable("context", { status: "done", control: { duration_ms: 1 } });
-  const owed = replayable("prepare");
-  const target = replayable("implement", { status: "pending", replay: true });
-  const run = makeRun([done, owed, target]);
+test("fork: before its pending start step, only the steps that rerun on resume are admitted (F5)", async () => {
+  const { ctx } = artifactContext({ "ticket.md": "edited by hand" });
+  const branch = replayable("branch", { status: "done" });
+  // Stale against the edited ticket, and without a stamp: admitted, it would run.
+  const kept = derivedStep({ status: "done" });
+  const target = replayable("implement");
+  const run = makeRun([branch, kept, target]);
+  run.startAt = "implement";
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(run, { resuming: true, startAt: "implement" }, deps, ctx);
+    const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);
 
-    expect(calls.ids).toEqual(["context", "implement"]);
-    expect(outcome.setAside).toEqual(["prepare"]);
-    expect(owed.status).toBe("skipped");
+    expect(calls.ids).toEqual(["branch", "implement"]);
+    expect(kept.status).toBe("done");
+    expect(outcome.setAside).toEqual([]);
   } finally {
     rmSync(run.run_dir, { recursive: true, force: true });
   }
@@ -2248,7 +2267,7 @@ test("reconcile: a step left out with an unfinished pass does not turn a failure
 
 test("reconcile: a requeued step whose last attempt was interrupted keeps pending when left out, and the run stops", async () => {
   const { ctx } = artifactContext();
-  const requeued = replayable("publish", { status: "pending", replay: true });
+  const requeued = replayable("publish", { status: "pending" });
   requeued.attempts = [
     {
       attempt: 1,
@@ -2362,33 +2381,6 @@ test("reconcile: an interruption after a step left out unfinished is not turned 
     expect(outcome.stopped).toBe(false);
     expect(run.stopped_reason).toBeUndefined();
     expect(run.outcome?.stop).toBeUndefined();
-  } finally {
-    rmSync(run.run_dir, { recursive: true, force: true });
-  }
-});
-
-test("--start-at past a failed step sets it aside unfinished, stops for a decision, and a plain resume reruns it", async () => {
-  const { ctx } = artifactContext();
-  const failed = replayable("a", { status: "failed", errors: "boom" });
-  const target = replayable("b", { status: "pending", replay: true });
-  const run = makeRun([failed, target]);
-  try {
-    const first = fakeDeps();
-    const forked = await executeRunSteps(run, { resuming: true, startAt: "b" }, first.deps, ctx);
-
-    expect(first.calls.ids).toEqual(["b"]);
-    expect(forked.setAside).toEqual(["a"]);
-    expect(failed.status).toBe("failed");
-    expect(forked.stopped).toBe(true);
-    expect(run.outcome?.stop?.kind).toBe("needs-decision");
-    expect(run.outcome?.phase).toBe("a");
-
-    const second = fakeDeps();
-    const resumed = await executeRunSteps(run, { resuming: true }, second.deps, ctx);
-
-    expect(second.calls.ids[0]).toBe("a");
-    expect(resumed.setAside).toEqual([]);
-    expect(failed.status).toBe("done");
   } finally {
     rmSync(run.run_dir, { recursive: true, force: true });
   }

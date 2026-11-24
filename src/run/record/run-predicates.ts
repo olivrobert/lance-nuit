@@ -1,6 +1,6 @@
 import type { PersistedRun, RunStatus, StepStatus } from "../persisted.js";
 import type { RunAttemptView } from "../run.js";
-import { isCompleted, isProvisionalStatus } from "./run-status.js";
+import { isCompleted, isFinishedStatus, isProvisionalStatus } from "./run-status.js";
 
 /**
  * A step in this status has nothing left to execute. Every rule about what a
@@ -30,6 +30,25 @@ interface StepAttempts {
  */
 export function lastPassInterrupted(step: StepAttempts): boolean {
   return owesWork(step.status) && step.attempts?.at(-1)?.interrupted === true;
+}
+
+/**
+ * A fork whose `startAt` step never left `pending`: that step is forced to run,
+ * and before it only the steps that rerun on every resume are admitted. Once the
+ * step runs, is skipped, or starts its children, the fork is an ordinary run.
+ */
+export function forkPending(run: {
+  readonly startAt?: string;
+  readonly steps: readonly (StepAttempts & { readonly id: string; readonly orchestration?: unknown })[];
+}): boolean {
+  if (run.startAt === undefined) return false;
+  const target = run.steps.find((step) => step.id === run.startAt);
+  return (
+    target !== undefined &&
+    target.status === "pending" &&
+    (target.attempts?.length ?? 0) === 0 &&
+    target.orchestration === undefined
+  );
 }
 
 /** An interrupted attempt was followed by another one: the step was replayed. */
@@ -101,6 +120,8 @@ export function remainingWork<S extends { readonly status: StepStatus }>(run: {
   const settled = allStepsSettled(run.steps);
   const verdictOwed = settled && isProvisionalStatus(run.status);
   const discarded = run.outcome?.resumable === false;
+  // A superseded run still lists the steps its fork took over: it owes nothing.
+  if (isFinishedStatus(run.status)) return { steps, settled, verdictOwed, discarded, owed: false };
   return { steps, settled, verdictOwed, discarded, owed: steps.length > 0 || (verdictOwed && !discarded) };
 }
 

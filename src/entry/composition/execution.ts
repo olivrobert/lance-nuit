@@ -33,6 +33,7 @@ import {
   discardedResumeNotice,
   type ExplicitRunSelection,
   finalizeRun,
+  forkPending,
   recordDecision,
   runEnding,
   selectExplicitRun,
@@ -61,9 +62,7 @@ function resolveTargetRunDir(ready: ReadyRun): { dir?: string; explicit?: Explic
     return {};
   }
   try {
-    const explicit = selectExplicitRun(pipelineDef.name, args.ticket, args.runId, context, {
-      replay: args.startAt !== undefined,
-    });
+    const explicit = selectExplicitRun(pipelineDef.name, args.ticket, args.runId, context);
     log(`→ Explicitly resuming run ${args.runId}`);
     return { dir: explicit.dir, explicit };
   } catch (error) {
@@ -83,7 +82,10 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) =
   const { args, pipelineDef, pipelinePath, stateStore, worktreeMode } = ready;
   let context = ready.context;
 
-  const target = resolveTargetRunDir(ready);
+  // A fork names its source itself (`startup.ts`), and has no clean-tree guard:
+  // a hand edit of the tree is what it usually follows.
+  const forking = ready.forkSource !== undefined;
+  const target = forking ? {} : resolveTargetRunDir(ready);
   if ("error" in target) {
     log(target.error);
     return { kind: "exit", code: 1 };
@@ -97,16 +99,19 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) =
   // the main clone) does not create a new run: `resolveRunDir` fails with the
   // holder and the options. It still counts as resuming here, so the guard does
   // not replace that diagnosis with a dirty-tree refusal.
-  const resumesExisting = !!target.dir || wouldResumeLatest(pipelineDef.name, args.ticket, args.fresh, context);
+  const resumesExisting =
+    forking || !!target.dir || wouldResumeLatest(pipelineDef.name, args.ticket, args.fresh, context);
   let run: RunView;
   let resuming: boolean;
   try {
-    await enforceCleanTree({
-      resuming: resumesExisting,
-      allowDirty: args.allowDirty,
-      worktreeMode,
-      pipelineAllowsDirty: !!pipelineDef.allow_dirty,
-    });
+    if (!forking) {
+      await enforceCleanTree({
+        resuming: resumesExisting,
+        allowDirty: args.allowDirty,
+        worktreeMode,
+        pipelineAllowsDirty: !!pipelineDef.allow_dirty,
+      });
+    }
 
     // Published for bash steps that invoke a sub-runner.
     process.env[RUNNER_STEP_ENV.bin] = process.argv[1];
@@ -119,6 +124,8 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) =
       runDir: target.dir,
       fresh: args.fresh,
       startAt: args.startAt,
+      forkSource: ready.forkSource,
+      selection: { steps: args.stepFilter, skip: args.skipFilter, until: args.until },
       context,
       stateStore,
       maxCostUsd: args.budget,
@@ -129,7 +136,7 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) =
     }));
     if (run.readOnly) {
       throw new Error(
-        `Run ${run.runId} already passed and is never written again. Use --start-at <step> to run steps again in a new run.`,
+        `Run ${run.runId} is finished (${run.status}) and is never written again. Use --start-at <step> to run steps again in a new run.`,
       );
     }
   } catch (error) {
@@ -197,6 +204,12 @@ export function announceRun(run: RunView, args: RunnerArgs, workItemSourceStepId
   log(`\nPipeline: ${run.name}`);
   if (args.ticket) log(`Ticket: ${args.ticket}`);
   if (run.max_cost_usd) log(`Budget: $${run.max_cost_usd}`);
+  if (run.forkedFrom !== undefined && forkPending(run)) {
+    const inherited = run.inheritedSpendUsd ? `, inheriting $${run.inheritedSpendUsd.toFixed(2)} of spend` : "";
+    log(`Forked from ${run.forkedFrom} at ${run.startAt}${inherited}`);
+  }
+  if (args.stepFilter) log(`Selected steps: ${args.stepFilter.join(", ")}`);
+  if (args.skipFilter) log(`Left out: ${args.skipFilter.join(", ")}`);
 
   const done = run.steps.filter((s) => s.status === "done");
   // Both families the resume loop re-admits (`execution/step/step-loop.ts`) must stay out of
@@ -205,8 +218,10 @@ export function announceRun(run: RunView, args: RunnerArgs, workItemSourceStepId
   // replays unconditionally, while a step declaring `input` or reworking a gated
   // artifact is only re-examined and costs nothing when its sources have not moved
   // and no rejection is pending.
+  // A pending fork keeps the steps before its start as they are (`step-loop.ts`).
+  const keptByFork = forkPending(run);
   const reexamined = (s: RunStepView) =>
-    readmittedOnResume(s.def, workItemSourceStepId) || (s.def.rework_for?.length ?? 0) > 0;
+    !keptByFork && (readmittedOnResume(s.def, workItemSourceStepId) || (s.def.rework_for?.length ?? 0) > 0);
   const reruns = (s: RunStepView) => rerunsOnResume(s.def);
   const rerun = done.filter(reruns);
   const rechecked = done.filter((s) => !reruns(s) && reexamined(s));

@@ -198,8 +198,9 @@ test("U5: the bound is never persisted, so each invocation answers to its own bo
   const triage = run(cwd, "--start-at", "triage", "--until", "triage");
 
   expect(triage.status).toBe(UNTIL_EXIT);
-  expect(latestRunId(cwd)).toBe(runId);
-  // context is done and declares rerunOnResume: --start-at does not set it aside.
+  const fork = latestRunId(cwd);
+  expect(fork).not.toBe(runId);
+  // context is done and declares rerunOnResume: the fork admits it before its start.
   expect(traceSince(cwd, beforeTriage)).toEqual(["context", "triage"]);
   expectUntilStop(snapshot(cwd), "triage");
   // Nothing on the snapshot carries a bound for a later invocation to obey.
@@ -210,9 +211,9 @@ test("U5: the bound is never persisted, so each invocation answers to its own bo
   const implement = run(cwd, "--until", "implement");
 
   expect(implement.status).toBe(UNTIL_EXIT);
-  expect(latestRunId(cwd)).toBe(runId);
-  // --start-at requeued plan, so it runs although fresh; triage is fresh and
-  // skipped, context replays as on every resume.
+  expect(latestRunId(cwd)).toBe(fork);
+  // plan is after the fork's start, so the lock decides it: triage ran again and
+  // changed its input, so it runs. context replays as on every resume.
   expect(traceSince(cwd, beforeImplement)).toEqual(["context", "plan", "prepare", "implement"]);
   expectUntilStop(snapshot(cwd), "implement");
   const beforeEnd = mark(cwd);
@@ -220,7 +221,7 @@ test("U5: the bound is never persisted, so each invocation answers to its own bo
   const unbounded = run(cwd);
 
   expect(unbounded.status).toBe(0);
-  expect(latestRunId(cwd)).toBe(runId);
+  expect(latestRunId(cwd)).toBe(fork);
   expect(snapshot(cwd).status).toBe("PASS");
   expect(traceSince(cwd, beforeEnd)).toEqual(["context", "prepare", "quality", "commit", "publish", "report"]);
 });

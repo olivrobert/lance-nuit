@@ -406,8 +406,7 @@ The rules:
   completed pipeline pays only for the `rerunOnResume` steps and for the
   steps whose stamp no longer matches. A step skipped this way is `skipped`
   in the new run, which also reaches an `--until` bound set on it.
-- **Guarantees.** A step requeued by `--start-at` runs even when its stamp
-  matches. A pass that failed, was aborted or was interrupted leaves no stamp,
+- **Guarantees.** A pass that failed, was aborted or was interrupted leaves no stamp,
   so the step runs again (or asks first, if the runner died in it). A skipped
   step keeps the spend of its earlier passes in the run's totals and budget.
 - **Composition nodes.** `runPipeline` and `forEachPipeline` nodes keep the
@@ -417,16 +416,14 @@ The rules:
   step still runs again while a rejection of its subject is pending. The step
   `forEachWorkItem` adds to read the ticket, which belongs to the runner, keeps
   the authority of its status too.
-- **Selectors.** `--steps`, `--skip` and `--start-at` hold for one
-  invocation. A step they leave out is not run and the journal records
+- **Selectors.** `--steps` and `--skip` hold for one invocation. A step they leave out is not run and the journal records
   `operator selection`: a `done` step stays `done`, a pending one becomes
   `skipped`, and one whose last pass failed, was aborted or was interrupted
   keeps that status, so the next invocation still meets the
   [interruption guard](#interrupted-steps) and reruns the failed pass. The run
   then stops with `needs-decision` instead of passing (a run holding an aborted
   step stays `ABORTED`), unless an `--until` bound or another stop ended it
-  first. A step that `--start-at` requeued after a failed or aborted attempt is
-  `pending`, and settles like any other. An unfinished pass never settles the
+  first. An unfinished pass never settles the
   step in any case: it left no [stamp](#input-freshness), whatever the status
   says. Nothing is persisted as an
   exclusion, and the next invocation admits those steps again, except the nodes
@@ -471,7 +468,7 @@ next invocation resumes the run with that step still owing work. Its side
 effects — a push, a merge request, a tracker comment — may already have
 happened, so the resumed run does not replay it silently: admission stops the
 run as `STOPPED` (resumable) before the step runs again, naming the step and the
-two ways to authorize the replay. The check comes after `when`, freshness and
+ways to authorize the replay. The check comes after `when`, freshness and
 rework, so a step those guards now skip replays nothing and asks nothing. An
 interrupted pass leaves no stamp, so the outputs it left never settle the step,
 and the guard still asks before the replay.
@@ -481,7 +478,6 @@ The replay is authorized when any of these holds:
 - the step declares `replayInterrupted: true` — its side effects are safe to
   repeat;
 - the step declares `rerunOnResume: true`, which already declares it idempotent;
-- the step is the one this invocation names in `--start-at`;
 - the invocation carries `--replay-interrupted`, which covers this invocation
   and the runs it composes, and is never persisted: a replay that dies again
   asks again.
@@ -558,9 +554,11 @@ The rules:
 - **Order.** `when` first, then a pending rejection, then the stamp.
 - **Resume.** A `done` step declaring `input` or `output` is re-admitted, and so
   is a `skipped` one ([admission of settled steps](#admission-of-settled-steps)).
-  A re-admitted step whose stamp matches costs nothing. A step requeued by
-  `--start-at` is the exception: it runs even when its stamp matches, because
-  the lock does not track the repository tree an operator fixed. So does a step
+  A re-admitted step whose stamp matches costs nothing. The target of a
+  [`--start-at` fork](usage.md#common-options) is the exception while it has
+  never left `pending`: it runs even when its stamp matches, because the lock
+  does not track the repository tree an operator fixed. It has no attempt to
+  replay, so the interruption guard does not ask for it. So does a step
   whose last pass failed or was interrupted: that pass left no stamp. A pass
   the runner died in needs an authorization before it is replayed; see
   [Interrupted steps](#interrupted-steps). A run stopped by `--until` resumes

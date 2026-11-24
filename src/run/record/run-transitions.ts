@@ -48,7 +48,6 @@ import { closeAttempt, journalAttemptClosed } from "./attempt-closure.js";
 import { type CostStop, costStopOf } from "./budget.js";
 import { aggregateControl, sumStepUsage } from "./cost-accounting.js";
 import { appendRunEvent, relativeRunPath } from "./run-journal.js";
-import { isSettledStatus } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
 import { latestAttemptLog } from "./run-timeline.js";
 import { isResumableStatus } from "./run-status.js";
@@ -97,9 +96,6 @@ export function updateStep(runView: RunView, stepView: RunStepView, status: RunS
   // A skipped step did not fail: it must not keep showing the failure of the
   // pass it abandoned. Its spend stays in `control`, still owed to the budget.
   if (status === "skipped") clearStepFailure(step);
-  // A `--start-at` replay is owed until the step settles: a failed or
-  // interrupted replay must still run on a resume that no longer names it.
-  if (isSettledStatus(status)) delete step.replay;
   // Persist failure reason unless an error_extractor already supplied one.
   if (status === "failed" && errors && !step.errors) step.errors = errors;
   const attemptLog = latestAttemptLog(run, step);

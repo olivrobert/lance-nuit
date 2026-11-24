@@ -44,7 +44,13 @@ test("file-run-event-store: validates the integration contract", () => {
   expect(store.read("run-1")).toEqual([]);
   expect(store.readAt(runDir)).toEqual([]);
 
-  const resumed = event("run.resumed", { pipeline: "quality", futureField: true });
+  const resumed = event("run.resumed", {
+    pipeline: "quality",
+    steps: null,
+    skip: null,
+    until: null,
+    futureField: true,
+  });
   store.appendAt(runDir, resumed);
   expect(store.read("run-1")).toEqual([resumed]);
 

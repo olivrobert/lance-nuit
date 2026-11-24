@@ -14,5 +14,5 @@ export type {
   StepSessionEvent,
   StepStartedEvent,
 } from "./run-output.js";
-export { executeRunSteps, loadOrCreateRun, stepLoopDeps } from "./step/step-loop.js";
+export { checkForkSource, executeRunSteps, loadOrCreateRun, stepLoopDeps } from "./step/step-loop.js";
 export type { RunOutcome } from "./step/step-loop.js";

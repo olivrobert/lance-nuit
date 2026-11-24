@@ -85,8 +85,8 @@ test("--steps and --skip are mutually exclusive → CliError", () => {
 });
 
 test("--start-at is exclusive with --steps / --skip → CliError", () => {
-  expect(() => parseRunnerArgs(["T", "--start-at", "x", "--skip", "b"])).toThrow(/mutually exclusive/);
-  expect(() => parseRunnerArgs(["T", "--steps", "a", "--start-at", "x"])).toThrow(/mutually exclusive/);
+  expect(() => parseRunnerArgs(["T", "--start-at", "x", "--skip", "b"])).toThrow(/cannot be combined/);
+  expect(() => parseRunnerArgs(["T", "--steps", "a", "--start-at", "x"])).toThrow(/cannot be combined/);
 });
 
 test("--run also targets a run: explicit runId resume, outside --inspect/--logs", () => {

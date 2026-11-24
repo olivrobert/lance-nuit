@@ -649,43 +649,64 @@ lancenuit run PROJ-28 --worktree
 - `--watch` opens a tmux pane when tmux is available; the pane stays open by
   default and `--watch-auto-close` closes it after a terminal run.
 - `--steps` and `--skip` filter step IDs.
-- `--start-at X` replays from `X`: `X` and every later step run again, even
-  when an earlier pass finished them, and the steps before `X` that still owe
-  work are set aside for this invocation. It is exclusive with the other
-  selectors.
-  - Replayed steps keep their attempts, spend and fix quota: the budget still
-    counts what they cost before. A replayed step runs even when its stamp in
-    the freshness lock is up to date, since the lock does not see a manual fix
-    in the tree.
-  - The requeue is durable: a later invocation without `--start-at` still runs
-    the steps the replay has not finished.
-  - `--run <id> --start-at X` replays inside that run even when it already
-    passed. Without `--run`, a completed `latest` run is not resumed, so
-    `--start-at` starts a new run there, subject to the clean-tree guard.
-  - A composed step (`runPipeline`, `forEachPipeline`) whose children already
-    settled cannot be replayed in place: the run refuses and points to
-    `--fresh`.
+- `--start-at X` forks a new run from `X`. The new run copies the steps before
+  `X` as settled (status, session, profile and orchestration kept; no attempts,
+  spend or errors; quotas reset), and `X` and every later step start blank
+  `pending`. The source run is left as it was, unless it did not pass.
+  - The source is `--run <id>`, else `latest`, whatever its status, `PASS`
+    included. No run is an error. `--run <older>` is refused while a different
+    unfinished run is `latest`, which the error names. A source held by a live
+    runner, or a composed child run, is refused.
+  - Everything is validated before anything is written: no decision recorded by
+    `--approve`/`--reject`, no run directory, source untouched. An unknown `X`
+    is refused as soon as the definition loads. `--start-at` is refused with
+    `--fresh`, `--steps` or `--skip`, on an inspection command (`--inspect`,
+    `--logs`, `--clean`, `--approve-only`, `--reject-only`) and under `--scan`.
+  - Every step before `X` must be settled (`done` or `skipped`). A stamped step
+    before `X` must still be fresh on its artifact inputs and outputs; sources
+    such as the code tree are not compared, so a hand edit of the tree does not
+    block a fork. A stamped `done` step without a stamp in the lock is an error.
+    All offending steps are listed. `rerunOnResume` steps, orchestration nodes
+    and the work-item source step are not checked.
+  - The fork records `forkedFrom`, `startAt` and `inheritedSpendUsd`: the source's
+    inherited spend plus its own, crashed attempts included. It counts against
+    `max_cost_usd`, so a fork whose inheritance reaches the ceiling stops at the
+    first gate; the report and statistics count only the fork's own spend.
+    `cost_unaccounted` is carried over, and `budget_exceeded`, `budget_approved`
+    and `allow_unmetered` come from this invocation's flags only. The console
+    header says `Forked from <runId> at <X>, inheriting $N of spend`.
+  - `latest` points to the fork. A source that did not pass is closed
+    `SUPERSEDED`, with its unfinished composed child runs. `SUPERSEDED` is a
+    verdict like `PASS`: never written again, not resumable, not a failure;
+    `--run <superseded>` fails and points to `--start-at`.
+  - No clean-tree guard applies to a fork.
+  - `X` runs even when its stamp in the freshness lock is up to date; only
+    `rerunOnResume` steps (a branch, a preflight) run before it, and the other
+    copied steps are not admitted. Once `X` runs, is skipped by `when` or, for
+    an orchestration node, starts its children, the fork is an ordinary run.
+    Steps after `X` are not forced: they run when their inputs changed or they
+    have no stamp. A blank orchestration node starts new child runs.
 - `--until X` stops the run once `X` is done or skipped. Unlike the selectors,
   it is a bound of this invocation only and is never persisted: the steps after
   `X` stay `pending`, the run stops as `STOPPED` with the stop kind `until` and
   exits `3`, and a plain rerun resumes it where it stopped. When nothing is owed
   after `X`, the run simply passes. It is exclusive with `--steps`, and works
-  with `--skip` and `--start-at`.
-- The selectors hold for one invocation only: nothing they leave out is
-  persisted, and `--start-at` re-admits the `done` steps before `X`
-  (orchestration nodes and the work-item source step keep their status); see
-  the *Selectors* rule of [admission](dsl.md#admission-of-settled-steps). A
+  with `--skip` and `--start-at` (a bound before the `--start-at` step is
+  refused: nothing would run).
+- `--steps` and `--skip` hold for one invocation only: nothing they leave out
+  is persisted; see the *Selectors* rule of
+  [admission](dsl.md#admission-of-settled-steps). A
   pending step they leave out becomes `skipped`, so once no step remains the run
   finalizes as `PASS` and counts as complete — `--scan` will not pick the work
   item up again. `--fresh` starts a new run instead, which still skips a step
   whose stamp in the freshness lock is up to date
-  ([input freshness](dsl.md#input-freshness)); `--start-at` forces them.
+  ([input freshness](dsl.md#input-freshness)); `--start-at` forces one.
 - `--scan` discovers work items, and `--limit` caps the number discovered.
   `--steps` and `--skip` apply to each scanned ticket, so a ticket whose
   remaining work they all exclude is complete for later scans. `--until` applies
   to each scanned ticket too: each child stops after the bound, the scan reports
   it on an `Until` line rather than as a failure, and a later scan resumes it.
-  `--start-at` is refused under `--scan`: replay one ticket explicitly instead.
+  `--start-at` is refused under `--scan`: fork one ticket's run explicitly instead.
 - `--allow-dirty` disables the clean-tree guard for the current run.
 - `--worktree` isolates the run in a dedicated Git worktree.
 

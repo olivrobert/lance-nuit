@@ -1,18 +1,26 @@
 //
-// Build or resume a run: load the definition, validate `--start-at`, and decide
-// this invocation's selection. Opening the run itself — selecting its directory,
-// restoring or creating it, applying the selection, and every write that does —
-// is `run-record`'s (`openRun`); this file hands it the definition and the
-// selection as a policy, and only reads the steps it decides on.
+// Build, resume or fork a run: load the definition and decide what this
+// invocation opens. Opening the run itself — selecting its directory, restoring,
+// creating or forking it, and every write that does — is `run-record`'s
+// (`openRun`, `forkRun`); this file hands it the definition as a policy, and
+// owns the rule that decides whether a run may be forked (`checkForkSource`).
 //
 // It lives with the step loop because a composed child opens its run here too:
 // from `boot/`, execution would have to reach back into startup.
 
 import { DEFAULT_SPEC_PATH } from "../../shared/env/tickets.js";
 import { agentBackendRegistryOf, type PipelineContext, workItemRegistryOf } from "../../shared/language/context.js";
-import type { PersistedStepState, DeepReadonly, RunEventStore, RunLogStore, RunStateStore } from "../../run/index.js";
-import { buildPipelineContext, loadPipelineDefinition } from "../../definition/index.js";
-import { isChildSettled, type OpenedRun, openRun, type RunScope, type StrictSnapshotRead } from "../../run/index.js";
+import type { ForkSource, InvocationSelection, RunEventStore, RunLogStore, RunStateStore } from "../../run/index.js";
+import { buildPipelineContext, isStamped, loadPipelineDefinition, type Pipeline } from "../../definition/index.js";
+import {
+  forkRun,
+  isSettledStatus,
+  type OpenedRun,
+  openRun,
+  type RunScope,
+  type StrictSnapshotRead,
+} from "../../run/index.js";
+import { stampKey, stepFreshness } from "../../work-items/index.js";
 
 export interface LoadOrCreateRunOptions extends RunScope {
   pipelinePath: string;
@@ -20,8 +28,12 @@ export interface LoadOrCreateRunOptions extends RunScope {
   /** The run directory the invocation names (`--run`, or a composed child's own). */
   runDir?: string;
   fresh?: boolean;
-  /** `--start-at`: requeue this step and every later one. */
+  /** `--start-at`: fork `forkSource` at this step instead of opening a run. */
   startAt?: string;
+  /** The run `--start-at` forks, selected and checked before any write. */
+  forkSource?: ForkSource;
+  /** This invocation's selectors, journaled with a resume. */
+  selection?: InvocationSelection;
   context?: PipelineContext;
   /** Whether this invocation runs inside a worktree: the entry point passes its
    *  boot's answer, a composed child its parent's. Required, so that a caller
@@ -35,15 +47,46 @@ export interface LoadOrCreateRunOptions extends RunScope {
   strictSnapshot?: StrictSnapshotRead;
 }
 
-type StepState = DeepReadonly<PersistedStepState>;
-
-/** Composed steps in the replay range that cannot run again in place: a child
- * already settled returns at once on the next pass, so the node would turn
- * `done` without running anything. */
-function unreplayableSteps(steps: readonly StepState[], replayIds: ReadonlySet<string>): string[] {
-  return steps
-    .filter((state) => replayIds.has(state.id) && (state.orchestration?.children.some(isChildSettled) ?? false))
-    .map((state) => state.id);
+/**
+ * Why the source cannot be forked at `startAt`, one line per offending step;
+ * empty when it can. Read-only, so a refusal leaves no decision, no run
+ * directory and the source untouched.
+ *
+ * Every step before `startAt` must be settled: the fork keeps it as it is. A
+ * stamped one with a stamp must still be fresh on its artifacts, and a `done`
+ * one must have a stamp: the fork never runs it again, so its outputs must still
+ * be the ones its inputs produced. Sources are not compared, so a hand edit of
+ * the code tree, which is what a fork usually follows, blocks nothing.
+ */
+export async function checkForkSource(
+  pipeline: Pipeline,
+  source: ForkSource,
+  startAt: string,
+  ctx: PipelineContext,
+): Promise<string[]> {
+  const sourceStepId = pipeline.work_item_source?.step_id;
+  const states = new Map(source.snapshot.steps.map((state) => [state.id, state]));
+  const definitionIds = new Set(pipeline.steps.map((step) => step.id));
+  const problems = source.snapshot.steps
+    .filter((state) => !definitionIds.has(state.id))
+    .map((state) => `step "${state.id}" of run ${source.snapshot.runId} is no longer in the pipeline`);
+  const cut = pipeline.steps.findIndex((step) => step.id === startAt);
+  const lot = source.snapshot.lot ?? ctx.lot;
+  for (const step of pipeline.steps.slice(0, Math.max(cut, 0))) {
+    const status = states.get(step.id)?.status ?? "pending";
+    if (!isSettledStatus(status)) {
+      problems.push(`step "${step.id}" is ${status}: every step before "${startAt}" must be done or skipped`);
+      continue;
+    }
+    if (!isStamped(step, sourceStepId) || !ctx.paths.workItemDir) continue;
+    const freshness = await stepFreshness(ctx, step, stampKey(step.id, lot), { artifactsOnly: true });
+    if (freshness.value === "stale") {
+      problems.push(`step "${step.id}" is stale: its artifacts changed since it succeeded`);
+    } else if (freshness.value === "none" && status === "done") {
+      problems.push(`step "${step.id}" is done but has no stamp in the freshness lock`);
+    }
+  }
+  return problems;
 }
 
 /** Open the run this invocation executes, with its definition and selection. */
@@ -54,6 +97,8 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
     runDir,
     fresh,
     startAt,
+    forkSource,
+    selection,
     context,
     worktree,
     stateStore,
@@ -65,18 +110,23 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
   const buildContext = context ?? buildPipelineContext({ ticket });
   const pipeline = await loadPipelineDefinition(pipelinePath, buildContext);
 
-  // --start-at requeues the target and every later step even when an earlier
-  // pass finished them; the loop leaves out the preceding steps still owing work.
-  let replayIds: ReadonlySet<string> = new Set();
-  if (startAt) {
-    const ids = pipeline.steps.map((step) => step.id);
-    const cut = ids.indexOf(startAt);
-    if (cut < 0) {
-      throw new Error(
-        `--start-at: step "${startAt}" not found in pipeline "${pipeline.name}" (steps: ${ids.join(", ")}).`,
-      );
-    }
-    replayIds = new Set(ids.slice(cut));
+  // Where this invocation actually reads artifacts and writes decisions. The
+  // worktree boot step has already chdir'd, so the context cwd is the effective
+  // one; a reader outside the runner cannot infer it from the run directory.
+  const location = { worktree, cwd: buildContext.cwd };
+
+  if (startAt !== undefined) {
+    if (!forkSource) throw new Error("--start-at: no source run was selected to fork.");
+    return forkRun({
+      pipeline,
+      pipelinePath,
+      ticket,
+      context: buildContext,
+      location,
+      scope,
+      sourceDir: forkSource.dir,
+      startAt,
+    });
   }
 
   return openRun({
@@ -86,11 +136,9 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
     runDir,
     fresh,
     context: buildContext,
-    // Where this invocation actually reads artifacts and writes decisions. The
-    // worktree boot step has already chdir'd, so the context cwd is the effective
-    // one; a reader outside the runner cannot infer it from the run directory.
-    location: { worktree, cwd: buildContext.cwd },
+    location,
     scope,
+    selection,
     stateStore,
     eventStore,
     logStore,
@@ -114,25 +162,6 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
             agentBackendRegistry: agentBackendRegistryOf(buildContext),
           }),
         ),
-      // The requeue reads the journal-reconciled states, which are the ones
-      // hydration consumes.
-      selectResumed: (states) => {
-        const unreplayable = unreplayableSteps(states, replayIds);
-        if (unreplayable.length > 0) {
-          throw new Error(
-            `--start-at: step "${unreplayable[0]}" composes pipelines whose children already settled and cannot be ` +
-              `replayed in place. Use --fresh to start a new run.`,
-          );
-        }
-        return {
-          // Attempts, retries and spend are kept: the budget ledger seeds from
-          // them, and the replay is more work on the same run, not a new one.
-          // `replay` is what keeps the requeue durable over the `done` events the
-          // journal holds for the earlier pass.
-          replay: [...replayIds],
-        };
-      },
-      selectNew: (def) => (replayIds.has(def.id) ? { status: "pending", replay: true } : { status: "pending" }),
     },
   });
 }

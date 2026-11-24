@@ -29,6 +29,7 @@ const OUTCOME: Record<Item["status"], string> = {
   ABORTED: "aborted",
   STOPPED: "stopped",
   RUNNING: "running",
+  SUPERSEDED: "superseded",
 };
 
 function iso(timeline: RunTimeline, at: number): string {
@@ -41,7 +42,7 @@ function episodeTitle(episode: RunEpisode): string {
   return `${episode.index === 0 ? "Initial run" : `Resume ${episode.index}`} · ${length}`;
 }
 
-interface EpisodeStoryProps {
+export interface EpisodeStoryProps {
   item: Item;
   timeline: RunTimeline;
   episode: RunEpisode;
@@ -51,7 +52,7 @@ interface EpisodeStoryProps {
 
 /** How a stretch began and ended: the decision that resumed it, and the stop
  *  or the outcome that closed it. */
-function EpisodeStory({ item, timeline, episode, previous, next }: EpisodeStoryProps): JSX.Element {
+export function EpisodeStory({ item, timeline, episode, previous, next }: EpisodeStoryProps): JSX.Element {
   if (episode.kind === "pause") return <span>{episode.pause.reason ?? "runner exited"}</span>;
   const decision = previous?.kind === "pause" ? previous.pause.decision : undefined;
   let opened: JSX.Element | null = null;
@@ -73,7 +74,7 @@ function EpisodeStory({ item, timeline, episode, previous, next }: EpisodeStoryP
   );
 }
 
-interface JourneyProps {
+export interface JourneyProps {
   item: Item;
   timeline: RunTimeline;
   onHighlight: (highlight: EpisodeHighlight | null) => void;
@@ -81,7 +82,7 @@ interface JourneyProps {
 
 /** The run's invocations and the waits between them, each as wide as the time
  *  it took. A run that ran in one go has nothing to show here. */
-function Journey({ item, timeline, onHighlight }: JourneyProps): JSX.Element | null {
+export function Journey({ item, timeline, onHighlight }: JourneyProps): JSX.Element | null {
   const { episodes, waiting } = timeline;
   if (episodes.length < 2 && !waiting) return null;
   return (

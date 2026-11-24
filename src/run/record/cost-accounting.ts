@@ -428,7 +428,9 @@ export function chargeAttemptToLedger(
 export function openRunLedger(runView: RunView): RunBudget {
   const run = writable(runView);
   const ledger: RunBudget = {
-    cumulative: controlForRun(run).total_cost_usd ?? 0,
+    // A fork answers to the ceiling with what its sources spent: that spend is
+    // counted here only, never in the run's own totals or statistics.
+    cumulative: (run.inheritedSpendUsd ?? 0) + (controlForRun(run).total_cost_usd ?? 0),
     // A guard stop persisted by a previous generation still holds: the ledger
     // alone can read the ceiling as affordable when the guard fired on an estimate.
     ...(run.budget_exceeded ? { exceeded: true } : {}),

@@ -3,7 +3,7 @@
 // exclusion, the journal says why each step was left out, and the next
 // invocation reconciles them like any other step.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
@@ -17,9 +17,6 @@ import {
   type Mark,
   mark,
   PIPELINE,
-  partialAt,
-  lockSteps,
-  readArtifact,
   type RunSnapshot,
   removeArtifact,
   run,
@@ -258,26 +255,14 @@ test("K2: on a resumed run, --steps sets aside settled steps too, keeping their 
   );
 });
 
-test("--start-at on a first run sets the steps before it aside, and the next run reconciles them", () => {
+test("--start-at on a first run is refused: there is no run to fork, and nothing is created", () => {
   const cwd = scratchRoute();
 
   const started = run(cwd, "--start-at", "implement");
 
-  expect(started.status).toBe(0);
-  expect(trace(cwd)).toEqual(["implement", "quality", "commit", "publish", "report"]);
-  const state = snapshot(cwd);
-  expect(state.status).toBe("PASS");
-  expectNoExclusion(state);
-  expect(reasons(cwd, WHOLE_RUN)).toEqual(setAside("context", "branch", "triage", "plan", "prepare"));
-  const firstRun = latestRunId(cwd);
-  const before = mark(cwd);
-
-  const rerun = run(cwd);
-
-  expect(rerun.status).toBe(0);
-  expect(latestRunId(cwd)).not.toBe(firstRun);
-  // branch, triage and plan never ran; implement reads the plan.md they now write.
-  expect(traceSince(cwd, before)).toEqual(FULL);
+  expect(started.status).toBe(1);
+  expect(started.stderr).toContain("has no run to fork");
+  expect(existsSync(join(cwd, ".lance-nuit", "work-items", TICKET, "runs"))).toBe(false);
 });
 
 test("--skip under --scan sets the step aside in every ticket's run, and a later scan reconciles it", () => {
@@ -473,147 +458,6 @@ test("a failure after a step left out unfinished is reported as that failure, no
   expect(state.outcome?.phase).toBe("report");
   expect(state.outcome?.reason).toContain("report: forced failure");
   expect(statusesOf(state)).toMatchObject({ implement: "failed", report: "failed" });
-});
-
-test("the interruption guard's stop is kept when the selection also left an unfinished step out", async () => {
-  const cwd = scratchRoute();
-  await killDuring(cwd, "publish");
-  failAt(cwd, "implement");
-  // The replay requeues publish as pending, its last attempt still interrupted.
-  expect(run(cwd, "--start-at", "implement").status).toBe(1);
-  expect(statusesOf(snapshot(cwd))).toMatchObject({ implement: "failed", publish: "pending" });
-  const before = mark(cwd);
-
-  const skipped = run(cwd, "--skip", "implement");
-
-  expect(skipped.status).toBe(0);
-  expect(traceSince(cwd, before)).not.toContain("publish");
-  const state = snapshot(cwd);
-  expect(state.outcome?.stop?.kind).toBe("needs-decision");
-  expect(state.outcome?.stop?.detail).toContain("rerun with --replay-interrupted");
-  expect(state.outcome?.stop?.detail).not.toContain("operator selection");
-});
-
-// The third FAIL of L3. `--start-at` requeues the failed step as `pending`, so its
-// status no longer says that its last pass failed, and `--skip` then settles it:
-// a requeued step whose last attempt failed without the runner dying owes no
-// decision, and the run passes. The relaunch still never keeps what the failed
-// pass left, because that pass cleared the stamp of its step before its attempt.
-
-/** The partial output is still there, and no stamp vouches for it. */
-function expectMarkedPartial(cwd: string, content: string): void {
-  expect(readArtifact(cwd, "impl.md")).toBe(content);
-  expect(lockSteps(cwd).implement).toBeUndefined();
-}
-
-/** Steps 3 to 5 of the repro: requeue, set aside (the run passes), relaunch (implement runs). */
-function requeueSetAsideRelaunch(cwd: string, partial: string): void {
-  expect(run(cwd, "--start-at", "plan", "--until", "plan").status).toBe(UNTIL_EXIT);
-  expect(snapshot(cwd).steps.find((step) => step.id === "implement")).toMatchObject({
-    status: "pending",
-    replay: true,
-  });
-  const beforeSkip = mark(cwd);
-
-  const skipped = run(cwd, "--skip", "implement");
-
-  expect(skipped.status).toBe(0);
-  const passed = snapshot(cwd);
-  expect(passed.status).toBe("PASS");
-  expect(statusesOf(passed).implement).toBe("skipped");
-  expect(reasons(cwd, beforeSkip)).toContainEqual({ stepId: "implement", reason: SELECTION });
-  expect(skipped.stderr).toContain("1 step set aside by operator selection: implement");
-  expectMarkedPartial(cwd, partial);
-  const passedRun = latestRunId(cwd);
-  const before = mark(cwd);
-
-  const relaunch = run(cwd);
-
-  expect(relaunch.status).toBe(0);
-  expect(latestRunId(cwd)).not.toBe(passedRun);
-  expect(snapshot(cwd).status).toBe("PASS");
-  expect(traceSince(cwd, before)).toEqual([
-    "context",
-    "prepare",
-    "implement",
-    "quality",
-    "commit",
-    "publish",
-    "report",
-  ]);
-  expect(skipsSince(cwd, before).filter(({ stepId }) => stepId === "implement")).toEqual([]);
-  expect(readArtifact(cwd, "impl.md")).toStartWith("implement ");
-}
-
-test("third FAIL: a step whose attempt wrote then failed, requeued by --start-at and set aside, is never adopted by the next run", () => {
-  const cwd = scratchRoute();
-  partialAt(cwd, "implement");
-  expect(run(cwd).status).toBe(1);
-  expectMarkedPartial(cwd, "partial implement\n");
-  heal(cwd, "implement");
-
-  requeueSetAsideRelaunch(cwd, "partial implement\n");
-});
-
-// The repro as the third FAIL wrote it: the attempt failed before writing, and the
-// partial file appears afterwards. It lies beside the mark of that attempt, which
-// says nothing succeeded since, so it is unfinished too, whoever wrote it. Keeping
-// such a file means deleting its record (W11 in inflight.test.ts).
-test("third FAIL: a file written by hand after a failed attempt, requeued and set aside, is never adopted either", () => {
-  const cwd = scratchRoute();
-  failAt(cwd, "implement");
-  expect(run(cwd).status).toBe(1);
-  writePartialArtifact(cwd, "impl.md");
-  heal(cwd, "implement");
-
-  requeueSetAsideRelaunch(cwd, "partial\n");
-});
-
-test("third FAIL: an attempt the operator interrupted after a partial write, requeued and set aside, is never adopted", async () => {
-  const cwd = scratchRoute();
-  partialAt(cwd, "implement");
-  await interruptDuring(cwd, "implement");
-  const aborted = snapshot(cwd);
-  expect(aborted.status).toBe("ABORTED");
-  expect(statusesOf(aborted).implement).toBe("aborted");
-  expectMarkedPartial(cwd, "partial implement\n");
-  heal(cwd, "implement");
-
-  requeueSetAsideRelaunch(cwd, "partial implement\n");
-});
-
-// The second FAIL's variant: a requeued step whose last attempt the runner died
-// in keeps `pending` when set aside, and the interruption still needs authorizing.
-test("a requeued step killed mid-pass and left out by --skip still needs the replay authorized", async () => {
-  const cwd = scratchRoute();
-  await killDuring(cwd, "publish");
-  const killedRun = latestRunId(cwd);
-  expect(run(cwd, "--start-at", "implement", "--until", "implement").status).toBe(UNTIL_EXIT);
-  expect(snapshot(cwd).steps.find((step) => step.id === "publish")).toMatchObject({ status: "pending", replay: true });
-  const beforeSkip = mark(cwd);
-
-  const skipped = run(cwd, "--skip", "publish");
-
-  expect(skipped.status).toBe(0);
-  expect(latestRunId(cwd)).toBe(killedRun);
-  expect(traceSince(cwd, beforeSkip)).toEqual(["context", "prepare", "quality", "commit", "report"]);
-  const stopped = snapshot(cwd);
-  expect(stopped.status).toBe("STOPPED");
-  expect(stopped.outcome?.stop?.kind).toBe("needs-decision");
-  expect(stopped.outcome?.stop?.detail).toContain("--replay-interrupted");
-  expect(statusesOf(stopped).publish).toBe("pending");
-  const before = mark(cwd);
-
-  const resumed = run(cwd);
-
-  expect(snapshot(cwd).outcome?.stop?.kind).toBe("needs-decision");
-  expect(traceSince(cwd, before)).not.toContain("publish");
-  expect(resumed.stderr + resumed.stdout).not.toContain("replaying after an interrupted attempt");
-  const beforeReplay = mark(cwd);
-
-  expect(run(cwd, "--replay-interrupted").status).toBe(0);
-  expect(snapshot(cwd).status).toBe("PASS");
-  expect(traceSince(cwd, beforeReplay)).toContain("publish");
 });
 
 // A pass the runner died in stays `running` once set aside, while later steps

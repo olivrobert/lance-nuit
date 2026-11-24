@@ -22,7 +22,7 @@ export const READ_API_VERSION = 1;
 
 /** Every status the read API serves: the values its schema and its `status`
  *  filter accept. */
-export const API_RUN_STATUSES = ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED"] as const;
+export const API_RUN_STATUSES = ["RUNNING", "PASS", "FAIL", "STOPPED", "ABORTED", "SUPERSEDED"] as const;
 
 /** The status a later `lancenuit run` would judge: a snapshot without a verdict
  *  that no live process holds is `ABORTED`, never `RUNNING`. */

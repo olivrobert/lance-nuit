@@ -21,6 +21,7 @@ export {
   isCompleted,
   isFailure,
   isHalted,
+  isFinishedStatus,
   isResumableStatus,
   type RunEndingKind,
   runEnding,
@@ -30,6 +31,7 @@ export { recordedVerdict } from "./run-verdict.js";
 
 // What a run or a step still owes, read from its steps.
 export {
+  forkPending,
   isPersistedRunComplete,
   isSettledStatus,
   lastPassInterrupted,
@@ -131,6 +133,8 @@ export {
 // `--inspect` lists snapshots through the other before reading each with
 // `readListedRun`, and a composed child is booted with its own.
 export {
+  forkRun,
+  type InvocationSelection,
   type OpenedRun,
   openRun,
   type RunScope,
@@ -151,7 +155,13 @@ export { closureOf, isClosureCurrent, readClosureAt, removeClosureAt, writeClosu
 // directories, the `latest` link, the snapshot file) is known only below: a
 // reader asks for a run by what it wants, never by a path it builds.
 export { relativeRunPath } from "./run-journal.js";
-export { discardedResumeNotice, type ExplicitRunSelection, selectExplicitRun } from "./run-selection.js";
+export {
+  discardedResumeNotice,
+  type ExplicitRunSelection,
+  type ForkSource,
+  selectExplicitRun,
+  selectForkSource,
+} from "./run-selection.js";
 export { FileRunLogStore } from "./stores/file-run-log-store.js";
 export {
   composedRunDir,

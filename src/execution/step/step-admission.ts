@@ -17,6 +17,7 @@ import {
   lastPassInterrupted,
   owesWork,
   type RunBudget,
+  forkPending,
   recordSkip,
   recordUnavailableSource,
   stopRun,
@@ -159,10 +160,6 @@ export interface AdmitStepInput {
   /** `--replay-interrupted`: this invocation authorizes replaying a step the
    *  runner died in. */
   replayInterrupted?: boolean;
-  /** The step this invocation names in `--start-at`. Never `step.replay`, which
-   *  is persisted until the step settles and would authorize a replay nobody
-   *  asked for on a later resume. */
-  startAt?: string;
   /** The pipeline's `work_item_source.step_id`, never stamped. */
   workItemSourceStepId?: string;
 }
@@ -220,7 +217,6 @@ function interruptedReplayAuthorization(input: AdmitStepInput): string | undefin
   // Replayed on every resume by its author's choice: an interrupted pass is no
   // less safe than a completed one.
   if (step.def.rerun_on_resume) return "declared rerunOnResume";
-  if (input.startAt === step.id) return "named by --start-at";
   if (input.replayInterrupted) return "--replay-interrupted";
   return undefined;
 }
@@ -311,9 +307,9 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
   const rejected = reworks.length > 0 && (await anyPendingRejection(baseCtx, reworks));
 
   // The class rule: only the stamp of a stamped step decides whether it owes work.
-  // A failed, aborted or interrupted pass left no stamp, so it runs. A `--start-at`
-  // replay is forced: it does not track the repository tree, which is what an
-  // operator fixes before replaying.
+  // A failed, aborted or interrupted pass left no stamp, so it runs. The step a
+  // fork starts at is forced: it does not track the repository tree, which is
+  // what an operator fixes before forking.
   // A run without a ticket has no lock: its steps always run.
   let freshness: Freshness | undefined;
   if (isStamped(step.def, input.workItemSourceStepId) && baseCtx.paths.workItemDir) {
@@ -327,7 +323,8 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
       return { kind: "failed", reason };
     }
     reportUnavailableSources(input, freshness.unavailable);
-    if (freshness.value === "fresh" && !rejected && step.replay !== true) {
+    const forced = forkPending(run) && run.startAt === step.id;
+    if (freshness.value === "fresh" && !rejected && !forced) {
       return applyInputDecision(run, step, input.output, "skip", SKIP_UP_TO_DATE, freshness.value);
     }
   }

@@ -307,6 +307,7 @@ const HANDED_OUT: Record<string, string[]> = {
   // (`def.when`), produced by the call.
   OpenedRun: ["RunStopState"],
   openRun: ["RunStopState"],
+  forkRun: ["RunStopState"],
 };
 
 // What an injected store is given to serialize: the snapshot the run record

@@ -56,6 +56,7 @@ const RUN_STATS_STATUSES = [
   "FAIL",
   "STOPPED",
   "ABORTED",
+  "SUPERSEDED",
   "UNKNOWN",
 ] as const satisfies readonly RunStatsEntry["status"][];
 const STOP_KINDS = [

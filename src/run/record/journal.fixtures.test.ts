@@ -21,6 +21,8 @@ const FIXTURE_TYPES = [
   "run.budget.exceeded",
   "run.cost.unaccounted",
   "run.unmetered.authorized",
+  "run.superseded",
+  "run.forked",
   "step.skipped",
   "step.source.unavailable",
   "step.status.changed",

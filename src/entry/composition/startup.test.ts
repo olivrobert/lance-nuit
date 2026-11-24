@@ -9,7 +9,7 @@ import { buildPipelineContext } from "../../definition/pipeline/context.js";
 import { pipelineRunsDir } from "../../run/record/stores/run-storage.js";
 import { textArtifact } from "../../definition/dsl/artifact.js";
 import { readDecision } from "../../work-items/store/decisions.js";
-import { applyApproval, applyRejection, checkUntil } from "./startup.js";
+import { applyApproval, applyRejection, checkStepBounds } from "./startup.js";
 
 const budgetArtifact = artifact("budget.json", (value) => value as { amountUsd: number });
 const def = pipeline("budgeted")
@@ -163,7 +163,7 @@ test("--reject on a run another runner is already resuming starts no second run"
   expect(readDecision(context, "plan")?.decision).toBe("rejected");
 });
 
-test("checkUntil: an unknown step lists the ids, and a bound before --start-at is refused", () => {
+test("checkStepBounds: an unknown step lists the ids, and a bound before --start-at is refused", () => {
   const steps = pipeline("bounded")
     .add(bashStep({ id: "a", name: "A", command: "true", rerunOnResume: true }))
     .add(bashStep({ id: "b", name: "B", command: "true", rerunOnResume: true }))
@@ -171,13 +171,16 @@ test("checkUntil: an unknown step lists the ids, and a bound before --start-at i
     .build();
   const args = (overrides: Partial<RunnerArgs>) => ({ ...overrides }) as RunnerArgs;
 
-  expect(checkUntil(args({}), steps)).toBeUndefined();
-  expect(checkUntil(args({ until: "b" }), steps)).toBeUndefined();
-  expect(checkUntil(args({ until: "b", startAt: "b" }), steps)).toBeUndefined();
-  expect(checkUntil(args({ until: "x" }), steps)).toBe(
+  expect(checkStepBounds(args({}), steps)).toBeUndefined();
+  expect(checkStepBounds(args({ until: "b" }), steps)).toBeUndefined();
+  expect(checkStepBounds(args({ until: "b", startAt: "b" }), steps)).toBeUndefined();
+  expect(checkStepBounds(args({ startAt: "x", until: "b" }), steps)).toBe(
+    '--start-at: step "x" not found in pipeline "bounded" (steps: a, b, c).',
+  );
+  expect(checkStepBounds(args({ until: "x" }), steps)).toBe(
     '--until: step "x" not found in pipeline "bounded" (steps: a, b, c).',
   );
-  expect(checkUntil(args({ until: "a", startAt: "b" }), steps)).toBe(
+  expect(checkStepBounds(args({ until: "a", startAt: "b" }), steps)).toBe(
     '--until: step "a" comes before --start-at step "b" in pipeline "bounded": nothing would run.',
   );
 });
