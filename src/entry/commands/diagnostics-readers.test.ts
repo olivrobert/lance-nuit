@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { textArtifact } from "../../definition/dsl/artifact.js";
-import type { PersistedRun } from "../../run/persisted.js";
+import type { PersistedAttempt, PersistedRun } from "../../run/persisted.js";
+import { closureOf, writeClosureAt } from "../../run/record/closure.js";
 import {
   createLogRef,
   type LogRef,
@@ -14,6 +15,7 @@ import {
 import { buildPipelineContext } from "../../definition/pipeline/context.js";
 import { diagnoseRunJournals, inspectTicket, logsForTicket } from "./diagnostics-readers.js";
 import { recordApproval, recordRejection } from "../../work-items/store/decisions.js";
+import { workItemLayout } from "../../work-items/store/layout.js";
 
 function snapshot(runId: string, pipeline: string, updatedAt: string): PersistedRun {
   return {
@@ -199,7 +201,7 @@ test("diagnoseRunJournals reports what the journal contract kept, refused and ig
   // The counters are reachable from `--inspect`, not only from the API: a reader
   // told about them in the guide must have a command that prints them.
   const inspected = await inspectTicket(context, "PROJ-1", undefined, { stateStore });
-  expect(inspected).toContain("journal: 1 event, 1 invalid, 1 skipped (1 live-feed line ignored)");
+  expect(inspected).toContain("journal: 1 event, 1 invalid, 1 skipped (1 uncontracted line ignored)");
   expect(inspected).toContain("refused: step.attempt.started ×1 —");
 });
 
@@ -220,7 +222,7 @@ test("inspectTicket reports a healthy journal as ok, with the live feed as ignor
   ]);
 
   const inspected = await inspectTicket(context, "PROJ-1", undefined, { stateStore });
-  expect(inspected).toContain("journal: 2 events, ok (2 live-feed lines ignored)\n");
+  expect(inspected).toContain("journal: 2 events (2 uncontracted lines ignored)\n");
   expect(inspected).not.toContain("refused:");
 });
 
@@ -235,7 +237,7 @@ test("inspectTicket omits the ignored lines when the journal holds no live feed"
     { state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z"), runDir },
   ]);
 
-  expect(await inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("journal: 1 event, ok\n");
+  expect(await inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("journal: 1 event\n");
 });
 
 test("inspectTicket says so when a run has no readable journal", async () => {
@@ -326,4 +328,144 @@ test("inspectTicket tells whether a rejection still waits on its rework", async 
   expect(await inspect()).toContain(
     "approval: plan — reworked after rejection round 1; approve it or reject it again\n",
   );
+});
+
+function workItemContext(prefix: string) {
+  const cwd = mkdtempSync(join(tmpdir(), prefix));
+  const base = buildPipelineContext();
+  return buildPipelineContext({
+    cwd,
+    ticket: "PROJ-1",
+    config: { ...base.config, specPath: ".lance-nuit/work-items" },
+  });
+}
+
+function attempt(n: number, kind: "step" | "fix" | "review", status: "done" | "failed"): PersistedAttempt {
+  return { attempt: n, kind, status, started_at: "2026-07-03T00:00:00.000Z", log_path: "" };
+}
+
+test("B7: inspect shows spend, duration, place, lineage and each step's attempts from state.json", async () => {
+  const fork: PersistedRun = {
+    ...snapshot("feature-fork", "feature", "2026-07-03T00:00:00.000Z"),
+    status: "FAIL",
+    max_cost_usd: 15,
+    inheritedSpendUsd: 3.42,
+    forkedFrom: "feature-source",
+    startAt: "plan",
+    cwd: "/work/tree",
+    worktree: true,
+    steps: [
+      {
+        id: "plan",
+        status: "done",
+        retries: 0,
+        control: { duration_ms: 90_000, total_cost_usd: 1.25 },
+        attempts: [attempt(1, "step", "done"), attempt(2, "review", "done"), attempt(3, "fix", "failed")],
+      },
+      { id: "implement", status: "pending", retries: 0 },
+    ],
+  };
+  const output = await inspectTicket(context, "PROJ-1", {}, { stateStore: new FakeStateStore([{ state: fork }]) });
+
+  expect(output).toContain("forked from: feature-source at plan\n");
+  expect(output).toContain("spend: $1.25 own, inherited $3.42; budget $15.00\n");
+  expect(output).toContain("duration: 1m30s of attempts\n");
+  expect(output).toContain("cwd: /work/tree (worktree)\n");
+  expect(output).toContain("  done     plan (3 attempts, last fix failed)\n");
+  expect(output).toContain("  pending  implement");
+  expect(output).toContain("closed: no\n");
+});
+
+test("B7: inspect shows a superseded run and the fork that replaced it", async () => {
+  const source: PersistedRun = {
+    ...snapshot("feature-source", "feature", "2026-07-03T00:00:00.000Z"),
+    status: "SUPERSEDED",
+    supersededBy: "feature-fork",
+  };
+  const output = await inspectTicket(context, "PROJ-1", {}, { stateStore: new FakeStateStore([{ state: source }]) });
+  expect(output).toContain("status: SUPERSEDED\n");
+  expect(output).toContain("superseded by: feature-fork\n");
+});
+
+test("B7: inspect shows a dead RUNNING run as interrupted, and a current closure", async () => {
+  const runDir = mkdtempSync(join(tmpdir(), "inspect-dead-"));
+  const dead: PersistedRun = { ...snapshot("feature-dead", "feature", "2026-07-03T00:00:00.000Z"), status: "RUNNING" };
+  const closed: PersistedRun = { ...snapshot("quality-closed", "quality", "2026-07-03T00:00:00.000Z"), status: "FAIL" };
+  const closedDir = mkdtempSync(join(tmpdir(), "inspect-closed-"));
+  writeClosureAt(closedDir, closureOf(closed, "olivier", new Date("2026-07-04T00:00:00.000Z")));
+  const stateStore = new FakeStateStore([
+    { state: dead, runDir },
+    { state: closed, runDir: closedDir },
+  ]);
+
+  const output = await inspectTicket(context, "PROJ-1", {}, { stateStore });
+
+  expect(output).toContain("status: ABORTED (interrupted: the runner died without a verdict)\n");
+  expect(output).not.toContain("status: RUNNING");
+  expect(output).toContain("closed: by olivier on 2026-07-04T00:00:00.000Z\n");
+});
+
+test("B7: inspect marks a step whose stamp absorbed a failure, read from the work item's lock", async () => {
+  const ctx = workItemContext("inspect-lock-");
+  const lockPath = workItemLayout(ctx.paths.workItemDir!).lockPath;
+  mkdirSync(dirname(lockPath), { recursive: true });
+  const stamp = { pipeline: "feature", runId: "feature-latest", stampedAt: "2026-07-03T00:00:00.000Z", inputs: {} };
+  writeFileSync(
+    lockPath,
+    JSON.stringify({ schemaVersion: 1, steps: { "quality.tests": { ...stamp, outputs: {}, absorbed: true } } }),
+  );
+  const stateStore = new FakeStateStore([{ state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z") }]);
+
+  expect(await inspectTicket(ctx, "PROJ-1", {}, { stateStore })).toContain("  done     quality.tests [absorbed]");
+
+  writeFileSync(lockPath, "{ not json");
+  expect(await inspectTicket(ctx, "PROJ-1", {}, { stateStore })).toContain("lock: unreadable — ");
+});
+
+test("B7: --pipeline keeps the runs of that pipeline, children whose parent runs another one included", async () => {
+  const child: PersistedRun = {
+    ...snapshot("lot-run", "implement-lot", "2026-07-03T00:10:00.000Z"),
+    parentRunId: "feature-latest",
+  };
+  const stateStore = new FakeStateStore([
+    { state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z") },
+    { state: snapshot("quality-latest", "quality", "2026-07-02T00:00:00.000Z") },
+    { state: child },
+  ]);
+  const inspect = (selection: { runId?: string; pipeline: string }) =>
+    inspectTicket(context, "PROJ-1", selection, { stateStore });
+
+  const quality = await inspect({ pipeline: "quality" });
+  expect(quality).toContain("Run quality-latest");
+  expect(quality).not.toContain("Run feature-latest");
+  expect(await inspect({ pipeline: "implement-lot" })).toContain("Run lot-run");
+  expect(await inspect({ pipeline: "deploy" })).toBe("No run of pipeline deploy found for PROJ-1.");
+  expect(await inspect({ runId: "feature-latest", pipeline: "quality" })).toBe(
+    "Run feature-latest of pipeline quality not found for PROJ-1.",
+  );
+});
+
+test("B7: inspect lists a composed child of another work item from its parent's ref", async () => {
+  const ref = { kind: "main" as const, pipeline: "feature", accountedCostUsd: 0 };
+  const parent: PersistedRun = {
+    ...snapshot("batch-latest", "batch", "2026-07-03T00:00:00.000Z"),
+    steps: [
+      {
+        id: "each-ticket",
+        status: "running",
+        retries: 0,
+        orchestration: {
+          kind: "forEachPipeline",
+          children: [
+            { ...ref, key: "PROJ-2", ticket: "PROJ-2", runId: "r-2", status: "failed" },
+            { ...ref, key: "PROJ-3", ticket: "PROJ-3", status: "pending" },
+          ],
+        },
+      },
+    ],
+  };
+  const output = await inspectTicket(context, "PROJ-1", {}, { stateStore: new FakeStateStore([{ state: parent }]) });
+
+  expect(output).toContain("children:\n  failed    feature PROJ-2 (r-2)");
+  expect(output).not.toContain("PROJ-3");
 });

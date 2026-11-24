@@ -30,9 +30,11 @@ function decisionOf(value: unknown): RunPause["decision"] {
  * Pauses of the run, in journal order.
  *
  * A pause runs from the last line before a `run.resumed` to that resume, so a
- * runner that died without writing `run.stopped` still shows its gap. The
- * decision a resume carries is journaled right after it, before any step
- * event; one found later belongs to no pause.
+ * runner that died without writing `run.stopped` still shows its gap: the
+ * opening journals `run.resumed` before the attempts it settles and the
+ * authorization it records, so these never shorten the pause. The decision a
+ * resume carries is journaled after that opening, before any step runs; one
+ * found once a step started belongs to no pause.
  */
 function pausesOf(events: readonly RunJournalEvent[]): RunPause[] {
   const pauses: RunPause[] = [];
@@ -50,7 +52,7 @@ function pausesOf(events: readonly RunJournalEvent[]): RunPause[] {
     } else if (event.type === "decision.recorded" && resumed) {
       const decision = decisionOf(event.decision);
       if (decision) resumed.decision = decision;
-    } else if (event.type.startsWith("step.")) {
+    } else if (event.type.startsWith("step.") && event.type !== "step.attempt.finished") {
       resumed = undefined;
     }
     if (ts) lastTs = ts;

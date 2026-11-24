@@ -146,6 +146,32 @@ test("a runner that died without stopping still leaves a pause, with no reason",
   ]);
 });
 
+test("V2/B4: after a crash, the pause runs from the dead invocation's last line to run.resumed, settlements aside", () => {
+  const project = listedProject();
+  const runDir = writeRun(project, "DEMO-1", "feature", { runId: "r-1", status: "RUNNING", steps: [] });
+  writeRunEvents(runDir, [
+    { ts: "2026-09-05T07:00:00.000Z", type: "run.started", pipeline: "feature", ticket: "DEMO-1" },
+    { ts: "2026-09-05T07:00:01.000Z", type: "step.attempt.started", stepId: "a", attempt: 1, kind: "step" },
+    { ts: "2026-09-05T09:00:00.000Z", type: "run.resumed", pipeline: "feature" },
+    {
+      ts: "2026-09-05T09:00:00.001Z",
+      type: "step.attempt.finished",
+      stepId: "a",
+      attempt: 1,
+      kind: "step",
+      status: "failed",
+      interrupted: true,
+    },
+    { ts: "2026-09-05T09:00:00.002Z", type: "run.unmetered.authorized", budgetScopeId: "r-1", maxCostUsd: null },
+    { ts: "2026-09-05T09:00:00.003Z", type: "decision.recorded", subject: "gate", decision: "approved" },
+    { ts: "2026-09-05T09:00:01.000Z", type: "step.attempt.started", stepId: "a", attempt: 2, kind: "step" },
+  ]);
+
+  expect(readRunJourney("demo-app", "DEMO-1")?.pauses).toEqual([
+    { stoppedAt: "2026-09-05T07:00:01.000Z", resumedAt: "2026-09-05T09:00:00.000Z", decision: "approved" },
+  ]);
+});
+
 test("a run stopped and not resumed yet ends on an open pause", () => {
   const project = listedProject();
   const runDir = writeRun(project, "DEMO-1", "feature", { runId: "r-1", status: "STOPPED", steps: [] });

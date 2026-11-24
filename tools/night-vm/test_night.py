@@ -250,7 +250,7 @@ class NightTests(unittest.TestCase):
                              {"id": "commit", "status": "pending"}]}
         pulled = Path(self.fetched({"18": {"state": "running", "startedAt": "2026-11-14T21:36:00Z"}, "19": {"state": "pending"}},
                                    [running], name="vm", archive_name="live.tgz")) / "live.tgz"
-        done = dict(running, status="DONE", steps=[dict(step, status="done") for step in running["steps"]])
+        done = dict(running, status="PASS", steps=[dict(step, status="done") for step in running["steps"]])
         result = self.night("_run", run_id, LIVE_TGZ=str(pulled),
                             FETCH_DIR=self.fetched({"18": {"state": "done", "outcome": "fixed", "runId": "r1"}}, [done]),
                             VM_UNIT_RESULT="exit-code", VM_UNIT_STATUS="1")
@@ -264,7 +264,7 @@ class NightTests(unittest.TestCase):
                          ["vm", "secrets", "boot", "code", "broker", "prepare"])
         self.assertEqual(live["result"]["state"], "failed")
         [ticket] = live["tickets"]
-        self.assertEqual((ticket["ticket"], ticket["outcome"], ticket["run"]["status"]), ("18", "fixed", "DONE"))
+        self.assertEqual((ticket["ticket"], ticket["outcome"], ticket["run"]["status"]), ("18", "fixed", "PASS"))
         self.assertIsNotNone(live["contactAt"])
 
     def test_a_stuck_or_silent_vm_leaves_live_json_without_contact(self):
@@ -443,6 +443,30 @@ class ReportTests(unittest.TestCase):
         self.assertFalse(night_report.unpack_live(self.run_dir, archive))
         self.assertTrue((self.run_dir / "live/kept").exists())
         self.assertFalse((self.run_dir / "live.part").exists())
+
+    def test_a_running_run_shows_its_spend_and_age_before_any_total(self):
+        state = {"runId": "fork", "status": "RUNNING", "createdAt": "2026-11-14T21:00:00Z", "inheritedSpendUsd": 1.5,
+                 "steps": [{"id": "plan", "status": "done", "control": {"total_cost_usd": 0.25}},
+                           {"id": "code", "status": "running", "control": {"total_cost_usd": 0.5}},
+                           {"id": "commit", "status": "pending"}]}
+        now = night_report.parse_iso("2026-11-14T21:10:00Z")
+        view = night_report.run_view(state, now)
+        self.assertEqual((view["costUsd"], view["durationMs"], view["outcome"]), (2.25, 600000, None))
+
+    def test_a_run_not_charged_yet_has_no_cost(self):
+        state = {"runId": "r", "status": "RUNNING", "createdAt": "2026-11-14T21:00:00Z",
+                 "steps": [{"id": "plan", "status": "pending"}]}
+        self.assertIsNone(night_report.run_view(state)["costUsd"])
+
+    def test_a_finished_run_keeps_its_recorded_duration_and_a_failure_says_where(self):
+        state = {"runId": "r", "status": "FAIL", "createdAt": "2026-11-14T21:00:00Z",
+                 "total_control": {"duration_ms": 1234, "total_cost_usd": 0.1},
+                 "outcome": {"phase": "tests", "reason": "3 tests failed", "resumable": True},
+                 "steps": [{"id": "tests", "status": "failed", "control": {"total_cost_usd": 0.1}}]}
+        view = night_report.run_view(state)
+        self.assertEqual((view["durationMs"], view["costUsd"]), (1234, 0.1))
+        self.assertEqual(view["outcome"], {"phase": "tests", "reason": "3 tests failed"})
+        self.assertIsNone(night_report.run_view(dict(state, status="STOPPED"))["outcome"])
 
     def test_cost_counts_root_runs_once_at_their_latest_line(self):
         lines = [

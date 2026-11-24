@@ -37,9 +37,10 @@ flags.
 | `--reject-only` | | With `--reject`, write the rejection and exit without running, worktree, or project lock. The `lancenuit reject <ticket> <subject> --reason <text> --pipeline <name>` subcommand always implies it |
 | `--close` | | Mark the latest failed, stopped, or aborted run of `--pipeline` as closed by hand, keeping its status. Requires a ticket and `--pipeline` (`lancenuit close <ticket> --pipeline <name>`). See [human-control.md](human-control.md#close-a-run-finished-by-hand) |
 | `--reopen` | | Remove the closure written by `--close` (`lancenuit reopen <ticket> --pipeline <name>`) |
-| `--inspect` | | Display a ticket's run state with its sub-runs (`forEachPipeline` children) listed under their parent; combine with `--run` to select a run |
+| `--inspect` | | Display the latest run of each of a ticket's pipelines, from `state.json`, `closure.json`, the run lock and the work item's `lock.json`: status (`ABORTED (interrupted …)` for a `RUNNING` run no live runner holds, `SUPERSEDED` with `superseded by`), `forked from` with its `--start-at` step, `closed`, duration of the attempts, own spend, inherited spend and budget, `cwd` and worktree, and per step its attempt count, the kind and status of the last attempt, and `[absorbed]`. Sub-runs are listed under their parent, a child on another work item from the parent's ref. The `journal` line only counts events: it is a trace, never a verdict. Combine with `--run` to select a run and `--pipeline <name>` to keep one pipeline's runs |
 | `--logs` | | Display a ticket's logs; combine with `--step` and/or `--run` |
 | `--run <runId>` | | Explicitly resume a run, or filter `--inspect`/`--logs` |
+| `--pipeline <name>` with `--inspect` | | Keep the runs of that pipeline name, a composed child whose parent runs another pipeline included |
 | `--step <id>` | | Filter `--logs` (for example `tests`) |
 | `--clean` | | Remove old step logs; requires `--logs-only` |
 | `--logs-only` | | With `--clean`, remove only step log files (snapshots/history are preserved) |
@@ -61,6 +62,7 @@ The wrapper forms are usually easier to remember:
 ```bash
 lancenuit run PROJ-28 -p release
 lancenuit inspect PROJ-28 --run <run-id>
+lancenuit inspect PROJ-28 --pipeline release
 lancenuit logs PROJ-28 --step tests
 lancenuit close PROJ-28 --pipeline release
 lancenuit clean --logs-only --older-than 30d --keep-failed

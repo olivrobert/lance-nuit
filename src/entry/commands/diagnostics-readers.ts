@@ -8,9 +8,12 @@ import { basename, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { createArtifactRef } from "../../shared/language/artifact-ports.js";
 import type { PipelineContext } from "../../shared/language/context.js";
-import type { RunJournalCounts, PersistedRun } from "../../run/index.js";
+import type { PersistedPipelineChildRef, PersistedRun, PersistedStepState, RunJournalCounts } from "../../run/index.js";
 import {
   createRunRef,
+  isClosureCurrent,
+  readClosureAt,
+  runSpend,
   type RunLogStore,
   type RunStateSnapshot,
   type RunStateStore,
@@ -27,7 +30,10 @@ import {
 } from "../../run/index.js";
 import { parseAge } from "../../shared/lib/durations.js";
 import { errorMessage } from "../../shared/lib/errors.js";
-import { gateDecisionStatus, isValidSubjectToken } from "../../work-items/index.js";
+import { gateDecisionStatus, isValidSubjectToken, readLock, stampKey } from "../../work-items/index.js";
+import { formatDuration } from "../output/format.js";
+
+type WorkItemLock = ReturnType<typeof readLock>;
 import { isPathWithin } from "../../shared/lib/path-safety.js";
 
 export interface DiagnosticsOptions {
@@ -160,11 +166,10 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`): s
   return `${count} ${count === 1 ? singular : pluralForm}`;
 }
 
-/** Journal health, on one line of `--inspect`. Uncontracted lines (the `unknown`
- *  count) are the live feed sharing the file, so they are reported as ignored
- *  rather than as a count a reader would take for an anomaly. `invalid` and
- *  `skipped` only appear when non-zero, so that `invalid` — the only count that
- *  means a recorded fact was lost — stands out; `ok` says both are zero. */
+/** Journal counts, on one line of `--inspect`. The journal is a trace, never the
+ *  run's record: these counts judge nothing about the run, which `state.json`
+ *  alone describes. Uncontracted lines (the `unknown` count) are reported as
+ *  ignored; `invalid` and `skipped` only appear when non-zero. */
 function journalLine(record: RunRecord): string {
   const journal = diagnoseRunJournal(record);
   if (journal.readError !== undefined) return `journal: unreadable — ${journal.readError.split("\n", 1)[0]}`;
@@ -172,8 +177,7 @@ function journalLine(record: RunRecord): string {
   const parts = [plural(journal.known, "event")];
   if (journal.invalid > 0) parts.push(`${journal.invalid} invalid`);
   if (journal.skipped > 0) parts.push(`${journal.skipped} skipped`);
-  if (journal.invalid === 0 && journal.skipped === 0) parts.push("ok");
-  const ignored = journal.unknown > 0 ? ` (${plural(journal.unknown, "live-feed line")} ignored)` : "";
+  const ignored = journal.unknown > 0 ? ` (${plural(journal.unknown, "uncontracted line")} ignored)` : "";
   const counts = `${parts.join(", ")}${ignored}`;
   if (journal.invalid === 0) return `journal: ${counts}`;
   const refused = Object.entries(journal.invalidByType)
@@ -213,30 +217,100 @@ async function approvalLine(context: PipelineContext, record: RunRecord): Promis
   }
 }
 
-function formatRunRecord(record: RunRecord, approval?: string): string {
+function usd(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
+/** Own spend, what a fork inherited, and the ceiling both count against. */
+function spendLine(state: PersistedRun): string {
+  const spend = runSpend(state);
+  const own = spend.usd === undefined ? "—" : `${usd(spend.usd)}${spend.lowerBound ? " at least" : ""}`;
+  const estimated = spend.estimated ? " (estimated)" : "";
+  const inherited = state.inheritedSpendUsd ? `, inherited ${usd(state.inheritedSpendUsd)}` : "";
+  const budget = state.max_cost_usd === undefined ? "none" : usd(state.max_cost_usd);
+  return `spend: ${own}${estimated} own${inherited}; budget ${budget}`;
+}
+
+function lineageLines(state: PersistedRun): string[] {
+  return [
+    ...(state.forkedFrom ? [`forked from: ${state.forkedFrom} at ${state.startAt ?? "—"}`] : []),
+    ...(state.supersededBy ? [`superseded by: ${state.supersededBy}`] : []),
+  ];
+}
+
+function closedLine(record: RunRecord): string {
+  const closure = record.dir ? readClosureAt(record.dir) : undefined;
+  if (!closure) return "closed: no";
+  if (!isClosureCurrent(closure, record.state)) return "closed: no (a closure predates the last write)";
+  return `closed: by ${closure.closedBy} on ${closure.closedAt}`;
+}
+
+/** The lock of the work item the run belongs to; `undefined` when it cannot
+ *  be read, which `lockLine` reports instead of the stamps. */
+function readWorkItemLock(context: PipelineContext): { lock?: WorkItemLock; error?: string } {
+  const dir = context.paths.workItemDir;
+  if (!dir) return {};
+  try {
+    return { lock: readLock(dir) };
+  } catch (error) {
+    return { error: errorMessage(error).split("\n", 1)[0] };
+  }
+}
+
+function stepLine(step: PersistedStepState, state: PersistedRun, lock: WorkItemLock | undefined): string {
+  const attempts = step.attempts ?? [];
+  const last = attempts.at(-1);
+  const tried = last ? ` (${plural(attempts.length, "attempt")}, last ${last.kind} ${last.status})` : "";
+  const absorbed = lock?.steps[stampKey(step.id, state.lot)]?.absorbed ? " [absorbed]" : "";
+  const error = step.errors ? ` — ${step.errors.split("\n", 1)[0]}` : "";
+  return `  ${step.status.padEnd(8)} ${step.id}${tried}${absorbed}${error}`;
+}
+
+function formatRunRecord(
+  record: RunRecord,
+  workItem: { lock?: WorkItemLock; error?: string },
+  approval?: string,
+): string {
   const { state, status, interrupted } = record;
+  const duration = formatDuration(runSpend(state).durationMs);
   const lines = [
     `Run ${record.runId}`,
     `pipeline: ${record.pipeline}`,
     `ticket: ${state.ticket ?? "—"}`,
     `status: ${status}${interrupted ? " (interrupted: the runner died without a verdict)" : ""}`,
+    ...lineageLines(state),
+    closedLine(record),
     `created: ${state.createdAt ?? "—"}`,
     `updated: ${state.updatedAt ?? "—"}`,
+    `duration: ${duration ? `${duration} of attempts` : "—"}`,
+    spendLine(state),
+    `cwd: ${state.cwd ?? "—"}${state.worktree ? " (worktree)" : ""}`,
     outcomeLine(state),
     ...(approval ? [approval] : []),
     journalLine(record),
+    ...(workItem.error ? [`lock: unreadable — ${workItem.error}`] : []),
     "steps:",
   ];
-  for (const step of state.steps) {
-    const error = step.errors ? ` — ${step.errors.split("\n", 1)[0]}` : "";
-    lines.push(`  ${step.status.padEnd(8)} ${step.id}${error}`);
-  }
+  for (const step of state.steps) lines.push(stepLine(step, state, workItem.lock));
   return lines.join("\n");
 }
 
-/** Child runs of `parent`, in execution order (oldest first). */
+/** Child runs of `parent` listed with it, in execution order (oldest first). */
 function childrenOf(parent: RunRecord, records: RunRecord[]): RunRecord[] {
   return sortNewest(records.filter((record) => record.state.parentRunId === parent.runId)).reverse();
+}
+
+/** Children the parent launched on another work item (`forEachWorkItem`): their
+ *  snapshots live under that work item, so only the parent's ref describes them. */
+function foreignChildRefs(parent: RunRecord, listed: ReadonlySet<string>): PersistedPipelineChildRef[] {
+  return parent.state.steps
+    .flatMap((step) => step.orchestration?.children ?? [])
+    .filter((ref) => ref.runId !== undefined && !listed.has(ref.runId));
+}
+
+function formatChildRefLine(ref: PersistedPipelineChildRef): string {
+  const ticket = ref.ticket ? ` ${ref.ticket}` : "";
+  return `${ref.status.padEnd(9)} ${ref.pipeline}${ticket} (${ref.runId})`;
 }
 
 function formatChildLine(record: RunRecord): string {
@@ -251,34 +325,50 @@ function formatChildLine(record: RunRecord): string {
  * `forEachPipeline` run spawns one child per item; listing them here is the only
  * way to see the whole run without grepping `parentRunId` in the snapshots. */
 async function formatRunTree(context: PipelineContext, record: RunRecord, records: RunRecord[]): Promise<string> {
-  const lines = [formatRunRecord(record, await approvalLine(context, record))];
+  const lines = [formatRunRecord(record, readWorkItemLock(context), await approvalLine(context, record))];
+  const listed = new Set(records.map((entry) => entry.runId));
   const render = (parent: RunRecord, depth: number) => {
     const children = childrenOf(parent, records);
-    if (depth === 1 && children.length > 0) lines.push("children:");
+    const foreign = foreignChildRefs(parent, listed);
+    if (depth === 1 && children.length + foreign.length > 0) lines.push("children:");
     for (const child of children) {
       lines.push(`${"  ".repeat(depth)}${formatChildLine(child)}`);
       render(child, depth + 1);
     }
+    for (const ref of foreign) lines.push(`${"  ".repeat(depth)}${formatChildRefLine(ref)}`);
   };
   render(record, 1);
   return lines.join("\n");
 }
 
+export interface InspectSelection {
+  runId?: string;
+  /** Only the runs of this pipeline name. */
+  pipeline?: string;
+}
+
 export async function inspectTicket(
   context: PipelineContext,
   ticket: string,
-  runId?: string,
+  selection: InspectSelection = {},
   options?: DiagnosticsOptions,
 ): Promise<string> {
+  const { runId, pipeline } = selection;
   const { stateStore, records } = recordsFor(context, ticket, options);
-  if (records.length === 0) return `No run found for ${ticket}.`;
-  const selected = runId ? selectRunRecord(records, runId) : undefined;
-  if (runId && !selected) return `Run ${runId} not found for ${ticket}.`;
+  const ofPipeline = (record: RunRecord) => pipeline === undefined || record.pipeline === pipeline;
+  const among = pipeline === undefined ? "" : ` of pipeline ${pipeline}`;
+  if (!records.some(ofPipeline)) return `No run${among} found for ${ticket}.`;
+  const selected = runId ? selectRunRecord(records.filter(ofPipeline), runId) : undefined;
+  if (runId && !selected) return `Run ${runId}${among} not found for ${ticket}.`;
   if (selected) return formatRunTree(context, selected, records);
   // A child run belongs to the tree of its parent; only orphans (parent snapshot
-  // gone) compete for the "latest per pipeline" slots.
-  const knownRunIds = new Set(records.map((record) => record.runId));
-  const topLevel = records.filter((record) => !record.state.parentRunId || !knownRunIds.has(record.state.parentRunId));
+  // gone) compete for the "latest per pipeline" slots, and, under `--pipeline`,
+  // the children whose parent runs another pipeline.
+  const byRunId = new Map(records.map((record) => [record.runId, record] as const));
+  const topLevel = records.filter((record) => {
+    const parent = record.state.parentRunId ? byRunId.get(record.state.parentRunId) : undefined;
+    return ofPipeline(record) && (!parent || (pipeline !== undefined && !ofPipeline(parent)));
+  });
   const trees = await Promise.all(
     latestPerPipeline(topLevel, stateStore, ticket).map((record) => formatRunTree(context, record, records)),
   );

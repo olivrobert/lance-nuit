@@ -9,7 +9,7 @@ import type { RunnerCommand } from "./runner-command.js";
 import { isValidTicket } from "./shared.js";
 
 /** Options each diagnostic command reads, out of the 35 `RunnerArgs` carries. */
-type InspectArgs = Pick<RunnerArgs, "ticket" | "runId">;
+type InspectArgs = Pick<RunnerArgs, "ticket" | "runId" | "pipelinePath">;
 type LogsArgs = Pick<RunnerArgs, "ticket" | "runId" | "step">;
 type CleanArgs = Pick<RunnerArgs, "ticket" | "logsOnly" | "olderThan" | "keepFailed">;
 
@@ -37,7 +37,8 @@ export const inspectCommand: RunnerCommand = {
       return 1;
     }
     const context = contextFor(args.ticket);
-    const report = await inspectTicket(context, args.ticket, args.runId, storesFor(context, args.ticket));
+    const selection = { runId: args.runId, pipeline: args.pipelinePath };
+    const report = await inspectTicket(context, args.ticket, selection, storesFor(context, args.ticket));
     process.stdout.write(`${report}\n`);
     return 0;
   },

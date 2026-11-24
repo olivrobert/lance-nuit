@@ -158,7 +158,7 @@ function composedRuns(project: string): { parentDir: string; childDir: string } 
 
 async function childStatusesOf({ project, options }: Listed) {
   const tree = await inspectTicket(contextFor(project), TICKET);
-  const child = await inspectTicket(contextFor(project), TICKET, "c-1");
+  const child = await inspectTicket(contextFor(project), TICKET, { runId: "c-1" });
   return {
     sheet: (await readItem("demo-app", TICKET, options))?.status,
     steps: readSteps("demo-app", TICKET, options)?.status,

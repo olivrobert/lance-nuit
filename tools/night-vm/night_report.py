@@ -243,17 +243,47 @@ def step_view(step: dict) -> dict:
     }
 
 
-def run_view(state: dict) -> dict:
-    control = mapping(state.get("total_control"))
-    stop = mapping(mapping(state.get("outcome")).get("stop"))
+def parse_iso(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def run_cost(state: dict, steps: list) -> float | int | None:
+    """`total_control` is only written when the run ends, and leaves out what a fork inherited."""
+    inherited = number(state.get("inheritedSpendUsd"))
+    costs = [number(mapping(step.get("control")).get("total_cost_usd")) for step in steps if isinstance(step, dict)]
+    charged = [cost for cost in costs if cost is not None]
+    if inherited is None and not charged:
+        return None
+    return (inherited or 0) + sum(charged)
+
+
+def run_duration(state: dict, now: datetime) -> float | int | None:
+    if state.get("status") == "RUNNING" and (created := parse_iso(state.get("createdAt"))) is not None:
+        return max(0, round((now - created).total_seconds() * 1000))
+    return number(mapping(state.get("total_control")).get("duration_ms"))
+
+
+def run_view(state: dict, now: datetime | None = None) -> dict:
+    outcome = mapping(state.get("outcome"))
+    stop = mapping(outcome.get("stop"))
     steps = state.get("steps") if isinstance(state.get("steps"), list) else []
     return {
         "runId": text(state.get("runId"), 128),
         "pipeline": text(state.get("name"), 128),
         "status": text(state.get("status"), 32),
         "updatedAt": text(state.get("updatedAt"), 40),
-        "durationMs": number(control.get("duration_ms")),
-        "costUsd": number(control.get("total_cost_usd")),
+        "durationMs": run_duration(state, now or datetime.now(timezone.utc)),
+        "costUsd": run_cost(state, steps),
+        "outcome": {
+            "phase": text(outcome.get("phase"), 128),
+            "reason": text(outcome.get("reason")),
+        } if state.get("status") == "FAIL" and outcome else None,
         "stoppedReason": text(state.get("stopped_reason")),
         "stop": {
             "subject": text(stop.get("subject"), 128),

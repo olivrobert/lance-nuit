@@ -155,6 +155,7 @@ Diagnostic and administration commands:
 lancenuit list
 lancenuit help
 lancenuit inspect PROJ-28
+lancenuit inspect PROJ-28 --pipeline release
 lancenuit logs PROJ-28 --step tests
 lancenuit clean --logs-only --older-than 30d
 lancenuit typecheck

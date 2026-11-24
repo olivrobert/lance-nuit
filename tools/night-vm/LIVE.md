@@ -26,8 +26,12 @@ resumed the night (`chief:<thread>` for instance), when that caller had one.
       "state": "pending|deferred|running|done",
       "outcome": "fixed|failed|escalated|…",   // null until done
       "run": {                                 // null while pending or deferred
-        "runId": "…", "pipeline": "autonome", "status": "RUNNING|DONE|STOPPED|FAILED|…",
-        "updatedAt": "…", "durationMs": 1234, "costUsd": 0.42,
+        "runId": "…", "pipeline": "autonome",
+        "status": "RUNNING|PASS|FAIL|STOPPED|ABORTED|SUPERSEDED",
+        "updatedAt": "…",
+        "durationMs": 1234,                    // since createdAt while RUNNING, the recorded total once ended
+        "costUsd": 0.42,                       // inheritedSpendUsd + every step's spend so far; null before any charge
+        "outcome": { "phase": "tests", "reason": "…" },  // FAIL only, else null
         "stoppedReason": "…",                  // null unless stopped
         "stop": { "subject": "triage", "kind": "needs-decision", "detail": "…" },  // or null
         "steps": [                             // every step of the pipeline, pending ones included
