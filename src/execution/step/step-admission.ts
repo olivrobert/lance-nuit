@@ -110,8 +110,8 @@ function applyInputDecision(
   if (action === "skip") {
     // Not `control`: a failed or interrupted pass carries its spend there too, yet never completed.
     const alreadyCompleted = step.status === "done";
-    recordSkip(run, step, { reason, freshness });
     updateStep(run, step, alreadyCompleted ? "done" : "skipped");
+    recordSkip(run, step, { reason, freshness });
     output.emit({
       type: "runner.message",
       level: "info",

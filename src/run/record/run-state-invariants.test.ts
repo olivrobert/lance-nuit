@@ -11,6 +11,7 @@ import { buildPipelineContext } from "../../definition/pipeline/context.js";
 import { startLiveFeed } from "../../entry/composition/feed.js";
 import { NULL_RUN_OUTPUT } from "../../execution/run-output.js";
 import { loadOrCreateRun } from "../../execution/step/load-or-create-run.js";
+import { skipForOperatorSelection } from "../../execution/step/step-admission.js";
 import { executeRunSteps, stepLoopDeps } from "../../execution/step/step-loop.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import type { RunJournalEvent } from "../journal.js";
@@ -148,6 +149,18 @@ test("S1: every transition saves the snapshot before it journals its event", asy
     "snapshot",
     "run.finished",
   ]);
+});
+
+test("S1: an admission skip saves the skipped step before it journals the skip", async () => {
+  const f = fixture();
+  const writes: Write[] = [];
+  const { run } = await open(f, writes);
+  writes.length = 0;
+
+  skipForOperatorSelection(run, run.steps[0]!, NULL_RUN_OUTPUT);
+
+  expect(writes).toEqual(["snapshot", "step.status.changed", "step.skipped"]);
+  expect(snapshotOf(f.dir).steps[0]?.status).toBe("skipped");
 });
 
 test("S1: a failing journal fails no transition, and the snapshot holds every transition", async () => {
