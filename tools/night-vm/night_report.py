@@ -230,11 +230,12 @@ def last_attempt(step: dict):
     return max((n for n in numbers if isinstance(n, int) and not isinstance(n, bool)), default=None)
 
 
-def step_view(step: dict) -> dict:
+def step_view(step: dict, interrupted: bool = False) -> dict:
     control = mapping(step.get("control"))
+    status = step.get("status")
     return {
         "id": text(step.get("id"), 128),
-        "status": text(step.get("status"), 32),
+        "status": "aborted" if interrupted and status == "running" else text(status, 32),
         "attempt": number(last_attempt(step)),
         "startedAt": text(step.get("started_at"), 40),
         "finishedAt": text(step.get("finished_at"), 40),
@@ -295,7 +296,7 @@ def run_view(state: dict, now: datetime | None = None, held: bool = True) -> dic
             "kind": text(stop.get("kind"), 64),
             "detail": text(stop.get("detail")),
         } if stop else None,
-        "steps": [step_view(step) for step in steps[:200] if isinstance(step, dict) and isinstance(step.get("id"), str)],
+        "steps": [step_view(step, interrupted) for step in steps[:200] if isinstance(step, dict) and isinstance(step.get("id"), str)],
     }
 
 

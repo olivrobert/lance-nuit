@@ -110,8 +110,7 @@ test("a run whose runner died reads the same run status in every reader", async 
 
   expect(statusesOf(steps?.steps)).toEqual(expected);
   expect(statusesOf(recap?.steps)).toEqual(expected);
-  // `--inspect` prints the snapshot's step statuses as stored.
-  expect(inspectedSteps(inspected)).toEqual(["plan:done", "coder:running", "review:pending"]);
+  expect(inspectedSteps(inspected)).toEqual(expected);
   expect(item?.failure?.phase).toBe("coder");
 
   const detail = readStepDetail("demo-app", TICKET, "coder", undefined, options);

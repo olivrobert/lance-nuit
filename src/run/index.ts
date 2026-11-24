@@ -44,6 +44,7 @@ export {
   declareChild,
   discardedResumeNotice,
   effectiveStatus,
+  effectiveStepStatus,
   expectAllowances,
   failChildLaunch,
   finalizeRun,

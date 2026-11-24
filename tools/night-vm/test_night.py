@@ -265,6 +265,8 @@ class NightTests(unittest.TestCase):
         self.assertEqual(live["result"]["state"], "failed")
         [ticket] = live["tickets"]
         self.assertEqual((ticket["ticket"], ticket["outcome"], ticket["run"]["status"]), ("18", "fixed", "PASS"))
+        self.assertEqual([(step["id"], step["attempt"]) for step in ticket["run"]["steps"]],
+                         [("triage", None), ("tests", 2), ("commit", None)])
         self.assertIsNotNone(live["contactAt"])
 
     def test_a_stuck_or_silent_vm_leaves_live_json_without_contact(self):
@@ -459,6 +461,8 @@ class ReportTests(unittest.TestCase):
         now = night_report.parse_iso("2026-11-15T09:00:00Z")
         view = night_report.run_view(state, now, held=False)
         self.assertEqual((view["status"], view["interrupted"], view["durationMs"]), ("ABORTED", True, 300000))
+        self.assertEqual([step["status"] for step in view["steps"]], ["aborted"])
+        self.assertEqual([step["status"] for step in night_report.run_view(state, now)["steps"]], ["running"])
         self.scan("1.json", {"18": {"state": "done", "outcome": "failed", "runId": "r"}})
         path = self.run_dir / "work-items/18/runs/claude/r/state.json"
         path.parent.mkdir(parents=True)

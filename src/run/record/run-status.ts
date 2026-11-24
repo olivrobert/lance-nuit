@@ -191,6 +191,12 @@ export function effectiveStatus(state: Pick<PersistedRun, "status">, holderAlive
   return holderAlive() ? { status: "RUNNING", interrupted: false } : { status: "ABORTED", interrupted: true };
 }
 
+/** A step still `running` in an interrupted run runs nowhere: every reader shows
+ *  it `aborted`, the status the runner writes for a step it lived to interrupt. */
+export function effectiveStepStatus<S extends string>(status: S, interrupted: boolean): S | "aborted" {
+  return interrupted && status === "running" ? "aborted" : status;
+}
+
 /** What is known about a run as it ends. A fact the caller cannot know is left
  *  out and reads false. */
 export interface RunEndingFacts {

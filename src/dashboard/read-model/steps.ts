@@ -15,7 +15,7 @@
 
 import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import type { RawJournalEvent, RunJournalKnownEvent, PersistedStepState } from "../../run/index.js";
-import { lastFeedEvent } from "../../run/index.js";
+import { effectiveStepStatus, lastFeedEvent } from "../../run/index.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
 import type {
@@ -37,13 +37,11 @@ const CODER_PROFILE = "coder";
 const TAIL_BYTES = 64 * 1024;
 
 /** Persisted step status in the dashboard's vocabulary; shared with the recap so
- *  both views name a step's state the same way. A step still `running` in a run
- *  whose runner died runs nowhere: it is shown `aborted`, as the runner writes
- *  the step it was in when it is interrupted. */
+ *  both views name a step's state the same way. */
 export function stepStatusOf(step: PersistedStepState, interrupted: boolean): RunStepStatus {
   switch (step.status) {
     case "running":
-      return interrupted ? "aborted" : "running";
+      return effectiveStepStatus(step.status, interrupted);
     case "pending":
     case "done":
     case "failed":

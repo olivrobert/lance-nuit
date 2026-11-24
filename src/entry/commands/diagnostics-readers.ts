@@ -18,6 +18,7 @@ import {
   type RunStateSnapshot,
   type RunStateStore,
   awaitsHuman,
+  effectiveStepStatus,
   FileRunLogStore,
   FileRunStateStore,
   matchesStepSelector,
@@ -258,14 +259,19 @@ function readWorkItemLock(context: PipelineContext): { lock?: WorkItemLock; erro
   }
 }
 
-function stepLine(step: PersistedStepState, state: PersistedRun, lock: WorkItemLock | undefined): string {
+function stepLine(
+  step: PersistedStepState,
+  state: PersistedRun,
+  interrupted: boolean,
+  lock: WorkItemLock | undefined,
+): string {
   const attempts = step.attempts ?? [];
   const last = attempts.at(-1);
   const tried = last ? ` (${plural(attempts.length, "attempt")}, last ${last.kind} ${last.status})` : "";
   const stamp = lock?.steps[stampKey(step.id, state.lot)];
   const absorbed = stamp?.absorbed && stamp.runId === state.runId ? " [absorbed]" : "";
   const error = step.errors ? ` — ${step.errors.split("\n", 1)[0]}` : "";
-  return `  ${step.status.padEnd(8)} ${step.id}${tried}${absorbed}${error}`;
+  return `  ${effectiveStepStatus(step.status, interrupted).padEnd(8)} ${step.id}${tried}${absorbed}${error}`;
 }
 
 function formatRunRecord(
@@ -293,7 +299,7 @@ function formatRunRecord(
     ...(workItem.error ? [`lock: unreadable — ${workItem.error}`] : []),
     "steps:",
   ];
-  for (const step of state.steps) lines.push(stepLine(step, state, workItem.lock));
+  for (const step of state.steps) lines.push(stepLine(step, state, interrupted, workItem.lock));
   return lines.join("\n");
 }
 

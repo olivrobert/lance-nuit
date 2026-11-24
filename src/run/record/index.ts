@@ -17,6 +17,7 @@
 export {
   awaitsHuman,
   effectiveStatus,
+  effectiveStepStatus,
   hasVerdict,
   isCompleted,
   isFailure,
