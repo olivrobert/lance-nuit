@@ -3,7 +3,7 @@
 // decision reads, attempts live in the snapshot, a finished run is never written.
 
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
@@ -305,6 +305,79 @@ test("S9: the journal holds contract events only; the run's feed is feed.jsonl",
   expect(journal.entries.length).toBeGreaterThan(0);
   expect(journal.entries.every((entry) => entry.kind === "known")).toBe(true);
   expect(readFileSync(join(f.dir, "feed.jsonl"), "utf-8")).toContain("hello");
+});
+
+test("S9: a real backend stream reaches the feed alone; the journal reads without a skipped, unknown or invalid line", async () => {
+  const f = fixture(`export default ({ pipeline, llmStep }) => pipeline("p")
+  .add(llmStep({ id: "a", name: "a", backend: "claude", profile: "coder", command: "a", rerunOnResume: true }))
+  .build();`);
+  f.ctx = buildPipelineContext({
+    ...builtinRegistries(),
+    cwd: f.root,
+    ticket: f.ticket,
+    config: { ...f.ctx.config, profiles: { ...f.ctx.config.profiles, coder: { backends: { claude: {} } } } },
+  });
+  const replay = join(f.root, "replay.jsonl");
+  const fake = join(f.root, "claude");
+  const stream = [
+    { type: "system", subtype: "init", model: "claude-sonnet-5", session_id: "s-1" },
+    {
+      type: "assistant",
+      message: {
+        id: "m1",
+        model: "claude-sonnet-5",
+        content: [
+          { type: "text", text: "Reading the order." },
+          { type: "tool_use", id: "t1", name: "Read", input: { file_path: "/src/Order.php" } },
+        ],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    },
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "<?php" }] } },
+    {
+      type: "assistant",
+      message: {
+        id: "m2",
+        model: "claude-sonnet-5",
+        content: [{ type: "tool_use", id: "t2", name: "StructuredOutput", input: { success: true } }],
+        usage: { input_tokens: 20, output_tokens: 5 },
+      },
+    },
+    {
+      type: "result",
+      subtype: "success",
+      duration_ms: 3,
+      total_cost_usd: 0.01,
+      session_id: "s-1",
+      structured_output: { success: true },
+      result: '{"success":true}',
+    },
+  ];
+  writeFileSync(replay, `${stream.map((line) => JSON.stringify(line)).join("\n")}\n`);
+  writeFileSync(fake, `#!/bin/sh\ncat '${replay}'\n`);
+  chmodSync(fake, 0o755);
+  const previous = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = fake;
+  try {
+    const { run } = await open(f);
+    startLiveFeed(run.run_dir, false);
+    const outcome = await executeRunSteps(run, { resuming: false }, stepLoopDeps(NULL_RUN_OUTPUT), f.ctx);
+    finalizeRun(run, outcome);
+    expect(run.status).toBe("PASS");
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_BIN;
+    else process.env.CLAUDE_BIN = previous;
+  }
+
+  const journal = readRunJournal(f.dir);
+  expect(journal.entries.length).toBeGreaterThan(0);
+  expect({ skipped: journal.skipped, invalid: journal.invalid, unknown: journal.unknown }).toEqual({
+    skipped: 0,
+    invalid: 0,
+    unknown: 0,
+  });
+  expect(readFileSync(join(f.dir, "feed.jsonl"), "utf-8")).toContain("Order.php");
+  expect(readFileSync(join(f.dir, "events.jsonl"), "utf-8")).not.toContain("Order.php");
 });
 
 test("A3: a step the selection set aside, aborted earlier, neither decides the verdict nor drops the stop", async () => {
