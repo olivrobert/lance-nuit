@@ -19,7 +19,7 @@ Every `llmStep` requires a backend, profile, and exactly one `command` or
 ```ts
 import type { Dsl } from "@lance-nuit/dsl";
 
-export default ({ pipeline, llmStep }: Dsl) =>
+export default ({ pipeline, llmStep, textArtifact }: Dsl) =>
   pipeline("implementation")
     .add(
       llmStep({
@@ -28,7 +28,10 @@ export default ({ pipeline, llmStep }: Dsl) =>
         backend: "codex",
         profile: "coder",
         options: { sandbox: "workspace-write" },
-        command: "Implement the task and return the JSON verdict",
+        command: (ctx) =>
+          `Implement the task, summarize it in ${ctx.paths.artifact("implementation.md")} ` +
+          "and return the JSON verdict",
+        output: [textArtifact("implementation.md")],
       }),
     )
     .build();

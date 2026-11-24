@@ -486,7 +486,7 @@ test("capture: the runner-side rule refuses captures on a non-agent step", () =>
 });
 
 /* ------------------------------------------------------------------------- *
- * Reconcile mode: every step declares what it delivers (decision D2).
+ * Every step declares what it reads or delivers (decision D2), always on.
  * ------------------------------------------------------------------------- */
 
 const announce = () => actionStep({ id: "announce", name: "Announce", describe: "post", run: () => {} });
@@ -494,32 +494,31 @@ const notify = () => bashStep({ id: "notify", name: "Notify", command });
 const produce = () => bashStep({ id: "produce", name: "Produce", command, output: [result] });
 const replayable = () => bashStep({ id: "context", name: "Context", command, rerunOnResume: true });
 
-test("reconcile: a step with neither output nor rerunOnResume is refused at build, with both ways out", () => {
-  const build = () => pipeline("p").reconcile().add(produce(), announce(), replayable(), notify()).build();
+const D2_REFUSAL =
+  'steps "announce", "notify" declare neither input, output nor rerunOnResume. ' +
+  "Declare the artifact a step produces, or a receipt of its side effect, as output; " +
+  "or set rerunOnResume: true if replaying it on every invocation is idempotent.";
 
-  expect(build).toThrow(
-    'Pipeline "p": reconcile mode requires every step to declare what it delivers; ' +
-      'steps "announce", "notify" declare neither output nor rerunOnResume. ' +
-      "Declare the artifact a step produces, or a receipt of its side effect, as output; " +
-      "or set rerunOnResume: true if replaying it on every invocation is idempotent.",
-  );
+test("D2: a step with neither input, output nor rerunOnResume is refused at build, with both ways out", () => {
+  const build = () => pipeline("p").add(produce(), announce(), replayable(), notify()).build();
+
+  expect(build).toThrow(`Pipeline "p": every step must declare what it reads or delivers; ${D2_REFUSAL}`);
 });
 
-test("reconcile: the same steps build in legacy mode", () => {
-  const built = pipeline("p").add(produce(), announce(), replayable(), notify()).build();
+test("D2: the refusal needs no opt-in, and the DSL no longer offers a reconcile switch", () => {
+  const builder = pipeline("p") as unknown as Record<string, unknown>;
 
-  expect(built.reconcile).toBeUndefined();
-  expect(built.steps.map((step) => step.id)).toEqual(["produce", "announce", "context", "notify"]);
+  expect(builder.reconcile).toBeUndefined();
+  expect(
+    pipeline("p")
+      .add(produce(), replayable())
+      .build()
+      .steps.map((step) => step.id),
+  ).toEqual(["produce", "context"]);
 });
 
-test("reconcile: the mode is recorded on the built pipeline, whichever builder call comes first", () => {
-  expect(pipeline("p").reconcile().add(produce()).build().reconcile).toBe(true);
-  expect(pipeline("p").add(produce()).reconcile().build().reconcile).toBe(true);
-});
-
-test("reconcile: composition nodes and the work-item source step are not the author's to classify", () => {
+test("D3: composition nodes and the work-item source step are not the author's to classify", () => {
   const built = pipeline("p")
-    .reconcile()
     .forEachWorkItem({
       queue: "bugTodo",
       do: [produce(), runPipeline({ id: "child", name: "Child", pipeline: "other" })],
@@ -540,17 +539,17 @@ function structureFindings(pipelineDefinition: Record<string, unknown>): string[
     .map((finding) => finding.message);
 }
 
-test("reconcile: a raw definition is held to the same rule at validation", () => {
+test("D2: a raw definition is held to the same rule at validation", () => {
   const steps = [
     { id: "notify", name: "Notify", command: "true", runner: "bash" },
     { id: "produce", name: "Produce", command: "true", runner: "bash", outputs: [result] },
+    { id: "child", name: "Child", runner: "pipeline", pipeline_ref: "other" },
   ];
 
-  expect(structureFindings({ reconcile: true, steps })).toEqual([
-    'reconcile mode requires every step to declare what it delivers; step "notify" declares neither output ' +
+  expect(structureFindings({ steps })).toContain(
+    'every step must declare what it reads or delivers; step "notify" declares neither input, output ' +
       "nor rerunOnResume. Declare the artifact a step produces, or a receipt of its side effect, as output; " +
       "or set rerunOnResume: true if replaying it on every invocation is idempotent.",
-  ]);
-  expect(structureFindings({ steps })).toEqual([]);
-  expect(structureFindings({ reconcile: "yes", steps })).toEqual(["reconcile must be a boolean"]);
+  );
+  expect(structureFindings({ steps: steps.slice(1) }).filter((m) => m.includes("rerunOnResume"))).toEqual([]);
 });

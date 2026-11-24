@@ -15,11 +15,18 @@ function gatePipeline(onFail: OnFail) {
   return pipeline("validation")
     .add(
       llmStep(
-        { id: "implement", name: "Implement", backend: "claude", profile: "coder", command: "implement" },
+        {
+          id: "implement",
+          name: "Implement",
+          backend: "claude",
+          profile: "coder",
+          command: "implement",
+          rerunOnResume: true,
+        },
         REGISTRY,
       ),
     )
-    .add(bashStep({ id: "verify", name: "Verify", command: "make test", onFail }))
+    .add(bashStep({ id: "verify", name: "Verify", command: "make test", rerunOnResume: true, onFail }))
     .build();
 }
 
@@ -65,6 +72,7 @@ test("refuses fixBackend on an agent step at build time", () => {
         backend: "claude",
         profile: "reviewer",
         command: "review",
+        rerunOnResume: true,
         onFail: FRESH_ON_CODEX,
       },
       REGISTRY,

@@ -617,8 +617,8 @@ test("persisted format: a snapshot written before cost_unaccounted existed still
     pipelinePath,
     `export default ({ pipeline, actionStep }) => pipeline("p")
   .maxCost(5)
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", rerunOnResume: true }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", rerunOnResume: true }))
   .build();`,
   );
   const runDir = resolveRunDir("p", "PROJ-9", undefined, true, ctx);
@@ -689,8 +689,8 @@ test("persisted format: a snapshot that still carries a step's last_command open
   writeFileSync(
     pipelinePath,
     `export default ({ pipeline, actionStep }) => pipeline("p")
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", rerunOnResume: true }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", rerunOnResume: true }))
   .build();`,
   );
   const runDir = resolveRunDir("p", "PROJ-11", undefined, true, ctx);
@@ -746,8 +746,8 @@ test("persisted format: a minimal step flagged cost_unknown with nothing measure
     pipelinePath,
     `export default ({ pipeline, actionStep }) => pipeline("p")
   .maxCost(5)
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", rerunOnResume: true }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", rerunOnResume: true }))
   .build();`,
   );
   const runDir = resolveRunDir("p", "PROJ-10", undefined, true, ctx);

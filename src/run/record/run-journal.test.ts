@@ -156,7 +156,7 @@ test("run-journal: validates the integration contract", async () => {
   const pipelinePath = join(root, "pipeline.ts");
   writeFileSync(
     pipelinePath,
-    `export default ({ pipeline, bashStep }) => pipeline("fixture").add(bashStep({ id: "inspect", name: "Inspect", command: "true" })).build();\n`,
+    `export default ({ pipeline, bashStep }) => pipeline("fixture").add(bashStep({ id: "inspect", name: "Inspect", command: "true", rerunOnResume: true })).build();\n`,
   );
   const context = buildPipelineContext({ ...builtinRegistries(), cwd: root, runnerBin: pipelinePath, runnerDir: root });
   const calls: string[] = [];

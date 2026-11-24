@@ -30,7 +30,7 @@ test("lancenuit lint: a factory reading the execution context at load time loads
   writeFileSync(
     file,
     `export default (dsl: any, ctx: any) =>
-  dsl.pipeline("ctx").desc(ctx.cwd).add(dsl.bashStep({ id: "step", name: "Step", command: "true" })).build();\n`,
+  dsl.pipeline("ctx").desc(ctx.cwd).add(dsl.bashStep({ id: "step", name: "Step", command: "true", rerunOnResume: true })).build();\n`,
   );
 
   const report = await lintPipeline(file, { context: context() });
@@ -41,8 +41,8 @@ test("lancenuit lint: a factory reading the execution context at load time loads
 test("lancenuit lint: duplicate escalation IDs rejected", () => {
   const definition = pipeline("duplicates")
     .add(
-      bashStep({ id: "escalate", name: "One", command: "true" }),
-      bashStep({ id: "escalate", name: "Two", command: "true" }),
+      bashStep({ id: "escalate", name: "One", command: "true", rerunOnResume: true }),
+      bashStep({ id: "escalate", name: "Two", command: "true", rerunOnResume: true }),
     )
     .build();
   const report = lintPipelineDefinition(definition, context());
@@ -65,6 +65,7 @@ test("lancenuit lint: declared capability missing from disk", () => {
           profile: "planner",
           backend: "claude",
           command: "/skill-that-does-not-exist LINT-0",
+          rerunOnResume: true,
         },
         REGISTRY,
       ),

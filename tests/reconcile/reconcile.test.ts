@@ -1,7 +1,6 @@
-// Reconcile mode, rows R1 to R7 of the reconciliation matrix and the reconcile
-// half of U1. A pipeline declaring `.reconcile()` no longer lets a `done` status
-// stand for its work: every settled step is re-admitted, and its declared outputs
-// decide. R8 is legacy.test.ts and until.test.ts, unchanged.
+// Rows R1 to R7 of the reconciliation matrix. A `done` status no longer
+// stands for its work: every settled step is re-admitted, and its declared outputs
+// decide. R8 is until.test.ts.
 
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
@@ -28,18 +27,14 @@ afterEach(cleanupScratch);
 
 const FULL = ["context", "branch", "triage", "plan", "prepare", "implement", "quality", "commit", "publish", "report"];
 const CHEAP = ["context", "prepare", "quality", "report"];
-const UP_TO_PLAN = ["context", "branch", "triage", "plan"];
-const AFTER_PLAN = ["prepare", "implement", "quality", "commit", "publish", "report"];
 
 /** Exit code of a run `--until` stopped with work left (guide/cli-options.md). */
 const UNTIL_EXIT = 3;
 
 /** What admission says when a step's outputs match its inputs. */
 const UP_TO_DATE = "outputs up to date with declared inputs";
-/** What admission says, in reconcile mode, when a step without input finds every output it declares. */
+/** What admission says when a step without input finds every output it declares. */
 const PRESENT = "outputs present";
-
-const reconcile = { reconcile: true } as const;
 
 function statusesOf(state: RunSnapshot): Record<string, string> {
   return Object.fromEntries(state.steps.map((step) => [step.id, step.status]));
@@ -61,8 +56,8 @@ function passedRun(cwd: string): string {
   return latestRunId(cwd);
 }
 
-test("R1: a step with neither output nor rerunOnResume is a build error naming it and both ways out", () => {
-  const cwd = scratchRoute({ ...reconcile, unclassified: true });
+test("R1: a step with neither input, output nor rerunOnResume is a build error naming it and both ways out", () => {
+  const cwd = scratchRoute({ unclassified: true });
 
   const refused = run(cwd);
 
@@ -78,7 +73,7 @@ test("R1: a step with neither output nor rerunOnResume is a build error naming i
 });
 
 test("R2: a run after a PASS starts a new run that skips branch too, its output being present", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   const firstRun = passedRun(cwd);
   const before = mark(cwd);
 
@@ -97,7 +92,7 @@ test("R2: a run after a PASS starts a new run that skips branch too, its output 
 });
 
 test("R3: a failure healed and resumed continues the same run from the failed step", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   failAt(cwd, "implement");
   const failed = run(cwd);
   expect(failed.status).not.toBe(0);
@@ -134,7 +129,7 @@ test("R3: a failure healed and resumed continues the same run from the failed st
 });
 
 test("R4: a receipt deleted by hand after a PASS replays its step and what depends on it, nothing before", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   passedRun(cwd);
   removeArtifact(cwd, "commit.sha");
   const before = mark(cwd);
@@ -152,7 +147,7 @@ test("R4: a receipt deleted by hand after a PASS replays its step and what depen
 });
 
 test("R5: a runner killed during publish stops the resume until the replay is authorized", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   await killDuring(cwd, "publish");
   const killedRun = latestRunId(cwd);
   expect(trace(cwd)).toEqual(FULL.slice(0, -1));
@@ -186,7 +181,7 @@ test("R5: a runner killed during publish stops the resume until the replay is au
 });
 
 test("R6: a ticket edited after a PASS replays every step downstream of it, branch excepted", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   const firstRun = passedRun(cwd);
   touchTicket(cwd);
   const before = mark(cwd);
@@ -201,7 +196,7 @@ test("R6: a ticket edited after a PASS replays every step downstream of it, bran
 });
 
 test("R7: --run on a PASS run with --start-at replays the target and every later step in that run", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   const firstRun = passedRun(cwd);
   const before = mark(cwd);
 
@@ -223,36 +218,8 @@ test("R7: --run on a PASS run with --start-at replays the target and every later
   expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: PRESENT }, ...upToDate("triage", "plan")]);
 });
 
-test("U1-R: --until plan stops after plan, and a plain rerun resumes the same run without repaying it", () => {
-  const cwd = scratchRoute(reconcile);
-
-  const bounded = run(cwd, "--until", "plan");
-
-  expect(bounded.status).toBe(UNTIL_EXIT);
-  expect(trace(cwd)).toEqual(UP_TO_PLAN);
-  const stopped = snapshot(cwd);
-  expect(stopped.status).toBe("STOPPED");
-  expect(stopped.outcome?.stop?.kind).toBe("until");
-  expect(stopped.outcome?.phase).toBe("plan");
-  expect(stopped.outcome?.resumable).toBe(true);
-  expect(statusesOf(stopped)).toEqual({
-    ...Object.fromEntries(UP_TO_PLAN.map((id) => [id, "done"])),
-    ...Object.fromEntries(AFTER_PLAN.map((id) => [id, "pending"])),
-  });
-  const stoppedRun = latestRunId(cwd);
-  const before = mark(cwd);
-
-  const resumed = run(cwd);
-
-  expect(resumed.status).toBe(0);
-  expect(latestRunId(cwd)).toBe(stoppedRun);
-  expect(snapshot(cwd).status).toBe("PASS");
-  expect(traceSince(cwd, before)).toEqual(["context", ...AFTER_PLAN]);
-  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: PRESENT }, ...upToDate("triage", "plan")]);
-});
-
 test("--until after a PASS: the new run reaches the bound for free, and the rerun pays only CHEAP steps", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   passedRun(cwd);
   const before = mark(cwd);
 

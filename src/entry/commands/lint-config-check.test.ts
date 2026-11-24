@@ -85,14 +85,14 @@ function projectWithPipeline(name: string, source: string): { cwd: string; clean
 }
 
 const DEMO_PIPELINE = `export default ({ pipeline, bashStep }) =>
-  pipeline("demo").add(bashStep({ id: "verifier", name: "Check", command: "true" })).build();
+  pipeline("demo").add(bashStep({ id: "verifier", name: "Check", command: "true", rerunOnResume: true })).build();
 `;
 
 test("lint: a legitimate override appears as config source", async () => {
   const project = projectWithPipeline(
     "agent",
     `export default ({ pipeline, llmStep }) => pipeline("agent").add(
-  llmStep({ id: "review", name: "Review", backend: "claude", profile: "reviewer", command: "review" })
+  llmStep({ id: "review", name: "Review", backend: "claude", profile: "reviewer", command: "review", rerunOnResume: true })
 ).build();\n`,
   );
   try {
@@ -141,7 +141,7 @@ test("lint: a project pipeline shadows a builtin with the same name", async () =
   const project = projectWithPipeline(
     "bugfix",
     `export default ({ pipeline, bashStep }) =>
-  pipeline("bugfix").add(bashStep({ id: "seul-step", name: "Seul", command: "true" })).build();
+  pipeline("bugfix").add(bashStep({ id: "seul-step", name: "Seul", command: "true", rerunOnResume: true })).build();
 `,
   );
   try {
@@ -165,7 +165,7 @@ test("lint: a project pipeline profile is visible", async () => {
   const project = projectWithPipeline(
     "agent-profile",
     `export default ({ pipeline, llmStep }) => pipeline("agent-profile").add(
-  llmStep({ id: "implement", name: "Implement", backend: "claude", profile: "coder", command: "implement" })
+  llmStep({ id: "implement", name: "Implement", backend: "claude", profile: "coder", command: "implement", rerunOnResume: true })
 ).build();\n`,
   );
   try {
@@ -195,9 +195,9 @@ test("lint: the three registered backends are linted in one pipeline", async () 
   const project = projectWithPipeline(
     "trois-backends",
     `export default ({ pipeline, llmStep }) => pipeline("trois-backends")
-  .add(llmStep({ id: "review", name: "Review", backend: "claude", profile: "reviewer", command: "review" }))
-  .add(llmStep({ id: "implement", name: "Implement", backend: "codex", profile: "coder", command: "implement" }))
-  .add(llmStep({ id: "sort", name: "Sort", backend: "opencode", profile: "triage", command: "sort" }))
+  .add(llmStep({ id: "review", name: "Review", backend: "claude", profile: "reviewer", command: "review", rerunOnResume: true }))
+  .add(llmStep({ id: "implement", name: "Implement", backend: "codex", profile: "coder", command: "implement", rerunOnResume: true }))
+  .add(llmStep({ id: "sort", name: "Sort", backend: "opencode", profile: "triage", command: "sort", rerunOnResume: true }))
   .build();\n`,
   );
   try {

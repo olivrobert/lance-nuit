@@ -26,7 +26,7 @@ const REGISTRY = createDefaultAgentBackendRegistry();
 const bashStep = createProjectBashStep(REGISTRY);
 
 function step(id: string) {
-  return bashStep({ id, name: id, command: "true" });
+  return bashStep({ id, name: id, command: "true", rerunOnResume: true });
 }
 
 test("add flattens exactly one level and preserves order", () => {
@@ -161,11 +161,27 @@ test("fix claude options apply only when the fix backend is Claude", () => {
   const definition = pipeline("fix-backends")
     .add(
       llmStep(
-        { id: "on-claude", name: "on-claude", profile: "coder", backend: "claude", command: "go", onFail: fix },
+        {
+          id: "on-claude",
+          name: "on-claude",
+          profile: "coder",
+          backend: "claude",
+          command: "go",
+          rerunOnResume: true,
+          onFail: fix,
+        },
         REGISTRY,
       ),
       llmStep(
-        { id: "on-codex", name: "on-codex", profile: "coder", backend: "codex", command: "go", onFail: fix },
+        {
+          id: "on-codex",
+          name: "on-codex",
+          profile: "coder",
+          backend: "codex",
+          command: "go",
+          rerunOnResume: true,
+          onFail: fix,
+        },
         REGISTRY,
       ),
       step("on-bash").onFail(fix),

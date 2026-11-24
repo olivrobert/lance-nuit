@@ -20,7 +20,7 @@ two authoring APIs:
 ```ts
 import type { Dsl } from "@lance-nuit/dsl";
 
-export default ({ pipeline, llmStep, promptFile }: Dsl) => {
+export default ({ pipeline, llmStep, promptFile, textArtifact }: Dsl) => {
   const triage = promptFile("./prompts/triage.md", ["ticket", "artifactsDir"] as const);
   return pipeline("feature")
     .add(llmStep({
@@ -32,6 +32,7 @@ export default ({ pipeline, llmStep, promptFile }: Dsl) => {
         ticket: ctx.ticket ?? "?",
         artifactsDir: ctx.paths.artifactsDir ?? "artifacts",
       }),
+      output: [textArtifact("triage.md")],
     }))
     .build();
 };
@@ -40,7 +41,7 @@ export default ({ pipeline, llmStep, promptFile }: Dsl) => {
 `prompts/triage.md`:
 
 ```md
-Analyze ticket {{ticket}} and write the result under {{artifactsDir}}.
+Analyze ticket {{ticket}} and write the result to triage.md under {{artifactsDir}}.
 ```
 
 The path must be relative to the pipeline file; absolute paths are rejected. The

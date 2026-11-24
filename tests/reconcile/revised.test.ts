@@ -35,24 +35,16 @@ afterEach(cleanupScratch);
 
 const FULL = ["context", "branch", "triage", "plan", "prepare", "implement", "quality", "commit", "publish", "report"];
 
-const reconcile = { reconcile: true } as const;
-
 /** Journal event naming the outputs an unfinished attempt left behind. */
 const UNFINISHED_EVENT = "step.outputs.unfinished";
 
-/** Steps that pay an agent in a real pipeline: none of them may run on a relaunch with nothing to redo.
- *  `branch` is not among them: legacy mode replays a step without input on every new run (S1). */
+/** Steps that pay an agent in a real pipeline: none of them may run on a relaunch with nothing to redo. */
 const COSTLY = ["rbranch", "triage", "plan", "review", "implement", "commit", "publish"];
 
 /** `route` with `review`, in run order. */
 const REVIEWED = ["context", "branch", "triage", "plan", "review", ...FULL.slice(4)];
 /** What resuming a run failed at `review` replays when `plan.md` is the one `plan` wrote. */
 const FROM_REVIEW = ["context", "review", "prepare", "implement", "quality", "commit", "publish", "report"];
-
-const MODES = [
-  { name: "legacy", options: {} },
-  { name: "reconcile", options: reconcile },
-] as const;
 
 function statusesOf(cwd: string): Record<string, string> {
   return Object.fromEntries(snapshot(cwd).steps.map((step) => [step.id, step.status]));
@@ -109,51 +101,49 @@ function expectNothingRepaid(cwd: string): void {
 
 // ── A revision that failed ───────────────────────────────────────────────────
 
-for (const mode of MODES) {
-  test(`W7 (${mode.name}): a revision that failed before writing does not make the step that produced the output pay again`, () => {
-    const cwd = scratchRoute({ ...mode.options, review: true });
-    failAt(cwd, "review");
-    const failedRun = failedAtReview(cwd);
-    expect(recordsWith(cwd, "inFlight")).toEqual(["plan.md.json"]);
-    const planBefore = readArtifact(cwd, "plan.md");
-    heal(cwd, "review");
-    const before = mark(cwd);
+test(`W7: a revision that failed before writing does not make the step that produced the output pay again`, () => {
+  const cwd = scratchRoute({ review: true });
+  failAt(cwd, "review");
+  const failedRun = failedAtReview(cwd);
+  expect(recordsWith(cwd, "inFlight")).toEqual(["plan.md.json"]);
+  const planBefore = readArtifact(cwd, "plan.md");
+  heal(cwd, "review");
+  const before = mark(cwd);
 
-    const resumed = run(cwd);
+  const resumed = run(cwd);
 
-    expect(resumed.status).toBe(0);
-    expect(traceSince(cwd, before)).toEqual(FROM_REVIEW);
-    expect(latestRunId(cwd)).toBe(failedRun);
-    expect(snapshot(cwd).status).toBe("PASS");
-    expect(planBefore).toStartWith("plan ");
-    expect(readArtifact(cwd, "plan.md")).toStartWith("review ");
-    expect(recordsWith(cwd, "inFlight")).toEqual([]);
-  });
+  expect(resumed.status).toBe(0);
+  expect(traceSince(cwd, before)).toEqual(FROM_REVIEW);
+  expect(latestRunId(cwd)).toBe(failedRun);
+  expect(snapshot(cwd).status).toBe("PASS");
+  expect(planBefore).toStartWith("plan ");
+  expect(readArtifact(cwd, "plan.md")).toStartWith("review ");
+  expect(recordsWith(cwd, "inFlight")).toEqual([]);
+});
 
-  // Replaces the known limit L2b documented (WL): the revision was resumed over
-  // its own partial bytes, and `plan` was never replayed.
-  test(`W8 (${mode.name}): a revision that wrote then failed leaves the output unfinished, so it is produced again`, () => {
-    const cwd = scratchRoute({ ...mode.options, review: true });
-    partialAt(cwd, "review");
-    failedAtReview(cwd);
-    expect(readArtifact(cwd, "plan.md")).toBe("partial review\n");
-    heal(cwd, "review");
-    const before = mark(cwd);
+// Replaces the known limit L2b documented (WL): the revision was resumed over
+// its own partial bytes, and `plan` was never replayed.
+test(`W8: a revision that wrote then failed leaves the output unfinished, so it is produced again`, () => {
+  const cwd = scratchRoute({ review: true });
+  partialAt(cwd, "review");
+  failedAtReview(cwd);
+  expect(readArtifact(cwd, "plan.md")).toBe("partial review\n");
+  heal(cwd, "review");
+  const before = mark(cwd);
 
-    const resumed = run(cwd);
+  const resumed = run(cwd);
 
-    expect(resumed.status).toBe(0);
-    expect(traceSince(cwd, before)).toEqual(["context", "plan", ...FROM_REVIEW.slice(1)]);
-    expect(eventsSince(cwd, before, UNFINISHED_EVENT)).toEqual([
-      expect.objectContaining({ stepId: "plan", outputs: ["plan.md"] }),
-    ]);
-    expect(readArtifact(cwd, "plan.md")).toStartWith("review ");
-    expect(recordsWith(cwd, "inFlight")).toEqual([]);
-  });
-}
+  expect(resumed.status).toBe(0);
+  expect(traceSince(cwd, before)).toEqual(["context", "plan", ...FROM_REVIEW.slice(1)]);
+  expect(eventsSince(cwd, before, UNFINISHED_EVENT)).toEqual([
+    expect.objectContaining({ stepId: "plan", outputs: ["plan.md"] }),
+  ]);
+  expect(readArtifact(cwd, "plan.md")).toStartWith("review ");
+  expect(recordsWith(cwd, "inFlight")).toEqual([]);
+});
 
 test("W9: a revision killed after writing leaves the output unfinished, so it is produced again", async () => {
-  const cwd = scratchRoute({ ...reconcile, review: true });
+  const cwd = scratchRoute({ review: true });
   partialAt(cwd, "review");
   await killDuring(cwd, "review");
   expect(readArtifact(cwd, "plan.md")).toBe("partial review\n");
@@ -168,85 +158,84 @@ test("W9: a revision killed after writing leaves the output unfinished, so it is
   expect(readArtifact(cwd, "plan.md")).toStartWith("review ");
 });
 
-for (const mode of [
-  { ...MODES[0], relaunch: ["context", "branch", "review", "prepare", "quality", "report"] },
-  { ...MODES[1], relaunch: ["context", "review", "prepare", "quality", "report"] },
-] as const) {
-  test(`W10 (${mode.name}): an absorbed revision that never writes costs only itself on every new run`, () => {
-    const cwd = scratchRoute({ ...mode.options, review: "absorbed" });
-    failAt(cwd, "review");
-    expect(run(cwd).status).toBe(0);
-    expect(snapshot(cwd).status).toBe("PASS");
-    expect(trace(cwd)).toEqual(REVIEWED);
+test(`W10: an absorbed revision that never writes costs only itself on every new run`, () => {
+  const cwd = scratchRoute({ review: "absorbed" });
+  failAt(cwd, "review");
+  expect(run(cwd).status).toBe(0);
+  expect(snapshot(cwd).status).toBe("PASS");
+  expect(trace(cwd)).toEqual(REVIEWED);
 
-    for (const relaunch of [1, 2]) {
-      const before = mark(cwd);
-      expect(run(cwd).status, `relaunch ${relaunch}`).toBe(0);
-      expect(traceSince(cwd, before), `relaunch ${relaunch}`).toEqual([...mode.relaunch]);
-      expect(snapshot(cwd).status).toBe("PASS");
-    }
-    // The absorbed failure keeps its mark; the bytes it vouches for are still those `plan` wrote.
-    expect(recordsWith(cwd, "inFlight")).toEqual(["plan.md.json"]);
-    expect(readArtifact(cwd, "plan.md")).toStartWith("plan ");
-  });
-}
+  for (const relaunch of [1, 2]) {
+    const before = mark(cwd);
+    expect(run(cwd).status, `relaunch ${relaunch}`).toBe(0);
+    expect(traceSince(cwd, before), `relaunch ${relaunch}`).toEqual([
+      "context",
+      "review",
+      "prepare",
+      "quality",
+      "report",
+    ]);
+    expect(snapshot(cwd).status).toBe("PASS");
+  }
+  // The absorbed failure keeps its mark; the bytes it vouches for are still those `plan` wrote.
+  expect(recordsWith(cwd, "inFlight")).toEqual(["plan.md.json"]);
+  expect(readArtifact(cwd, "plan.md")).toStartWith("plan ");
+});
 
 // ── A revision made over unfinished bytes (decision of 2026-10-17) ───────────
 // It does not vouch for the step that produced them, always, whichever run left
 // them: that step is replayed on the next run, then everything settles.
 
-for (const mode of MODES) {
-  test(`W12 (${mode.name}): a revision that succeeded over partial bytes does not keep the producer fresh`, () => {
-    const cwd = scratchRoute({ ...mode.options, review: true });
-    revisedOverPartialBytes(cwd);
-    // Written down, not inferred from the inputs the record lacks.
-    expect(provenanceRecords(cwd)["plan.md.json"]).toMatchObject({ unguaranteed: { revisedBy: ["review"] } });
-    expect(recordsWith(cwd, "inFlight")).toEqual([]);
-    const before = mark(cwd);
+test(`W12: a revision that succeeded over partial bytes does not keep the producer fresh`, () => {
+  const cwd = scratchRoute({ review: true });
+  revisedOverPartialBytes(cwd);
+  // Written down, not inferred from the inputs the record lacks.
+  expect(provenanceRecords(cwd)["plan.md.json"]).toMatchObject({ unguaranteed: { revisedBy: ["review"] } });
+  expect(recordsWith(cwd, "inFlight")).toEqual([]);
+  const before = mark(cwd);
 
-    expect(run(cwd).status).toBe(0);
+  expect(run(cwd).status).toBe(0);
 
-    expect(traceSince(cwd, before)).toContain("plan");
-    expect(skippedIds(cwd, before)).not.toContain("plan");
-    expect(readArtifact(cwd, "plan.md")).toStartWith("review ");
-    expectStable(cwd);
-  });
+  expect(traceSince(cwd, before)).toContain("plan");
+  expect(skippedIds(cwd, before)).not.toContain("plan");
+  expect(readArtifact(cwd, "plan.md")).toStartWith("review ");
+  expectStable(cwd);
+});
 
-  test(`W12 (${mode.name}): a retry that revised the partial bytes of its own first attempt does not keep the producer fresh`, () => {
-    const cwd = scratchRoute({ ...mode.options, review: "retried" });
-    partialAt(cwd, "review");
-    expect(run(cwd).status).toBe(0);
-    expect(snapshot(cwd).status).toBe("PASS");
-    expect(trace(cwd).filter((id) => id === "review")).toHaveLength(2);
-    const before = mark(cwd);
+test(`W12: a retry that revised the partial bytes of its own first attempt does not keep the producer fresh`, () => {
+  const cwd = scratchRoute({ review: "retried" });
+  partialAt(cwd, "review");
+  expect(run(cwd).status).toBe(0);
+  expect(snapshot(cwd).status).toBe("PASS");
+  expect(trace(cwd).filter((id) => id === "review")).toHaveLength(2);
+  const before = mark(cwd);
 
-    expect(run(cwd).status).toBe(0);
+  expect(run(cwd).status).toBe(0);
 
-    expect(traceSince(cwd, before)).toContain("plan");
-    expect(skippedIds(cwd, before)).not.toContain("plan");
-    expectStable(cwd);
-  });
+  expect(traceSince(cwd, before)).toContain("plan");
+  expect(skippedIds(cwd, before)).not.toContain("plan");
+  expectStable(cwd);
+});
 
-  // The earlier rule dropped the producer's fingerprints from the record and let
-  // the revision merge its own: a reviser reading every input of the producer
-  // brought them all back, and the record vouched for the partial bytes again.
-  test(`ADV-A (${mode.name}): a revision whose inputs cover those of the producer does not keep it fresh either`, () => {
-    const cwd = scratchRoute({ ...mode.options, review: true, reviewReadsAll: true });
-    revisedOverPartialBytes(cwd);
-    const before = mark(cwd);
+// The earlier rule dropped the producer's fingerprints from the record and let
+// the revision merge its own: a reviser reading every input of the producer
+// brought them all back, and the record vouched for the partial bytes again.
+test(`ADV-A: a revision whose inputs cover those of the producer does not keep it fresh either`, () => {
+  const cwd = scratchRoute({ review: true, reviewReadsAll: true });
+  revisedOverPartialBytes(cwd);
+  const before = mark(cwd);
 
-    expect(run(cwd).status).toBe(0);
+  expect(run(cwd).status).toBe(0);
 
-    expect(traceSince(cwd, before)).toContain("plan");
-    expect(skippedIds(cwd, before)).not.toContain("plan");
-    expectStable(cwd);
-  });
-}
+  expect(traceSince(cwd, before)).toContain("plan");
+  expect(skippedIds(cwd, before)).not.toContain("plan");
+  expectStable(cwd);
+});
 
 // A producer without input keeps no record once it succeeded, so no missing key
 // could ever make it stale: only the written fact does.
 test("ADV-B: a revision over the partial output of a step without input does not keep that step settled", () => {
-  const cwd = scratchRoute({ ...reconcile, branchReview: true });
+  const cwd = scratchRoute({ branchReview: true });
   partialAt(cwd, "branch");
   expect(run(cwd).status).not.toBe(0);
   expect(readArtifact(cwd, "branch.json")).toBe("partial branch\n");
@@ -271,25 +260,23 @@ test("ADV-B: a revision over the partial output of a step without input does not
 // deliverable) produces what it revises. Its success over its own partial bytes
 // exempts it from the doubt it leaves, or it would replay itself on every run.
 
-for (const mode of MODES) {
-  test(`self-revision (${mode.name}): a producer that revises its own partial output pays for it once`, () => {
-    const cwd = scratchRoute({ ...mode.options, planRevisesItself: true });
-    partialAt(cwd, "plan");
-    expect(run(cwd).status).not.toBe(0);
-    expect(statusesOf(cwd).plan).toBe("failed");
-    expect(readArtifact(cwd, "plan.md")).toBe("partial plan\n");
-    heal(cwd, "plan");
-    const before = mark(cwd);
+test(`self-revision: a producer that revises its own partial output pays for it once`, () => {
+  const cwd = scratchRoute({ planRevisesItself: true });
+  partialAt(cwd, "plan");
+  expect(run(cwd).status).not.toBe(0);
+  expect(statusesOf(cwd).plan).toBe("failed");
+  expect(readArtifact(cwd, "plan.md")).toBe("partial plan\n");
+  heal(cwd, "plan");
+  const before = mark(cwd);
 
-    expect(run(cwd).status).toBe(0);
+  expect(run(cwd).status).toBe(0);
 
-    expect(snapshot(cwd).status).toBe("PASS");
-    expect(traceSince(cwd, before)).toContain("plan");
-    expect(readArtifact(cwd, "plan.md")).toStartWith("plan ");
-    expect(provenanceRecords(cwd)["plan.md.json"]).toMatchObject({ unguaranteed: { revisedBy: ["plan"] } });
-    expectNothingRepaid(cwd);
-  });
-}
+  expect(snapshot(cwd).status).toBe("PASS");
+  expect(traceSince(cwd, before)).toContain("plan");
+  expect(readArtifact(cwd, "plan.md")).toStartWith("plan ");
+  expect(provenanceRecords(cwd)["plan.md.json"]).toMatchObject({ unguaranteed: { revisedBy: ["plan"] } });
+  expectNothingRepaid(cwd);
+});
 
 // ── The producer of a revised output, named by what it wrote ─────────────────
 // A step without input that succeeds records that it produced its outputs, with no
@@ -297,7 +284,7 @@ for (const mode of MODES) {
 // step could adopt as its own.
 
 test("rbranch: a revision of the output of a step without input runs on a clean first run, then settles", () => {
-  const cwd = scratchRoute({ ...reconcile, branchReview: true });
+  const cwd = scratchRoute({ branchReview: true });
 
   expect(run(cwd).status).toBe(0);
 
@@ -308,7 +295,7 @@ test("rbranch: a revision of the output of a step without input runs on a clean 
 });
 
 test("W7 (no input): a revision that failed before writing does not replay the step without input that produced the output", () => {
-  const cwd = scratchRoute({ ...reconcile, branchReview: true });
+  const cwd = scratchRoute({ branchReview: true });
   failAt(cwd, "rbranch");
   expect(run(cwd).status).not.toBe(0);
   expect(statusesOf(cwd).rbranch).toBe("failed");
@@ -325,7 +312,7 @@ test("W7 (no input): a revision that failed before writing does not replay the s
 // without a record, so it was named its producer; its success over its own partial
 // bytes then passed for the producer's, and `branch` was never replayed.
 test("V1: a revision of a step without input, made over its own partial bytes, does not keep that step settled", () => {
-  const cwd = scratchRoute({ ...reconcile, branchReview: true });
+  const cwd = scratchRoute({ branchReview: true });
   expect(run(cwd).status).toBe(0);
   touchNotes(cwd);
   partialAt(cwd, "rbranch");
@@ -344,7 +331,7 @@ test("V1: a revision of a step without input, made over its own partial bytes, d
 });
 
 test("V2: a retry of that revision over the partial bytes of its first attempt does not keep the step settled either", () => {
-  const cwd = scratchRoute({ ...reconcile, branchReview: "retried" });
+  const cwd = scratchRoute({ branchReview: "retried" });
   expect(run(cwd).status).toBe(0);
   touchNotes(cwd);
   partialAt(cwd, "rbranch");
@@ -362,7 +349,7 @@ test("V2: a retry of that revision over the partial bytes of its first attempt d
 // The doubt names the revisers it exempts, not the producer: renaming the step
 // that produces the output does not let the bytes pass for its own.
 test("V7: a producer renamed while its output is in doubt is still replayed", () => {
-  const options = { ...reconcile, review: true, reviewReadsAll: true } as const;
+  const options = { review: true, reviewReadsAll: true } as const;
   const cwd = scratchRoute(options);
   revisedOverPartialBytes(cwd);
   redefineRoute(cwd, { ...options, planId: "draft" });

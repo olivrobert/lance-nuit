@@ -49,13 +49,8 @@ export class PipelineStructureValidator implements PipelineValidationRule {
       }
     }
 
-    if (context.pipeline.reconcile != null && typeof context.pipeline.reconcile !== "boolean") {
-      fail("reconcile must be a boolean");
-    }
-    if (context.pipeline.reconcile === true) {
-      const unclassified = stepsWithoutDeliverable({ ...context.pipeline, steps: stepsOf(context) });
-      if (unclassified.length > 0) fail(withoutDeliverableMessage(unclassified));
-    }
+    const unclassified = stepsWithoutDeliverable({ ...context.pipeline, steps: stepsOf(context) });
+    if (unclassified.length > 0) fail(withoutDeliverableMessage(unclassified));
 
     const seenIds = new Set<string>();
     for (const step of stepsOf(context)) {

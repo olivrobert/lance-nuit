@@ -10,6 +10,7 @@ export default ({ pipeline, bashStep }: Dsl) =>
           id: "process",
           name: "Process the loaded GitHub issue",
           command: (ctx) => `printf 'loaded GitHub issue %s\\n' '${ctx.ticket ?? "unknown"}'`,
+          rerunOnResume: true,
         }),
       ],
     })

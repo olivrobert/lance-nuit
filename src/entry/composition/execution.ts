@@ -13,7 +13,7 @@ import { RUNNER_STEP_ENV } from "../../shared/env/runner-env.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import {
-  reconcilable,
+  readmittedOnResume,
   rerunsOnResume,
   agentBackendRegistryOf,
   buildPipelineContext,
@@ -116,8 +116,6 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) =
     ({ run, resumed: resuming } = await loadOrCreateRun({
       pipelinePath,
       ticket: args.ticket,
-      stepFilter: args.stepFilter,
-      skipFilter: args.skipFilter,
       runDir: target.dir,
       fresh: args.fresh,
       startAt: args.startAt,
@@ -189,9 +187,8 @@ export function wireRunOutputs(run: RunView, args: RunnerArgs): WiredOutputs {
   };
 }
 
-/** Header printed before the first step: what runs, and what a resume skipped.
- *  `reconcile` is the pipeline's mode, which widens what the loop re-admits. */
-export function announceRun(run: RunView, args: RunnerArgs, reconcile = false): void {
+/** Header printed before the first step: what runs, and what a resume skipped. */
+export function announceRun(run: RunView, args: RunnerArgs): void {
   log(`\nPipeline: ${run.name}`);
   if (args.ticket) log(`Ticket: ${args.ticket}`);
   if (run.max_cost_usd) log(`Budget: $${run.max_cost_usd}`);
@@ -203,9 +200,8 @@ export function announceRun(run: RunView, args: RunnerArgs, reconcile = false): 
   // replays unconditionally, while a step declaring `input` or reworking a gated
   // artifact is only re-examined and costs nothing when its sources have not moved
   // and no rejection is pending.
-  const reexamined = (s: RunStepView) =>
-    (s.def.sources?.length ?? 0) > 0 || (s.def.rework_for?.length ?? 0) > 0 || (reconcile && reconcilable(s.def));
-  const reruns = (s: RunStepView) => rerunsOnResume(s.def, reconcile);
+  const reexamined = (s: RunStepView) => readmittedOnResume(s.def) || (s.def.rework_for?.length ?? 0) > 0;
+  const reruns = (s: RunStepView) => rerunsOnResume(s.def);
   const rerun = done.filter(reruns);
   const rechecked = done.filter((s) => !reruns(s) && reexamined(s));
   const settled = done.filter((s) => !reruns(s) && !reexamined(s));

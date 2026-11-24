@@ -21,7 +21,7 @@ function makeRun(steps: RunStep[]): Run {
 }
 
 /** Capture what the header wrote to stderr. */
-function announce(run: Run, reconcile = false): string {
+function announce(run: Run): string {
   const previous = process.stderr.write.bind(process.stderr);
   let captured = "";
   process.stderr.write = ((chunk: string | Uint8Array) => {
@@ -29,7 +29,7 @@ function announce(run: Run, reconcile = false): string {
     return true;
   }) as typeof process.stderr.write;
   try {
-    announceRun(run, {} as RunnerArgs, reconcile);
+    announceRun(run, {} as RunnerArgs);
   } finally {
     process.stderr.write = previous;
   }
@@ -85,19 +85,14 @@ test("each family lands on its own line", () => {
   expect(out).not.toContain("later");
 });
 
-test("in reconcile mode, a completed step declaring an output is announced as re-checked, not as done", () => {
-  const steps = () => [step("branch", { outputs: [specArtifact] }), step("child", { runner: "pipeline" })];
-  const out = announce(makeRun(steps()), true);
+test("a completed step declaring an output is announced as re-checked; a node as done (D3)", () => {
+  const out = announce(makeRun([step("branch", { outputs: [specArtifact] }), step("child", { runner: "pipeline" })]));
   expect(out).toContain("Re-checked on resume: branch\n");
-  // An orchestration node keeps the authority of its status.
   expect(out).toContain("Resumed — already done: child\n");
-  expect(announce(makeRun(steps()))).toContain("Resumed — already done: branch, child\n");
 });
 
-test("in reconcile mode, a completed orchestration node declaring rerunOnResume is announced as done, not as re-run", () => {
-  const node = () => [step("child", { runner: "pipeline", rerun_on_resume: true })];
-  const out = announce(makeRun(node()), true);
+test("a completed orchestration node declaring rerunOnResume is announced as done, not as re-run (D3)", () => {
+  const out = announce(makeRun([step("child", { runner: "pipeline", rerun_on_resume: true })]));
   expect(out).toContain("Resumed — already done: child\n");
   expect(out).not.toContain("Re-run on resume");
-  expect(announce(makeRun(node()))).toContain("Re-run on resume: child\n");
 });

@@ -22,11 +22,18 @@ test("validatePipeline aggregates independent step errors", () => {
   const invalid = pipeline("broken")
     .add(
       llmStep(
-        { id: "backend", name: "Backend", backend: "codeex" as never, profile: "coder", command: "run" },
+        {
+          id: "backend",
+          name: "Backend",
+          backend: "codeex" as never,
+          profile: "coder",
+          command: "run",
+          rerunOnResume: true,
+        },
         REGISTRY,
       ),
     )
-    .add(bashStep({ id: "reports", name: "Reports", command: "make test", report: "reports.xml" }))
+    .add(bashStep({ id: "reports", name: "Reports", command: "make test", rerunOnResume: true, report: "reports.xml" }))
     .build();
 
   let error: unknown;
@@ -55,7 +62,12 @@ test("validatePipeline checks step references and capability conflicts before mu
     runnerDir: join(project, "kit", "lance-nuit", "runner"),
   });
   const definition = pipeline("demo")
-    .add(llmStep({ id: "probe", name: "Probe", backend: "claude", profile: "operator", command: "/probe" }, REGISTRY))
+    .add(
+      llmStep(
+        { id: "probe", name: "Probe", backend: "claude", profile: "operator", command: "/probe", rerunOnResume: true },
+        REGISTRY,
+      ),
+    )
     .build();
   const overrides = parseStepOverrides({
     "demo:probe": { model: "opus" },
@@ -88,7 +100,12 @@ test("validatePipeline checks step references and capability conflicts before mu
 
 test("validatePipeline rejects a profile policy referencing a missing backend", () => {
   const definition = pipeline("demo")
-    .add(llmStep({ id: "agent", name: "Agent", backend: "codex", profile: "coder", command: "run" }, REGISTRY))
+    .add(
+      llmStep(
+        { id: "agent", name: "Agent", backend: "codex", profile: "coder", command: "run", rerunOnResume: true },
+        REGISTRY,
+      ),
+    )
     .build();
 
   expect(() =>
@@ -136,6 +153,7 @@ test("validatePipeline rejects non-finite and fractional retry quotas", () => {
           id: "retry",
           name: "Retry",
           command: "false",
+          rerunOnResume: true,
           onFail: { retries },
         }),
       )

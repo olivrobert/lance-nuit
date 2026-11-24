@@ -63,8 +63,6 @@ export interface RunView extends DeepReadonly<Omit<PersistedRun, "pipeline_path"
   /** Run directory, derived at load time and never persisted. */
   readonly run_dir: string;
   readonly steps: readonly RunStepView[];
-  /** The pipeline declares `.reconcile()`, as boot loaded it. */
-  readonly reconcile?: boolean;
   /** The journal and attempt-log stores a caller injected, if any. */
   readonly eventStore?: RunEventStore;
   readonly logStore?: RunLogStore;

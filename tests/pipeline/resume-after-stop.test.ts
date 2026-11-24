@@ -7,7 +7,7 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AgentCapabilities, AgentRequest } from "../../src/contracts/backends.js";
 import { createDefaultAgentBackendRegistry } from "../../src/agents/default-registry.js";
 import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
@@ -32,16 +32,20 @@ test("a run stopped for human review resumes instead of replaying completed step
 import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 const mark = (ctx, what) => appendFileSync(join(ctx.cwd, "trace.log"), what + "\\n");
-export default ({ pipeline, actionStep, reject }) => pipeline("gated")
+export default ({ pipeline, actionStep, reject, textArtifact }) => {
+  const done = textArtifact("pre.txt");
+  return pipeline("gated")
   .add(
-    actionStep({ id: "pre", name: "pre", run: (ctx) => mark(ctx, "pre"), describe: "pre" }),
+    actionStep({ id: "pre", name: "pre", output: [done], describe: "pre",
+      run: async (ctx) => { mark(ctx, "pre"); await done.write(ctx, "pre"); } }),
     actionStep({
-      id: "gate", name: "gate",
+      id: "gate", name: "gate", rerunOnResume: true,
       when: { if: () => existsSync(${JSON.stringify(blocker)}) ? reject("escalated: needs approval") : true, else: "stop" },
       run: (ctx) => mark(ctx, "gate"), describe: "gate",
     }),
-    actionStep({ id: "work", name: "work", run: (ctx) => mark(ctx, "work"), describe: "work" }),
+    actionStep({ id: "work", name: "work", rerunOnResume: true, run: (ctx) => mark(ctx, "work"), describe: "work" }),
   ).build();
+};
 `,
   );
   const ctx = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
@@ -89,11 +93,17 @@ if (!REGISTRY.has(BACKEND)) {
     capabilities,
     create(options) {
       const cost = typeof options === "object" && options && "cost" in options ? Number(options.cost) : 0;
+      // The deliverable a real agent would write, so a resume finds the paid step's work done.
+      const out = typeof options === "object" && options && "out" in options ? String(options.out) : undefined;
       return {
         id: BACKEND,
         capabilities,
         async run(request: AgentRequest) {
           const charged = request.budgetRemaining != null ? Math.min(cost, request.budgetRemaining) : cost;
+          if (out && charged >= cost) {
+            mkdirSync(dirname(out), { recursive: true });
+            writeFileSync(out, "paid");
+          }
           return {
             provider: BACKEND,
             output: "",
@@ -115,12 +125,13 @@ test("a run stopped by its budget resumes on a --budget approval without repayin
     `
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-export default ({ pipeline, llmStep, actionStep }) => pipeline("costly")
+export default ({ pipeline, llmStep, actionStep, textArtifact }) => pipeline("costly")
   .maxCost(0.5)
   .add(
     llmStep({ id: "paid", name: "paid", backend: ${JSON.stringify(BACKEND)}, profile: "coder",
-      options: { cost: 0.5 }, command: "go" }),
-    actionStep({ id: "rest", name: "rest",
+      options: { cost: 0.5, out: ${JSON.stringify(join(root, ".lance-nuit", "work-items", "P-01", "artifacts", "paid.txt"))} },
+      output: [textArtifact("paid.txt")], command: "go" }),
+    actionStep({ id: "rest", name: "rest", rerunOnResume: true,
       run: (ctx) => appendFileSync(join(ctx.cwd, "trace.log"), "rest\\n"), describe: "rest" }),
   ).build();
 `,
@@ -217,7 +228,7 @@ export default ({ pipeline, actionStep, textArtifact }) => {
         },
       }),
       actionStep({
-        id: "gate", name: "gate", describe: "gate",
+        id: "gate", name: "gate", describe: "gate", rerunOnResume: true,
         when: { if: () => !existsSync(${JSON.stringify(blocker)}), else: "stop" },
         run: (ctx) => mark(ctx, "gate"),
       }),

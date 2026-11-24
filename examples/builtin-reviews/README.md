@@ -16,7 +16,9 @@ real quality command to run.
 
 The example shows blocking flags, two preconditions (`reuse-watch.md` and
 `e2e-scenarios.md`), app URL guards, report paths, capability qualification, and
-a non-blocking retrospective step. Add `onFail` explicitly when the surrounding
+a non-blocking retrospective step. Each step captures its conclusion as an
+artifact (`capture`), the output that spares a resume a review already paid
+for. Add `onFail` explicitly when the surrounding
 project pipeline has a repair policy.
 
 To use this as a project starting point, copy the steps into

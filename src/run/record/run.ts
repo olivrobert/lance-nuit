@@ -44,11 +44,6 @@ export interface Run extends Omit<PersistedRun, "pipeline_path" | "steps"> {
   /** Run directory, derived at load time and never persisted. */
   run_dir: string;
   steps: RunStep[];
-  /** The pipeline declares `.reconcile()`. Boot sets it from the definition it
-   *  loads the steps from, and every later reader takes it from here, so boot and
-   *  the step loop cannot disagree on the mode. Runtime-only: the mode belongs to
-   *  the pipeline, never to the snapshot. */
-  reconcile?: boolean;
   /** The steps whose pass this process started and has not ended, by id, each with
    *  the live estimate of its attempt. `updateStep` alone decides who is in, and
    *  `abortRun` reads it. Runtime-only: a step left `running` by a runner that died

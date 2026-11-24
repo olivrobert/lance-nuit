@@ -76,7 +76,7 @@ export function skillPreflightStep(
     name: options.name ?? (agents.length > 0 ? "Required skills and agents preflight" : "Required skills preflight"),
     command: (ctx) => capabilityPreflightCommand(ctx.runnerDir, ctx.cwd, skills, agents),
     // A pure check of the machine, which can lose a skill between invocations:
-    // replaying it is safe, and reconcile mode needs that said, having no output.
+    // replaying it is safe.
     rerunOnResume: true,
   });
 }

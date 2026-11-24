@@ -10,6 +10,7 @@ export default ({ pipeline, bashStep }: Dsl) =>
           id: "process",
           name: "Process the loaded Jira work item",
           command: (ctx) => `printf 'loaded Jira work item %s\\n' '${ctx.ticket ?? "unknown"}'`,
+          rerunOnResume: true,
         }),
       ],
     })

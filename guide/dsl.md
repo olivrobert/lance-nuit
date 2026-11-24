@@ -231,7 +231,7 @@ configuration during typechecking.
 ```ts
 import type { Dsl } from "@lance-nuit/dsl";
 
-export default ({ pipeline, llmStep }: Dsl) =>
+export default ({ pipeline, llmStep, textArtifact }: Dsl) =>
   pipeline("codex-implementation")
     .add(llmStep({
       id: "implement",
@@ -239,7 +239,10 @@ export default ({ pipeline, llmStep }: Dsl) =>
       backend: "codex",
       profile: "coder",
       options: { sandbox: "workspace-write" },
-      command: "Implement the task and return the expected verdict",
+      command: (ctx) =>
+        `Implement the task, summarize it in ${ctx.paths.artifact("implementation.md")} ` +
+        "and return the expected verdict",
+      output: [textArtifact("implementation.md")],
     }))
     .build();
 ```
@@ -351,6 +354,117 @@ its last pass completed. A step whose last pass failed or was interrupted become
 `skipped`: the spend of that pass stays counted, and its previous error is
 dropped from the report and the dashboard.
 
+### Admission of settled steps
+
+The declared deliverables, not the status a previous invocation recorded,
+decide what remains to do. The run record still holds what only the run
+knows — spend, attempts, sessions, how each pass ended; see
+[the run record and the deliverables](persistence.md#the-run-record-and-the-deliverables).
+
+```ts
+pipeline("ticket")
+  .add(
+    bashStep({ id: "context", name: "Context", command: "load-context", rerunOnResume: true }),
+    bashStep({ id: "branch", name: "Branch", command: "create-branch", output: [branch] }),
+    bashStep({ id: "spec", name: "Spec", command: "write-spec", input: [ticket], output: [spec] }),
+    bashStep({ id: "publish", name: "Publish", command: "push-and-open-mr", input: [spec], output: [mrUrl] }),
+  )
+  .build();
+```
+
+The rules:
+
+- **Every step declares what it reads or delivers.** A step with neither
+  `input`, `output` nor `rerunOnResume` is rejected when the pipeline is built
+  (and by `lancenuit lint`). Otherwise its side effects — a push, a tracker
+  comment — would repeat on every invocation, since nothing would tell the
+  runner they already happened. The error names every such step and the two
+  ways out: declare the artifact the step produces, or a receipt of its side
+  effect (the merge-request URL a push wrote, the id of a posted comment), as
+  `output`; or declare `rerunOnResume: true` when replaying it is idempotent.
+  `rerunOnResume` therefore means "safe to replay, nothing to deliver". The
+  gate, the escalation and the branch abandonment of a
+  [`humanReview`](human-control.md), `workItemEscalateStep`,
+  `workItemDeliveryStep` and the `requireCapabilitiesStep` preflight declare
+  it themselves. See [tracker steps replay](#tracker-steps-replay) for what
+  that costs.
+- **Re-admission.** On a resume, every settled step goes through admission
+  again, `done` or `skipped`.
+- **Admission.** `when` decides first, then a pending rejection of a
+  [rework](human-control.md#reject-and-rework) step, then the declarations:
+  - `input` and `output`: [input freshness](#input-freshness);
+  - `output` without `input`: the step is skipped with `outputs present` when
+    every output it declares exists, and runs when one is missing or
+    [unfinished](#input-freshness);
+  - `rerunOnResume` without `output`: the step runs.
+
+  The [interruption guard](#interrupted-steps) still comes last.
+- **New runs.** A run after a `PASS` applies the same rules, so relaunching a
+  completed pipeline pays only for the `rerunOnResume` steps and for the
+  deliverables that are missing or stale. A step skipped this way is `skipped`
+  in the new run, which also reaches an `--until` bound set on it.
+- **Guarantees.** A step requeued by `--start-at` runs even when its outputs
+  are there. What a pass that failed or was interrupted left is never adopted:
+  the step runs again (or asks first, if the runner died in it). A skipped
+  step keeps the spend of its earlier passes in the run's totals and budget. A
+  `blocking: false` step declaring `output` without `input` whose failure was
+  absorbed gets an empty record of its inputs, and is skipped with
+  `failure absorbed, inputs unchanged since` instead of failing again on every
+  invocation.
+- **Composition nodes.** `runPipeline` and `forEachPipeline` nodes keep the
+  authority of their status: they are neither re-admitted nor required to
+  declare anything, and an output or a `rerunOnResume` they declare has no
+  effect on that. A node that is a [rework](human-control.md#reject-and-rework)
+  step still runs again while a rejection of its subject is pending. The step
+  `forEachWorkItem` adds to read the ticket, which belongs to the runner, keeps
+  the authority of its status too.
+- **Selectors.** `--steps`, `--skip` and `--start-at` hold for one
+  invocation. A step they leave out is not run and the journal records
+  `operator selection`: a `done` step stays `done`, a pending one becomes
+  `skipped`, and one whose last pass failed, was aborted or was interrupted
+  keeps that status, so the next invocation still meets the
+  [interruption guard](#interrupted-steps) and reruns the failed pass. The run
+  then stops with `needs-decision` instead of passing (a run holding an aborted
+  step stays `ABORTED`), unless an `--until` bound or another stop ended it
+  first. A step that `--start-at` requeued after a failed or aborted attempt is
+  `pending`, and settles like any other. What an unfinished pass wrote is never
+  adopted in any case: its outputs stay [unfinished](#input-freshness) until an
+  attempt succeeds, whatever the status says. Nothing is persisted as an
+  exclusion, and the next invocation admits those steps again, except the nodes
+  and the work-item source step above, which keep the status the selection left
+  them: `done`, or `skipped` for one that was pending (see
+  [CLI options](cli-options.md)). An exclusion an older runner persisted in a
+  snapshot is ignored: the step is a plain `skipped` step, admitted again.
+
+#### Tracker steps replay
+
+`workItemEscalateStep`, `workItemDeliveryStep` and the branch abandonment of a
+`humanReview` are `rerunOnResume`: they run again on every resume, and on every
+new run of a work item whose previous run passed. Each replay applies its
+tracker move again — `escalate` for an escalation, `done` and `inReview` for a
+delivery — and the abandonment restores the base branch again. The note is not
+duplicated (its `{ ticket, stepId }` key deduplicates it), but a move a human
+made in between is undone.
+
+Inside a `humanReview`, the escalation and the abandonment run only while the
+verdict still blocks and no approval matches it: they replay exactly when the
+gate is about to stop anyway. Used on their own, these steps have no such
+guard:
+
+- `workItemEscalateStep` escalates again whenever its artifact still satisfies
+  `onlyIf`. Declare an `input` that changes when the human acts on the step
+  that writes the artifact — `ticket.md`, a `source` on the branch `HEAD` — so
+  a returned work item is judged again instead of escalated with the old
+  verdict ([`examples/nightly-tickets`](../examples/nightly-tickets/README.md)
+  does this), and keep `onlyIf` as narrow as the verdict allows.
+- `workItemDeliveryStep` has no condition: it moves the work item on every
+  invocation that reaches it. Run its pipeline from the queue
+  (`forEachWorkItem` with `--scan` only picks items still in it), not again by
+  hand on a delivered item. When it must stay replay-proof, deliver from an
+  `actionStep` instead: call `ctx.workItem.comment` and `ctx.workItem.moveTo`
+  in `run`, write a receipt, and declare that receipt as its `output`, so a
+  later invocation skips it.
+
 ### Interrupted steps
 
 When the runner dies during an attempt (crash, OOM, `SIGKILL`, power loss), the
@@ -360,8 +474,8 @@ happened, so the resumed run does not replay it silently: admission stops the
 run as `STOPPED` (resumable) before the step runs again, naming the step and the
 two ways to authorize the replay. The check comes after `when`, freshness and
 rework, so a step those guards now skip replays nothing and asks nothing. The
-same holds in [reconcile mode](#reconcile-mode): the outputs an interrupted pass
-left never settle it, so the guard still asks before the replay.
+outputs an interrupted pass left never settle it, so the guard still asks
+before the replay.
 
 The replay is authorized when any of these holds:
 
@@ -397,10 +511,10 @@ bashStep({
 
 The rules:
 
-- **Opt-in.** Only a step declaring `input` changes behavior. A step declaring
-  `input` without `output` is rejected at build time: freshness is decided on the
-  outputs. In [reconcile mode](#reconcile-mode), a step declaring `output`
-  without `input` answers to its outputs too, by their presence.
+- **Outputs decide.** A step declaring `input` without `output` is rejected at
+  build time: freshness is decided on the outputs. A step declaring `output`
+  without `input` answers to its outputs too, by their presence
+  ([admission of settled steps](#admission-of-settled-steps)).
 - **Pure inputs** are `input` minus `output`. An artifact listed in both is
   **revised in place**: it is not erased before the attempt, it is not part of the
   fingerprint, and it is still required afterwards.
@@ -427,12 +541,11 @@ The rules:
   partial. An unfinished output is never adopted and never counts as present:
   every step declaring it as output runs. The mark lives in the work item, not
   in the run, so it holds across a new run, `--fresh`, `--start-at`, and
-  `--steps`/`--skip`. It ranks with `missing` in the summary. This applies with
-  or without [reconcile mode](#reconcile-mode), and to a step without `input`
-  as well. Whenever admission reads the freshness of such a step, the journal
+  `--steps`/`--skip`. It ranks with `missing` in the summary. This applies to a
+  step without `input` as well. Whenever admission reads the freshness of such a step, the journal
   says why it runs with `step.outputs.unfinished` (`stepId`, `outputs`); a
   step that runs without that reading (a resume of its failed pass,
-  `--start-at`, a step without `input` outside reconcile mode) gets no event.
+  `--start-at`) gets no event.
 - **Outputs revised in place.** The mark of a revision keeps the bytes it
   found and the record that vouched for them. A revision that failed or was
   killed without writing leaves the output as it was: the step that produced
@@ -463,15 +576,13 @@ The rules:
   start a new run (`--fresh`): the output is `adoptable` and adopts the current
   inputs. Resuming the failed run instead replays the step over your repair,
   because its last pass failed. A step without `input` never adopts anything:
-  once its record is gone, its output counts as present in reconcile mode, and
-  the step runs again on every new run in the default mode. To have the step
+  once its record is gone, its output counts as present. To have the step
   rewrite the output instead, replay it with `--start-at`. A revising step
   that finds an output without any record adopts it as its own.
 - **Order.** `when` first, freshness second. When `when` refuses while an output
   is stale, the reason reads `... (inputs changed, outputs kept)`.
 - **Resume.** A `done` step declaring `input` is re-admitted, and so is a
-  `skipped` one — unless it was taken out by `--steps`, `--skip`, or
-  `--start-at`, an exclusion [reconcile mode](#reconcile-mode) never keeps.
+  `skipped` one ([admission of settled steps](#admission-of-settled-steps)).
   A re-admitted step whose outputs are all fresh costs nothing. A step requeued
   by `--start-at` is the exception: it runs even when its outputs are fresh,
   because freshness does not track the repository tree an operator fixed. So
@@ -579,96 +690,6 @@ and `implement` — an agent step — is stale and paid again on every rerun.
 - **Untracked files.** `git diff HEAD` does not show them. A pipeline that must
   see new files marks them itself (`git add -N`), in a step or in the source's
   command; the runner never stages anything.
-- **Both modes.** A source works with or without [reconcile mode](#reconcile-mode):
-  a step declaring `input` answers to its freshness in both.
-
-### Reconcile mode
-
-`.reconcile()` makes the declared outputs, not the status a previous invocation
-recorded, decide what remains to do. Without it, a `done` step that declares
-neither `input` nor `rerunOnResume` is never looked at again in its run, and a
-new run replays every such step. The mode is opt-in per pipeline; a pipeline
-without it keeps the behavior described in the sections above. The run record
-still holds what only the run knows — spend, attempts, sessions, how each pass
-ended; see
-[the run record and the deliverables](persistence.md#the-run-record-and-the-deliverables).
-
-```ts
-pipeline("ticket")
-  .reconcile()
-  .add(
-    bashStep({ id: "context", name: "Context", command: "load-context", rerunOnResume: true }),
-    bashStep({ id: "branch", name: "Branch", command: "create-branch", output: [branch] }),
-    bashStep({ id: "spec", name: "Spec", command: "write-spec", input: [ticket], output: [spec] }),
-    bashStep({ id: "publish", name: "Publish", command: "push-and-open-mr", input: [spec], output: [mrUrl] }),
-  )
-  .build();
-```
-
-The rules:
-
-- **Every step declares what it delivers.** A step with neither `output` nor
-  `rerunOnResume` is rejected when the pipeline is built (and by
-  `lancenuit lint`). Otherwise its side effects — a push, a tracker comment —
-  would repeat on every invocation, since nothing would tell the runner they
-  already happened. The error names every such step and the two ways out:
-  declare the artifact the step produces, or a receipt of its side effect (the
-  merge-request URL a push wrote, the id of a posted comment), as `output`; or
-  declare `rerunOnResume: true` when replaying it is idempotent. In this mode
-  `rerunOnResume` therefore means "safe to replay, nothing to deliver". The
-  gate and the escalation of a [`humanReview`](human-control.md), and the
-  `requireCapabilitiesStep` preflight, declare it themselves.
-- **Re-admission.** On a resume, every settled step goes through admission
-  again, `done` or `skipped`.
-- **Admission.** `when` decides first, then a pending rejection of a
-  [rework](human-control.md#reject-and-rework) step, then the declarations:
-  - `input` and `output`: [input freshness](#input-freshness), unchanged;
-  - `output` without `input`: the step is skipped with `outputs present` when
-    every output it declares exists, and runs when one is missing or
-    [unfinished](#input-freshness);
-  - `rerunOnResume` without `output`: the step runs.
-
-  The [interruption guard](#interrupted-steps) still comes last.
-- **New runs.** A run after a `PASS` applies the same rules, so relaunching a
-  completed pipeline pays only for the `rerunOnResume` steps and for the
-  deliverables that are missing or stale. A step skipped this way is `skipped`
-  in the new run, which also reaches an `--until` bound set on it.
-- **Unchanged guarantees.** A step requeued by `--start-at` runs even when its
-  outputs are there. What a pass that failed or was interrupted left is never
-  adopted: the step runs again (or asks first, if the runner died in it). A
-  skipped step keeps the spend of its earlier passes in the run's totals and
-  budget. A `blocking: false` step declaring `output` without `input` whose
-  failure was absorbed gets an empty record of its inputs, and is skipped with
-  `failure absorbed, inputs unchanged since` instead of failing again on every
-  invocation.
-- **Out of scope.** `runPipeline` and `forEachPipeline` nodes keep the authority
-  of their status: they are neither re-admitted nor required to declare an
-  output, and an output they declare never skips them. `rerunOnResume` has no
-  effect on them in this mode, while the default mode re-admits a `done` node
-  that declares it (a `skipped` one stays `skipped`). In both modes, a node
-  that is a [rework](human-control.md#reject-and-rework) step still runs again
-  while a rejection of its subject is pending. The step `forEachWorkItem` adds to read the ticket, which
-  belongs to the runner, keeps the authority of its status too.
-- **Selectors.** `--steps`, `--skip` and `--start-at` hold for one
-  invocation. A step they leave out is not run and the journal records
-  `operator selection`: a `done` step stays `done`, a pending one becomes
-  `skipped`, and one whose last pass failed, was aborted or was interrupted
-  keeps that status, so the next invocation still meets the
-  [interruption guard](#interrupted-steps) and reruns the failed pass. The run
-  then stops with `needs-decision` instead of passing (a run holding an aborted
-  step stays `ABORTED`), unless an `--until` bound or another stop ended it
-  first. A step that `--start-at` requeued after a failed or aborted attempt is
-  `pending`, and settles like any other. What an unfinished pass wrote is never
-  adopted in any case: its outputs stay [unfinished](#input-freshness) until an
-  attempt succeeds, whatever the status says. Nothing is persisted as an
-  exclusion, and the next invocation admits those steps again, except the nodes
-  and the work-item source step above, which keep the status the selection left
-  them: `done`, or `skipped` for one that was pending (see
-  [CLI options](cli-options.md)).
-- **Switching back to the default mode.** A step a reconcile invocation set
-  aside is a plain `skipped` step in that run: the default mode re-admits it
-  only if it declares `input`, as any skipped step, while the next reconcile
-  invocation runs it.
 
 ### Failure handling and retry escalation
 
@@ -693,6 +714,7 @@ export default ({ pipeline, bashStep, mechanicalFix }: Dsl) =>
       id: "check",
       name: "Check",
       command: "npm test",
+      rerunOnResume: true,
       onFail: mechanicalFix((ctx) => `Fix these errors:\n\n${ctx.errors}`),
     }))
     .build();
@@ -715,14 +737,15 @@ and execution context, then builds its object at load time:
 ```ts
 import type { Dsl } from "@lance-nuit/dsl";
 
-export default ({ pipeline, llmStep }: Dsl) =>
+export default ({ pipeline, llmStep, textArtifact }: Dsl) =>
   pipeline("project")
     .add(llmStep({
       id: "review",
       name: "Review",
       backend: "claude",
       profile: "reviewer",
-      command: (ctx) => `review ${ctx.ticket ?? "?"}`,
+      command: (ctx) => `review ${ctx.ticket ?? "?"} into ${ctx.paths.artifact("review.md")}`,
+      output: [textArtifact("review.md")],
     }))
     .build();
 ```

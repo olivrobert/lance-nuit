@@ -650,8 +650,9 @@ lancenuit run PROJ-28 --worktree
   default and `--watch-auto-close` closes it after a terminal run.
 - `--steps` and `--skip` filter step IDs.
 - `--start-at X` replays from `X`: `X` and every later step run again, even
-  when an earlier pass finished them or an earlier selection excluded them, and
-  every step before `X` is skipped. It is exclusive with the other selectors.
+  when an earlier pass finished them, and the steps before `X` that still owe
+  work are set aside for this invocation. It is exclusive with the other
+  selectors.
   - Replayed steps keep their attempts, spend and fix quota: the budget still
     counts what they cost before. A replayed step runs even when its declared
     outputs are fresh, since freshness does not see a manual fix in the tree.
@@ -669,18 +670,15 @@ lancenuit run PROJ-28 --worktree
   exits `3`, and a plain rerun resumes it where it stopped. When nothing is owed
   after `X`, the run simply passes. It is exclusive with `--steps`, and works
   with `--skip` and `--start-at`.
-- On a **resumed** run the selectors are durable, not a one-off view: every step
-  they leave out is written to the snapshot as `skipped`. Once no step remains,
-  the run finalizes as `PASS` and counts as complete — `--scan` will not pick the
-  work item up again. `--fresh` starts a new run instead, which still skips
-  a step declaring `input` whose outputs are up to date
-  ([input freshness](dsl.md#input-freshness)), and in reconcile mode a step
-  whose outputs are present; `--start-at` forces them. In
-  [reconcile mode](dsl.md#reconcile-mode) the selectors hold for one
-  invocation only, and `--start-at` re-admits the `done` steps before `X`
-  (orchestration nodes and the work-item source step keep their status), where
-  the default mode re-checks only rework steps and those declaring `input` or
-  `rerunOnResume`; see its *Selectors* rule.
+- The selectors hold for one invocation only: nothing they leave out is
+  persisted, and `--start-at` re-admits the `done` steps before `X`
+  (orchestration nodes and the work-item source step keep their status); see
+  the *Selectors* rule of [admission](dsl.md#admission-of-settled-steps). A
+  pending step they leave out becomes `skipped`, so once no step remains the run
+  finalizes as `PASS` and counts as complete — `--scan` will not pick the work
+  item up again. `--fresh` starts a new run instead, which still skips a step
+  whose outputs are present and up to date with its declared inputs
+  ([input freshness](dsl.md#input-freshness)); `--start-at` forces them.
 - `--scan` discovers work items, and `--limit` caps the number discovered.
   `--steps` and `--skip` apply to each scanned ticket, so a ticket whose
   remaining work they all exclude is complete for later scans. `--until` applies

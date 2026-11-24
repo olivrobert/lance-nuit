@@ -38,7 +38,6 @@ export function makeRunStep(def: PipelineStep, state: StepStateInput = {}): RunS
     // The log-numbering floor when the journal is missing; dropping it on
     // hydration would let a resume renumber from 1 and overwrite earlier logs.
     last_attempt: state.last_attempt,
-    excluded: state.excluded,
     replay: state.replay,
     absorbed_inputs: state.absorbed_inputs,
     attempts: state.attempts ? state.attempts.map((attempt) => ({ ...attempt })) : [],

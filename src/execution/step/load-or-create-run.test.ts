@@ -10,14 +10,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { buildPipelineContext } from "../../definition/pipeline/context.js";
+import type { PipelineContext } from "../../shared/language/context.js";
 import { appendRunEvent, readRunEvents } from "../../run/record/run-journal.js";
 import { type LoadOrCreateRunOptions, loadOrCreateRun } from "./load-or-create-run.js";
 import { pendingSteps, resumeDecision } from "../../run/record/run-predicates.js";
 import { saveRun } from "../../run/record/run-repository.js";
 import { readRunSnapshot } from "../../run/record/run-snapshot.js";
-import { abortRun, finalizeRun, stopRun, updateStep } from "../../run/record/run-transitions.js";
+import { abortRun, finalizeRun, updateStep } from "../../run/record/run-transitions.js";
 import { allocateAttempt } from "../../run/record/attempt-lifecycle.js";
 import { runSpend } from "../../run/record/cost-accounting.js";
 import { resolveRunDir } from "../../run/record/stores/run-storage.js";
@@ -32,13 +33,22 @@ function pipelineFile(root: string): string {
   const path = join(root, "p.ts");
   writeFileSync(
     path,
-    `export default ({ pipeline, actionStep }) => pipeline("p")
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
-  .add(actionStep({ id: "c", name: "c", run: () => {}, describe: "c" }))
+    `export default ({ pipeline, actionStep, textArtifact }) => pipeline("p")
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", output: [textArtifact("a.txt")] }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", output: [textArtifact("b.txt")] }))
+  .add(actionStep({ id: "c", name: "c", run: () => {}, describe: "c", output: [textArtifact("c.txt")] }))
   .build();`,
   );
   return path;
+}
+
+/** Leave the outputs the fixture steps declare, as their passes would have. */
+function writeOutputs(ctx: PipelineContext, ...ids: string[]): void {
+  for (const id of ids) {
+    const path = ctx.paths.artifact(`${id}.txt`);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, id);
+  }
 }
 
 test("resume: a selected snapshot disappearing before the final read does not initialize a replacement", async () => {
@@ -196,58 +206,6 @@ test("resume: SIGINT after the last step but before finalizeRun keeps the same r
   expect(resumed.aborted).toBe(false);
 });
 
-for (const ending of ["STOPPED", "FAIL"] as const) {
-  test(`resume: --skip of the step a ${ending} run ended on settles it with a new verdict`, async () => {
-    const root = mkdtempSync(join(tmpdir(), "resume-skip-last-"));
-    const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-5" });
-    const path = pipelineFile(root);
-    const dir = resolveRunDir("p", "T-5", undefined, true, ctx);
-    const run = writable(
-      (
-        await loadOrCreateRun({
-          pipelinePath: path,
-          ticket: "T-5",
-          runDir: dir,
-          fresh: false,
-          context: ctx,
-          worktree: false,
-        })
-      ).run,
-    );
-    updateStep(run, run.steps[0]!, "done");
-    updateStep(run, run.steps[1]!, "done");
-    if (ending === "STOPPED") {
-      updateStep(run, run.steps[2]!, "failed", "blocked: no credentials");
-      stopRun(run, run.steps[2]!, "blocked: no credentials");
-      finalizeRun(run, { stopped: true });
-    } else {
-      run.budget_exceeded = true;
-      updateStep(run, run.steps[2]!, "failed", "process killed: budget exceeded");
-      finalizeRun(run, { failed: true, budgetExceeded: true });
-    }
-    expect(readRunSnapshot(join(dir, "state.json"))!.status).toBe(ending);
-
-    // Skipping the last step left settles every step, but the verdict on disk
-    // judged the work the selection just took out: the run is live again.
-    const { run: resumed } = await loadOrCreateRun({
-      pipelinePath: path,
-      ticket: "T-5",
-      skipFilter: ["c"],
-      fresh: false,
-      context: ctx,
-      worktree: false,
-    });
-    expect(resumed.run_dir).toBe(dir);
-    expect(resumed.status).toBe("RUNNING");
-    expect(resumed.stopped_reason).toBeUndefined();
-
-    const { deps, spawned } = countingDeps([]);
-    finalizeRun(resumed, await executeRunSteps(resumed, { resuming: true }, deps, ctx));
-    expect(spawned).toEqual([]);
-    expect(readRunSnapshot(join(dir, "state.json"))!.status).toBe("PASS");
-  });
-}
-
 test("a run records where it executes, so a reader finds its artifacts", async () => {
   const root = mkdtempSync(join(tmpdir(), "run-location-"));
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-4" });
@@ -291,87 +249,6 @@ test("a caller must say whether the run it opens is in a worktree", () => {
   const given: LoadOrCreateRunOptions = { pipelinePath: "p.ts", worktree: false };
   expect(missing.worktree).toBeUndefined();
   expect(given.worktree).toBe(false);
-});
-
-test("resume selectors apply to an aborted step, not only to pending ones", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-selectors-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-2" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-2", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-2",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  updateStep(run, run.steps[0]!, "done");
-  updateStep(run, run.steps[1]!, "running");
-  abortRun(run, "SIGINT");
-  expect(readRunSnapshot(join(dir, "state.json"))!.steps[1]!.status).toBe("aborted");
-
-  // An aborted step is replayed on resume, so it still holds executable work: a
-  // selector that excludes it must take it out, or `--step c` runs `b` anyway.
-  const { run: onlyC } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-2",
-    stepFilter: ["c"],
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(onlyC.steps[1]!.status).toBe("skipped");
-
-  const { run: skipB } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-2",
-    skipFilter: ["b"],
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(skipB.steps[1]!.status).toBe("skipped");
-});
-
-test("resume selectors leave a step the journal finished as done, even when the snapshot still calls it running", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-selectors-journal-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-journal" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-journal", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-journal",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  updateStep(run, run.steps[0]!, "done");
-  updateStep(run, run.steps[1]!, "running");
-  // A hard death between `updateStep`'s journal append and its snapshot write.
-  appendRunEvent(run, "step.status.changed", { stepId: "b", status: "done" });
-  expect(readRunSnapshot(join(dir, "state.json"))!.steps[1]!.status).toBe("running");
-
-  for (const [stepFilter, skipFilter] of [
-    [undefined, ["b"]],
-    [["c"], undefined],
-  ] as const) {
-    const { run: resumed } = await loadOrCreateRun({
-      pipelinePath: path,
-      ticket: "T-journal",
-      stepFilter: stepFilter?.slice(),
-      skipFilter: skipFilter?.slice(),
-      runDir: dir,
-      fresh: false,
-      context: ctx,
-      worktree: false,
-    });
-    expect(resumed.steps[1]!.status).toBe("done");
-    expect(resumed.steps[1]!.excluded).toBeUndefined();
-  }
 });
 
 test("resume: an attempt priced in the journal but missing from the snapshot still counts", async () => {
@@ -592,7 +469,7 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
     context: ctx,
     worktree: false,
   });
-  const { deps } = countingDeps([]);
+  const { deps } = countingDeps(ctx, []);
   const spawn = deps.executeStep;
   let onDisk: { state: string; events: string } | undefined;
   deps.executeStep = async (...args) => {
@@ -640,7 +517,7 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
   expect(finished[0]).toMatchObject({ attempt: 1, status: "failed", interrupted: true });
 
   // Settled as an interrupted pass: the next execution asks before replaying it.
-  const next = countingDeps([]);
+  const next = countingDeps(ctx, []);
   expect((await executeRunSteps(resumed, { resuming: true }, next.deps, ctx)).stopped).toBe(true);
   expect(next.spawned).toEqual([]);
 });
@@ -688,7 +565,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
     context: ctx,
     worktree: false,
   });
-  const first = countingDeps([]);
+  const first = countingDeps(ctx, []);
   const outcome = await executeRunSteps(resumed, { resuming: true }, first.deps, ctx);
   expect(outcome.stopped).toBe(true);
   expect(first.spawned).toEqual([]);
@@ -706,7 +583,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
     context: ctx,
     worktree: false,
   });
-  const second = countingDeps([]);
+  const second = countingDeps(ctx, []);
   expect((await executeRunSteps(again, { resuming: true }, second.deps, ctx)).stopped).toBe(true);
   expect(second.spawned).toEqual([]);
 
@@ -718,7 +595,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
     context: ctx,
     worktree: false,
   });
-  const third = countingDeps([]);
+  const third = countingDeps(ctx, []);
   const replayed = await executeRunSteps(authorized, { resuming: true, replayInterrupted: true }, third.deps, ctx);
   expect(replayed.stopped).toBe(false);
   expect(third.spawned).toEqual(["a", "b", "c"]);
@@ -732,8 +609,8 @@ for (const option of ["replayInterrupted", "rerunOnResume"]) {
     const path = join(root, "declared.ts");
     writeFileSync(
       path,
-      `export default ({ pipeline, actionStep }) => pipeline("p")
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", ${option}: true }))
+      `export default ({ pipeline, actionStep, textArtifact }) => pipeline("p")
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", ${option}: true, output: [textArtifact("a.txt")] }))
   .build();`,
     );
     const dir = resolveRunDir("p", "T-6d", undefined, true, ctx);
@@ -759,7 +636,7 @@ for (const option of ["replayInterrupted", "rerunOnResume"]) {
       context: ctx,
       worktree: false,
     });
-    const loop = countingDeps([]);
+    const loop = countingDeps(ctx, []);
     const outcome = await executeRunSteps(resumed, { resuming: true }, loop.deps, ctx);
     expect(outcome.stopped).toBe(false);
     expect(loop.spawned).toEqual(["a"]);
@@ -785,6 +662,7 @@ test("resume: a --start-at replay interrupted by a second crash stops the next r
     ).run,
   );
   for (const step of initial.steps) updateStep(initial, step, "done");
+  writeOutputs(ctx, "a", "b", "c");
   saveRun(initial);
 
   crashDuring(
@@ -812,7 +690,7 @@ test("resume: a --start-at replay interrupted by a second crash stops the next r
   });
   // The persisted requeue outlives the invocation that asked for it.
   expect(resumed.steps[1]!.replay).toBe(true);
-  const loop = countingDeps([]);
+  const loop = countingDeps(ctx, []);
   const outcome = await executeRunSteps(resumed, { resuming: true }, loop.deps, ctx);
   expect(outcome.stopped).toBe(true);
   expect(loop.spawned).toEqual([]);
@@ -827,18 +705,21 @@ function budgetedPipelineFile(root: string, usd?: number): string {
   const path = join(root, "budgeted.ts");
   writeFileSync(
     path,
-    `export default ({ pipeline, actionStep }) => pipeline("p")
+    `export default ({ pipeline, actionStep, textArtifact }) => pipeline("p")
   ${usd === undefined ? "" : `.maxCost(${usd})`}
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
-  .add(actionStep({ id: "c", name: "c", run: () => {}, describe: "c" }))
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", output: [textArtifact("a.txt")] }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", output: [textArtifact("b.txt")] }))
+  .add(actionStep({ id: "c", name: "c", run: () => {}, describe: "c", output: [textArtifact("c.txt")] }))
   .build();`,
   );
   return path;
 }
 
 /** Loop dependencies whose spawn is programmable and counted. */
-function countingDeps(results: Array<Partial<Awaited<ReturnType<StepLoopDeps["executeStep"]>>>>): {
+function countingDeps(
+  ctx: PipelineContext,
+  results: Array<Partial<Awaited<ReturnType<StepLoopDeps["executeStep"]>>>>,
+): {
   deps: StepLoopDeps;
   spawned: string[];
 } {
@@ -849,8 +730,16 @@ function countingDeps(results: Array<Partial<Awaited<ReturnType<StepLoopDeps["ex
     deps: {
       executeStep: async (step) => {
         spawned.push(step.id);
-        const result = results[index++] ?? { ok: true };
-        return { output: "", ok: true, stats: { duration_ms: 1 }, ...result };
+        const result = { output: "", ok: true, stats: { duration_ms: 1 }, ...(results[index++] ?? {}) };
+        // A successful spawn leaves the outputs its step declares, as a real one would.
+        if (result.ok) {
+          for (const output of step.def.outputs ?? []) {
+            const path = ctx.paths.artifact(output.name);
+            mkdirSync(dirname(path), { recursive: true });
+            writeFileSync(path, step.id);
+          }
+        }
+        return result;
       },
       extractErrors: async () => ({ hasErrors: false, errors: "" }),
       runFixLoop: async () => ({ failed: false }),
@@ -877,7 +766,7 @@ test("resume: a mid-step .maxCost() kill stops the run, and its cost is read bac
   // The live guard killed step `a` mid-flight on an estimate above the ceiling.
   // The figure the backend settled on afterwards ($0.90) lands under it, so the
   // ledger alone would read the ceiling as affordable.
-  const first = countingDeps([
+  const first = countingDeps(ctx, [
     {
       ok: false,
       budgetExceeded: true,
@@ -912,7 +801,7 @@ test("resume: a mid-step .maxCost() kill stops the run, and its cost is read bac
   expect(resumed.budget_exceeded).toBe(true);
   expect(runSpend(resumed).usd).toBe(0.9);
 
-  const second = countingDeps([{ ok: true }, { ok: true }, { ok: true }]);
+  const second = countingDeps(ctx, [{ ok: true }, { ok: true }, { ok: true }]);
   const again = await executeRunSteps(resumed, { resuming: true }, second.deps, ctx);
   expect(again.budgetExceeded).toBe(true);
   expect(second.spawned).toEqual([]);
@@ -935,7 +824,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
 
   // Step `a` completes, spends $1 the runner could price, and consumes tokens it
   // could not: the $5 ceiling is no longer enforceable against the remainder.
-  const first = countingDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 1, cost_unknown: true } }]);
+  const first = countingDeps(ctx, [{ ok: true, stats: { duration_ms: 1, total_cost_usd: 1, cost_unknown: true } }]);
   const outcome = await executeRunSteps(run, { resuming: false }, first.deps, ctx);
   expect(outcome.costUnaccounted).toBe(true);
   expect(outcome.budgetExceeded).toBe(false);
@@ -957,7 +846,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
   });
   expect(resumed.cost_unaccounted).toBe(true);
   expect(resumed.allow_unmetered).toBeUndefined();
-  const second = countingDeps([{ ok: true }, { ok: true }]);
+  const second = countingDeps(ctx, [{ ok: true }, { ok: true }]);
   const again = await executeRunSteps(resumed, { resuming: true }, second.deps, ctx);
   expect(again.costUnaccounted).toBe(true);
   expect(second.spawned).toEqual([]);
@@ -977,7 +866,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
   expect(raised.max_cost_usd).toBe(50);
   expect(raised.cost_unaccounted).toBe(true);
   expect(raised.allow_unmetered).toBeUndefined();
-  const third = countingDeps([{ ok: true }, { ok: true }]);
+  const third = countingDeps(ctx, [{ ok: true }, { ok: true }]);
   const withBudget = await executeRunSteps(raised, { resuming: true }, third.deps, ctx);
   expect(withBudget.costUnaccounted).toBe(true);
   expect(third.spawned).toEqual([]);
@@ -999,7 +888,7 @@ test("resume: an accounting stop resists a plain resume and --budget, and only -
   expect(authorized.cost_unaccounted).toBe(true);
   expect(readRunEvents(dir).filter((event) => event.type === "run.unmetered.authorized")).toHaveLength(1);
 
-  const fourth = countingDeps([{ ok: true }, { ok: true }]);
+  const fourth = countingDeps(ctx, [{ ok: true }, { ok: true }]);
   const allowed = await executeRunSteps(authorized, { resuming: true }, fourth.deps, ctx);
   expect(allowed.costUnaccounted).toBe(false);
   expect(allowed.failed).toBe(false);
@@ -1036,7 +925,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
     worktree: false,
   });
   expect(run.max_cost_usd).toBeUndefined();
-  const first = countingDeps([
+  const first = countingDeps(ctx, [
     { ok: true, stats: { duration_ms: 1, total_cost_usd: 1, cost_unknown: true } },
     { ok: false, failReason: "step b failed" },
   ]);
@@ -1061,7 +950,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
   });
   expect(capped.max_cost_usd).toBe(10);
   expect(capped.cost_unaccounted).toBe(true);
-  const second = countingDeps([{ ok: true }, { ok: true }]);
+  const second = countingDeps(ctx, [{ ok: true }, { ok: true }]);
   const again = await executeRunSteps(capped, { resuming: true }, second.deps, ctx);
   expect(again.costUnaccounted).toBe(true);
   expect(again.costUnaccountedStop).toBe(true);
@@ -1077,7 +966,7 @@ test("resume: --budget on a run that was uncapped when it spent unpriced tokens 
     allowUnmetered: true,
     worktree: false,
   });
-  const third = countingDeps([{ ok: true }, { ok: true }]);
+  const third = countingDeps(ctx, [{ ok: true }, { ok: true }]);
   const allowed = await executeRunSteps(authorized, { resuming: true }, third.deps, ctx);
   expect(allowed.costUnaccounted).toBe(false);
   expect(third.spawned).toEqual(["b", "c"]);
@@ -1098,7 +987,7 @@ test("resume: a fresh run inherits neither the authorization nor the accounting 
     worktree: false,
   });
   expect(authorized.allow_unmetered).toBe(true);
-  const first = countingDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 1, cost_unknown: true } }]);
+  const first = countingDeps(ctx, [{ ok: true, stats: { duration_ms: 1, total_cost_usd: 1, cost_unknown: true } }]);
   await executeRunSteps(authorized, { resuming: false }, first.deps, ctx);
   expect(readRunSnapshot(join(dir, "state.json"))?.cost_unaccounted).toBe(true);
 
@@ -1136,7 +1025,7 @@ test("resume: an authorized run still stops when the spend it could price reache
   // authorization covers the unknown portion; the known lower bound does not
   // stop being a fact, so the run reports an exceeded budget, not an accounting
   // stop, and stops all the same.
-  const deps = countingDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 2, cost_unknown: true } }]);
+  const deps = countingDeps(ctx, [{ ok: true, stats: { duration_ms: 1, total_cost_usd: 2, cost_unknown: true } }]);
   const outcome = await executeRunSteps(run, { resuming: false }, deps.deps, ctx);
   expect(outcome.budgetExceeded).toBe(true);
   expect(outcome.costUnaccounted).toBe(false);
@@ -1144,74 +1033,7 @@ test("resume: an authorized run still stops when the spend it could price reache
   expect(run.steps.map((step) => step.status)).toEqual(["done", "pending", "pending"]);
 }, 20_000);
 
-test("resume selectors apply to a step added to the definition after the snapshot", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-new-step-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-new" });
-  const step = (id: string) => `  .add(actionStep({ id: "${id}", name: "${id}", run: () => {}, describe: "${id}" }))`;
-  // A distinct file per revision: the loader imports the module, and an import is
-  // cached for the process.
-  const definition = (file: string, ids: string[]) => {
-    const path = join(root, file);
-    writeFileSync(
-      path,
-      `export default ({ pipeline, actionStep }) => pipeline("p")\n${ids.map(step).join("\n")}\n  .build();`,
-    );
-    return path;
-  };
-
-  // Two snapshots taken while the definition holds a and b only.
-  const before = definition("before.ts", ["a", "b"]);
-  const selected = resolveRunDir("p", "T-new", undefined, true, ctx);
-  await loadOrCreateRun({
-    pipelinePath: before,
-    ticket: "T-new",
-    runDir: selected,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  const skipped = resolveRunDir("p", "T-new", undefined, true, ctx);
-  await loadOrCreateRun({
-    pipelinePath: before,
-    ticket: "T-new",
-    runDir: skipped,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-
-  // A step added afterwards has no persisted state, so hydration would default it
-  // to pending: it must still answer to the resume selectors.
-  const after = definition("after.ts", ["a", "b", "deploy"]);
-
-  const { run: onlyA } = await loadOrCreateRun({
-    pipelinePath: after,
-    ticket: "T-new",
-    stepFilter: ["a"],
-    runDir: selected,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  const outsideSelection = onlyA.steps.find((entry) => entry.id === "deploy")!;
-  expect(outsideSelection.status).toBe("skipped");
-  expect(outsideSelection.excluded).toBe(true);
-
-  const { run: withoutDeploy } = await loadOrCreateRun({
-    pipelinePath: after,
-    ticket: "T-new",
-    skipFilter: ["deploy"],
-    runDir: skipped,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  const explicitlySkipped = withoutDeploy.steps.find((entry) => entry.id === "deploy")!;
-  expect(explicitlySkipped.status).toBe("skipped");
-  expect(explicitlySkipped.excluded).toBe(true);
-});
-
-test("--start-at leaves a done step before it to the resume re-check instead of excluding it", async () => {
+test("--start-at leaves the steps before it as they are at boot", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-start-at-done-"));
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-start" });
   const path = pipelineFile(root);
@@ -1240,13 +1062,9 @@ test("--start-at leaves a done step before it to the resume re-check instead of 
     context: ctx,
     worktree: false,
   });
-  const [a, b] = resumed.steps;
-  // The step loop re-admits a `done` step declaring `input` (step-loop.test.ts):
-  // an exclusion here would turn that freshness re-check off.
-  expect(a!.status).toBe("done");
-  expect(a!.excluded).toBeUndefined();
-  expect(b!.status).toBe("skipped");
-  expect(b!.excluded).toBe(true);
+  // Boot leaves the steps before the target as they are: the loop applies the
+  // selection to this invocation only (step-loop.test.ts).
+  expect(resumed.steps.map((step) => step.status)).toEqual(["done", "pending", "pending"]);
 });
 
 // Invariant: the journal owns the attempts. A resume that cannot read it must
@@ -1490,6 +1308,7 @@ test("resume: --start-at requeues the target and every later step, keeping their
     ).run,
   );
   updateStep(run, run.steps[0]!, "done");
+  writeOutputs(ctx, "a");
   run.steps[1]!.retries = 1;
   run.steps[1]!.last_attempt = 2;
   run.steps[1]!.control = { duration_ms: 1, total_cost_usd: 1 };
@@ -1514,7 +1333,7 @@ test("resume: --start-at requeues the target and every later step, keeping their
   expect(resumed.steps[1]).toMatchObject({ retries: 1, last_attempt: 2, control: { total_cost_usd: 1 } });
   expect(runSpend(resumed).usd).toBe(1);
 
-  const deps = countingDeps([{ ok: true }, { ok: true }]);
+  const deps = countingDeps(ctx, [{ ok: true }, { ok: true }]);
   await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
   expect(deps.spawned).toEqual(["b", "c"]);
   // Settled, the replay mark is gone: a later plain resume treats them as history.
@@ -1539,6 +1358,7 @@ test("resume: a step requeued by --start-at stays pending when the next invocati
     worktree: false,
   });
   for (const step of run.steps) updateStep(run, step, "done");
+  writeOutputs(ctx, "a", "b", "c");
 
   // Interrupted before the replay ran anything: the journal's last word on each
   // step is still the `done` of the first pass.
@@ -1561,53 +1381,9 @@ test("resume: a step requeued by --start-at stays pending when the next invocati
   });
   expect(resumed.steps.map((step) => step.status)).toEqual(["done", "pending", "pending"]);
 
-  const deps = countingDeps([{ ok: true }, { ok: true }]);
+  const deps = countingDeps(ctx, [{ ok: true }, { ok: true }]);
   await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
   expect(deps.spawned).toEqual(["b", "c"]);
-});
-
-test("resume: --start-at replays a target an earlier --start-at excluded", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-start-at-excluded-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-excl" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-excl", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-excl",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  updateStep(run, run.steps[0]!, "failed", "acceptance refused");
-
-  // `--start-at b` takes the failed `a` out of the run, durably.
-  const { run: skipping } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-excl",
-    runDir: dir,
-    fresh: false,
-    startAt: "b",
-    context: ctx,
-    worktree: false,
-  });
-  expect(skipping.steps[0]).toMatchObject({ status: "skipped", excluded: true });
-  await executeRunSteps(skipping, { resuming: true }, countingDeps([]).deps, ctx);
-
-  // Naming `a` is the newer decision: it supersedes the exclusion.
-  const { run: replaying } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-excl",
-    runDir: dir,
-    fresh: false,
-    startAt: "a",
-    context: ctx,
-    worktree: false,
-  });
-  expect(replaying.steps[0]!.excluded).toBeUndefined();
-  const deps = countingDeps([{ ok: true }, { ok: true }, { ok: true }]);
-  await executeRunSteps(replaying, { resuming: true }, deps.deps, ctx);
-  expect(deps.spawned).toEqual(["a", "b", "c"]);
 });
 
 test("resume: --start-at on an explicitly selected PASS run replays from the target", async () => {
@@ -1631,6 +1407,7 @@ test("resume: --start-at on an explicitly selected PASS run replays from the tar
     step.control = { duration_ms: 1, total_cost_usd: 1 };
     updateStep(run, step, "done");
   }
+  writeOutputs(ctx, "a", "b", "c");
   finalizeRun(run);
   unlinkSync(join(dir, "runner.lock"));
   expect(readRunSnapshot(join(dir, "state.json"))?.status).toBe("PASS");
@@ -1652,7 +1429,7 @@ test("resume: --start-at on an explicitly selected PASS run replays from the tar
   expect(resumed.total_control).toBeUndefined();
   expect(runSpend(resumed).usd).toBe(3);
 
-  const deps = countingDeps([{ ok: true }]);
+  const deps = countingDeps(ctx, [{ ok: true }]);
   await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
   expect(deps.spawned).toEqual(["c"]);
   selection.release();
@@ -1716,9 +1493,9 @@ test("resume: a definition that dropped a persisted step refuses and gives the r
   const trimmed = join(root, "p-trimmed.ts");
   writeFileSync(
     trimmed,
-    `export default ({ pipeline, actionStep }) => pipeline("p")
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
+    `export default ({ pipeline, actionStep, textArtifact }) => pipeline("p")
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", output: [textArtifact("a.txt")] }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", output: [textArtifact("b.txt")] }))
   .build();`,
   );
 
@@ -1742,90 +1519,38 @@ test("a new run started with --start-at marks the target and later steps as repl
     context: ctx,
     worktree: false,
   });
-  expect(run.steps.map((step) => [step.status, step.excluded, step.replay])).toEqual([
-    ["skipped", true, undefined],
-    ["pending", undefined, true],
-    ["pending", undefined, true],
+  expect(run.steps.map((step) => [step.status, step.replay])).toEqual([
+    ["pending", undefined],
+    ["pending", true],
+    ["pending", true],
   ]);
 });
 
-// Reconcile mode: the selectors last one invocation, so boot persists none of
-// them and drops an exclusion an earlier legacy invocation left behind.
-
-function reconcilePipelineFile(root: string, file: string, mode: "reconcile" | "legacy"): string {
-  const path = join(root, file);
-  const step = (id: string) =>
-    `  .add(actionStep({ id: "${id}", name: "${id}", run: () => {}, describe: "${id}", rerunOnResume: true }))`;
-  writeFileSync(
-    path,
-    `export default ({ pipeline, actionStep }) => pipeline("p")${mode === "reconcile" ? ".reconcile()" : ""}
-${["a", "b", "c"].map(step).join("\n")}
-  .build();`,
-  );
-  return path;
-}
-
-test("reconcile: a new run started with selectors persists no exclusion and leaves every step to the loop", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-reconcile-new-"));
-  try {
-    const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-rec" });
-    const path = reconcilePipelineFile(root, "p.ts", "reconcile");
-    for (const [stepFilter, skipFilter, startAt] of [
-      [["c"], undefined, undefined],
-      [undefined, ["b"], undefined],
-      [undefined, undefined, "c"],
-    ] as const) {
-      const dir = resolveRunDir("p", "T-rec", undefined, true, ctx);
-      const { run } = await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-rec",
-        stepFilter: stepFilter?.slice(),
-        skipFilter: skipFilter?.slice(),
-        runDir: dir,
-        fresh: false,
-        startAt,
-        context: ctx,
-        worktree: false,
-      });
-      expect(run.steps.map((step) => step.status)).toEqual(["pending", "pending", "pending"]);
-      expect(run.steps.map((step) => step.excluded)).toEqual([undefined, undefined, undefined]);
-      expect(run.reconcile).toBe(true);
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("reconcile: a resume applies no selector at boot and drops an exclusion a legacy invocation persisted", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-reconcile-inherited-"));
+test("selectors persist nothing: a resume drops the exclusion an older runner left in the snapshot", async () => {
+  const root = mkdtempSync(join(tmpdir(), "resume-dropped-exclusion-"));
   try {
     const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-inh" });
-    const legacy = reconcilePipelineFile(root, "legacy.ts", "legacy");
+    const path = pipelineFile(root);
     const dir = resolveRunDir("p", "T-inh", undefined, true, ctx);
-    const run = writable(
-      (
-        await loadOrCreateRun({
-          pipelinePath: legacy,
-          ticket: "T-inh",
-          skipFilter: ["b"],
-          runDir: dir,
-          fresh: false,
-          context: ctx,
-          worktree: false,
-        })
-      ).run,
-    );
-    expect(run.steps[1]).toMatchObject({ status: "skipped", excluded: true });
-    expect(run.reconcile).toBe(false);
-    saveRun(run);
+    const { run } = await loadOrCreateRun({
+      pipelinePath: path,
+      ticket: "T-inh",
+      runDir: dir,
+      fresh: false,
+      context: ctx,
+      worktree: false,
+    });
+    expect(run.steps.map((step) => step.status)).toEqual(["pending", "pending", "pending"]);
+    const statePath = join(dir, "state.json");
+    const legacy = JSON.parse(readFileSync(statePath, "utf8"));
+    legacy.steps[1] = { ...legacy.steps[1], status: "skipped", excluded: true };
+    writeFileSync(statePath, JSON.stringify(legacy));
 
-    const reconciled = reconcilePipelineFile(root, "reconciled.ts", "reconcile");
     const resumed = writable(
       (
         await loadOrCreateRun({
-          pipelinePath: reconciled,
+          pipelinePath: path,
           ticket: "T-inh",
-          skipFilter: ["c"],
           runDir: dir,
           fresh: false,
           context: ctx,
@@ -1833,14 +1558,10 @@ test("reconcile: a resume applies no selector at boot and drops an exclusion a l
         })
       ).run,
     );
-
-    // b stays skipped, which the loop re-admits; c owes work the loop sets aside.
+    // b stays skipped, which the loop re-admits like any settled step.
     expect(resumed.steps.map((step) => step.status)).toEqual(["pending", "skipped", "pending"]);
-    expect(resumed.steps.map((step) => step.excluded)).toEqual([undefined, undefined, undefined]);
-    // The mode comes from the definition boot loaded, never from the snapshot.
-    expect(resumed.reconcile).toBe(true);
     saveRun(resumed);
-    const persisted = readRunSnapshot(join(dir, "state.json"))!;
+    const persisted = readRunSnapshot(statePath)!;
     expect(persisted.steps.some((step) => "excluded" in step)).toBe(false);
     expect("reconcile" in persisted).toBe(false);
   } finally {

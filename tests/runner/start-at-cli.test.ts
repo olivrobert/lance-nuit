@@ -36,11 +36,22 @@ function scratchProject() {
   );
   writeFileSync(
     join(cwd, ".lance-nuit", "pipelines", "default.ts"),
-    `export default ({ pipeline, bashStep }: any) => pipeline("startat")
-  .add(bashStep({ id: "implement", name: "implement", command: "echo implement >> trace.log" }))
-  .add(bashStep({ id: "acceptance", name: "acceptance", command: "echo acceptance >> trace.log" }))
-  .add(bashStep({ id: "commit", name: "commit", command: "echo commit >> trace.log" }))
-  .add(bashStep({ id: "publish", name: "publish", command: "echo publish >> trace.log && test -f fixed" }))
+    `// Each step leaves a receipt, so a resume finds the steps already done.
+const traced = (bashStep: any, textArtifact: any, id: string, check = "true") =>
+  bashStep({
+    id,
+    name: id,
+    output: [textArtifact(id + ".done")],
+    command: (ctx: any) => {
+      const out = ctx.paths.artifact(id + ".done");
+      return "echo " + id + " >> trace.log && " + check + " && mkdir -p '" + out.slice(0, out.lastIndexOf("/")) + "' && touch '" + out + "'";
+    },
+  });
+export default ({ pipeline, bashStep, textArtifact }: any) => pipeline("startat")
+  .add(traced(bashStep, textArtifact, "implement"))
+  .add(traced(bashStep, textArtifact, "acceptance"))
+  .add(traced(bashStep, textArtifact, "commit"))
+  .add(traced(bashStep, textArtifact, "publish", "test -f fixed"))
   .build();
 `,
   );

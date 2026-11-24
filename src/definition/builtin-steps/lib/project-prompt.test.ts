@@ -39,6 +39,7 @@ test("promptFile: loader binds base to pipeline file", async () => {
           id: "prompt",
           name: "Prompt",
           command: ctx => prompt({ ticket: ctx.ticket ?? "?" }),
+          rerunOnResume: true,
         }),
       ).build();
     };

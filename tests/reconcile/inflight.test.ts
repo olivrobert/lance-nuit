@@ -35,13 +35,11 @@ afterEach(cleanupScratch);
 const FULL = ["context", "branch", "triage", "plan", "prepare", "implement", "quality", "commit", "publish", "report"];
 /** Until `implement`, where `partialAt implement` makes the first run fail. */
 const UNTIL_IMPLEMENT = ["context", "branch", "triage", "plan", "prepare", "implement"];
-/** What a new run replays when only `implement` owes work: legacy also replays `branch`. */
+/** What a new run replays when only `implement` owes work. */
 const FROM_IMPLEMENT = ["context", "prepare", "implement", "quality", "commit", "publish", "report"];
 
 /** Exit code of a run `--until` stopped with work left (guide/cli-options.md). */
 const UNTIL_EXIT = 3;
-
-const reconcile = { reconcile: true } as const;
 
 /** Journal event naming the outputs an unfinished attempt left behind. */
 const UNFINISHED_EVENT = "step.outputs.unfinished";
@@ -82,7 +80,7 @@ function inFlightRecords(cwd: string): string[] {
 }
 
 test("W1: a partial output left by a failed attempt is replayed by --fresh, never adopted", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   failWithPartialImplement(cwd);
   const failedRun = latestRunId(cwd);
   const markLeft = provenanceRecords(cwd)["impl.md.json"]?.inFlight;
@@ -102,30 +100,12 @@ test("W1: a partial output left by a failed attempt is replayed by --fresh, neve
   expect(inFlightRecords(cwd)).toEqual([]);
 });
 
-// Deliberate change of the legacy behavior (L2b): before it, the fresh run adopted
-// the partial `impl.md`, which carried no record, and skipped `implement` with
-// `outputs up to date with declared inputs` and freshness `adoptable`.
-test("W2: in legacy mode too, --fresh replays the step whose partial output a failed attempt left", () => {
-  const cwd = scratchRoute();
-  failWithPartialImplement(cwd);
-  heal(cwd, "implement");
-  const before = mark(cwd);
-
-  const fresh = run(cwd, "--fresh");
-
-  expect(fresh.status).toBe(0);
-  expect(snapshot(cwd).status).toBe("PASS");
-  expect(traceSince(cwd, before)).toEqual(["context", "branch", "prepare", ...FROM_IMPLEMENT.slice(2)]);
-  expectPartialReplaced(cwd, before);
-  expect(inFlightRecords(cwd)).toEqual([]);
-});
-
 // The third FAIL of L3: the run facts that kept the partial output from being
 // adopted vanish once `--start-at` puts the step back to `pending` and a new run
 // starts. The form with `--skip implement` in place of `--fresh` is in
 // selectors.test.ts.
 test("W3: a step requeued by --start-at, then run anew, never adopts the partial output of its failed pass", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   failAt(cwd, "implement");
   expect(run(cwd).status).not.toBe(0);
   expect(statusesOf(cwd).implement).toBe("failed");
@@ -157,7 +137,7 @@ test("W3: a step requeued by --start-at, then run anew, never adopts the partial
 });
 
 test("W4: a partial output left by a killed attempt is replayed by --fresh, never adopted", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   partialAt(cwd, "implement");
   await killDuring(cwd, "implement");
   expect(readArtifact(cwd, "impl.md")).toBe("partial implement\n");
@@ -178,7 +158,7 @@ test("W4: a partial output left by a killed attempt is replayed by --fresh, neve
 });
 
 test("W5: a step without input whose failed attempt left its output replays on resume", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   partialAt(cwd, "branch");
   expect(run(cwd).status).not.toBe(0);
   expect(statusesOf(cwd).branch).toBe("failed");
@@ -199,7 +179,7 @@ test("W5: a step without input whose failed attempt left its output replays on r
 // The resume above is also guarded by the run fact (`branch` is `failed`). A new
 // run has no such fact: only the mark stops `outputs present` from settling it.
 test("W5: a step without input ignores `outputs present` when a failed attempt left its output, on a new run", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   partialAt(cwd, "branch");
   expect(run(cwd).status).not.toBe(0);
   heal(cwd, "branch");
@@ -219,33 +199,28 @@ test("W5: a step without input ignores `outputs present` when a failed attempt l
   expect(provenanceRecords(cwd)["branch.json.json"]).toMatchObject({ producedBy: "branch", inputs: {} });
 });
 
-for (const mode of [
-  { name: "legacy", options: {}, relaunch: ["context", "branch", "prepare", "quality", "report"] },
-  { name: "reconcile", options: reconcile, relaunch: ["context", "prepare", "quality", "report"] },
-] as const) {
-  test(`W6 (${mode.name}): no record carries a mark after a complete PASS, and a relaunch is unchanged`, () => {
-    const cwd = scratchRoute(mode.options);
-    expect(run(cwd).status).toBe(0);
-    expect(trace(cwd)).toEqual(FULL);
-    const records = provenanceRecords(cwd);
-    expect(Object.keys(records)).toEqual([
-      "branch.json.json",
-      "commit.sha.json",
-      "impl.md.json",
-      "mr-url.txt.json",
-      "plan.md.json",
-      "triage.md.json",
-    ]);
-    expect(inFlightRecords(cwd)).toEqual([]);
-    const before = mark(cwd);
+test("W6: no record carries a mark after a complete PASS, and a relaunch is unchanged", () => {
+  const cwd = scratchRoute();
+  expect(run(cwd).status).toBe(0);
+  expect(trace(cwd)).toEqual(FULL);
+  const records = provenanceRecords(cwd);
+  expect(Object.keys(records)).toEqual([
+    "branch.json.json",
+    "commit.sha.json",
+    "impl.md.json",
+    "mr-url.txt.json",
+    "plan.md.json",
+    "triage.md.json",
+  ]);
+  expect(inFlightRecords(cwd)).toEqual([]);
+  const before = mark(cwd);
 
-    expect(run(cwd).status).toBe(0);
+  expect(run(cwd).status).toBe(0);
 
-    // S1 in legacy, R2 in reconcile mode.
-    expect(traceSince(cwd, before)).toEqual([...mode.relaunch]);
-    expect(inFlightRecords(cwd)).toEqual([]);
-  });
-}
+  // R2: only the steps declaring rerunOnResume run again.
+  expect(traceSince(cwd, before)).toEqual(["context", "prepare", "quality", "report"]);
+  expect(inFlightRecords(cwd)).toEqual([]);
+});
 
 // ── Repairing an output by hand (guide/dsl.md, Input freshness) ──────────────
 
@@ -258,7 +233,7 @@ function repairedByHand(cwd: string): void {
 }
 
 test("W11: a repaired output whose record was deleted is adopted by a new run", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   repairedByHand(cwd);
   const before = mark(cwd);
 
@@ -274,7 +249,7 @@ test("W11: a repaired output whose record was deleted is adopted by a new run", 
 });
 
 test("W11: resuming the failed run instead replays the step over the repair", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   repairedByHand(cwd);
   const before = mark(cwd);
 

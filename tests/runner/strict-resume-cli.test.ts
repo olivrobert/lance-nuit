@@ -47,13 +47,17 @@ function scratchProject() {
   writeFileSync(join(cwd, ".counter"), "0\n");
   writeFileSync(
     join(cwd, ".lance-nuit", "pipelines", "default.ts"),
-    `export default ({ pipeline, bashStep }: any) => pipeline("strict-resume")
+    `export default ({ pipeline, bashStep, textArtifact }: any) => pipeline("strict-resume")
   .add(bashStep({
     id: "count",
     name: "Count once",
-    command: "n=$(cat .counter); printf '%s\\n' $((n + 1)) > .counter",
+    output: [textArtifact("counted.txt")],
+    command: (ctx: any) => {
+      const out = ctx.paths.artifact("counted.txt");
+      return "n=$(cat .counter); printf '%s\\n' $((n + 1)) > .counter && mkdir -p '" + out.slice(0, out.lastIndexOf("/")) + "' && touch '" + out + "'";
+    },
   }))
-  .add(bashStep({ id: "stop", name: "Stop here", command: "exit 17" }))
+  .add(bashStep({ id: "stop", name: "Stop here", command: "exit 17", rerunOnResume: true }))
   .build();
 `,
   );

@@ -264,7 +264,6 @@ async function admitReconciled(step: RunStep, ctx: PipelineContext, extra: { sta
     baseCtx: ctx,
     budget: { cumulative: 0 },
     output: NULL_RUN_OUTPUT,
-    reconcile: true,
     ...extra,
   });
   return { admission, events: readRunEvents(run.run_dir) };
@@ -308,13 +307,6 @@ test("reconcile: a step missing one of its outputs runs", async () => {
   );
 
   expect((await admitReconciled(step, ctx)).admission.kind).toBe("ready");
-});
-
-test("legacy: a step whose outputs are present but which declares no input runs", async () => {
-  const { ctx } = reworkContext({ "plan.md": "v1" });
-  const step = deliverableStep({ status: "pending" });
-
-  expect((await admitRework(step, ctx)).admission.kind).toBe("ready");
 });
 
 test("reconcile: a step requeued by --start-at runs although its outputs are present", async () => {

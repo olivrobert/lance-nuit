@@ -177,7 +177,7 @@ function verifyInstalledTypesCommand() {
     join(pipelineDir, "minimal.ts"),
     `import type { Dsl } from "@lance-nuit/dsl";
 export default ({ pipeline, bashStep }: Dsl) => pipeline("minimal")
-  .add(bashStep({ id: "check", name: "Check", command: "true" }))
+  .add(bashStep({ id: "check", name: "Check", command: "true", rerunOnResume: true }))
   .build();
 `,
   );
@@ -239,6 +239,7 @@ export default ({ pipeline, bashStep }: Dsl) => pipeline("extension")
   .forEachWorkItem({ queue: "bugTodo", do: [bashStep({
     id: "check", name: "Read kit extension ticket",
     command: "test -s .lance-nuit/work-items/PROJ-24/artifacts/ticket.md",
+    rerunOnResume: true,
   })] }).build();
 `,
   );
@@ -316,6 +317,7 @@ export default ({ pipeline, bashStep }: Dsl) => pipeline("extension")
   .forEachWorkItem({ queue: "bugTodo", do: [bashStep({
     id: "check", name: "Read installed extension ticket",
     command: "test -s .lance-nuit/work-items/PROJ-24/artifacts/ticket.md",
+    rerunOnResume: true,
   })] }).build();
 `,
   );

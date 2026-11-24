@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AgentCapabilities, AgentRequest } from "../../contracts/backends.js";
 import { createDefaultAgentBackendRegistry } from "../../agents/default-registry.js";
 import type { PipelineContext } from "../../shared/language/context.js";
@@ -48,6 +48,12 @@ if (!REGISTRY.has(COST_BACKEND)) {
           const charged =
             request.budgetRemaining != null ? Math.min(planned.cost, request.budgetRemaining) : planned.cost;
           const overBudget = charged < planned.cost;
+          // A prompt `write:<path>` stands for an agent that produces that file.
+          if (planned.ok && !overBudget && request.prompt.startsWith("write:")) {
+            const path = request.prompt.slice("write:".length);
+            mkdirSync(dirname(path), { recursive: true });
+            writeFileSync(path, "done\n");
+          }
           return {
             provider: COST_BACKEND,
             output: "",
@@ -138,7 +144,7 @@ import { join } from "node:path";
 export default ({ pipeline, actionStep }) => pipeline(${JSON.stringify(name)})
   .add(actionStep({ id: ${JSON.stringify(label)}, name: ${JSON.stringify(label)},
     run: ctx => { appendFileSync(join(ctx.cwd, "trace.log"), ${JSON.stringify(`${label}:`)} + (ctx.ticket ?? "-") + "\\n"); },
-    describe: ${JSON.stringify(label)} }))
+    describe: ${JSON.stringify(label)}, rerunOnResume: true }))
   .build();
 `;
 }
@@ -347,7 +353,7 @@ test("forEachPipeline: validates the contract", async () => {
     `
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-export default ({ pipeline, forEachPipeline, actionStep }) => pipeline("parent")
+export default ({ pipeline, forEachPipeline, actionStep, textArtifact }) => pipeline("parent")
   .maxCost(10)
   .add(
     forEachPipeline({
@@ -365,7 +371,7 @@ export default ({ pipeline, forEachPipeline, actionStep }) => pipeline("parent")
         ticket: ctx => ctx.ticket,
       },
     }),
-    actionStep({ id: "parent-after", name: "parent-after", run: ctx => { appendFileSync(join(ctx.cwd, "trace.log"), "parent-after:" + (ctx.ticket ?? "-") + "\\n"); }, describe: "parent-after" }),
+    actionStep({ id: "parent-after", name: "parent-after", output: [textArtifact("parent-after.txt")], run: async ctx => { appendFileSync(join(ctx.cwd, "trace.log"), "parent-after:" + (ctx.ticket ?? "-") + "\\n"); await textArtifact("parent-after.txt").write(ctx, "done\\n"); }, describe: "parent-after" }),
   )
   .build();
 `,
@@ -504,7 +510,7 @@ test("forEachPipeline: validates the contract", async () => {
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 export default ({ pipeline, actionStep }) => pipeline("child")
-  .add(actionStep({ id: "work", name: "work", run: ctx => { appendFileSync(join(ctx.cwd, "trace.log"), (ctx.ticket ?? "-") + ":" + (ctx.lot?.id ?? "-") + "\\n"); }, describe: "work" }))
+  .add(actionStep({ id: "work", name: "work", run: ctx => { appendFileSync(join(ctx.cwd, "trace.log"), (ctx.ticket ?? "-") + ":" + (ctx.lot?.id ?? "-") + "\\n"); }, describe: "work", rerunOnResume: true }))
   .build();
 `,
   );
@@ -556,7 +562,7 @@ export default ({ pipeline, actionStep }) => pipeline("child")
   .add(actionStep({ id: "work", name: "work", run: ctx => {
     appendFileSync(join(ctx.cwd, "trace.log"), "child:" + ctx.ticket + "\\n");
     if (ctx.ticket === "P-02") throw new Error("child failed");
-  }, describe: "work" })).build();
+  }, describe: "work", rerunOnResume: true })).build();
 `,
   );
   const afterPath = writePipeline(root, "after", actionPipelineSource("after", "after"));
@@ -619,7 +625,7 @@ export default ({ pipeline, runPipeline, actionStep }) => pipeline("parent")
       pipeline: "middle",
       ticket: ctx => ctx.ticket + "-middle",
     }),
-    actionStep({ id: "parent-after", name: "parent-after", run: ctx => { appendFileSync(join(ctx.cwd, "trace.log"), "parent:" + ctx.ticket + "\\n"); }, describe: "parent-after" }),
+    actionStep({ id: "parent-after", name: "parent-after", run: ctx => { appendFileSync(join(ctx.cwd, "trace.log"), "parent:" + ctx.ticket + "\\n"); }, describe: "parent-after", rerunOnResume: true }),
   )
   .build();
 `,
@@ -778,7 +784,7 @@ test("pipeline-orchestration: validates the integration contract", async () => {
     `
 export default ({ pipeline, llmStep }) => pipeline("child")
   .maxCost(1)
-  .add(llmStep({ id: "work", name: "work", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 0.4 }, command: "work" }))
+  .add(llmStep({ id: "work", name: "work", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 0.4 }, command: "work", rerunOnResume: true }))
   .build();
 `,
   );
@@ -894,7 +900,7 @@ test("pipeline-orchestration: validates the integration contract", async () => {
     `
 export default ({ pipeline, llmStep }) => pipeline("child")
   .maxCost(1)
-  .add(llmStep({ id: "work", name: "work", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 0.4 }, command: "work", onFail: { retries: 1 } }))
+  .add(llmStep({ id: "work", name: "work", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 0.4 }, command: "work", onFail: { retries: 1 }, rerunOnResume: true }))
   .build();
 `,
   );
@@ -963,7 +969,7 @@ test("pipeline-orchestration: validates the integration contract", async () => {
     "paid-child",
     `
 export default ({ pipeline, llmStep }) => pipeline("paid-child")
-  .add(llmStep({ id: "work", name: "work", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 0.4 }, command: "work" }))
+  .add(llmStep({ id: "work", name: "work", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 0.4 }, command: "work", rerunOnResume: true }))
   .build();
 `,
   );
@@ -1011,10 +1017,10 @@ test("pipeline-orchestration: --budget on the parent lifts a child's own ceiling
     root,
     "child",
     `
-export default ({ pipeline, llmStep }) => pipeline("child")
+export default ({ pipeline, llmStep, textArtifact }) => pipeline("child")
   .maxCost(1)
-  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 1 }, command: "a" }))
-  .add(llmStep({ id: "b", name: "b", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 1 }, command: "b" }))
+  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 1 }, command: (ctx) => "write:" + ctx.paths.artifact("a.txt"), output: [textArtifact("a.txt")] }))
+  .add(llmStep({ id: "b", name: "b", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 1 }, command: (ctx) => "write:" + ctx.paths.artifact("b.txt"), output: [textArtifact("b.txt")] }))
   .build();
 `,
   );
@@ -1080,8 +1086,8 @@ function unpricedComposition(root: string): { parentPath: string; context: Pipel
     `
 export default ({ pipeline, llmStep }) => pipeline("child")
   .maxCost(2)
-  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "a" }))
-  .add(llmStep({ id: "b", name: "b", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "b" }))
+  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "a", rerunOnResume: true }))
+  .add(llmStep({ id: "b", name: "b", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "b", rerunOnResume: true }))
   .build();
 `,
   );
@@ -1114,7 +1120,7 @@ function unpricedFanOut(root: string): { parentPath: string; context: PipelineCo
     "child",
     `
 export default ({ pipeline, llmStep }) => pipeline("child")
-  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "a" }))
+  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "a", rerunOnResume: true }))
   .build();
 `,
   );
@@ -1123,7 +1129,7 @@ export default ({ pipeline, llmStep }) => pipeline("child")
     "after",
     `
 export default ({ pipeline, llmStep }) => pipeline("after")
-  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "after" }))
+  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "after", rerunOnResume: true }))
   .build();
 `,
   );
@@ -1162,8 +1168,8 @@ test("pipeline-orchestration: a child stopped at its own accounting gate is the 
     `
 export default ({ pipeline, llmStep }) => pipeline("child")
   .maxCost(5)
-  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "a" }))
-  .add(llmStep({ id: "b", name: "b", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "b" }))
+  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "a", rerunOnResume: true }))
+  .add(llmStep({ id: "b", name: "b", backend: ${JSON.stringify(UNPRICED_BACKEND)}, profile: "coder", command: "b", rerunOnResume: true }))
   .build();
 `,
   );
@@ -1201,8 +1207,8 @@ test("pipeline-orchestration: a group inside a forEachPipeline child runs its me
     `
 export default ({ pipeline, parallelize, llmStep }) => pipeline("child")
   .add(parallelize({ id: "audits", name: "Audits", steps: [
-    llmStep({ id: "audits.a", name: "a", backend: ${JSON.stringify(OVERLAP_BACKEND)}, profile: "coder", command: "a" }),
-    llmStep({ id: "audits.b", name: "b", backend: ${JSON.stringify(OVERLAP_BACKEND)}, profile: "coder", command: "b" }),
+    llmStep({ id: "audits.a", name: "a", backend: ${JSON.stringify(OVERLAP_BACKEND)}, profile: "coder", command: "a", rerunOnResume: true }),
+    llmStep({ id: "audits.b", name: "b", backend: ${JSON.stringify(OVERLAP_BACKEND)}, profile: "coder", command: "b", rerunOnResume: true }),
   ] }))
   .build();
 `,
@@ -1576,7 +1582,7 @@ function pricedComposition(root: string, childCost: number): { parentPath: strin
     "child",
     `
 export default ({ pipeline, llmStep }) => pipeline("child")
-  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: ${childCost} }, command: "a" }))
+  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: ${childCost} }, command: "a", rerunOnResume: true }))
   .build();
 `,
   );
@@ -1661,8 +1667,8 @@ import { join } from "node:path";
 
 const trace = (label) => ctx => { appendFileSync(join(ctx.cwd, "trace.log"), label + ":" + (ctx.ticket ?? "-") + "\\n"); };
 export default ({ pipeline, actionStep }) => pipeline(${JSON.stringify(name)})
-  .add(actionStep({ id: "a", name: "a", run: trace("a"), describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: trace("b"), describe: "b" }))
+  .add(actionStep({ id: "a", name: "a", run: trace("a"), describe: "a", rerunOnResume: true }))
+  .add(actionStep({ id: "b", name: "b", run: trace("b"), describe: "b", rerunOnResume: true }))
   .build();
 `;
 }
@@ -1768,10 +1774,10 @@ function nestedComposition(root: string): { rootPath: string; context: PipelineC
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-export default ({ pipeline, llmStep, actionStep }) => pipeline("leaf")
-  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 1 }, command: "a" }))
-  .add(actionStep({ id: "gate", name: "gate", run: ctx => { if (!existsSync(join(ctx.cwd, "go"))) throw new Error("not yet"); }, describe: "gate" }))
-  .add(llmStep({ id: "b", name: "b", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 1 }, command: "b" }))
+export default ({ pipeline, llmStep, actionStep, textArtifact }) => pipeline("leaf")
+  .add(llmStep({ id: "a", name: "a", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 1 }, command: (ctx) => "write:" + ctx.paths.artifact("a.txt"), output: [textArtifact("a.txt")] }))
+  .add(actionStep({ id: "gate", name: "gate", run: ctx => { if (!existsSync(join(ctx.cwd, "go"))) throw new Error("not yet"); }, describe: "gate", rerunOnResume: true }))
+  .add(llmStep({ id: "b", name: "b", backend: ${JSON.stringify(COST_BACKEND)}, profile: "coder", options: { cost: 1 }, command: (ctx) => "write:" + ctx.paths.artifact("b.txt"), output: [textArtifact("b.txt")] }))
   .build();
 `,
   );
@@ -1892,8 +1898,8 @@ import { join } from "node:path";
 
 const trace = (label) => ctx => { appendFileSync(join(ctx.cwd, "trace.log"), label + ":" + (ctx.ticket ?? "-") + "\\n"); };
 export default ({ pipeline, actionStep }) => pipeline("child")
-  .add(actionStep({ id: "a", name: "a", run: ctx => { trace("a")(ctx); globalThis[${JSON.stringify(hook)}](); }, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: trace("b"), describe: "b" }))
+  .add(actionStep({ id: "a", name: "a", run: ctx => { trace("a")(ctx); globalThis[${JSON.stringify(hook)}](); }, describe: "a", rerunOnResume: true }))
+  .add(actionStep({ id: "b", name: "b", run: trace("b"), describe: "b", rerunOnResume: true }))
   .build();
 `,
   );
@@ -1956,8 +1962,8 @@ test("pipeline-orchestration: an abort seen only on the scope is not reported as
     "child",
     `
 export default ({ pipeline, actionStep }) => pipeline("child")
-  .add(actionStep({ id: "a", name: "a", run: () => { globalThis[${JSON.stringify(hook)}](); }, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
+  .add(actionStep({ id: "a", name: "a", run: () => { globalThis[${JSON.stringify(hook)}](); }, describe: "a", rerunOnResume: true }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", rerunOnResume: true }))
   .build();
 `,
   );
@@ -1992,7 +1998,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   }
 });
 
-test("pipeline-orchestration: a child declaring .reconcile() is resumed in reconcile mode", async () => {
+test("pipeline-orchestration: a resumed child re-admits its done steps, and their outputs decide", async () => {
   const root = mkdtempSync(join(tmpdir(), "pipeline-compose-reconcile-"));
   try {
     writePipeline(
@@ -2005,7 +2011,6 @@ import { join } from "node:path";
 export default ({ pipeline, actionStep, textArtifact }) => {
   const delivered = textArtifact("delivered.txt");
   return pipeline("child")
-    .reconcile()
     .add(
       actionStep({ id: "produce", name: "produce", describe: "produce", output: [delivered],
         run: async (ctx) => { appendFileSync(join(ctx.cwd, "trace.log"), "produce\\n"); await delivered.write(ctx, "done\\n"); } }),
@@ -2037,7 +2042,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
     const childRun = resumed.run.steps[0]!.orchestration!.children[0]!;
     const childCtx = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
     const childEvents = readRunEvents(join(pipelineRunsDir("child", "P", childCtx), childRun.runId!));
-    // Only reconcile mode re-admits a done step without input: legacy would trust its status silently.
+    // A done step without input is re-admitted: its present output, not its status, skips it.
     expect(childEvents.filter((event) => event.type === "step.skipped")).toEqual([
       expect.objectContaining({ stepId: "produce", reason: "outputs present" }),
     ]);

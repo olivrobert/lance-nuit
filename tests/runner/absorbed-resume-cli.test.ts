@@ -45,7 +45,7 @@ function scratchProject() {
       command: (ctx: any) => \`mkdir -p "$(dirname '\${ctx.paths.artifact("source.txt")}')" && echo v1 > '\${ctx.paths.artifact("source.txt")}'\` }))
     .add(bashStep({ id: "check", name: "check", input: [source], output: [report], blocking: false,
       command: "echo check >> trace.log && exit 1" }))
-    .add(bashStep({ id: "gate", name: "gate", command: "test -f ok" }))
+    .add(bashStep({ id: "gate", name: "gate", command: "test -f ok", rerunOnResume: true }))
     .build();
 };
 `,

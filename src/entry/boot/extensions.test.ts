@@ -286,6 +286,7 @@ describe("explicit runner extensions", () => {
       profile: "coder",
       backend: "local-e2e",
       command: "hello extension",
+      rerunOnResume: true,
     });
     const step = builder.build();
     const pipeline = dsl.pipeline("extension").add(builder).build();

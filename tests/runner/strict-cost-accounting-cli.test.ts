@@ -12,7 +12,7 @@
 
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -40,6 +40,12 @@ function runRunner(cwd: string, ...args: string[]) {
 
 function counter(cwd: string): string {
   return readFileSync(join(cwd, ".counter"), "utf8").trim();
+}
+
+/** How many agent turns the fixture backends ran, one line each. */
+function spawns(cwd: string): number {
+  if (!existsSync(join(cwd, ".spawns"))) return 0;
+  return readFileSync(join(cwd, ".spawns"), "utf8").split("\n").filter(Boolean).length;
 }
 
 /** The journal of the run of `pipeline`, as a post-mortem tool would read it:
@@ -80,6 +86,9 @@ function lastStopKind(cwd: string, pipeline: string): string | undefined {
  *  authorization. `ok` is a parameter because the retry/fix scenario needs the
  *  same unpriceable spend on a FAILED attempt. */
 const EXTENSIONS = `
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
 const capabilities = {
   structuredOutput: true,
   streaming: false,
@@ -96,7 +105,14 @@ function unpriced(id, ok) {
       return {
         id,
         capabilities,
-        async run() {
+        async run(request) {
+          appendFileSync(".spawns", id + "\\n");
+          // A prompt "write:<path>" stands for an agent that produces that file.
+          if (ok && request.prompt.startsWith("write:")) {
+            const path = request.prompt.slice("write:".length);
+            mkdirSync(dirname(path), { recursive: true });
+            writeFileSync(path, "done\\n");
+          }
           return {
             provider: id,
             output: ok ? "done" : "the command failed",
@@ -115,6 +131,18 @@ export default { backends: [unpriced("unpriced-ok", true), unpriced("unpriced-fa
 
 const COUNT_COMMAND = "n=$(cat .counter); printf '%s\\\\n' $((n + 1)) > .counter";
 
+/** The counting step, with a receipt it leaves once it ran: a resume finds it
+ *  done instead of counting again. */
+const COUNT_STEP = `bashStep({
+    id: "count",
+    name: "Count once",
+    output: [textArtifact("counted.txt")],
+    command: (ctx: any) => {
+      const out = ctx.paths.artifact("counted.txt");
+      return "${COUNT_COMMAND} && mkdir -p '" + out.slice(0, out.lastIndexOf("/")) + "' && touch '" + out + "'";
+    },
+  })`;
+
 /** A project whose default pipeline is `pipelineSource`. Extra pipelines are
  *  written next to it so a composed scenario can name a child by path. */
 function scratchProject(pipelines: Record<string, string>): string {
@@ -123,7 +151,7 @@ function scratchProject(pipelines: Record<string, string>): string {
   mkdirSync(join(cwd, ".lance-nuit", "pipelines"), { recursive: true });
   writeFileSync(
     join(cwd, ".gitignore"),
-    ".counter\n.lance-nuit/run/\n.lance-nuit/work-items/\n.lance-nuit/pipeline-history/\n",
+    ".counter\n.spawns\n.lance-nuit/run/\n.lance-nuit/work-items/\n.lance-nuit/pipeline-history/\n",
   );
   writeFileSync(join(cwd, ".counter"), "0\n");
   writeFileSync(join(cwd, ".lance-nuit", "extensions.mjs"), EXTENSIONS);
@@ -158,11 +186,18 @@ function scratchProject(pipelines: Record<string, string>): string {
  * on the next invocation, and a fresh run deliberately inherits no
  * authorization. Without it there would be no resume left to prove the
  * authorization persisted. */
-const SPEND_COUNT_FAIL = `export default ({ pipeline, llmStep, bashStep }: any) => pipeline("strict-cost")
+const SPEND_COUNT_FAIL = `export default ({ pipeline, llmStep, bashStep, textArtifact }: any) => pipeline("strict-cost")
   .maxCost(5)
-  .add(llmStep({ id: "spend", name: "Spend unpriced", profile: "coder", backend: "unpriced-ok", command: "go" }))
-  .add(bashStep({ id: "count", name: "Count once", command: "${COUNT_COMMAND}" }))
-  .add(bashStep({ id: "stop", name: "Stop here", command: "exit 17" }))
+  .add(llmStep({
+    id: "spend",
+    name: "Spend unpriced",
+    profile: "coder",
+    backend: "unpriced-ok",
+    command: (ctx: any) => "write:" + ctx.paths.artifact("spent.txt"),
+    output: [textArtifact("spent.txt")],
+  }))
+  .add(${COUNT_STEP})
+  .add(bashStep({ id: "stop", name: "Stop here", command: "exit 17", rerunOnResume: true }))
   .build();
 `;
 
@@ -174,6 +209,7 @@ test("a capped run stops on unpriceable spend, and only --allow-unmetered lets t
   const first = runRunner(cwd, "COST-1");
   expect(first.status).toBe(1);
   expect(counter(cwd)).toBe("0");
+  expect(spawns(cwd)).toBe(1);
   expect(first.out).toContain("Spending is unaccounted");
   expect(first.out).toContain("--allow-unmetered");
   // The final report gets its own headline and the exact recovery command, not
@@ -241,11 +277,13 @@ test("a capped run stops on unpriceable spend, and only --allow-unmetered lets t
   expect(again.status).toBe(1);
   expect(counter(cwd)).toBe("1");
   expect(again.out).not.toContain("Spending is unaccounted");
+  // The agent step left its receipt on the first run: no resume paid it again.
+  expect(spawns(cwd)).toBe(1);
 });
 
 test("a failed unpriceable attempt is not retried, and its repair loop does not resume the run", () => {
   const cwd = scratchProject({
-    default: `export default ({ pipeline, llmStep, bashStep }: any) => pipeline("strict-cost-fix")
+    default: `export default ({ pipeline, llmStep, bashStep, textArtifact }: any) => pipeline("strict-cost-fix")
   .maxCost(5)
   .add(llmStep({
     id: "spend",
@@ -254,8 +292,9 @@ test("a failed unpriceable attempt is not retried, and its repair loop does not 
     backend: "unpriced-fail",
     command: "go",
     onFail: { retries: 3, fix: "repair it" },
+    rerunOnResume: true,
   }))
-  .add(bashStep({ id: "count", name: "Count once", command: "${COUNT_COMMAND}" }))
+  .add(${COUNT_STEP})
   .build();
 `,
   });
@@ -298,13 +337,13 @@ test("a failed unpriceable attempt is not retried, and its repair loop does not 
 test("a child run's unpriceable spend stops its parent, and the root authorization lifts it", () => {
   const cwd = scratchProject({
     child: `export default ({ pipeline, llmStep }: any) => pipeline("strict-cost-child")
-  .add(llmStep({ id: "spend", name: "Spend unpriced", profile: "coder", backend: "unpriced-ok", command: "go" }))
+  .add(llmStep({ id: "spend", name: "Spend unpriced", profile: "coder", backend: "unpriced-ok", command: "go", rerunOnResume: true }))
   .build();
 `,
-    default: `export default ({ pipeline, runPipeline, bashStep }: any) => pipeline("strict-cost-parent")
+    default: `export default ({ pipeline, runPipeline, bashStep, textArtifact }: any) => pipeline("strict-cost-parent")
   .maxCost(5)
   .add(runPipeline({ id: "sub", name: "Sub run", pipeline: "./child.ts" }))
-  .add(bashStep({ id: "count", name: "Count once", command: "${COUNT_COMMAND}" }))
+  .add(${COUNT_STEP})
   .build();
 `,
   });

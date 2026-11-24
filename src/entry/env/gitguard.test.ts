@@ -81,7 +81,7 @@ test("checkWorkingTreeAsync still lists a real untracked file next to an uncommi
 test("DSL: .allowDirty() exposes allow_dirty on the pipeline", () => {
   const p = pipeline("x")
     .allowDirty()
-    .add(bashStep({ id: "s", name: "S", command: "true" }))
+    .add(bashStep({ id: "s", name: "S", command: "true", rerunOnResume: true }))
     .build();
   expect(p.allow_dirty).toBe(true);
 });

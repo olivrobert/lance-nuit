@@ -17,7 +17,7 @@ function writePipeline(factory: string): string {
 
 const BODY = `dsl
     .pipeline("ctx").desc(ctx.cwd)
-    .add(dsl.bashStep({ id: "step", name: "Step", command: "true" }))
+    .add(dsl.bashStep({ id: "step", name: "Step", command: "true", rerunOnResume: true }))
     .build()`;
 
 test("loadPipelineDefinition: the factory receives the execution context", async () => {

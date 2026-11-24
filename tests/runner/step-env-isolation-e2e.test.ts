@@ -39,7 +39,7 @@ function pipelines(dir: string, command: string): void {
     join(pipelinesDir, "default.ts"),
     `export default ({ pipeline, bashStep }: any) =>
   pipeline("outer")
-    .add(bashStep({ id: "nested", name: "Nested", command: ${JSON.stringify(command)} }))
+    .add(bashStep({ id: "nested", name: "Nested", command: ${JSON.stringify(command)}, rerunOnResume: true }))
     .build();
 `,
   );
@@ -47,7 +47,7 @@ function pipelines(dir: string, command: string): void {
     join(pipelinesDir, "inner.ts"),
     `export default ({ pipeline, bashStep }: any) =>
   pipeline("inner")
-    .add(bashStep({ id: "noop", name: "Noop", command: "true" }))
+    .add(bashStep({ id: "noop", name: "Noop", command: "true", rerunOnResume: true }))
     .build();
 `,
   );

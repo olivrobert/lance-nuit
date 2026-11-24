@@ -73,9 +73,9 @@ test("run snapshot fixtures: a real resume through loadOrCreateRun reads a snaps
   writeFileSync(
     pipelinePath,
     `export default ({ pipeline, actionStep }) => pipeline("quality")
-  .add(actionStep({ id: "phpcsfix", name: "phpcsfix", run: () => {}, describe: "a" }))
-  .add(actionStep({ id: "phpstan", name: "phpstan", run: () => {}, describe: "b" }))
-  .add(actionStep({ id: "tests", name: "tests", run: () => {}, describe: "c" }))
+  .add(actionStep({ id: "phpcsfix", name: "phpcsfix", run: () => {}, describe: "a", rerunOnResume: true }))
+  .add(actionStep({ id: "phpstan", name: "phpstan", run: () => {}, describe: "b", rerunOnResume: true }))
+  .add(actionStep({ id: "tests", name: "tests", run: () => {}, describe: "c", rerunOnResume: true }))
   .build();`,
   );
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "QUALITY" });

@@ -473,19 +473,17 @@ and each rule they read has one owner:
 
 | Decision | Owner |
 | --- | --- |
-| **Re-admission**: whether a settled step goes through admission again, and, in reconcile mode, whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `execution/step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). `execution/step/load-or-create-run.ts` decides the selection a resume applies to the snapshot — the selectors in the default mode only, and in both modes the requeue of the `--start-at` target and the steps after it — and `openRun` applies it |
+| **Re-admission**: whether a settled step goes through admission again, and whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `execution/step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). `execution/step/load-or-create-run.ts` decides the only selection a resume applies to the snapshot, the requeue of the `--start-at` target and the steps after it, and `openRun` applies it |
 | **Admission**: budget, `when`, a pending rejection, the freshness or presence of the outputs, the interruption guard, then the environment guard | `execution/step/step-admission.ts` (`admitStep`; `answersToOutputs` says whether the outputs decide, `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished) |
 | **Standing of an output**: `missing`, `unfinished`, `unknown`, `stale`, `fresh` or adoptable, and the doubt `unguaranteed` carries | `work-items/store/provenance.ts`, the only writer of `artifacts/.provenance/`. `standingOf` is the one reading rule for a record: admission (`stepFreshness`), the public `freshness()` and the dashboard all read it there. The attempt (`execution/step/step-attempt.ts`) only chooses when to write: the in-flight mark before each attempt (`markInFlight`), the record after a success |
-| **Reconcile classification**: which steps the mode re-admits (those declaring `output` or `rerunOnResume`), the build error for a step declaring neither, and the orchestration nodes that keep the authority of their status | `definition/definition.ts` (`deliversOutputs`, `reconcilable`, `stepsWithoutDeliverable`), shared by the build (`.reconcile()`), the loader's validation (`definition/validation/structure.ts`), admission and the loop; `rerunsOnResume`, which leaves a node's `rerunOnResume` without effect in this mode, is used by `reconcilable`, the loop and the resume header |
+| **Resume classification**: which steps a resume re-admits (those declaring `input`, `output` or `rerunOnResume`), the build error for a step declaring none, and the orchestration nodes and work-item source step that keep the authority of their status | `definition/definition.ts` (`deliversOutputs`, `rerunsOnResume`, `readmittedOnResume`, `stepsWithoutDeliverable`), shared by the build, the loader's validation (`definition/validation/structure.ts`), admission, the loop and the resume header |
 
-Two run facts beside the decision are runtime-only and never persisted
-(`run/record/run.ts`): `Run.reconcile`, set by boot from the definition it loads the
-steps from and read by the step loop, so boot and the loop cannot disagree on
-the mode; and `Run.executing`, whose members `updateStep` alone decides and which
-`abortRun` reads, so that a signal interrupts the steps this process is running,
-each charged its own live estimate, and never one a dead runner left `running`.
-What the run record still decides in
-reconcile mode, and what the deliverables decide instead, is tabled in
+One run fact beside the decision is runtime-only and never persisted
+(`run/record/run.ts`): `Run.executing`, whose members `updateStep` alone decides
+and which `abortRun` reads, so that a signal interrupts the steps this process is
+running, each charged its own live estimate, and never one a dead runner left
+`running`. What the run record still decides, and what the deliverables decide
+instead, is tabled in
 [persistence](persistence.md#the-run-record-and-the-deliverables).
 
 ## 6. Capability lookup

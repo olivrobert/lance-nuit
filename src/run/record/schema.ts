@@ -180,7 +180,6 @@ export const PersistedStepStateSchema = z.looseObject({
   fail_cause: z.enum(FAIL_CAUSES).optional(),
   timeout_retries: nonNegativeInt.optional(),
   last_attempt: nonNegativeInt.optional(),
-  excluded: z.literal(true).optional(),
   replay: z.literal(true).optional(),
   absorbed_inputs: z
     .record(

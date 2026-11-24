@@ -10,30 +10,17 @@
 
 import { DEFAULT_SPEC_PATH } from "../../shared/env/tickets.js";
 import { agentBackendRegistryOf, type PipelineContext, workItemRegistryOf } from "../../shared/language/context.js";
-import type { PipelineStep } from "../../definition/index.js";
 import type { PersistedStepState, DeepReadonly, RunEventStore, RunLogStore, RunStateStore } from "../../run/index.js";
 import { buildPipelineContext, loadPipelineDefinition } from "../../definition/index.js";
-import {
-  isChildSettled,
-  matchesStepSelector,
-  type OpenedRun,
-  openRun,
-  owesWork,
-  type RunScope,
-  type StrictSnapshotRead,
-} from "../../run/index.js";
+import { isChildSettled, type OpenedRun, openRun, type RunScope, type StrictSnapshotRead } from "../../run/index.js";
 
 export interface LoadOrCreateRunOptions extends RunScope {
   pipelinePath: string;
   ticket?: string;
-  /** `--steps`: the steps this invocation runs. */
-  stepFilter?: string[];
-  /** `--skip`: the steps this invocation leaves out. */
-  skipFilter?: string[];
   /** The run directory the invocation names (`--run`, or a composed child's own). */
   runDir?: string;
   fresh?: boolean;
-  /** `--start-at`: requeue this step and every later one, skip the earlier ones. */
+  /** `--start-at`: requeue this step and every later one. */
   startAt?: string;
   context?: PipelineContext;
   /** Whether this invocation runs inside a worktree: the entry point passes its
@@ -50,28 +37,6 @@ export interface LoadOrCreateRunOptions extends RunScope {
 
 type StepState = DeepReadonly<PersistedStepState>;
 
-/** The steps the resume selectors leave out. Both selectors operate only on steps
- * that still have executable work, preserving terminal history on a resumed run.
- *
- * The steps must already be reconciled with the journal: a step the snapshot
- * still calls `running` may be one the journal knows finished, and a selector
- * applied to the snapshot would turn that finished work into an exclusion. */
-function excludedSteps(
-  steps: readonly StepState[],
-  stepFilter: string[] | undefined,
-  skipFilter: string[] | undefined,
-): string[] {
-  return steps
-    .filter((state) => {
-      if (!owesWork(state.status)) return false;
-      const outsideSelection =
-        stepFilter !== undefined && !stepFilter.some((selector) => matchesStepSelector(state.id, selector));
-      const explicitlySkipped = skipFilter?.some((selector) => matchesStepSelector(state.id, selector)) ?? false;
-      return outsideSelection || explicitlySkipped;
-    })
-    .map((state) => state.id);
-}
-
 /** Composed steps in the replay range that cannot run again in place: a child
  * already settled returns at once on the next pass, so the node would turn
  * `done` without running anything. */
@@ -81,21 +46,11 @@ function unreplayableSteps(steps: readonly StepState[], replayIds: ReadonlySet<s
     .map((state) => state.id);
 }
 
-/** Whether a step is left out of a new run by `--steps` or `--skip`. */
-function excludedFromNewRun(def: PipelineStep, stepFilter?: string[], skipFilter?: string[]): boolean {
-  return (
-    (stepFilter !== undefined && !stepFilter.some((selector) => matchesStepSelector(def.id, selector))) ||
-    (skipFilter?.some((selector) => matchesStepSelector(def.id, selector)) ?? false)
-  );
-}
-
 /** Open the run this invocation executes, with its definition and selection. */
 export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<OpenedRun> {
   const {
     pipelinePath,
     ticket,
-    stepFilter,
-    skipFilter: skipSelectors,
     runDir,
     fresh,
     startAt,
@@ -107,13 +62,11 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
     strictSnapshot,
     ...scope
   } = options;
-  let skipFilter = skipSelectors;
   const buildContext = context ?? buildPipelineContext({ ticket });
   const pipeline = await loadPipelineDefinition(pipelinePath, buildContext);
 
-  // --start-at skips the preceding steps that still owe work (`excludedSteps`; a
-  // done one meets the usual resume re-check), and requeues the target and every
-  // later step even when an earlier pass finished them.
+  // --start-at requeues the target and every later step even when an earlier
+  // pass finished them; the loop leaves out the preceding steps still owing work.
   let replayIds: ReadonlySet<string> = new Set();
   if (startAt) {
     const ids = pipeline.steps.map((step) => step.id);
@@ -123,7 +76,6 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
         `--start-at: step "${startAt}" not found in pipeline "${pipeline.name}" (steps: ${ids.join(", ")}).`,
       );
     }
-    skipFilter = ids.slice(0, cut);
     replayIds = new Set(ids.slice(cut));
   }
 
@@ -162,11 +114,9 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
             agentBackendRegistry: agentBackendRegistryOf(buildContext),
           }),
         ),
-      // Filters apply to every still-executable step, including failed and running
-      // state restored from a previous attempt, and the definition steps the
-      // snapshot does not know yet. They and the requeue read the journal-reconciled
-      // states, which are the ones hydration consumes.
-      selectResumed: (states, reconcile) => {
+      // The requeue reads the journal-reconciled states, which are the ones
+      // hydration consumes.
+      selectResumed: (states) => {
         const unreplayable = unreplayableSteps(states, replayIds);
         if (unreplayable.length > 0) {
           throw new Error(
@@ -175,14 +125,6 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
           );
         }
         return {
-          exclude: reconcile ? [] : excludedSteps(states, stepFilter, skipFilter),
-          // Reconcile mode persists no exclusion: the loop applies this
-          // invocation's selectors (`execution/step/step-loop.ts`), so one an earlier legacy
-          // invocation left in the snapshot is dropped instead of binding every
-          // later invocation.
-          dropExclusions: reconcile,
-          // `--start-at` is the operator's newest decision, so the requeue also
-          // lifts an exclusion an earlier selection left inside the range.
           // Attempts, retries and spend are kept: the budget ledger seeds from
           // them, and the replay is more work on the same run, not a new one.
           // `replay` is what keeps the requeue durable over the `done` events the
@@ -190,11 +132,7 @@ export async function loadOrCreateRun(options: LoadOrCreateRunOptions): Promise<
           replay: [...replayIds],
         };
       },
-      // Reconcile mode leaves the selection to the loop: it lasts this invocation only.
-      selectNew: (def, reconcile) => {
-        if (!reconcile && excludedFromNewRun(def, stepFilter, skipFilter)) return { status: "skipped", excluded: true };
-        return replayIds.has(def.id) ? { status: "pending", replay: true } : { status: "pending" };
-      },
+      selectNew: (def) => (replayIds.has(def.id) ? { status: "pending", replay: true } : { status: "pending" }),
     },
   });
 }

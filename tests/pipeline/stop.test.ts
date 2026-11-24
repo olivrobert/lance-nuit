@@ -84,7 +84,9 @@ test("stopRun: a stopped run resumes instead of replaying completed steps", () =
 
 test("validatePipeline accepts a stop admission", () => {
   const p = pipeline("x")
-    .add(bashStep({ id: "s", name: "S", command: "true", when: { command: "false", else: "stop" } }))
+    .add(
+      bashStep({ id: "s", name: "S", command: "true", rerunOnResume: true, when: { command: "false", else: "stop" } }),
+    )
     .build();
   // Validation runs against the backends the run will use: the caller supplies
   // the context that carries the registry.

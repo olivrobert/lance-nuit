@@ -26,6 +26,7 @@ test("llmStep selects Codex without exposing a provider type to the pipeline", (
       profile: "coder",
       options: { sandbox: CODEX_SANDBOX.WORKSPACE_WRITE },
       command: "implement the task",
+      rerunOnResume: true,
       onFail: {
         fix: "corrige",
         retries: 1,
@@ -46,7 +47,17 @@ test("llmStep selects Codex without exposing a provider type to the pipeline", (
     validatePipeline(
       pipeline("codex")
         .add(
-          llmStep({ id: "implement", name: "Implement", backend: "codex", profile: "coder", command: "x" }, REGISTRY),
+          llmStep(
+            {
+              id: "implement",
+              name: "Implement",
+              backend: "codex",
+              profile: "coder",
+              command: "x",
+              rerunOnResume: true,
+            },
+            REGISTRY,
+          ),
         )
         .build(),
       "test",
@@ -56,10 +67,14 @@ test("llmStep selects Codex without exposing a provider type to the pipeline", (
 });
 
 test("JSON verdict is implicit and validation always requires a backend", () => {
-  expect(() => llmStep({ id: "x", name: "X", profile: "coder", command: "x" } as never, REGISTRY)).toThrow(/backend/);
+  expect(() =>
+    llmStep({ id: "x", name: "X", profile: "coder", command: "x", rerunOnResume: true } as never, REGISTRY),
+  ).toThrow(/backend/);
 
   const implicitVerdict = pipeline("valid")
-    .add(llmStep({ id: "x", name: "X", backend: "codex", profile: "coder", command: "x" }, REGISTRY))
+    .add(
+      llmStep({ id: "x", name: "X", backend: "codex", profile: "coder", command: "x", rerunOnResume: true }, REGISTRY),
+    )
     .build();
   expect(implicitVerdict.steps[0]?.output_format).toBe("json");
   expect(() => validatePipeline(implicitVerdict, "test", { context: CONTEXT })).not.toThrow();
@@ -67,7 +82,12 @@ test("JSON verdict is implicit and validation always requires a backend", () => 
 
 test("validation rejects an unregistered backend before execution", () => {
   const unknownBackend = pipeline("invalid")
-    .add(llmStep({ id: "x", name: "X", backend: "codeex" as never, profile: "coder", command: "x" }, REGISTRY))
+    .add(
+      llmStep(
+        { id: "x", name: "X", backend: "codeex" as never, profile: "coder", command: "x", rerunOnResume: true },
+        REGISTRY,
+      ),
+    )
     .build();
 
   expect(() => validatePipeline(unknownBackend, "test", { context: CONTEXT })).toThrow(
@@ -86,6 +106,7 @@ test("validation rejects a profile without a backend policy, even with an explic
           profile: "planner",
           options: { model: CODEX_MODEL.GPT_5_CODEX } as never,
           command: "review",
+          rerunOnResume: true,
         },
         REGISTRY,
       ),
@@ -101,7 +122,14 @@ test("a provider-specific configuration policy makes the profile coherent", () =
   const configuredProfile = pipeline("codex")
     .add(
       llmStep(
-        { id: "review", name: "Review", backend: "codex" as never, profile: "planner", command: "review" },
+        {
+          id: "review",
+          name: "Review",
+          backend: "codex" as never,
+          profile: "planner",
+          command: "review",
+          rerunOnResume: true,
+        },
         REGISTRY,
       ),
     )
@@ -125,12 +153,13 @@ test("backend shortcuts select the engine directly", () => {
       backend: "claude",
       profile: "coder",
       command: "review",
+      rerunOnResume: true,
     },
     REGISTRY,
   ).build();
   expect(step.backend).toEqual({ id: "claude" });
   const codex = llmStep(
-    { id: "codex", name: "Codex", backend: "codex", profile: "coder", command: "run" },
+    { id: "codex", name: "Codex", backend: "codex", profile: "coder", command: "run", rerunOnResume: true },
     REGISTRY,
   ).build();
   expect(codex.backend).toEqual({ id: "codex" });

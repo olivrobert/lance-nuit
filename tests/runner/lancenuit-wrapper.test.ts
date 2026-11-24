@@ -57,7 +57,7 @@ test("public lancenuit types install wrapper generates project and user declarat
       `import type { Dsl } from "@lance-nuit/dsl";
 const metadata = { name: "typed" } satisfies Record<string, string>;
 export default ({ pipeline, bashStep }: Dsl) => pipeline(metadata.name)
-  .add(bashStep({ id: "check", name: "Check", command: "true" }))
+  .add(bashStep({ id: "check", name: "Check", command: "true", rerunOnResume: true }))
   .build();
 `,
     );
@@ -99,7 +99,7 @@ writeFileSync(
   JSON.stringify({ bun: process.versions.bun ?? null, execPath: process.execPath }),
 );
 export default ({ pipeline, bashStep }: any) => pipeline("runtime-proof")
-  .add(bashStep({ id: "noop", name: "No-op", command: "true" }))
+  .add(bashStep({ id: "noop", name: "No-op", command: "true", rerunOnResume: true }))
   .build();
 `,
     );

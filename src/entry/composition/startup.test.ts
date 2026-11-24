@@ -14,7 +14,7 @@ import { applyApproval, applyRejection, checkUntil } from "./startup.js";
 const budgetArtifact = artifact("budget.json", (value) => value as { amountUsd: number });
 const def = pipeline("budgeted")
   .approval("budget", budgetArtifact)
-  .add(bashStep({ id: "noop", name: "Noop", command: "true" }))
+  .add(bashStep({ id: "noop", name: "Noop", command: "true", rerunOnResume: true }))
   .build();
 
 function approvedContext() {
@@ -165,9 +165,9 @@ test("--reject on a run another runner is already resuming starts no second run"
 
 test("checkUntil: an unknown step lists the ids, and a bound before --start-at is refused", () => {
   const steps = pipeline("bounded")
-    .add(bashStep({ id: "a", name: "A", command: "true" }))
-    .add(bashStep({ id: "b", name: "B", command: "true" }))
-    .add(bashStep({ id: "c", name: "C", command: "true" }))
+    .add(bashStep({ id: "a", name: "A", command: "true", rerunOnResume: true }))
+    .add(bashStep({ id: "b", name: "B", command: "true", rerunOnResume: true }))
+    .add(bashStep({ id: "c", name: "C", command: "true", rerunOnResume: true }))
     .build();
   const args = (overrides: Partial<RunnerArgs>) => ({ ...overrides }) as RunnerArgs;
 

@@ -1,10 +1,9 @@
-// Selectors in reconcile mode, rows K1 to K3 of the reconciliation matrix.
-// `--steps`, `--skip` and `--start-at` set steps aside for one invocation: nothing
-// is persisted as an exclusion, the journal says why each step was left out, and
-// the next invocation reconciles them like any other step. K3 pins that legacy
-// mode keeps persisting the exclusion (S4 in legacy.test.ts, unchanged).
+// Selectors, rows K1 and K2 of the reconciliation matrix. `--steps`, `--skip`
+// and `--start-at` set steps aside for one invocation: nothing is persisted as an
+// exclusion, the journal says why each step was left out, and the next
+// invocation reconciles them like any other step.
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
@@ -25,7 +24,6 @@ import {
   removeArtifact,
   run,
   runRaw,
-  routeSource,
   scratchRoute,
   skipsSince,
   snapshot,
@@ -51,8 +49,6 @@ const UNTIL_EXIT = 3;
 const SELECTION = "operator selection";
 const UP_TO_DATE = "outputs up to date with declared inputs";
 const PRESENT = "outputs present";
-
-const reconcile = { reconcile: true } as const;
 
 /** A mark naming no run: `skipsSince` then reads the whole journal of the `latest` run. */
 const WHOLE_RUN: Mark = { traceLength: 0, journalLength: 0 };
@@ -91,13 +87,17 @@ function writePartialArtifact(cwd: string, name: string): void {
   writeFileSync(join(cwd, ".lance-nuit", "work-items", TICKET, "artifacts", name), "partial\n");
 }
 
-/** Rewrites the pipeline in place, as an author switching its mode between two invocations. */
-function switchMode(cwd: string, options: { reconcile: boolean }): void {
-  writeFileSync(join(cwd, ".lance-nuit", "pipelines", `${PIPELINE}.ts`), routeSource(options));
+/** Marks step `id` of the `latest` run as an older runner persisted an operator exclusion. */
+function persistLegacyExclusion(cwd: string, id: string): void {
+  const path = join(cwd, ".lance-nuit", "work-items", TICKET, "runs", PIPELINE, latestRunId(cwd), "state.json");
+  const state = JSON.parse(readFileSync(path, "utf8")) as RunSnapshot;
+  const step = state.steps.find((candidate) => candidate.id === id)!;
+  Object.assign(step, { status: "skipped", excluded: true });
+  writeFileSync(path, JSON.stringify(state));
 }
 
 test("K1: --skip on a first run sets the step aside for that run only, and the next run reconciles it", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   const before = mark(cwd);
 
   const skipped = run(cwd, "--skip", "quality");
@@ -129,7 +129,7 @@ test("K1: --skip on a first run sets the step aside for that run only, and the n
 });
 
 test("K1: a step set aside on a run left unfinished is re-admitted by the next invocation of that run", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
 
   const bounded = run(cwd, "--skip", "prepare", "--until", "implement");
 
@@ -157,15 +157,11 @@ test("K1: a step set aside on a run left unfinished is re-admitted by the next i
   expectNoExclusion(snapshot(cwd));
 });
 
-test("K1: an exclusion a legacy invocation persisted no longer binds once the pipeline reconciles", () => {
+test("K1: an exclusion an older runner persisted no longer binds", () => {
   const cwd = scratchRoute();
-  expect(run(cwd, "--skip", "prepare", "--until", "implement").status).toBe(UNTIL_EXIT);
-  expect(snapshot(cwd).steps.find((step) => step.id === "prepare")).toMatchObject({
-    status: "skipped",
-    excluded: true,
-  });
+  expect(run(cwd, "--until", "implement").status).toBe(UNTIL_EXIT);
+  persistLegacyExclusion(cwd, "prepare");
   const stoppedRun = latestRunId(cwd);
-  switchMode(cwd, reconcile);
   const before = mark(cwd);
 
   const resumed = run(cwd);
@@ -178,7 +174,7 @@ test("K1: an exclusion a legacy invocation persisted no longer binds once the pi
 });
 
 test("K2: --steps after a PASS admits only the named step, which a fresh deliverable skips", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   const firstRun = passedRun(cwd);
   const before = mark(cwd);
 
@@ -202,7 +198,7 @@ test("K2: --steps after a PASS admits only the named step, which a fresh deliver
 });
 
 test("K2: --steps runs a step that owes its deliverable, and the next run reconciles what it left stale", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   passedRun(cwd);
   removeArtifact(cwd, "impl.md");
   const before = mark(cwd);
@@ -232,7 +228,7 @@ test("K2: --steps runs a step that owes its deliverable, and the next run reconc
 });
 
 test("K2: on a resumed run, --steps sets aside settled steps too, keeping their status", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   expect(run(cwd, "--until", "plan").status).toBe(UNTIL_EXIT);
   const stoppedRun = latestRunId(cwd);
   const before = mark(cwd);
@@ -264,7 +260,7 @@ test("K2: on a resumed run, --steps sets aside settled steps too, keeping their 
 });
 
 test("--start-at on a first run sets the steps before it aside, and the next run reconciles them", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
 
   const started = run(cwd, "--start-at", "implement");
 
@@ -287,7 +283,7 @@ test("--start-at on a first run sets the steps before it aside, and the next run
 
 test("--skip under --scan sets the step aside in every ticket's run, and a later scan reconciles it", () => {
   const tickets = ["T-1", "T-2"];
-  const cwd = scratchRoute({ ...reconcile, scan: tickets });
+  const cwd = scratchRoute({ scan: tickets });
 
   const scan = runRaw(cwd, "--scan", "--pipeline", PIPELINE, "--skip", "prepare", "--until", "implement");
 
@@ -316,7 +312,7 @@ test("--skip under --scan sets the step aside in every ticket's run, and a later
 // every invocation (inflight.test.ts), whatever the status.
 
 test("a step killed mid-pass and left out by --skip still needs the replay authorized on the next resume", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   await killDuring(cwd, "publish");
   const killedRun = latestRunId(cwd);
   failAt(cwd, "report");
@@ -345,7 +341,7 @@ test("a step killed mid-pass and left out by --skip still needs the replay autho
 });
 
 test("a partial output of a killed pass left out by --skip is never adopted, and the run does not pass", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   await killDuring(cwd, "publish");
   writePartialArtifact(cwd, "mr-url.txt");
   const beforeSkip = mark(cwd);
@@ -380,7 +376,7 @@ test("a partial output of a killed pass left out by --skip is never adopted, and
 });
 
 test("a failed step left out by --skip stays failed, so the next resume reruns it over its partial output", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   failAt(cwd, "implement");
   expect(run(cwd).status).toBe(1);
   writePartialArtifact(cwd, "impl.md");
@@ -409,7 +405,7 @@ test("a failed step left out by --skip stays failed, so the next resume reruns i
 });
 
 test("an --until bound left out while its last pass failed still stops the run after it", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   failAt(cwd, "plan");
   expect(run(cwd).status).toBe(1);
   heal(cwd, "plan");
@@ -433,7 +429,7 @@ test("an --until bound left out while its last pass failed still stops the run a
 });
 
 test("an --until bound left out while it was killed mid-pass still stops the run after it", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   await killDuring(cwd, "plan");
   const before = mark(cwd);
 
@@ -447,7 +443,7 @@ test("an --until bound left out while it was killed mid-pass still stops the run
 });
 
 test("an --until stop reached after a step left out unfinished keeps its own kind and names its own step", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   failAt(cwd, "implement");
   expect(run(cwd).status).toBe(1);
   const before = mark(cwd);
@@ -464,7 +460,7 @@ test("an --until stop reached after a step left out unfinished keeps its own kin
 });
 
 test("a failure after a step left out unfinished is reported as that failure, not as the step set aside", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   failAt(cwd, "implement");
   expect(run(cwd).status).toBe(1);
   heal(cwd, "implement");
@@ -481,7 +477,7 @@ test("a failure after a step left out unfinished is reported as that failure, no
 });
 
 test("the interruption guard's stop is kept when the selection also left an unfinished step out", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   await killDuring(cwd, "publish");
   failAt(cwd, "implement");
   // The replay requeues publish as pending, its last attempt still interrupted.
@@ -554,7 +550,7 @@ function requeueSetAsideRelaunch(cwd: string, partial: string): void {
 }
 
 test("third FAIL: a step whose attempt wrote then failed, requeued by --start-at and set aside, is never adopted by the next run", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   partialAt(cwd, "implement");
   expect(run(cwd).status).toBe(1);
   expectMarkedPartial(cwd, "partial implement\n");
@@ -568,7 +564,7 @@ test("third FAIL: a step whose attempt wrote then failed, requeued by --start-at
 // says nothing succeeded since, so it is unfinished too, whoever wrote it. Keeping
 // such a file means deleting its record (W11 in inflight.test.ts).
 test("third FAIL: a file written by hand after a failed attempt, requeued and set aside, is never adopted either", () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   failAt(cwd, "implement");
   expect(run(cwd).status).toBe(1);
   writePartialArtifact(cwd, "impl.md");
@@ -578,7 +574,7 @@ test("third FAIL: a file written by hand after a failed attempt, requeued and se
 });
 
 test("third FAIL: an attempt the operator interrupted after a partial write, requeued and set aside, is never adopted", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   partialAt(cwd, "implement");
   await interruptDuring(cwd, "implement");
   const aborted = snapshot(cwd);
@@ -593,7 +589,7 @@ test("third FAIL: an attempt the operator interrupted after a partial write, req
 // The second FAIL's variant: a requeued step whose last attempt the runner died
 // in keeps `pending` when set aside, and the interruption still needs authorizing.
 test("a requeued step killed mid-pass and left out by --skip still needs the replay authorized", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   await killDuring(cwd, "publish");
   const killedRun = latestRunId(cwd);
   expect(run(cwd, "--start-at", "implement", "--until", "implement").status).toBe(UNTIL_EXIT);
@@ -627,7 +623,7 @@ test("a requeued step killed mid-pass and left out by --skip still needs the rep
 // A pass the runner died in stays `running` once set aside, while later steps
 // run: a signal during one of those must abort that one, not the dead pass.
 test("an interruption during a later step aborts that step, not the killed pass the selection left running", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   await killDuring(cwd, "publish");
 
   await interruptDuring(cwd, "report", "--skip", "publish");
@@ -656,18 +652,19 @@ const TRACED_STEP = `const step = (id: string, extra: object = {}) =>
     run: async (ctx: any) => {
       appendFileSync(join(ctx.cwd, "trace.log"), id + "\\n");
       if (existsSync(join(ctx.cwd, "hang-" + id))) await new Promise(() => setInterval(() => {}, 1_000));
+      for (const out of (extra as any).output ?? []) await out.write(ctx, id + "\\n");
     },
   });`;
 
 const IMPORTS = `import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";`;
 
-/** `route` composing `child` through the node `sub`; both reconcile. */
+/** `route` composing `child` through the node `sub`. */
 const NODE_PIPELINES = {
   "route.ts": `${IMPORTS}
 export default ({ pipeline, actionStep, runPipeline }: any) => {
   ${TRACED_STEP}
-  return pipeline("route").reconcile()
+  return pipeline("route")
     .add(step("context"), runPipeline({ id: "sub", name: "sub", pipeline: "./child.ts" }), step("report"))
     .build();
 };
@@ -675,7 +672,7 @@ export default ({ pipeline, actionStep, runPipeline }: any) => {
   "child.ts": `${IMPORTS}
 export default ({ pipeline, actionStep }: any) => {
   ${TRACED_STEP}
-  return pipeline("child").reconcile().add(step("inner")).build();
+  return pipeline("child").add(step("inner")).build();
 };
 `,
 };
@@ -684,7 +681,7 @@ export default ({ pipeline, actionStep }: any) => {
 // tells a node killed mid-child from one that runs: only the process knows which
 // step it put in `running`.
 test("an interruption during a later step aborts that step, not the orchestration node killed mid-child and set aside", async () => {
-  const cwd = scratchRoute(reconcile);
+  const cwd = scratchRoute();
   writePipelines(cwd, NODE_PIPELINES);
   await killDuring(cwd, "inner");
   expect(statusesOf(snapshot(cwd)).sub).toBe("running");
@@ -698,15 +695,15 @@ test("an interruption during a later step aborts that step, not the orchestratio
   expect(statusesOf(aborted)).toMatchObject({ sub: "running", report: "aborted" });
 });
 
-/** `NODE_PIPELINES` whose node `sub` declares `rerunOnResume`, in reconcile mode or the default one. */
-function rerunNodePipelines(mode: "reconcile" | "default"): Record<string, string> {
+/** `NODE_PIPELINES` whose node `sub` declares `rerunOnResume`. */
+function rerunNodePipelines(): Record<string, string> {
   return {
     ...NODE_PIPELINES,
     "route.ts": `${IMPORTS}
 export default ({ pipeline, actionStep, runPipeline }: any) => {
   ${TRACED_STEP}
   const sub = runPipeline({ id: "sub", name: "sub", pipeline: "./child.ts" }).rerunOnResume();
-  return pipeline("route")${mode === "reconcile" ? ".reconcile()" : ""}.add(step("context"), sub, step("report")).build();
+  return pipeline("route").add(step("context"), sub, step("report")).build();
 };
 `,
   };
@@ -728,11 +725,10 @@ async function resumeAfterSettledNode(cwd: string): Promise<{ sub: unknown[]; he
   return { sub, header: resumed.stdout + resumed.stderr };
 }
 
-// D3: rerunOnResume does not take an orchestration node's status from it in
-// reconcile mode. The default mode keeps re-admitting it, as it always has.
-test("reconcile: a settled orchestration node declaring rerunOnResume is not re-admitted on resume", async () => {
-  const cwd = scratchRoute(reconcile);
-  writePipelines(cwd, rerunNodePipelines("reconcile"));
+// D3: rerunOnResume does not take an orchestration node's status from it.
+test("a settled orchestration node declaring rerunOnResume is not re-admitted on resume", async () => {
+  const cwd = scratchRoute();
+  writePipelines(cwd, rerunNodePipelines());
 
   const { sub, header } = await resumeAfterSettledNode(cwd);
 
@@ -741,37 +737,28 @@ test("reconcile: a settled orchestration node declaring rerunOnResume is not re-
   expect(header).not.toMatch(/Re-run on resume: .*sub/);
 });
 
-test("default mode: a settled orchestration node declaring rerunOnResume is re-admitted on resume", async () => {
-  const cwd = scratchRoute();
-  writePipelines(cwd, rerunNodePipelines("default"));
-
-  const { sub, header } = await resumeAfterSettledNode(cwd);
-
-  expect(sub).toEqual(["running", "done"]);
-  expect(header).toContain("Re-run on resume: context, sub\n");
-});
-
-/** Legacy `route`: `gate` admits itself through a `when` that traces
+/** `route` where `gate` admits itself through a `when` that traces
  *  `gate-when` and hangs while `hang-gate-when` exists, before `work`, the one
  *  step whose interrupted pass needs an authorization to replay. */
 const GATED_PIPELINE = {
   "route.ts": `${IMPORTS}
-export default ({ pipeline, actionStep }: any) => {
+export default ({ pipeline, actionStep, textArtifact }: any) => {
   ${TRACED_STEP}
+  const worked = textArtifact("work.txt");
   const when = async (ctx: any) => {
     appendFileSync(join(ctx.cwd, "trace.log"), "gate-when\\n");
     if (existsSync(join(ctx.cwd, "hang-gate-when"))) await new Promise(() => setInterval(() => {}, 1_000));
     return true;
   };
-  return pipeline("route").add(step("gate", { when }), step("work", { rerunOnResume: false }), step("report")).build();
+  return pipeline("route").add(step("gate", { when }), step("work", { rerunOnResume: false, output: [worked] }), step("report")).build();
 };
 `,
 };
 
-// Legacy change: a signal landing while no step executes, here during an
-// admission, used to mark the first `running` step `aborted`. That step was a
-// pass the runner had died in, and its replay then went through unauthorized.
-test("legacy: a signal during an admission does not abort the pass a dead runner left running", async () => {
+// A signal landing while no step executes, here during an admission, used to
+// mark the first `running` step `aborted`. That step was a pass the runner had
+// died in, and its replay then went through unauthorized.
+test("a signal during an admission does not abort the pass a dead runner left running", async () => {
   const cwd = scratchRoute();
   writePipelines(cwd, GATED_PIPELINE);
   await killDuring(cwd, "work");
@@ -794,33 +781,4 @@ test("legacy: a signal during an admission does not abort the pass a dead runner
   expect(snapshot(cwd).outcome?.stop?.detail).toContain("--replay-interrupted");
   expect(traceSince(cwd, before)).not.toContain("work");
   expect(resumed.stderr + resumed.stdout).not.toContain("replaying after an interrupted attempt");
-});
-
-// K3: legacy mode keeps the persisted exclusion (S4), on the resume too, and its
-// report says nothing about a selection that is not ephemeral.
-test("K3: legacy --skip persists the exclusion, which the next invocation of the run still obeys", () => {
-  const cwd = scratchRoute();
-
-  const bounded = run(cwd, "--skip", "prepare", "--until", "implement");
-
-  expect(bounded.status).toBe(UNTIL_EXIT);
-  expect(trace(cwd)).toEqual(UP_TO_IMPLEMENT);
-  expect(snapshot(cwd).steps.find((step) => step.id === "prepare")).toMatchObject({
-    status: "skipped",
-    excluded: true,
-  });
-  expect(reasons(cwd, WHOLE_RUN)).toEqual([]);
-  expect(bounded.stderr).not.toContain("set aside");
-  const before = mark(cwd);
-
-  const resumed = run(cwd);
-
-  expect(resumed.status).toBe(0);
-  expect(snapshot(cwd).status).toBe("PASS");
-  expect(traceSince(cwd, before)).toEqual(["context", "quality", "commit", "publish", "report"]);
-  expect(
-    snapshot(cwd)
-      .steps.filter((step) => step.excluded)
-      .map((step) => step.id),
-  ).toEqual(["prepare"]);
 });

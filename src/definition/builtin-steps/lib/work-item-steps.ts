@@ -272,6 +272,8 @@ class PublicWorkItemEscalateStepBuilder<T> extends ActionStepBuilder {
     });
     this.describe((ctx) => `work item ${ctx.ticket ?? "?"}: escalation note + queue ${from}`);
     this.blocking(false);
+    // Replay is safe: the note's execution key dedupes it and the move is idempotent.
+    this.rerunOnResume();
     return super.build();
   }
 }
@@ -342,6 +344,7 @@ class PublicWorkItemDeliveryStepBuilder extends ActionStepBuilder {
         : `work item ${ctx.ticket ?? "?"}: delivery note + ${describeMove(move)}`,
     );
     this.blocking(false);
+    this.rerunOnResume();
     return super.build();
   }
 }

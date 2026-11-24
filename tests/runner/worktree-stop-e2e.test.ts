@@ -72,19 +72,19 @@ function runStatus(repo: string): string | undefined {
 
 const PASSING = `export default ({ pipeline, bashStep }: any) =>
   pipeline("stop-pass")
-    .add(bashStep({ id: "hello", name: "Say hello", command: "true" }))
+    .add(bashStep({ id: "hello", name: "Say hello", command: "true", rerunOnResume: true }))
     .build();
 `;
 
 const FAILING = `export default ({ pipeline, bashStep }: any) =>
   pipeline("stop-fail")
-    .add(bashStep({ id: "boom", name: "Failing", command: "exit 3" }))
+    .add(bashStep({ id: "boom", name: "Failing", command: "exit 3", rerunOnResume: true }))
     .build();
 `;
 
 const GATED = `export default ({ pipeline, bashStep }: any) =>
   pipeline("stop-gate")
-    .add(bashStep({ id: "gated", name: "Gated", command: "true", when: { command: "false", else: "stop" } }))
+    .add(bashStep({ id: "gated", name: "Gated", command: "true", rerunOnResume: true, when: { command: "false", else: "stop" } }))
     .build();
 `;
 

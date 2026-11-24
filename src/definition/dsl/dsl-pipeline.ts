@@ -103,13 +103,6 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
     return this;
   }
 
-  /** Opt into reconcile mode: what remains to do is decided by the declared
-   *  outputs on every invocation, not by the status a previous one recorded. */
-  reconcile(): this {
-    this.p.reconcile = true;
-    return this;
-  }
-
   approval(subject: string, artifactDescriptor: Artifact<unknown>): this {
     if (!isValidSubjectToken(subject)) {
       throw new Error(
@@ -178,15 +171,14 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
       bindPipelineName(step, this.p.name);
       return step.build();
     });
-    if (this.p.reconcile) {
-      const unclassified = stepsWithoutDeliverable(this.p);
-      if (unclassified.length > 0)
-        throw new Error(`Pipeline "${this.p.name}": ${withoutDeliverableMessage(unclassified)}`);
-    }
     if (this.approvals.size > 0) this.p.approvals = new Map(this.approvals);
     if (this.approvalGuards.size > 0) this.p.approvalGuards = new Map(this.approvalGuards);
     const reworks = this.bindReworks();
     if (reworks.size > 0) this.p.reworks = reworks;
+    const unclassified = stepsWithoutDeliverable(this.p);
+    if (unclassified.length > 0) {
+      throw new Error(`Pipeline "${this.p.name}": ${withoutDeliverableMessage(unclassified)}`);
+    }
     return this.p;
   }
 

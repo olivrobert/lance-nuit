@@ -17,7 +17,7 @@ function writeFixture(dir: string): string {
   writeFileSync(
     path,
     `export default ({ pipeline, bashStep }) => pipeline("default")` +
-      `.add(bashStep({ id: "a", name: "A", command: "true" }))` +
+      `.add(bashStep({ id: "a", name: "A", command: "true", rerunOnResume: true }))` +
       `.build();\n`,
   );
   return path;

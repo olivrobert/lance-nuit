@@ -142,7 +142,7 @@ function writePipelineFixture(dir: string): string {
   const p = join(dir, "pipeline-fixture.ts");
   writeFileSync(
     p,
-    `export default ({ pipeline, bashStep }) => pipeline("default").add(bashStep({ id: "a", name: "A", command: "true" })).build();\n`,
+    `export default ({ pipeline, bashStep }) => pipeline("default").add(bashStep({ id: "a", name: "A", command: "true", rerunOnResume: true })).build();\n`,
   );
   return p;
 }
@@ -152,23 +152,10 @@ function writeMultiStepFixture(dir: string): string {
   writeFileSync(
     p,
     `export default ({ pipeline, bashStep }) => pipeline("default")` +
-      `.add(bashStep({ id: "a", name: "A", command: "true" }))` +
-      `.add(bashStep({ id: "b", name: "B", command: "true" }))` +
-      `.add(bashStep({ id: "c", name: "C", command: "true" }))` +
+      `.add(bashStep({ id: "a", name: "A", command: "true", rerunOnResume: true }))` +
+      `.add(bashStep({ id: "b", name: "B", command: "true", rerunOnResume: true }))` +
+      `.add(bashStep({ id: "c", name: "C", command: "true", rerunOnResume: true }))` +
       `.build();\n`,
-  );
-  return p;
-}
-
-function writeQualityFixture(dir: string): string {
-  const p = join(dir, "pipeline-quality.ts");
-  writeFileSync(
-    p,
-    `export default ({ pipeline, bashStep }) => {` +
-      `const p = pipeline("default");` +
-      `for (const name of ["format", "static-analysis", "dependencies", "tests", "mutation"]) p.add(bashStep({ id: "quality." + name, name, command: "true" }));` +
-      `return p.add(bashStep({ id: "commit", name: "Commit", command: "true" })).build();` +
-      `};\n`,
   );
   return p;
 }
@@ -178,7 +165,7 @@ function writeWorkItemBudgetFixture(dir: string): string {
   writeFileSync(
     p,
     `export default ({ pipeline, bashStep }) => pipeline("work-items")` +
-      `.forEachWorkItem({ queue: "featureTodo", scan: { limit: 3 }, maxCostPerWorkItemUsd: 7, do: [bashStep({ id: "body", name: "Body", command: "true" })] })` +
+      `.forEachWorkItem({ queue: "featureTodo", scan: { limit: 3 }, maxCostPerWorkItemUsd: 7, do: [bashStep({ id: "body", name: "Body", command: "true", rerunOnResume: true })] })` +
       `.build();\n`,
   );
   return p;
@@ -199,7 +186,9 @@ test("loadOrCreateRun rejects an existing corrupt snapshot instead of initializi
     worktree: false,
   });
   const byId = Object.fromEntries(run.steps.map((s) => [s.id, s.status]));
-  expect(byId).toEqual({ a: "skipped", b: "pending", c: "pending" });
+  // Boot requeues from the target on; the loop leaves the earlier steps out.
+  expect(byId).toEqual({ a: "pending", b: "pending", c: "pending" });
+  expect(run.steps.map((step) => step.replay)).toEqual([undefined, true, true]);
 });
 
 test("loadOrCreateRun: validates the contract", async () => {
@@ -225,26 +214,6 @@ test("matchesStepSelector: validates the contract", () => {
   expect(matchesStepSelector("quality.static-analysis", "quality.*")).toBe(true);
   expect(matchesStepSelector("refactoring-quality.static-analysis", "quality")).toBe(false);
   expect(matchesStepSelector("quality.static-analysis", "quality.static-analysis")).toBe(true);
-});
-
-test("loadOrCreateRun: validates the contract", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "quality-filter-"));
-  const pipelinePath = writeQualityFixture(dir);
-  const { run } = await loadOrCreateRun({
-    pipelinePath,
-    stepFilter: ["quality"],
-    runDir: join(dir, "run"),
-    fresh: true,
-    context: buildPipelineContext(builtinRegistries()),
-    worktree: false,
-  });
-  expect(run.steps.filter((step) => step.status === "pending").map((step) => step.id)).toEqual([
-    "quality.format",
-    "quality.static-analysis",
-    "quality.dependencies",
-    "quality.tests",
-    "quality.mutation",
-  ]);
 });
 
 test("maxCostPerWorkItemUsd: validates the contract", async () => {

@@ -102,7 +102,7 @@ function writePipelineFixture(dir: string): string {
   const pipelinePath = join(dir, "pipeline-fixture.ts");
   writeFileSync(
     pipelinePath,
-    `export default ({ pipeline, bashStep }) => pipeline("fixture").add(bashStep({ id: "inspect", name: "Inspect", command: "true" })).build();\n`,
+    `export default ({ pipeline, bashStep }) => pipeline("fixture").add(bashStep({ id: "inspect", name: "Inspect", command: "true", rerunOnResume: true })).build();\n`,
   );
   return pipelinePath;
 }

@@ -29,14 +29,15 @@ function runEntry(cwd: string, ...args: string[]) {
 
 const PASSING = `export default ({ pipeline, bashStep }: any) =>
   pipeline("entry-smoke")
-    .add(bashStep({ id: "hello", name: "Say hello", command: "printf 'hello\\\\n'" }))
+    .add(bashStep({ id: "hello", name: "Say hello", command: "printf 'hello\\\\n'", rerunOnResume: true }))
     .build();
 `;
 
-const FAILING = `export default ({ pipeline, bashStep }: any) =>
+const FAILING = `export default ({ pipeline, bashStep, textArtifact }: any) =>
   pipeline("entry-fail")
-    .add(bashStep({ id: "ok", name: "First", command: "printf 'ok\\\\n'" }))
-    .add(bashStep({ id: "boom", name: "Failing", command: "exit 3" }))
+    .add(bashStep({ id: "ok", name: "First", output: [textArtifact("ok.txt")],
+      command: (ctx: any) => { const out = ctx.paths.artifact("ok.txt"); return "mkdir -p '" + out.slice(0, out.lastIndexOf("/")) + "' && printf ok > '" + out + "'"; } }))
+    .add(bashStep({ id: "boom", name: "Failing", command: "exit 3", rerunOnResume: true }))
     .build();
 `;
 
@@ -56,7 +57,9 @@ test("a failing step exits 1, and the next invocation resumes after the done ste
 
   // The resume header is what proves the snapshot was selected, not recreated.
   const second = runEntry(cwd, "FAIL-1");
-  expect(second.out).toContain("Resumed — already done: First");
+  // First declares an output: a resume re-checks it, and finds it present.
+  expect(second.out).toContain("Re-checked on resume: First");
+  expect(second.out).toContain("First — already completed: outputs present");
   expect(second.status).toBe(1);
 });
 
@@ -76,7 +79,7 @@ test("a usage error is reported and exits 1 without booting", () => {
  *  the shortest real path from `absorbNonBlocking` to an operator's terminal. */
 const NON_BLOCKING = `export default ({ pipeline, bashStep }: any) =>
   pipeline("entry-warn")
-    .add(bashStep({ id: "soft", name: "Soft check", command: "exit 3", blocking: false }))
+    .add(bashStep({ id: "soft", name: "Soft check", command: "exit 3", blocking: false, rerunOnResume: true }))
     .build();
 `;
 

@@ -61,6 +61,14 @@ third is in the `escalate` queue with a note that says why the reviewer wanted a
 human, where the code is, and what to do next. If the machine went to sleep
 halfway through, the same command resumes where it stopped.
 
+Returning that ticket to the queue does not replay the whole night, nor hand
+it over again with the old verdict. `implement` declares `ticket.md` as
+`input`, and `review` declares the branch's `HEAD` (a `source`) and
+`implementation.md`. Answer on the ticket, and the next run implements and
+reviews again; commit on the branch, and it reviews again. A ticket returned
+with neither is handed over again. See
+[input freshness](../../guide/dsl.md#input-freshness).
+
 ## About the cost ceiling
 
 `maxCostPerWorkItemUsd: 8` stops a ticket's run once the agents have reported

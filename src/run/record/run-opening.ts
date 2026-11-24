@@ -6,8 +6,8 @@
 // the caller learns whether it resumed instead of deriving it again.
 //
 // What the invocation asks for stays with its caller (`execution/step/load-or-create-run.ts`): the
-// definition a snapshot runs against, and the selection (`--steps`, `--skip`,
-// `--start-at`) to apply to the steps. They come in as a policy, called at the
+// definition a snapshot runs against, and the `--start-at` requeue to apply to
+// the steps. They come in as a policy, called at the
 // one point of the opening where each applies; the caller reads the steps and
 // decides, and the opening writes them.
 
@@ -67,16 +67,11 @@ export interface StrictSnapshotRead {
 }
 
 /** What the invocation's selection does to the steps of a resumed run. The caller
- *  decides it on the journal-reconciled states; the opening applies it, in this
- *  order, before the states become the run's steps. */
+ *  decides it on the journal-reconciled states; the opening applies it before the
+ *  states become the run's steps. `--steps` and `--skip` are not here: they last
+ *  one invocation, and the step loop applies them. */
 export interface ResumedSelection {
-  /** Steps this invocation leaves out of work they still owe: `skipped`, and
-   *  recorded as an operator exclusion. */
-  readonly exclude: readonly string[];
-  /** Forget the exclusions an earlier invocation persisted (reconcile mode). */
-  readonly dropExclusions: boolean;
-  /** Steps requeued for replay, whatever their status: `pending`, marked
-   *  `replay`, and no longer excluded. */
+  /** Steps requeued for replay, whatever their status: `pending`, marked `replay`. */
   readonly replay: readonly string[];
 }
 
@@ -87,9 +82,9 @@ export interface RunOpeningPolicy {
   /** The selection for a resumed run's steps, each already reconciled with the
    *  journal. A throw refuses the resume, and the run lock this opening took is
    *  released. */
-  selectResumed(states: readonly DeepReadonly<PersistedStepState>[], reconcile: boolean): ResumedSelection;
+  selectResumed(states: readonly DeepReadonly<PersistedStepState>[]): ResumedSelection;
   /** The initial state of one step of a new run. */
-  selectNew(def: PipelineStep, reconcile: boolean): StepStateInput;
+  selectNew(def: PipelineStep): StepStateInput;
 }
 
 export interface OpenRunRequest {
@@ -144,7 +139,6 @@ function hydrate(
   persisted: PersistedRun,
   scope: RunScope,
   projected: ProjectedRunState,
-  selectionTookWork: boolean,
 ): Run {
   const definitionIds = new Set(pipeline.steps.map((step) => step.id));
   const removedIds = persisted.steps.map((step) => step.id).filter((id) => !definitionIds.has(id));
@@ -169,11 +163,7 @@ function hydrate(
   // ABORTED with no step left in flight is a SIGINT in the same window. Loading
   // either as terminal strands it — the parent of a child run then fails on
   // every resume, and a top-level run replays from scratch in a new directory.
-  // A selection that took out the work a STOPPED or FAIL run still owed settles
-  // it now: the verdict on disk judged that work, so it cannot stand for the run
-  // the selection leaves. Loaded as terminal, `--skip` of the step it ended on
-  // would change nothing and leave a run no later invocation resumes.
-  const awaitingVerdict = remaining.settled && (selectionTookWork || remaining.owed);
+  const awaitingVerdict = remaining.settled && remaining.owed;
   const terminal = persisted.status !== undefined && remaining.settled && !awaitingVerdict;
   return {
     name: persisted.name,
@@ -365,26 +355,14 @@ function selectDirectory(request: OpenRunRequest): SelectedDirectory {
   return { dir, stateStore, eventStore, logStore, saved, releaseLock };
 }
 
-/** Apply the invocation's selection to the reconciled states; returns whether it
- *  took out work the run still owed. */
-function applySelection(states: readonly PersistedStepState[], selection: ResumedSelection): boolean {
-  const exclude = new Set(selection.exclude);
+/** Apply the invocation's selection to the reconciled states. */
+function applySelection(states: readonly PersistedStepState[], selection: ResumedSelection): void {
   const replay = new Set(selection.replay);
-  let tookWork = false;
-  for (const state of states) {
-    if (!exclude.has(state.id)) continue;
-    state.status = "skipped";
-    state.excluded = true;
-    tookWork = true;
-  }
-  if (selection.dropExclusions) for (const state of states) delete state.excluded;
   for (const state of states) {
     if (!replay.has(state.id)) continue;
     state.status = "pending";
     state.replay = true;
-    delete state.excluded;
   }
-  return tookWork;
 }
 
 /** Restore a snapshot: project it with its journal, apply the invocation's
@@ -398,11 +376,8 @@ async function restore(request: OpenRunRequest, selected: SelectedDirectory, sav
   seedNewDefinitionSteps(pipeline, saved);
   const projected = projectRunState(saved, readRunEvents({ run_dir: dir, runId: saved.runId, eventStore }));
   const states = [...projected.steps.values()].flatMap((step) => (step.state ? [step.state] : []));
-  const reconcile = pipeline.reconcile === true;
-  const selection = policy.selectResumed(states, reconcile);
-  const selectionTookWork = applySelection(states, selection);
-  const run = hydrate(pipeline, request.pipelinePath, saved, scope, projected, selectionTookWork);
-  run.reconcile = reconcile;
+  applySelection(states, policy.selectResumed(states));
+  const run = hydrate(pipeline, request.pipelinePath, saved, scope, projected);
   run.run_dir = dir;
   run.stateStore = selected.stateStore;
   run.eventStore = eventStore;
@@ -429,7 +404,6 @@ function create(request: OpenRunRequest, selected: SelectedDirectory): Run {
   const { pipeline, scope, location, context } = request;
   const { dir } = selected;
   const runId = basename(dir);
-  const reconcile = pipeline.reconcile === true;
   const run: Run = {
     schemaVersion: 1,
     runId,
@@ -459,11 +433,10 @@ function create(request: OpenRunRequest, selected: SelectedDirectory): Run {
     worktree: location.worktree,
     cwd: location.cwd,
     specPath: context.config.specPath,
-    reconcile,
     stateStore: selected.stateStore,
     eventStore: selected.eventStore,
     logStore: selected.logStore,
-    steps: pipeline.steps.map((def) => makeRunStep(def, request.policy.selectNew(def, reconcile))),
+    steps: pipeline.steps.map((def) => makeRunStep(def, request.policy.selectNew(def))),
   };
 
   saveRun(run);

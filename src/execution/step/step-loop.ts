@@ -7,7 +7,7 @@
 import { extractErrors } from "../report-extraction.js";
 import { executeStep } from "../runners.js";
 import type { PipelineContext } from "../../shared/language/context.js";
-import { reconcilable, rerunsOnResume } from "../../definition/index.js";
+import { readmittedOnResume } from "../../definition/index.js";
 import type { RunStepView, RunView } from "../../run/index.js";
 import type { RunOutput } from "../run-output.js";
 import { type AbortScope, createAbortScope } from "../abort.js";
@@ -57,18 +57,17 @@ export interface ExecuteRunStepsOptions {
   /** `--until` of this invocation: the step after which the loop stops. A
    *  top-level step like `startAt`, never inherited, never persisted. */
   until?: string;
-  /** `--steps` of this invocation. In reconcile mode the loop applies it, and
-   *  `--skip`, instead of boot persisting them as exclusions. Top-level steps
-   *  only, like `startAt`. */
+  /** `--steps` of this invocation. It lasts this invocation only, so the loop
+   *  applies it, and `--skip`. Top-level steps only, like `startAt`. */
   stepFilter?: readonly string[];
   /** `--skip` of this invocation; see `stepFilter`. */
   skipFilter?: readonly string[];
 }
 
 /**
- * Whether this invocation's selectors leave `step` out, in reconcile mode. The
- * selection lasts one invocation, so this is the one place that applies it; boot
- * persists it only in legacy mode. `--steps` and `--skip` leave a step out
+ * Whether this invocation's selectors leave `step` out. The selection lasts one
+ * invocation, so this is the one place that applies it, and nothing persists
+ * it. `--steps` and `--skip` leave a step out
  * whatever its status: statuses no longer decide what runs, the operator's
  * selection does. `--start-at` keeps its scope: before the target, only work
  * still owed is left out, and a `done` step is re-admitted as usual.
@@ -128,8 +127,6 @@ export async function executeRunSteps(
   const unregisterActiveRun = abort.registerActiveRun(run);
   try {
     const { resuming } = opts;
-    // The mode as boot read it from the definition the steps come from.
-    const reconcile = run.reconcile === true;
 
     // One ledger, shared by every phase of this execution.
     const budget = openRunLedger(run);
@@ -144,7 +141,6 @@ export async function executeRunSteps(
       baseCtx,
       budget,
       abort,
-      reconcile,
       replayInterrupted: opts.replayInterrupted,
       deps,
     };
@@ -167,31 +163,21 @@ export async function executeRunSteps(
           boundReached = true;
           break units;
         }
-        if (reconcile && leftOutBySelection(run, step, opts)) {
+        if (leftOutBySelection(run, step, opts)) {
           if (skipForOperatorSelection(run, step, deps.output) === "unfinished") leftUnfinished ??= step;
           setAside.push(step.id);
           continue;
         }
-        // Reconsider a settled step on resume when it asked for it, when it
-        // declares `input` (its outputs may have been produced from bytes that have
-        // since changed), or when it reworks an artifact a human may have rejected.
-        // A re-admitted step with nothing to redo costs zero. Reconcile mode
-        // re-admits every step that declares what it delivers, except
-        // orchestration nodes (`runPipeline`, `forEachPipeline`), which keep the
-        // authority of their status whatever they declare. A step declaring
-        // neither output nor rerunOnResume can only be the runner's work-item
-        // source step (the build refuses any other), and keeps its status too.
-        const reconciled = reconcile && reconcilable(step.def);
-        const reconsider =
-          resuming &&
-          (reconciled ||
-            rerunsOnResume(step.def, reconcile) ||
-            (step.def.sources?.length ?? 0) > 0 ||
-            (step.def.rework_for?.length ?? 0) > 0);
-        // A legacy operator exclusion (`--steps`, `--skip`, `--start-at`) is a
-        // decision, not a freshness verdict: it survives the resume that re-admits
-        // the rest. Reconcile mode persists none (above).
-        if (step.status === "skipped" && !(reconsider && (reconciled || step.def.sources) && !step.excluded)) continue;
+        // A resume re-admits every settled step that declares what it reads or
+        // delivers, or asks to rerun, and a `done` step reworking an artifact a
+        // human may have rejected. A re-admitted step with nothing to redo costs
+        // zero. Orchestration nodes (`runPipeline`, `forEachPipeline`) keep the
+        // authority of their status whatever they declare (D3), and so does the
+        // runner's work-item source step, the only other step the build lets
+        // declare none of them.
+        const readmitted = readmittedOnResume(step.def);
+        const reconsider = resuming && (readmitted || (step.def.rework_for?.length ?? 0) > 0);
+        if (step.status === "skipped" && !(reconsider && readmitted)) continue;
         // Skip a done step on resume unless it is reconsidered. This idempotently
         // restores Git state: create-branch moves HEAD to feature/fix, while skipping
         // would leave it on base/develop and attach commits to the wrong branch.
@@ -205,7 +191,6 @@ export async function executeRunSteps(
           output: deps.output,
           replayInterrupted: opts.replayInterrupted,
           startAt: opts.startAt,
-          reconcile,
         });
         if (isAborted()) break units;
         if (admission.kind === "skip") continue;

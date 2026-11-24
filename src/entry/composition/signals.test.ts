@@ -29,10 +29,10 @@ function pipelineFile(root: string): string {
   const path = join(root, "p.ts");
   writeFileSync(
     path,
-    `export default ({ pipeline, actionStep }) => pipeline("p")
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
-  .add(actionStep({ id: "c", name: "c", run: () => {}, describe: "c" }))
+    `export default ({ pipeline, actionStep, textArtifact }) => pipeline("p")
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", output: [textArtifact("a.txt")] }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", output: [textArtifact("b.txt")] }))
+  .add(actionStep({ id: "c", name: "c", run: () => {}, describe: "c", output: [textArtifact("c.txt")] }))
   .build();`,
   );
   return path;
@@ -54,11 +54,15 @@ function childSource(root: string, runDir: string, pipelinePath: string, stopSou
     `import { updateStep } from ${module("src/run/record/run-transitions.ts")};`,
     `import { installChildKillHandlers } from ${module("src/entry/composition/signals.ts")};`,
     `import { createAbortScope } from ${module("src/execution/abort.ts")};`,
+    `import { mkdirSync, writeFileSync } from "node:fs";`,
+    `import { dirname } from "node:path";`,
     `const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: ${JSON.stringify(root)}, ticket: "T-9" });`,
     `const { run } = await loadOrCreateRun({ pipelinePath: ${JSON.stringify(pipelinePath)}, ticket: "T-9", runDir: ${JSON.stringify(
       runDir,
     )}, fresh: false, context: ctx });`,
     'updateStep(run, run.steps[0], "done");',
+    `mkdirSync(dirname(ctx.paths.artifact("a.txt")), { recursive: true });`,
+    'writeFileSync(ctx.paths.artifact("a.txt"), "a");',
     'updateStep(run, run.steps[1], "running");',
     'const logPath = allocateAttempt(run, run.steps[1], "step").logPath;',
     'appendRunEvent(run, "step.attempt.started", { stepId: "b", attempt: 1, kind: "step", logPath });',
@@ -175,6 +179,7 @@ test("a real SIGTERM during a step persists the abort and leaves a resumable run
     {
       executeStep: async (step) => {
         spawned.push(step.id);
+        writeFileSync(ctx.paths.artifact(`${step.id}.txt`), step.id);
         return { ok: true, output: "", stats: { duration_ms: 1 } };
       },
       extractErrors: async () => ({ hasErrors: false, errors: "" }),

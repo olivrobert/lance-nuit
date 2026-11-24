@@ -34,11 +34,13 @@ import { readRunSnapshot } from "../../run/record/run-snapshot.ts";
 import { makeRunStep, type StepStateInput } from "../../run/record/run-step.ts";
 import { admitStep } from "./step-admission.ts";
 import { executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
+import { loadOrCreateRun } from "./load-or-create-run.ts";
+import { resolveRunDir } from "../../run/record/stores/run-storage.ts";
 import { resolveOutcome } from "./step-outcome.ts";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import { createAbortScope } from "../abort.js";
 import { humanReview } from "../../definition/builtin-steps/lib/human-review.js";
-import { bashStep as dslBashStep, pipeline } from "../../definition/dsl.js";
+import { createInternalWorkItemSourceStep, bashStep as dslBashStep, pipeline } from "../../definition/dsl.js";
 import { pendingRejection, recordApproval, recordRejection } from "../../work-items/store/decisions.js";
 import { NULL_RUN_OUTPUT } from "../run-output.js";
 
@@ -1380,7 +1382,7 @@ test("resume: an absorbed step whose fix rewrote its input is not re-run", async
 
 test("resume: an absorbed step whose input an earlier step rewrote runs again", async () => {
   const { ctx, values } = artifactContext({ "ticket.md": "v1" });
-  const producer = bashStep("make", "cmd", { outputs: [ticketArtifact], rerun_on_resume: true });
+  const producer = bashStep("make", "cmd", { rerun_on_resume: true });
   const check = bashStep("check", "cmd", { sources: [ticketArtifact], outputs: [specArtifact], blocking: false });
   const gate = bashStep("gate", "test -f ok");
   const run = makeRun([producer, check, gate]);
@@ -1455,23 +1457,15 @@ test("a step revising an output another step produced is not adopted on its extr
   expect(calls.ids).toEqual(["plan-revise"]);
 });
 
-test("resume: a step skipped by its own admission is re-admitted, an excluded one is not", async () => {
+test("resume: a step skipped by its own admission is re-admitted", async () => {
   const { ctx } = artifactContext({ "ticket.md": "one" });
-  const admitted = derivedStep({ status: "skipped" });
-  const excluded = bashStep(
-    "plan",
-    "cmd",
-    { sources: [ticketArtifact], outputs: [textArtifact("plan.md")] },
-    { status: "skipped", excluded: true },
-  );
-  const run = makeRun([admitted, excluded]);
+  const run = makeRun([derivedStep({ status: "skipped" })]);
 
   const { deps, calls } = fakeDeps();
   await executeRunSteps(run, { resuming: true }, deps, ctx);
 
-  // The outputs are missing, so the re-admitted step runs; the operator exclusion holds.
+  // The outputs are missing, so the re-admitted step runs.
   expect(calls.ids).toEqual(["spec"]);
-  expect(excluded.status).toBe("skipped");
 });
 
 test("resume: a when refusal over stale inputs says the outputs were kept", async () => {
@@ -1834,12 +1828,6 @@ const branchArtifact = textArtifact("branch.json");
 const branchStep = (state: StepStateInput = {}, def: Partial<PipelineStep> = {}): RunStep =>
   bashStep("branch", "cmd", { outputs: [branchArtifact], ...def }, state);
 
-/** Marks `run` as boot does for a pipeline declaring `.reconcile()`. */
-function reconciled(run: Run): Run {
-  run.reconcile = true;
-  return run;
-}
-
 test("reconcile: a done step whose deliverable is present is not paid twice, and its spend still counts", async () => {
   const { ctx } = artifactContext({ "branch.json": "{}" });
   const step = branchStep({ status: "done", control: { duration_ms: 1, total_cost_usd: 0.4 } });
@@ -1847,7 +1835,7 @@ test("reconcile: a done step whose deliverable is present is not paid twice, and
   const run = makeRun([step, later]);
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["later"]);
   expect(step.status).toBe("done");
@@ -1863,19 +1851,13 @@ test("reconcile: a new run does not pay a step whose deliverable is already pres
   const run = makeRun([step]);
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(reconciled(run), { resuming: false }, deps, ctx);
+  await executeRunSteps(run, { resuming: false }, deps, ctx);
 
   expect(calls.exec).toBe(0);
   expect(step.status).toBe("skipped");
 });
 
-test("reconcile: a done step whose deliverable was deleted runs again; legacy trusts its status", async () => {
-  const legacy = artifactContext();
-  const legacyStep = branchStep({ status: "done", control: { duration_ms: 1 } });
-  const first = fakeDeps();
-  await executeRunSteps(makeRun([legacyStep]), { resuming: true }, first.deps, legacy.ctx);
-  expect(first.calls.exec).toBe(0);
-
+test("reconcile: a done step whose deliverable was deleted runs again", async () => {
   const { ctx, values } = artifactContext();
   const step = branchStep({ status: "done", control: { duration_ms: 1 } });
   const { deps, calls } = fakeDeps();
@@ -1886,25 +1868,19 @@ test("reconcile: a done step whose deliverable was deleted runs again; legacy tr
       return deps.executeStep(s, command, budget, context);
     },
   };
-  await executeRunSteps(reconciled(makeRun([step])), { resuming: true }, writing, ctx);
+  await executeRunSteps(makeRun([step]), { resuming: true }, writing, ctx);
 
   expect(calls.ids).toEqual(["branch"]);
   expect(step.status).toBe("done");
 });
 
-test("reconcile: a step skipped by its own admission is re-admitted, an excluded one is not", async () => {
+test("reconcile: a step skipped by its own admission is re-admitted", async () => {
   const { ctx, values } = artifactContext();
   const admitted = branchStep({ status: "skipped" });
-  const excluded = bashStep(
-    "plan",
-    "cmd",
-    { outputs: [textArtifact("plan.md")] },
-    { status: "skipped", excluded: true },
-  );
-  const run = makeRun([admitted, excluded]);
+  const run = makeRun([admitted]);
 
   const { deps, calls } = fakeDeps();
-  // The attempt checks its outputs: branch writes its own, so the loop goes on to the excluded step.
+  // The attempt checks its outputs: branch writes its own.
   const writing: StepLoopDeps = {
     ...deps,
     executeStep: async (s, command, budget, context) => {
@@ -1912,11 +1888,10 @@ test("reconcile: a step skipped by its own admission is re-admitted, an excluded
       return deps.executeStep(s, command, budget, context);
     },
   };
-  await executeRunSteps(reconciled(run), { resuming: true }, writing, ctx);
+  await executeRunSteps(run, { resuming: true }, writing, ctx);
 
   expect(calls.ids).toEqual(["branch"]);
   expect(admitted.status).toBe("done");
-  expect(excluded.status).toBe("skipped");
 });
 
 test("reconcile: an absorbed failure without input does not run again on every resume", async () => {
@@ -1925,29 +1900,18 @@ test("reconcile: an absorbed failure without input does not run again on every r
   const gate = bashStep("gate", "test -f ok");
   const run = makeRun([check, gate]);
   const first = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
-  await executeRunSteps(reconciled(run), { resuming: false }, first.deps, ctx);
+  await executeRunSteps(run, { resuming: false }, first.deps, ctx);
   expect(check.status).toBe("done");
   expect(check.errors).toBe("audit failed");
   // No input to fingerprint: the record is empty, and still vouches for the absorption.
   expect(check.absorbed_inputs).toEqual({});
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.ids).toEqual(["gate"]);
   const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
   expect(skipped).toMatchObject({ stepId: "branch", reason: SKIP_ABSORBED });
-});
-
-test("legacy: an absorbed failure without input records nothing, its status alone holds it", async () => {
-  const { ctx } = artifactContext();
-  const check = branchStep({}, { blocking: false });
-  const run = makeRun([check]);
-  const first = fakeDeps([{ ok: false, failReason: "audit failed" }]);
-  await executeRunSteps(run, { resuming: false }, first.deps, ctx);
-
-  expect(check.status).toBe("done");
-  expect(check.absorbed_inputs).toBeUndefined();
 });
 
 test("reconcile: a materialized orchestration node keeps the authority of its status", async () => {
@@ -1973,13 +1937,28 @@ test("reconcile: a materialized orchestration node keeps the authority of its st
   const run = makeRun([node]);
 
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   // Re-admitted, the node would relaunch its child pipeline, which does not exist here.
   expect(outcome.failed).toBe(false);
   expect(calls.exec).toBe(0);
   expect(node.status).toBe("done");
   expect(readRunEvents(run.run_dir).some((event) => event.type === "step.skipped")).toBe(false);
+});
+
+test("D3: a done work-item source step keeps the authority of its status on resume", async () => {
+  const { ctx } = artifactContext();
+  const built = pipeline("p")
+    .add(createInternalWorkItemSourceStep({ dir: () => "/tmp/work-items", queue: "featureTodo" }))
+    .add(dslBashStep({ id: "work", name: "Work", command: "work", rerunOnResume: true }))
+    .build();
+  const run = makeRun(built.steps.map((def) => makeRunStep(def, { status: "done", control: { duration_ms: 1 } })));
+
+  const { deps, calls } = fakeDeps();
+  await executeRunSteps(run, { resuming: true }, deps, ctx);
+
+  expect(calls.ids).toEqual(["work"]);
+  expect(run.steps[0]!.status).toBe("done");
 });
 
 test("reconcile: a skipped orchestration node declaring rerunOnResume stays skipped", async () => {
@@ -1999,7 +1978,7 @@ test("reconcile: a skipped orchestration node declaring rerunOnResume stays skip
   const run = makeRun([node]);
 
   const { deps, calls } = fakeDeps();
-  const outcome = await executeRunSteps(reconciled(run), { resuming: true }, deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(outcome.failed).toBe(false);
   expect(calls.exec).toBe(0);
@@ -2032,29 +2011,17 @@ test("reconcile: a done orchestration node declaring rerunOnResume keeps its sta
   const node = doneNodeRerunOnResume();
   const run = makeRun([node]);
 
-  const outcome = await executeRunSteps(reconciled(run), { resuming: true }, fakeDeps().deps, ctx);
+  const outcome = await executeRunSteps(run, { resuming: true }, fakeDeps().deps, ctx);
 
   expect(outcome.failed).toBe(false);
   expect(node.status).toBe("done");
   expect(readRunEvents(run.run_dir).map((event) => event.type)).toEqual([]);
 });
 
-test("default mode: a done orchestration node declaring rerunOnResume is re-admitted", async () => {
-  const { ctx } = artifactContext();
-  const node = doneNodeRerunOnResume();
-  const run = makeRun([node]);
-
-  // Re-admitted, the node starts its orchestration, which then fails to resolve a
-  // pipeline file that does not exist here.
-  await expect(executeRunSteps(run, { resuming: true }, fakeDeps().deps, ctx)).rejects.toThrow();
-  expect(node.status).toBe("running");
-});
-
 test("reconcile: a done humanReview gate checks its approval again on every invocation", async () => {
   const { values, ctx } = reworkContext({ "plan.md": "v1" });
   await recordApproval(ctx, "plan", reviewedPlan);
   const built = pipeline("p")
-    .reconcile()
     .add(
       dslBashStep({ id: "write", name: "Write", command: "write" }).output(reviewedPlan),
       humanReview<string>({
@@ -2070,7 +2037,7 @@ test("reconcile: a done humanReview gate checks its approval again on every invo
   const run = makeRun(built.steps.map((def) => makeRunStep(def, { status: "done", control: { duration_ms: 1 } })));
   const gate = run.steps.find((step) => step.id === "plan-gate")!;
 
-  const approved = await executeRunSteps(reconciled(run), { resuming: true }, fakeDeps().deps, ctx);
+  const approved = await executeRunSteps(run, { resuming: true }, fakeDeps().deps, ctx);
   expect(approved.stopped).toBe(false);
   expect(gate.status).toBe("done");
   const attempts = readRunEvents(run.run_dir).filter((event) => event.type === "step.attempt.started");
@@ -2078,7 +2045,7 @@ test("reconcile: a done humanReview gate checks its approval again on every invo
 
   // The plan changed after its approval: the done gate must not wave it through.
   values.set("plan.md", "v2");
-  const stale = await executeRunSteps(reconciled(run), { resuming: true }, fakeDeps().deps, ctx);
+  const stale = await executeRunSteps(run, { resuming: true }, fakeDeps().deps, ctx);
   expect(stale.stopped).toBe(true);
   expect(run.outcome?.phase).toBe("plan-gate");
 });
@@ -2105,12 +2072,7 @@ test("reconcile: --skip sets a step aside whatever its status, journals why, and
   const run = makeRun([done, owed, kept]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(
-      reconciled(run),
-      { resuming: true, skipFilter: ["context", "quality"] },
-      deps,
-      ctx,
-    );
+    const outcome = await executeRunSteps(run, { resuming: true, skipFilter: ["context", "quality"] }, deps, ctx);
 
     expect(calls.ids).toEqual(["report"]);
     expect(outcome.setAside).toEqual(["context", "quality"]);
@@ -2118,7 +2080,6 @@ test("reconcile: --skip sets a step aside whatever its status, journals why, and
     // A done step keeps the status its pass earned; a pending one settles as skipped.
     expect(done.status).toBe("done");
     expect(owed.status).toBe("skipped");
-    expect(run.steps.map((step) => step.excluded)).toEqual([undefined, undefined, undefined]);
     expect(selectionSkips(run)).toEqual([
       { stepId: "context", reason: "operator selection" },
       { stepId: "quality", reason: "operator selection" },
@@ -2135,7 +2096,7 @@ test("reconcile: --steps sets aside every step it does not name, prefixes includ
   const run = makeRun([replayable("checks.lint"), replayable("checks.types"), replayable("report")]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(reconciled(run), { resuming: false, stepFilter: ["checks"] }, deps, ctx);
+    const outcome = await executeRunSteps(run, { resuming: false, stepFilter: ["checks"] }, deps, ctx);
 
     expect(calls.ids).toEqual(["checks.lint", "checks.types"]);
     expect(outcome.setAside).toEqual(["report"]);
@@ -2153,12 +2114,11 @@ test("reconcile: --start-at sets aside the work still owed before its target, an
   const run = makeRun([done, owed, target]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(reconciled(run), { resuming: true, startAt: "implement" }, deps, ctx);
+    const outcome = await executeRunSteps(run, { resuming: true, startAt: "implement" }, deps, ctx);
 
     expect(calls.ids).toEqual(["context", "implement"]);
     expect(outcome.setAside).toEqual(["prepare"]);
     expect(owed.status).toBe("skipped");
-    expect(owed.excluded).toBeUndefined();
   } finally {
     rmSync(run.run_dir, { recursive: true, force: true });
   }
@@ -2182,12 +2142,7 @@ test("reconcile: a step left out whose last pass is unfinished keeps its status,
   const run = makeRun([failed, interrupted, kept]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(
-      reconciled(run),
-      { resuming: true, skipFilter: ["quality", "publish"] },
-      deps,
-      ctx,
-    );
+    const outcome = await executeRunSteps(run, { resuming: true, skipFilter: ["quality", "publish"] }, deps, ctx);
 
     expect(calls.ids).toEqual(["report"]);
     expect(outcome.setAside).toEqual(["quality", "publish"]);
@@ -2214,7 +2169,7 @@ test("reconcile: a step left out with an unfinished pass does not turn a failure
   const run = makeRun([failed, replayable("report")]);
   try {
     const { deps } = fakeDeps([{ ok: false }]);
-    const outcome = await executeRunSteps(reconciled(run), { resuming: true, skipFilter: ["quality"] }, deps, ctx);
+    const outcome = await executeRunSteps(run, { resuming: true, skipFilter: ["quality"] }, deps, ctx);
 
     expect(outcome.failed).toBe(true);
     expect(outcome.stopped).toBe(false);
@@ -2241,7 +2196,7 @@ test("reconcile: a requeued step whose last attempt was interrupted keeps pendin
   const run = makeRun([requeued, replayable("report")]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(reconciled(run), { resuming: true, skipFilter: ["publish"] }, deps, ctx);
+    const outcome = await executeRunSteps(run, { resuming: true, skipFilter: ["publish"] }, deps, ctx);
 
     expect(calls.ids).toEqual(["report"]);
     // Settled as skipped, it would lose the interruption the next admission must see.
@@ -2260,12 +2215,7 @@ test("reconcile: an --until bound left out unfinished is reached, and its stop o
   const run = makeRun([replayable("context"), bound, replayable("implement")]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(
-      reconciled(run),
-      { resuming: true, skipFilter: ["plan"], until: "plan" },
-      deps,
-      ctx,
-    );
+    const outcome = await executeRunSteps(run, { resuming: true, skipFilter: ["plan"], until: "plan" }, deps, ctx);
 
     expect(calls.ids).toEqual(["context"]);
     expect(outcome.untilStop).toBe(true);
@@ -2282,12 +2232,7 @@ test("reconcile: a step set aside before the --until bound settles it, later ste
   const run = makeRun([replayable("context"), replayable("plan"), replayable("report")]);
   try {
     const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(
-      reconciled(run),
-      { resuming: false, skipFilter: ["plan"], until: "plan" },
-      deps,
-      ctx,
-    );
+    const outcome = await executeRunSteps(run, { resuming: false, skipFilter: ["plan"], until: "plan" }, deps, ctx);
 
     expect(calls.ids).toEqual(["context"]);
     expect(outcome.untilStop).toBe(true);
@@ -2316,7 +2261,7 @@ for (const gate of [
     if (gate.unaccounted) run.cost_unaccounted = true;
     try {
       const { deps, calls } = fakeDeps();
-      const outcome = await executeRunSteps(reconciled(run), { resuming: true, skipFilter: ["quality"] }, deps, ctx);
+      const outcome = await executeRunSteps(run, { resuming: true, skipFilter: ["quality"] }, deps, ctx);
 
       expect(calls.ids).toEqual([]);
       expect(outcome.setAside).toEqual(["quality"]);
@@ -2345,12 +2290,7 @@ test("reconcile: an interruption after a step left out unfinished is not turned 
       abort.requestAbort("SIGINT");
       return executeStep(...args);
     };
-    const outcome = await executeRunSteps(
-      reconciled(run),
-      { resuming: true, abort, skipFilter: ["quality"] },
-      deps,
-      ctx,
-    );
+    const outcome = await executeRunSteps(run, { resuming: true, abort, skipFilter: ["quality"] }, deps, ctx);
 
     expect(calls.ids).toEqual(["report"]);
     expect(outcome.stopped).toBe(false);
@@ -2361,23 +2301,95 @@ test("reconcile: an interruption after a step left out unfinished is not turned 
   }
 });
 
-test("legacy: the loop leaves the selectors to boot, which persisted them as exclusions", async () => {
+test("--start-at past a failed step sets it aside unfinished, stops for a decision, and a plain resume reruns it", async () => {
   const { ctx } = artifactContext();
-  const run = makeRun([replayable("context"), replayable("quality")]);
+  const failed = replayable("a", { status: "failed", errors: "boom" });
+  const target = replayable("b", { status: "pending", replay: true });
+  const run = makeRun([failed, target]);
   try {
-    const { deps, calls } = fakeDeps();
-    const outcome = await executeRunSteps(
-      run,
-      { resuming: false, skipFilter: ["quality"], stepFilter: ["context"] },
-      deps,
-      ctx,
-    );
+    const first = fakeDeps();
+    const forked = await executeRunSteps(run, { resuming: true, startAt: "b" }, first.deps, ctx);
 
-    expect(calls.ids).toEqual(["context", "quality"]);
-    expect(outcome.setAside).toEqual([]);
-    expect(selectionSkips(run)).toEqual([]);
+    expect(first.calls.ids).toEqual(["b"]);
+    expect(forked.setAside).toEqual(["a"]);
+    expect(failed.status).toBe("failed");
+    expect(forked.stopped).toBe(true);
+    expect(run.outcome?.stop?.kind).toBe("needs-decision");
+    expect(run.outcome?.phase).toBe("a");
+
+    const second = fakeDeps();
+    const resumed = await executeRunSteps(run, { resuming: true }, second.deps, ctx);
+
+    expect(second.calls.ids[0]).toBe("a");
+    expect(resumed.setAside).toEqual([]);
+    expect(failed.status).toBe("done");
   } finally {
     rmSync(run.run_dir, { recursive: true, force: true });
+  }
+});
+
+for (const selection of [{ stepFilter: ["c"] }, { skipFilter: ["b"] }] as const) {
+  test(`${Object.keys(selection)[0]} sets an aborted step aside without running it, and the run stops for a decision`, async () => {
+    const { ctx } = artifactContext();
+    const aborted = replayable("b", { status: "aborted" });
+    const run = makeRun([replayable("a", { status: "done", control: { duration_ms: 1 } }), aborted, replayable("c")]);
+    try {
+      const { deps, calls } = fakeDeps();
+      const outcome = await executeRunSteps(run, { resuming: true, ...selection }, deps, ctx);
+
+      expect(calls.ids).not.toContain("b");
+      expect(calls.ids).toContain("c");
+      expect(outcome.setAside).toContain("b");
+      expect(aborted.status).toBe("aborted");
+      expect(outcome.stopped).toBe(true);
+      expect(run.outcome?.stop?.kind).toBe("needs-decision");
+    } finally {
+      rmSync(run.run_dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("the resume selectors apply to a step added to the definition after the snapshot", async () => {
+  const root = mkdtempSync(join(tmpdir(), "steploop-new-step-"));
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-new" });
+  const definition = (file: string, ids: string[]) => {
+    const path = join(root, file);
+    const steps = ids.map(
+      (id) =>
+        `  .add(actionStep({ id: "${id}", name: "${id}", run: () => {}, describe: "${id}", rerunOnResume: true }))`,
+    );
+    writeFileSync(path, `export default ({ pipeline, actionStep }) => pipeline("p")\n${steps.join("\n")}\n  .build();`);
+    return path;
+  };
+  try {
+    const dir = resolveRunDir("p", "T-new", undefined, true, ctx);
+    // A distinct file per revision: the loader imports the module, and an import
+    // is cached for the process.
+    await loadOrCreateRun({
+      pipelinePath: definition("before.ts", ["a", "b"]),
+      ticket: "T-new",
+      runDir: dir,
+      fresh: false,
+      context: ctx,
+      worktree: false,
+    });
+    const { run } = await loadOrCreateRun({
+      pipelinePath: definition("after.ts", ["a", "b", "deploy"]),
+      ticket: "T-new",
+      runDir: dir,
+      fresh: false,
+      context: ctx,
+      worktree: false,
+    });
+    const { deps, calls } = fakeDeps();
+    const outcome = await executeRunSteps(run, { resuming: true, stepFilter: ["a"] }, deps, ctx);
+
+    expect(calls.ids).toEqual(["a"]);
+    expect(outcome.setAside).toEqual(["b", "deploy"]);
+    expect(run.steps.find((step) => step.id === "deploy")?.status).toBe("skipped");
+    expect(outcome.stopped).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

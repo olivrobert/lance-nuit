@@ -22,7 +22,7 @@ import {
   rejectionPending,
 } from "../../src/work-items/store/decisions.js";
 
-const step = () => bashStep({ id: "noop", name: "Noop", command: "true" });
+const step = () => bashStep({ id: "noop", name: "Noop", command: "true", rerunOnResume: true });
 
 /** Arbitrary project artifact: the mechanism knows no particular name. */
 const budgetArtifact = artifact("budget.json", (value) => {

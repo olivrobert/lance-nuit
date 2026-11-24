@@ -51,7 +51,7 @@ export default defineExtension({
 `;
 
 const DEMO = `export default ({ pipeline, llmStep }: any) => pipeline("demo")
-  .add(llmStep({ id: "code", name: "Code", backend: "custom", profile: "coder", command: "go" }))
+  .add(llmStep({ id: "code", name: "Code", backend: "custom", profile: "coder", command: "go", rerunOnResume: true }))
   .build();
 `;
 

@@ -70,25 +70,25 @@ included, finds them as the last one left them. The code that owns the run
 record is the `src/run/record/` module; the rest of the runner reaches it
 through `run/record/index.ts` only.
 
-The two answer different questions, and the mode decides which one says what
-remains to do:
+The two answer different questions
+([admission of settled steps](dsl.md#admission-of-settled-steps)):
 
-| Question | Default mode | [Reconcile mode](dsl.md#reconcile-mode) |
-| --- | --- | --- |
-| Does a settled step run again? | its status in `state.json`: a `done` step is not looked at again in its run, unless it declares `input` or `rerunOnResume`, or is a gate's rework step | its declared outputs: it runs when one is missing, `unknown`, stale or [unfinished](dsl.md#input-freshness); a `rerunOnResume` step without output always runs |
-| Did the last pass of the step in this run finish? | the run record | the run record: the [interruption guard](dsl.md#interrupted-steps) and the rerun a failed pass is owed read it in both modes |
-| What was spent, and may the run spend more? | the run record | the run record |
-| Does a `runPipeline` or `forEachPipeline` node, or the work-item source step, run again? | its status, unless the node is `done` and declares `rerunOnResume` | its status, even when the node declares `rerunOnResume` |
+| Question | Answered by |
+| --- | --- |
+| Does a settled step run again? | its declared outputs: it runs when one is missing, `unknown`, stale or [unfinished](dsl.md#input-freshness); a `rerunOnResume` step without output always runs |
+| Did the last pass of the step in this run finish? | the run record: the [interruption guard](dsl.md#interrupted-steps) and the rerun a failed pass is owed read it |
+| What was spent, and may the run spend more? | the run record |
+| Does a `runPipeline` or `forEachPipeline` node, or the work-item source step, run again? | its status, even when the node declares `rerunOnResume` |
 
 `when` and a pending [rejection](human-control.md#reject-and-rework) come
-before these answers in both modes.
+before these answers.
 
-In reconcile mode `state.json` no longer decides what remains to do for a step
-that declares outputs, orchestration nodes aside: they keep the authority of
-their status. It still holds everything only the run can know: spend,
-attempts, sessions and the way a pass ended. Where an output's provenance
-record carries an in-flight mark, the mark answers whether the output can be
-adopted, in both modes and whatever the status of the step that wrote it.
+`state.json` does not decide what remains to do for a step that declares
+outputs, orchestration nodes aside: they keep the authority of their status. It
+still holds everything only the run can know: spend, attempts, sessions and the
+way a pass ended. Where an output's provenance record carries an in-flight mark,
+the mark answers whether the output can be adopted, whatever the status of the
+step that wrote it.
 Where none exists (an attempt of an older runner, a record deleted by hand),
 only the run's record of an unfinished pass keeps the output from being
 adopted, within that run.
@@ -148,7 +148,7 @@ interruption, the death of the runner and a failure absorbed by
   (`"inputs": {}`). It still names the step as the producer, which a later
   revision of the output keeps; without it, a revising step would find the
   output with no record, adopt it, and pass for its producer. `freshness()`
-  reports such an output `fresh`, and reconcile mode counts it as present.
+  reports such an output `fresh`, and admission counts it as present.
 
 An output revised in place, declared as both `input` and `output` of the step,
 is marked too, but keeps its bytes. Its mark adds `inFlight.revision`: the
@@ -229,14 +229,16 @@ A runner that predates the mark reads it as an ordinary record:
 
 - for a step declaring `input`, the mark lists none of its inputs, so it is
   `stale` and the step runs;
-- for a step without `input` in reconcile mode, it only checks that the output
+- for a step without `input`, it only checks that the output
   exists, so it counts a marked output as present, as it did before the mark;
 - for an output revised in place, the mark keeps the producer's inputs, so it
   trusts the producer even when the revision wrote partial bytes, as before the
   mark, and runs the revising step;
 - it ignores `unguaranteed`: the record lists only the revising steps' inputs,
   so the producer is `stale` and runs, unless the revisions read every input of
-  the producer, or the producer declares no `input` and the pipeline reconciles.
+  the producer, or the producer declares no `input` and its pipeline declares
+  the `.reconcile()` that runner still accepted, where the output's presence
+  decides.
   Merging into a record, it keeps the fields it does not know, so a newer
   runner still reads them afterwards;
 - a step without `input` leaves the record it finds as it is, mark included, as
@@ -277,18 +279,16 @@ projected steps, or creates a new run; every snapshot write and journal event of
 the opening is its own, and it tells its caller whether it resumed.
 `execution/step/load-or-create-run.ts` supplies the policy: it loads the definition — again, for a
 resume, under the snapshot's spec path and lot — validates `--start-at`, and
-decides what the `--steps`/`--skip`/`--start-at` selectors do to the projected
-steps, which `openRun` hands it read-only before hydration and then applies:
-the steps excluded, the exclusions dropped, the steps requeued. The selectors come after the projection so they judge what the journal
-knows: a step the snapshot still calls `running` but the journal finished stays
-`done` instead of becoming an exclusion. `--start-at X` requeues `X` and every
-later step, so the run is hydrated live with totals derived from the steps even
-when the snapshot had passed; attempts, retries and spend are kept.
+decides the `--start-at` requeue of the projected steps, which `openRun` hands
+it read-only before hydration and then applies. The requeue comes after the
+projection, so it judges what the journal knows. `--start-at X` requeues `X`
+and every later step, so the run is hydrated live with totals derived from the
+steps even when the snapshot had passed; attempts, retries and spend are kept.
 
-In [reconcile mode](dsl.md#reconcile-mode) the selectors last one invocation, so
-the snapshot never holds an exclusion: boot excludes nothing (it still
-requeues for `--start-at`) and has the `excluded` mark a default-mode
-invocation left dropped. The step loop applies them instead (`execution/step/step-loop.ts`): a
+The `--steps`/`--skip` selectors, and the steps before a `--start-at` target,
+last one invocation, so the snapshot never holds an exclusion: boot excludes
+nothing, and an `excluded` mark an older runner left is ignored. The step loop
+applies them instead (`execution/step/step-loop.ts`): a
 step they leave out is journaled as `step.skipped` with the reason
 `operator selection`, and the run outcome carries the ids, which the final
 report counts. A `done` step stays `done` and a pending one becomes `skipped`,
@@ -312,14 +312,8 @@ A step a dead runner left `running`, an orchestration node killed mid-child
 included, stays so while later steps run. The snapshot cannot tell it from the
 step being executed, so `updateStep` records the steps this process put in
 `running` (`Run.executing`, runtime-only), and a SIGINT or SIGTERM aborts those
-only. In either mode, a signal that lands while no step executes
+only. A signal that lands while no step executes
 (during an admission, or before the first step) marks no step `aborted`.
-
-`Run.reconcile` is runtime-only too: boot sets it from the definition it loads
-the steps from, and the step loop reads it there. The mode belongs to the
-pipeline, so a run created without `.reconcile()` is reconciled from the first
-invocation that loads a definition declaring it (for the way back, see
-[switching back to the default mode](dsl.md#reconcile-mode)).
 
 `run/record/` only reads, projects and reconciles
 (`run/record/run-projection.ts`): it reconciles each persisted step with the attempts
@@ -529,7 +523,7 @@ projection of spend already accounted for when the attempt closed.
 | Composed child spend (`accountedCostUsd`, `accountedDurationMs`, `accountedUsage`) | parent snapshot | the parent node's `control` and `usage`, the parent ledger | What the parent already charged for this child (`chargeChildReconciliation`). A resumed child re-reports its whole history and is charged by difference; a reference reloaded from a snapshot written before the last reconciliation is charged the missing difference again, never twice. |
 | Location (`worktree`, `cwd`) | snapshot | — | Rewritten by every resume with the invocation's own location. |
 | Absorbed inputs (`absorbed_inputs`) | snapshot | — | Written by `recordAbsorbedInputs` after a `blocking: false` step that declares `input` absorbed its failure in an attempt, cleared by `updateStep(running)`. The journal does not carry it. Missing — an older snapshot, or an interruption between the absorption and the record — leaves the decision to freshness, which re-runs the step. |
-| Selection (`excluded`, `replay`, skipped steps) | snapshot, then the current selectors | — | `--steps` / `--skip` / `--start-at` apply on top of the persisted state to every step that still owes work, including steps the definition gained since the snapshot. In reconcile mode no `excluded` mark is written or kept: the step loop applies the selectors to this invocation only. `--start-at X` also requeues `X` and every later step, whatever their status, as `pending` with `replay`, and lifts their `excluded` mark; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
+| Selection (`replay`, skipped steps) | snapshot, then the current selectors | — | No exclusion is written or kept: the step loop applies `--steps`, `--skip`, and the steps before a `--start-at` target to this invocation only, and an `excluded` mark an older runner wrote is ignored. `--start-at X` requeues `X` and every later step, whatever their status, as `pending` with `replay`; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
 
 ### Interruption windows
 
@@ -634,7 +628,7 @@ kept and read on what it still says.
 | `run.budget.exceeded` | the ceiling stopped the run (see [budgets and timeouts](budgets-timeouts.md)) |
 | `run.cost.unaccounted` | a gate withheld work over spend nobody could price |
 | `run.unmetered.authorized` | a human authorized unpriceable spend with `--allow-unmetered` |
-| `step.skipped` | admission skipped a step, or, in reconcile mode, this invocation's selection left it out (reason `operator selection`); carries `reason`, and the freshness summary when the freshness of declared inputs decided or when `when` refused a step declaring `input` |
+| `step.skipped` | admission skipped a step, or this invocation's selection left it out (reason `operator selection`); carries `reason`, and the freshness summary when the freshness of declared inputs decided or when `when` refused a step declaring `input` |
 | `step.source.unavailable` | a source the step declares as input could not be read: its freshness is unknown and the step runs (see [external sources](dsl.md#external-sources)) |
 | `step.outputs.unfinished` | outputs the step declares carry the mark of an attempt that never succeeded: they are never adopted and the step runs; carries `outputs` (see [input freshness](dsl.md#input-freshness)) |
 | `step.status.changed` | a step changes status |

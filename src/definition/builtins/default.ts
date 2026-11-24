@@ -4,5 +4,12 @@ import type { Dsl } from "../dsl.js";
 export default ({ pipeline, bashStep }: Dsl) =>
   pipeline("default")
     .desc("Generic standalone pipeline")
-    .add(bashStep({ id: "ready", name: "Standalone runner ready", command: "printf 'lance-nuit ready\\n'" }))
+    .add(
+      bashStep({
+        id: "ready",
+        name: "Standalone runner ready",
+        command: "printf 'lance-nuit ready\\n'",
+        rerunOnResume: true,
+      }),
+    )
     .build();

@@ -79,8 +79,6 @@ export interface StepPassEnv {
   /** The one ledger of this execution. */
   budget: RunBudget;
   abort: AbortScope;
-  /** The mode as boot read it from the definition the steps come from. */
-  reconcile: boolean;
   replayInterrupted?: boolean;
   deps: StepLoopDeps;
 }
@@ -226,10 +224,10 @@ async function passStartedStep(
   // `updateStep(running)` cleared `errors` for this pass, so a `done` step
   // carrying one absorbed its failure. Fingerprinted here, after any fix that
   // rewrote the inputs and before a later step can: a resume then re-checks
-  // the step only when something else changed them. In reconcile mode a step
-  // without input answers to its missing outputs too, so it needs the same
-  // record (an empty one) not to replay its failure on every invocation.
-  if (answersToOutputs(step.def, env.reconcile) && step.status === "done" && step.errors !== undefined) {
+  // the step only when something else changed them. A step without input
+  // answers to its missing outputs too, so it needs the same record (an empty
+  // one) not to replay its failure on every invocation.
+  if (answersToOutputs(step.def) && step.status === "done" && step.errors !== undefined) {
     recordAbsorbedInputs(run, step, await fingerprintInputs(baseCtx, pureInputsOf(step.def)));
   }
   if (action === "failed") return { failed: true };

@@ -357,3 +357,19 @@ test("public escalation: runtime validation of XOR and artifact", () => {
       .build(),
   ).toThrow(/invalid artifact descriptor/);
 });
+
+test("public escalation and delivery declare a safe replay, so a pipeline using them builds", () => {
+  const built = pipeline("project")
+    .add(sourceStep({ dir: () => "/tmp/project-work-items", queue: "featureTodo" }))
+    .add(
+      workItemEscalateStep({ artifact: triageArtifact, note: () => ({ headline: "Escalation.", fields: [] }) }),
+      workItemDeliveryStep({}),
+    )
+    .build();
+
+  expect(built.steps.map((step) => [step.id, step.rerun_on_resume])).toEqual([
+    ["ticket", undefined],
+    ["escalate", true],
+    ["work-item-update", true],
+  ]);
+});

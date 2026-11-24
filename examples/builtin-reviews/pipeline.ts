@@ -11,7 +11,7 @@ import type { Dsl, PipelineContext } from "@lance-nuit/dsl";
  * compatibility helper: projects should copy the steps they need and adjust
  * their prompts, reports, and policies in TypeScript.
  */
-export default ({ pipeline, llmStep }: Dsl) => {
+export default ({ pipeline, llmStep, textArtifact }: Dsl) => {
   const reports = (ctx: PipelineContext) => ctx.paths.reportsDir ?? ctx.paths.workItemDir ?? "reports";
   const artifacts = (ctx: PipelineContext) => ctx.paths.artifactsDir ?? ctx.paths.workItemDir ?? "artifacts";
 
@@ -24,6 +24,8 @@ export default ({ pipeline, llmStep }: Dsl) => {
         backend: "claude",
         profile: "reviewer",
         options: { strictMcp: true },
+        // The runner writes the verdict's conclusion: once present, a resume does not pay the review again.
+        capture: { conclusion: textArtifact("review-acceptance-criteria.md") },
         command: (ctx) =>
           `/quality-verifying-acceptance-criteria ${artifacts(ctx)}/spec.md reports=${reports(ctx)}/acceptance ui-checks=${artifacts(ctx)}/ui-checks.md screenshots=${reports(ctx)}/screenshots lot=${ctx.lot?.id ?? ""} lots=${artifacts(ctx)}/lots.json`,
         blocking: true,
@@ -39,6 +41,7 @@ export default ({ pipeline, llmStep }: Dsl) => {
         backend: "claude",
         profile: "reviewer",
         options: { strictMcp: true },
+        capture: { conclusion: textArtifact("review-constraints.md") },
         command: (ctx) =>
           `/quality-constraints:quality-constraints-verify --ticket=${ctx.ticketDir ?? ""} --reports=${reports(ctx)}/constraints`,
         blocking: true,
@@ -49,6 +52,7 @@ export default ({ pipeline, llmStep }: Dsl) => {
         backend: "claude",
         profile: "reviewer",
         options: { strictMcp: true },
+        capture: { conclusion: textArtifact("review-reuse-audit.md") },
         command: (ctx) => `/reuse-audit --diff --ticket=${ctx.ticketDir ?? ""}`,
         blocking: true,
         when: { command: (ctx) => `test -f "${artifacts(ctx)}/reuse-watch.md"` },
@@ -59,6 +63,7 @@ export default ({ pipeline, llmStep }: Dsl) => {
         backend: "claude",
         profile: "reviewer",
         options: { strictMcp: true, agent: "pipeline-e2e:qa-browser-tester" },
+        capture: { conclusion: textArtifact("review-e2e-testing.md") },
         command: (ctx) =>
           `Run every E2E scenario found in "${artifacts(ctx)}/e2e-scenarios.md" and write reports under "${reports(ctx)}/e2e/"`,
         blocking: true,
@@ -74,6 +79,7 @@ export default ({ pipeline, llmStep }: Dsl) => {
         backend: "claude",
         profile: "reviewer",
         options: { strictMcp: true },
+        capture: { conclusion: textArtifact("quality-retrospective.md") },
         command: (ctx) => `/quality-constraints:quality-retrospective ${ctx.ticketDir ?? ""}`,
         blocking: false,
       }),

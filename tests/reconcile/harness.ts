@@ -26,8 +26,6 @@ export const TICKET = "T-1";
 export const PIPELINE = "route";
 
 export interface RouteOptions {
-  /** Declares `.reconcile()` on the pipeline, between `pipeline("route")` and its steps. */
-  reconcile?: boolean;
   /** Adds `comment`, a side effect with neither receipt nor `rerunOnResume`. */
   unclassified?: boolean;
   /**
@@ -162,7 +160,6 @@ export function routeSource(options: RouteOptions = {}): string {
       step("publish", { input: [commit], output: [mr] }, [mr]),${comment}
       step("report", { rerunOnResume: true }),
     `;
-  const mode = options.reconcile ? ".reconcile()" : "";
   const body = options.scan ? `.forEachWorkItem({ queue: "bugTodo", scan: {}, do: [${steps}] })` : `.add(${steps})`;
   return `import { appendFileSync, existsSync${retried.length > 0 ? ", rmSync" : ""} } from "node:fs";
 import { join } from "node:path";
@@ -197,7 +194,7 @@ export default ({ pipeline, actionStep, textArtifact${options.source ? ", source
       },
     });
 
-  return pipeline("route")${mode}
+  return pipeline("route")
     ${body}
     .build();
 };
@@ -369,7 +366,6 @@ export function skipsSince(cwd: string, since: Mark, ticket: string = TICKET): S
 export interface StepSnapshot {
   id: string;
   status: string;
-  excluded?: boolean;
   [field: string]: unknown;
 }
 

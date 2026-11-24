@@ -32,7 +32,7 @@ const FROM_IMPLEMENT = ["context", "prepare", "implement", "quality", "commit", 
 
 /** What admission says when a step's outputs match its inputs. */
 const UP_TO_DATE = "outputs up to date with declared inputs";
-/** What admission says, in reconcile mode, when a step without input finds every output it declares. */
+/** What admission says when a step without input finds every output it declares. */
 const PRESENT = "outputs present";
 
 /** Provenance key of the `tree` source, beside the `artifacts/<name>` keys. */
@@ -70,7 +70,7 @@ function expectFreeRelaunch(cwd: string, ...args: string[]): void {
 }
 
 test("X1: a committed change replays implement and what follows it, not triage or plan", () => {
-  const cwd = scratchRoute({ reconcile: true, source: true });
+  const cwd = scratchRoute({ source: true });
   passedRun(cwd);
   const recorded = provenanceInputs(cwd, "impl.md");
   // Keyed apart from the artifacts: a source named like an artifact cannot shadow it.
@@ -96,7 +96,7 @@ test("X1: a committed change replays implement and what follows it, not triage o
 });
 
 test("X1: an uncommitted change replays implement too, once --allow-dirty admits the run", () => {
-  const cwd = scratchRoute({ reconcile: true, source: true });
+  const cwd = scratchRoute({ source: true });
   passedRun(cwd);
   editTracked(cwd, { commit: false });
   const before = mark(cwd);
@@ -117,7 +117,7 @@ test("X1: an uncommitted change replays implement too, once --allow-dirty admits
 });
 
 test("X1: a change made while a run is failed re-admits implement on the resume of that same run", () => {
-  const cwd = scratchRoute({ reconcile: true, source: true });
+  const cwd = scratchRoute({ source: true });
   failAt(cwd, "commit");
   const failed = run(cwd);
   expect(failed.status).not.toBe(0);
@@ -137,7 +137,7 @@ test("X1: a change made while a run is failed re-admits implement on the resume 
 });
 
 test("X1: a step that changes its own source is not stale because of it, only because of someone else's change", () => {
-  const cwd = scratchRoute({ reconcile: true, source: "written" });
+  const cwd = scratchRoute({ source: "written" });
   passedRun(cwd);
   // implement left tracked.txt edited: from here on the tree is dirty.
   // The source is read after the attempt, so the record already holds that edit.
@@ -153,31 +153,8 @@ test("X1: a step that changes its own source is not stale because of it, only be
   expectFreeRelaunch(cwd, "--allow-dirty");
 });
 
-test("X1 (legacy): a source works without .reconcile(), branch replaying as in S1", () => {
-  const cwd = scratchRoute({ source: true });
-  passedRun(cwd);
-  editTracked(cwd);
-  const before = mark(cwd);
-
-  const second = run(cwd);
-
-  expect(second.status).toBe(0);
-  expect(snapshot(cwd).status).toBe("PASS");
-  expect(traceSince(cwd, before)).toEqual([
-    "context",
-    "branch",
-    "prepare",
-    "implement",
-    "quality",
-    "commit",
-    "publish",
-    "report",
-  ]);
-  expect(reasons(cwd, before)).toEqual(upToDate("triage", "plan"));
-});
-
 test("X2: a source whose command fails leaves freshness unknown: the step runs and the journal says why", () => {
-  const cwd = scratchRoute({ reconcile: true, source: "failable" });
+  const cwd = scratchRoute({ source: "failable" });
   passedRun(cwd);
   failAt(cwd, "tree");
   const before = mark(cwd);
@@ -213,7 +190,7 @@ test("X2: a source whose command fails leaves freshness unknown: the step runs a
 });
 
 test("X3: a source declared as output is a build error, before any step and any run", () => {
-  const cwd = scratchRoute({ reconcile: true, source: "output" });
+  const cwd = scratchRoute({ source: "output" });
 
   const refused = run(cwd);
 

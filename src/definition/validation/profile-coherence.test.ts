@@ -15,7 +15,12 @@ const CONTEXT = buildPipelineContext({ agentBackendRegistry: REGISTRY });
  *  and `extractor` all declare one, so neither case below would be exercised. */
 function codexPipeline(profile: "coder" | "planner") {
   return pipeline("validation")
-    .add(llmStep({ id: "agent", name: "Agent", backend: "codex" as never, profile, command: "run" }, REGISTRY))
+    .add(
+      llmStep(
+        { id: "agent", name: "Agent", backend: "codex" as never, profile, command: "run", rerunOnResume: true },
+        REGISTRY,
+      ),
+    )
     .build();
 }
 

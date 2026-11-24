@@ -18,12 +18,23 @@ const bashStep = createProjectBashStep(REGISTRY);
 type LlmOptions = LlmStepOptions<"coder", "claude">;
 
 function member(id: string, options: Partial<StepOptionsBase> & Pick<LlmOptions, "capture"> = {}): AgentStepBuilder {
-  return llmStep({ id, name: id, profile: "coder", backend: "claude", command: "read", ...options }, REGISTRY);
+  return llmStep(
+    { id, name: id, profile: "coder", backend: "claude", command: "read", rerunOnResume: true, ...options },
+    REGISTRY,
+  );
 }
 
 function codexMember(id: string, sandbox: "read-only" | "workspace-write" | "danger-full-access"): AgentStepBuilder {
   return llmStep(
-    { id, name: id, profile: "coder", backend: "codex", command: "read", options: { sandbox } } as never,
+    {
+      id,
+      name: id,
+      profile: "coder",
+      backend: "codex",
+      command: "read",
+      options: { sandbox },
+      rerunOnResume: true,
+    } as never,
     REGISTRY,
   );
 }
@@ -52,9 +63,9 @@ function problemsOf(...steps: AgentStepBuilder[]): string {
 test("a valid group stays flat in the pipeline, each step marked with its group", () => {
   const built = pipeline("p")
     .add(
-      bashStep({ id: "before", name: "Before", command: "true" }),
+      bashStep({ id: "before", name: "Before", command: "true", rerunOnResume: true }),
       group(member("audits.security"), member("audits.perf")),
-      bashStep({ id: "after", name: "After", command: "true" }),
+      bashStep({ id: "after", name: "After", command: "true", rerunOnResume: true }),
     )
     .build();
 
@@ -112,8 +123,11 @@ test("a group id must be usable as a logical value", () => {
 });
 
 for (const [kind, other] of [
-  ["bashStep", () => bashStep({ id: "audits.other", name: "o", command: "true" })],
-  ["actionStep", () => actionStep({ id: "audits.other", name: "o", describe: "o", run: async () => {} })],
+  ["bashStep", () => bashStep({ id: "audits.other", name: "o", command: "true", rerunOnResume: true })],
+  [
+    "actionStep",
+    () => actionStep({ id: "audits.other", name: "o", describe: "o", run: async () => {}, rerunOnResume: true }),
+  ],
   ["runPipeline", () => runPipeline({ id: "audits.other", name: "o", pipeline: "child" })],
 ] as const) {
   test(`a group refuses a ${kind}`, () => {
@@ -224,7 +238,17 @@ test("a member is refused on what its backend says it grants, whichever the back
   const built = pipeline("p")
     .add(
       group(
-        llmStep({ id: "audits.a", name: "a", profile: "coder", backend: "scribe", command: "read" } as never, registry),
+        llmStep(
+          {
+            id: "audits.a",
+            name: "a",
+            profile: "coder",
+            backend: "scribe",
+            command: "read",
+            rerunOnResume: true,
+          } as never,
+          registry,
+        ),
         member("audits.b"),
       ),
     )
@@ -238,7 +262,7 @@ test("a group is declared in one piece", () => {
   const built = pipeline("p")
     .add(
       parallelize({ id: "audits", name: "Audits", steps: [member("audits.a")] }),
-      bashStep({ id: "between", name: "Between", command: "true" }),
+      bashStep({ id: "between", name: "Between", command: "true", rerunOnResume: true }),
       parallelize({ id: "audits", name: "Audits", steps: [member("audits.b")] }),
     )
     .build();
@@ -252,8 +276,8 @@ test("the selector of a group reaches its members and nothing else", () => {
   const built = pipeline("p")
     .add(
       group(member("audits.a"), member("audits.b")),
-      bashStep({ id: "audits", name: "Named like it", command: "true" }),
-      bashStep({ id: "audits.stranger", name: "Under its prefix", command: "true" }),
+      bashStep({ id: "audits", name: "Named like it", command: "true", rerunOnResume: true }),
+      bashStep({ id: "audits.stranger", name: "Under its prefix", command: "true", rerunOnResume: true }),
     )
     .build();
 
@@ -270,7 +294,7 @@ test("a loaded pipeline gets parallelize from its Dsl and is refused at load", a
     path,
     `export default ({ pipeline, parallelize, llmStep }) => pipeline("p")
       .add(parallelize({ id: "audits", name: "Audits", steps: [
-        llmStep({ id: "audits.a", name: "a", profile: "coder", backend: "claude", command: "read" }),
+        llmStep({ id: "audits.a", name: "a", profile: "coder", backend: "claude", command: "read", rerunOnResume: true }),
       ] }))
       .build();`,
   );

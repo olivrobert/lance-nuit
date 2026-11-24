@@ -89,9 +89,8 @@ test("preflight ignores node_modules and vendor", () => {
   expect(run(runnerDir, cwd, ["skill-leurre"]).status).toBe(1);
 });
 
-test("reconcile: the preflight declares a safe replay, so the pipeline builds", () => {
+test("the preflight declares a safe replay, so the pipeline builds", () => {
   const built = pipeline("p")
-    .reconcile()
     .add(requireCapabilitiesStep({ id: "preflight", skills: ["plugin-test:skill"] }))
     .build();
 

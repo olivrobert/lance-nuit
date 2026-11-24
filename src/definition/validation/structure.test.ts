@@ -9,7 +9,7 @@ import { PipelineStructureValidator } from "./structure.js";
 function findings(on_failure: StepFailure) {
   const pipeline = {
     name: "gate",
-    steps: [{ id: "verify", name: "Verify", command: "make test", runner: "bash", on_failure }],
+    steps: [{ id: "verify", name: "Verify", command: "make test", runner: "bash", rerun_on_resume: true, on_failure }],
   } as Pipeline;
 
   return new PipelineStructureValidator()
@@ -73,7 +73,7 @@ test("a raw definition writing a source, or declaring one twice, is refused like
 function captureFindings(captures: StepCapture[]) {
   const pipeline = {
     name: "gate",
-    steps: [{ id: "commit", name: "Commit", command: "write", runner: "agent", captures }],
+    steps: [{ id: "commit", name: "Commit", command: "write", runner: "agent", rerun_on_resume: true, captures }],
   } as unknown as Pipeline;
   return new PipelineStructureValidator()
     .validate({ source: "gate.ts", pipeline, profileOverrides: {} })

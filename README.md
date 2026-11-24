@@ -16,9 +16,9 @@ and what needs your attention.
 work, go to sleep, review in the morning.
 
 - **Resume after interruption.** Re-run the same command to continue from the
-  interrupted step, keeping completed steps and recorded spend. In
-  [reconcile mode](guide/dsl.md#reconcile-mode), the deliverables on disk, not
-  the run's status, decide what remains to do.
+  interrupted step, keeping recorded spend. Each step declares what it delivers,
+  and the deliverables on disk, not the run's status, decide what remains to do
+  ([admission](guide/dsl.md#admission)).
 - **Give failures a recovery plan.** Retry, ask an agent to repair the cause,
   escalate to a stronger model, or hand the work to a human.
 - **Control agent spending.** Set a budget for the run, including repairs and
@@ -46,12 +46,16 @@ export default ({ pipeline, llmStep, bashStep, mechanicalFix, textArtifact }: Ds
         name: "Implement",
         backend: "claude",
         profile: "coder",
-        command: (ctx) => `Implement ${ctx.ticket}. Read the requirements in ${ctx.paths.artifact("ticket.md")}.`,
+        command: (ctx) =>
+          `Implement ${ctx.ticket}. Read the requirements in ${ctx.paths.artifact("ticket.md")}. ` +
+          `Summarize your changes in ${ctx.paths.artifact("implementation.md")}.`,
+        output: [textArtifact("implementation.md")],
       }),
       bashStep({
         id: "test",
         name: "Run tests",
         command: "npm test",
+        rerunOnResume: true,
         onFail: mechanicalFix(
           (ctx) => `The test suite failed. Fix the cause and change nothing else.\n\n${ctx.errors}`,
         ),
@@ -73,8 +77,10 @@ export default ({ pipeline, llmStep, bashStep, mechanicalFix, textArtifact }: Ds
 <!-- project-pipeline-example:end -->
 
 `mechanicalFix` opens a Claude session limited to reading and editing files;
-the runner executes the tests after each repair. The review step must produce
-`review.md` to complete. A successful run means the workflow finished; read the
+the runner executes the tests after each repair. Every step declares what it
+delivers: the implementation and the review must produce their file to
+complete, and the tests, which deliver no file, are declared safe to run again
+on every resume. A successful run means the workflow finished; read the
 report to decide whether the changes are ready.
 
 `coder` and `reviewer` are roles: their models and effort levels live in config,
@@ -109,8 +115,9 @@ Files
 
 The implementation is on disk, the tests passed after one repair, and the review
 is in the work item's `artifacts/review.md`. If the process is interrupted during
-review, re-run the same command: completed implementation and test steps stay
-completed, and recorded spend still counts toward the budget.
+review, re-run the same command: the implementation, whose summary is on disk,
+is not paid again, the tests run again, and recorded spend still counts toward
+the budget.
 
 The budget guard reacts to usage reported by the backend, so an in-flight
 agent can exceed the ceiling before its spend is known. See

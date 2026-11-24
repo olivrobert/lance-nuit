@@ -19,6 +19,7 @@ test("Claude profile: preserves the role without materializing axes at build tim
       backend: "claude",
       profile: "coder",
       command: "code",
+      rerunOnResume: true,
     },
     REGISTRY,
   ).build();
@@ -34,6 +35,7 @@ test("Claude profile: nominal axes are materialized at load time", () => {
       backend: "claude",
       profile: "triage",
       command: "analyse",
+      rerunOnResume: true,
     },
     REGISTRY,
   ).build();
@@ -41,7 +43,12 @@ test("Claude profile: nominal axes are materialized at load time", () => {
   expect(step.backend).toEqual({ id: "claude" });
 
   const loaded = pipeline("demo")
-    .add(llmStep({ id: "triage", name: "Triage", backend: "claude", profile: "triage", command: "analyse" }, REGISTRY))
+    .add(
+      llmStep(
+        { id: "triage", name: "Triage", backend: "claude", profile: "triage", command: "analyse", rerunOnResume: true },
+        REGISTRY,
+      ),
+    )
     .build();
   applyProfileOverrides(loaded, {}, () => ({}), REGISTRY);
   expect(loaded.steps[0]?.backend).toEqual({ id: "claude", options: { model: "opus", effort: "high" } });
@@ -55,6 +62,7 @@ test("Claude profile: canonical DSL shares deferred resolution", () => {
       backend: "claude",
       profile: "coder",
       command: "code",
+      rerunOnResume: true,
     },
     REGISTRY,
   ).build();
@@ -65,6 +73,7 @@ test("Claude profile: canonical DSL shares deferred resolution", () => {
       backend: "claude",
       profile: "coder",
       command: "code",
+      rerunOnResume: true,
     },
     REGISTRY,
   ).build();
@@ -77,8 +86,12 @@ test("Claude profile: canonical DSL shares deferred resolution", () => {
 
 test("profile config: retunes the role's Claude axes", () => {
   const built = pipeline("demo")
-    .add(llmStep({ id: "a", name: "A", backend: "claude", profile: "coder", command: "a" }, REGISTRY))
-    .add(llmStep({ id: "b", name: "B", backend: "claude", profile: "coder", command: "b" }, REGISTRY))
+    .add(
+      llmStep({ id: "a", name: "A", backend: "claude", profile: "coder", command: "a", rerunOnResume: true }, REGISTRY),
+    )
+    .add(
+      llmStep({ id: "b", name: "B", backend: "claude", profile: "coder", command: "b", rerunOnResume: true }, REGISTRY),
+    )
     .build();
   applyProfileOverrides(
     built,
@@ -92,7 +105,19 @@ test("profile config: retunes the role's Claude axes", () => {
 
 test("agent profile: materializes Codex axes without injecting the Claude model", () => {
   const built = pipeline("codex")
-    .add(llmStep({ id: "implement", name: "Implement", backend: "codex", profile: "coder", command: "code" }, REGISTRY))
+    .add(
+      llmStep(
+        {
+          id: "implement",
+          name: "Implement",
+          backend: "codex",
+          profile: "coder",
+          command: "code",
+          rerunOnResume: true,
+        },
+        REGISTRY,
+      ),
+    )
     .build();
 
   applyProfileOverrides(built, {}, () => ({}), REGISTRY);
@@ -105,7 +130,19 @@ test("agent profile: materializes Codex axes without injecting the Claude model"
 
 test("profile config: provider-specific axes retune Codex", () => {
   const built = pipeline("codex")
-    .add(llmStep({ id: "implement", name: "Implement", backend: "codex", profile: "coder", command: "code" }, REGISTRY))
+    .add(
+      llmStep(
+        {
+          id: "implement",
+          name: "Implement",
+          backend: "codex",
+          profile: "coder",
+          command: "code",
+          rerunOnResume: true,
+        },
+        REGISTRY,
+      ),
+    )
     .build();
 
   applyProfileOverrides(
@@ -132,6 +169,7 @@ test("agent profile: backend technical options are preserved", () => {
           options: { sandbox: CODEX_SANDBOX.WORKSPACE_WRITE },
           profile: "coder",
           command: "code",
+          rerunOnResume: true,
         },
         REGISTRY,
       ),
@@ -152,7 +190,12 @@ test("agent profile: backend technical options are preserved", () => {
 
 test("profile config: an imposed axis is locally ignored like a wildcard", () => {
   const built = pipeline("demo")
-    .add(llmStep({ id: "a", name: "A", backend: "claude", profile: "operator", command: "a" }, REGISTRY))
+    .add(
+      llmStep(
+        { id: "a", name: "A", backend: "claude", profile: "operator", command: "a", rerunOnResume: true },
+        REGISTRY,
+      ),
+    )
     .build();
   applyProfileOverrides(
     built,
@@ -175,7 +218,10 @@ test("profile config: invalid name, axis, and effort are rejected", () => {
 
 test("profile: a second declaration is rejected", () => {
   expect(() =>
-    llmStep({ id: "x", name: "X", backend: "claude", profile: "coder", command: "x" }, REGISTRY).profile("reviewer"),
+    llmStep(
+      { id: "x", name: "X", backend: "claude", profile: "coder", command: "x", rerunOnResume: true },
+      REGISTRY,
+    ).profile("reviewer"),
   ).toThrow(/already defined/);
 });
 
@@ -186,6 +232,7 @@ test("fixProfile: a bash step's fix borrows the role regime through the default 
         id: "static-analysis",
         name: "Static analysis",
         command: "make static-analysis",
+        rerunOnResume: true,
         onFail: {
           fix: "corrige",
           retries: 2,
@@ -220,6 +267,7 @@ test("fixBackend: a bash step's fix borrows the role regime through the named ba
         id: "static-analysis",
         name: "Static analysis",
         command: "make static-analysis",
+        rerunOnResume: true,
         onFail: {
           fix: "fix",
           retries: 2,
@@ -253,6 +301,7 @@ test("fixBackend: the fix profile must have a policy for the named backend", () 
         id: "lint",
         name: "Lint",
         command: "make lint",
+        rerunOnResume: true,
         onFail: { fix: "fix", retries: 1, fixProfile: "planner", fixBackend: "codex" },
       }),
     )
@@ -277,6 +326,7 @@ test("mechanicalFix on Codex: the fix inherits the step's sandbox", () => {
           options: { sandbox: CODEX_SANDBOX.WORKSPACE_WRITE },
           profile: "coder",
           command: "check",
+          rerunOnResume: true,
           onFail: mechanicalFix(() => "repair"),
         },
         REGISTRY,
@@ -304,6 +354,7 @@ test("fix options: an explicit fix policy wins over the step's options", () => {
           options: { sandbox: CODEX_SANDBOX.WORKSPACE_WRITE },
           profile: "coder",
           command: "check",
+          rerunOnResume: true,
           onFail: {
             fix: () => "repair",
             retries: 2,

@@ -298,9 +298,7 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
               ctx.worktree === true,
               reworkable,
             ),
-          // Replay is safe: the note's execution key dedupes it and the move is
-          // idempotent. Reconcile mode needs it declared, having no output to check.
-        }).rerunOnResume(),
+        }),
       ]
     : [];
 
@@ -313,6 +311,8 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
         when: async (ctx) => ((await pending(ctx)) ? true : { ok: false, reason: "no escalation — branch kept" }),
         run: (ctx) => abandonWorkItemBranch(ctx, baseOf(ctx)),
         describe: (ctx) => `restore ${baseOf(ctx)} and delete the branch for ticket ${ctx.ticket ?? "?"}`,
+        // Replay is safe: once on the base branch there is nothing left to delete.
+        rerunOnResume: true,
       }),
     );
   }

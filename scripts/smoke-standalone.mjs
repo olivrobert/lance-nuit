@@ -121,10 +121,10 @@ function writePipeline() {
   writeFileSync(
     pipelineFile,
     [
-      'export default ({ pipeline, bashStep }) => pipeline("smoke-standalone")',
+      'export default ({ pipeline, bashStep, textArtifact }) => pipeline("smoke-standalone")',
       '  .desc("Technology-neutral standalone smoke pipeline")',
-      `  .add(bashStep({ id: "first", name: "First shell step", command: "printf 'first-step\\\\n' >> \\"$SMOKE_COUNTER\\"" }))`,
-      `  .add(bashStep({ id: "second", name: "Second shell step", command: "if [[ ! -f \\"$SMOKE_ALLOW_SECOND\\" ]]; then printf 'second-step blocked\\\\n'; exit 23; fi; printf 'second-step\\\\n' >> \\"$SMOKE_COUNTER\\"" }))`,
+      `  .add(bashStep({ id: "first", name: "First shell step", output: [textArtifact("first.txt")], command: (ctx) => "printf 'first-step\\\\n' >> \\"$SMOKE_COUNTER\\" && printf 'first-step\\\\n' > " + JSON.stringify(ctx.paths.artifact("first.txt")) }))`,
+      `  .add(bashStep({ id: "second", name: "Second shell step", rerunOnResume: true, command: "if [[ ! -f \\"$SMOKE_ALLOW_SECOND\\" ]]; then printf 'second-step blocked\\\\n'; exit 23; fi; printf 'second-step\\\\n' >> \\"$SMOKE_COUNTER\\"" }))`,
       "  .build();",
       "",
     ].join("\n"),

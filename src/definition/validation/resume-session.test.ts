@@ -13,13 +13,16 @@ const REGISTRY = createDefaultAgentBackendRegistry();
 const CONTEXT = buildPipelineContext({ agentBackendRegistry: REGISTRY });
 
 function implement(id = "implement") {
-  return llmStep({ id, name: "Implement", backend: "claude", profile: "coder", command: "implement" }, REGISTRY);
+  return llmStep(
+    { id, name: "Implement", backend: "claude", profile: "coder", command: "implement", rerunOnResume: true },
+    REGISTRY,
+  );
 }
 
 function gatePipeline(onFail: OnFail) {
   return pipeline("validation")
     .add(implement())
-    .add(bashStep({ id: "verify", name: "Verify", command: "make test", onFail }))
+    .add(bashStep({ id: "verify", name: "Verify", command: "make test", rerunOnResume: true, onFail }))
     .build();
 }
 
@@ -63,8 +66,10 @@ test("refuses a step resuming its own session", () => {
 
 test("refuses resumeSession naming a bash step, which records no session", () => {
   const p = pipeline("validation")
-    .add(bashStep({ id: "prepare", name: "Prepare", command: "make prepare" }))
-    .add(bashStep({ id: "verify", name: "Verify", command: "make test", onFail: resume("prepare") }))
+    .add(bashStep({ id: "prepare", name: "Prepare", command: "make prepare", rerunOnResume: true }))
+    .add(
+      bashStep({ id: "verify", name: "Verify", command: "make test", rerunOnResume: true, onFail: resume("prepare") }),
+    )
     .build();
   expect(onlyError(p)).toBe(
     'step "verify": resumeSession "prepare": step "prepare" is not an agent step, it has no session',
@@ -73,7 +78,15 @@ test("refuses resumeSession naming a bash step, which records no session", () =>
 
 test("refuses resumeSession naming a step declared later", () => {
   const p = pipeline("validation")
-    .add(bashStep({ id: "verify", name: "Verify", command: "make test", onFail: resume("implement") }))
+    .add(
+      bashStep({
+        id: "verify",
+        name: "Verify",
+        command: "make test",
+        rerunOnResume: true,
+        onFail: resume("implement"),
+      }),
+    )
     .add(implement())
     .build();
   expect(onlyError(p)).toBe(

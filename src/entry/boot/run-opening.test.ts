@@ -62,8 +62,8 @@ function pipelineFile(root: string, name = "p"): string {
   writeFileSync(
     path,
     `export default ({ pipeline, actionStep }) => pipeline(${JSON.stringify(name)})
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a" }))
-  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b" }))
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", rerunOnResume: true }))
+  .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", rerunOnResume: true }))
   .build();`,
   );
   return path;

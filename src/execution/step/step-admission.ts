@@ -35,7 +35,7 @@ import { absorbNonBlocking } from "./non-blocking.js";
 /** Reason logged when declared inputs still match every produced output. */
 const SKIP_UP_TO_DATE = "outputs up to date with declared inputs";
 
-/** Reason logged, in reconcile mode, when a step without declared input finds
+/** Reason logged when a step without declared input finds
  *  every output it declares: nothing it reads can have made them stale. */
 const SKIP_OUTPUTS_PRESENT = "outputs present";
 
@@ -45,7 +45,7 @@ const SKIP_ABSORBED_UNCHANGED = "failure absorbed, inputs unchanged since";
 /** Reason logged when a rework step already ran and nobody rejected its output since. */
 const SKIP_NO_REJECTION = "no pending rejection";
 
-/** Reason logged, in reconcile mode, when this invocation's `--steps`, `--skip` or
+/** Reason logged when this invocation's `--steps`, `--skip` or
  *  `--start-at` leaves the step out. */
 const SKIP_OPERATOR_SELECTION = "operator selection";
 
@@ -133,8 +133,8 @@ export type OperatorSelectionSkip = "settled" | "unfinished";
 
 /**
  * Leave a step out of this invocation on the operator's selection, without
- * admitting it: no budget gate, no `when`, no freshness. Unlike a legacy
- * exclusion nothing marks the step for later invocations, so the next one
+ * admitting it: no budget gate, no `when`, no freshness. Nothing marks the
+ * step for later invocations, so the next one
  * admits it like any other. A `done` step stays `done`, as on a freshness skip.
  *
  * A step whose last pass is unfinished keeps its status (`unfinished`), and the
@@ -172,17 +172,14 @@ export interface AdmitStepInput {
    *  is persisted until the step settles and would authorize a replay nobody
    *  asked for on a later resume. */
   startAt?: string;
-  /** The pipeline declares `.reconcile()`: declared outputs, not only declared
-   *  inputs, decide whether the step still owes work. */
-  reconcile?: boolean;
 }
 
-/** Whether the step's outputs decide if it still owes work: always when it
- *  declares input, and in reconcile mode as soon as it delivers an output —
- *  their presence then proves the work done, since nothing it reads can stale
- *  them. An orchestration node never does: its children decide (D3). */
-export function answersToOutputs(def: StepDefinition, reconcile: boolean | undefined): boolean {
-  return (def.sources?.length ?? 0) > 0 || (reconcile === true && deliversOutputs(def));
+/** Whether the step's outputs decide if it still owes work: when it declares
+ *  input, or as soon as it delivers an output — their presence then proves the
+ *  work done, since nothing it reads can stale them. An orchestration node
+ *  never does: its children decide (D3). */
+export function answersToOutputs(def: StepDefinition): boolean {
+  return (def.sources?.length ?? 0) > 0 || deliversOutputs(def);
 }
 
 /** A source that could not be read makes the step run without anyone seeing
@@ -334,7 +331,7 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
   }
 
   const declaresInput = (step.def.sources?.length ?? 0) > 0;
-  const decidedByOutputs = answersToOutputs(step.def, input.reconcile);
+  const decidedByOutputs = answersToOutputs(step.def);
   const admissions = admissionsToEvaluate(step);
   if (admissions.length > 0) {
     const decision = await checkInputs(step, baseCtx, admissions);

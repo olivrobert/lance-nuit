@@ -59,7 +59,7 @@ async function main() {
   const { run, context, resuming } = prepared;
 
   const outputs = wireRunOutputs(run, started.ready.args);
-  announceRun(run, started.ready.args, run.reconcile === true);
+  announceRun(run, started.ready.args);
 
   const outcome = await executeRunSteps(
     run,

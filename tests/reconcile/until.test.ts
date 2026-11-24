@@ -1,7 +1,6 @@
 // `--until <step>`, rows U1 to U5 of the reconciliation matrix: a bound that
 // belongs to one invocation. The run stops once the named step settled, stays
-// resumable, and the bound is never persisted. U1 and U5 run in legacy mode; the
-// reconcile half of U1 waits for the mode itself (L2).
+// resumable, and the bound is never persisted.
 
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
@@ -70,10 +69,11 @@ test("U1: --until plan stops after plan with its own kind and exit code, and a p
   expect(resumed.status).toBe(0);
   expect(latestRunId(cwd)).toBe(stoppedRun);
   expect(snapshot(cwd).status).toBe("PASS");
-  // triage and plan are fresh, so not replayed; context declares rerunOnResume
-  // and replays on every resume (legacy behavior pinned by S3).
+  // branch, triage and plan are fresh, so not replayed; context declares
+  // rerunOnResume and replays on every resume.
   expect(traceSince(cwd, before)).toEqual(["context", ...AFTER_PLAN]);
   expect(skipsSince(cwd, before).map(({ stepId, reason }) => ({ stepId, reason }))).toEqual([
+    { stepId: "branch", reason: "outputs present" },
     { stepId: "triage", reason: UP_TO_DATE },
     { stepId: "plan", reason: UP_TO_DATE },
   ]);
@@ -199,8 +199,7 @@ test("U5: the bound is never persisted, so each invocation answers to its own bo
 
   expect(triage.status).toBe(UNTIL_EXIT);
   expect(latestRunId(cwd)).toBe(runId);
-  // context is done and declares rerunOnResume: --start-at does not exclude it
-  // (legacy behavior pinned by S7).
+  // context is done and declares rerunOnResume: --start-at does not set it aside.
   expect(traceSince(cwd, beforeTriage)).toEqual(["context", "triage"]);
   expectUntilStop(snapshot(cwd), "triage");
   // Nothing on the snapshot carries a bound for a later invocation to obey.
