@@ -7,6 +7,7 @@ import { VERDICT_FIELD_NAMES } from "../../contracts/verdict.js";
 import { isLogicalSegment } from "../../shared/language/artifact-ports.js";
 import type { AsyncTemplated, PipelineContext, StepAction, Templated } from "../../shared/language/context.js";
 import {
+  onStaleDeclarationError,
   type ParallelGroup,
   type PipelineStep,
   reviewDeclarationError,
@@ -178,6 +179,7 @@ export abstract class StepBuilder {
     if (options.blocking !== undefined) this.blocking(options.blocking);
     if (options.rerunOnResume) this.rerunOnResume();
     if (options.replayInterrupted) this.replayInterrupted();
+    if (options.onStale !== undefined) this.onStale(options.onStale);
     if (options.onFail !== undefined) this.onFail(options.onFail);
     return this;
   }
@@ -229,6 +231,13 @@ export abstract class StepBuilder {
 
   replayInterrupted(): this {
     this.step.replay_interrupted = true;
+    return this;
+  }
+
+  onStale(value: "run" | "stop"): this {
+    if (value !== "run" && value !== "stop") throw new Error(`Step "${this.step.id}": onStale must be "run" or "stop"`);
+    if (value === "stop") this.step.on_stale = "stop";
+    else delete this.step.on_stale;
     return this;
   }
 
@@ -362,6 +371,8 @@ function validatePipelineStep(step: PipelineStep): void {
   }
   const reviewError = reviewDeclarationError(step);
   if (reviewError) throw new Error(`Step "${step.id}": ${reviewError}`);
+  const onStaleError = onStaleDeclarationError(step);
+  if (onStaleError) throw new Error(`Step "${step.id}": ${onStaleError}`);
   const sourceError = sourceDeclarationError(step);
   if (sourceError) throw new Error(`Step "${step.id}": ${sourceError}`);
   // A capture reads the agent's structured output; only an agent step has one.

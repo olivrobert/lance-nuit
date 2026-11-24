@@ -1,7 +1,8 @@
 // What other contexts may import from this one: re-exports only, every name with a caller outside.
 // `module-<context>-entry-only` in `.dependency-cruiser.cjs` holds the rule.
-export { isStamped, readmittedOnResume, rerunsOnResume } from "./definition.js";
+export { ignoredSourcesByStep, isStamped, readmittedOnResume, rerunsOnResume } from "./definition.js";
 export type {
+  IgnoredBy,
   Pipeline,
   PipelineInvocationDefinition,
   PipelineOrchestrationDefinition,

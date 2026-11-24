@@ -7,7 +7,7 @@
 import { extractErrors } from "../report-extraction.js";
 import { executeStep } from "../runners.js";
 import type { PipelineContext } from "../../shared/language/context.js";
-import { readmittedOnResume, rerunsOnResume } from "../../definition/index.js";
+import { ignoredSourcesByStep, readmittedOnResume, rerunsOnResume } from "../../definition/index.js";
 import type { RunStepView, RunView } from "../../run/index.js";
 import type { RunOutput } from "../run-output.js";
 import { type AbortScope, createAbortScope } from "../abort.js";
@@ -140,6 +140,7 @@ export async function executeRunSteps(
     let leftUnfinished: RunStepView | undefined;
     const bound = untilStepOf(run, opts.until);
     const isAborted = () => abort.isRunAborted(run);
+    const ignoredBy = ignoredSourcesByStep(run.steps.map((step) => step.def));
     const passEnv: StepPassEnv = {
       run,
       baseCtx,
@@ -195,6 +196,7 @@ export async function executeRunSteps(
           output: deps.output,
           replayInterrupted: opts.replayInterrupted,
           workItemSourceStepId: opts.workItemSourceStepId,
+          ignoredBy: ignoredBy.get(step.id),
         });
         if (isAborted()) break units;
         if (admission.kind === "skip") continue;

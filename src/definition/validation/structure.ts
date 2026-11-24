@@ -1,6 +1,8 @@
 import { VERDICT_FIELD_NAMES } from "../../contracts/verdict.js";
 import { isLogicalSegment } from "../../shared/language/artifact-ports.js";
 import {
+  ignoringErrors,
+  onStaleDeclarationError,
   type PipelineStep,
   producerConflicts,
   reviewDeclarationError,
@@ -58,6 +60,7 @@ export class PipelineStructureValidator implements PipelineValidationRule {
     const unclassified = stepsWithoutDeliverable({ ...context.pipeline, steps: stepsOf(context) });
     if (unclassified.length > 0) fail(withoutDeliverableMessage(unclassified));
     for (const conflict of producerConflicts({ steps: stepsOf(context) })) fail(conflict);
+    for (const error of ignoringErrors({ steps: stepsOf(context) })) fail(error);
 
     const seenIds = new Set<string>();
     for (const step of stepsOf(context)) {
@@ -95,6 +98,8 @@ export class PipelineStructureValidator implements PipelineValidationRule {
       }
       const reviewError = reviewDeclarationError(step);
       if (reviewError) fail(`step "${id}": ${reviewError}`);
+      const onStaleError = onStaleDeclarationError(step);
+      if (onStaleError) fail(`step "${id}": ${onStaleError}`);
       const sourceError = sourceDeclarationError(step);
       if (sourceError) fail(`step "${id}": ${sourceError}`);
       if (step.captures?.length && step.runner !== "agent") {

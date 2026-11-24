@@ -108,11 +108,26 @@ export function source(name: string, options: SourceOptions): Source {
   if (typeof command !== "function" && (typeof command !== "string" || !command.trim())) {
     throw new Error(`source("${name}"): command must be a non-empty string or a function`);
   }
+  return sourceDescriptor(name, command, []);
+}
+
+function sourceDescriptor(
+  name: string,
+  command: AsyncTemplated<PipelineContext>,
+  ignoredSteps: readonly string[],
+): Source {
   const descriptor: Source = Object.freeze({
     kind: "source" as const,
     name,
     command,
+    ...(ignoredSteps.length > 0 ? { ignoredSteps: Object.freeze([...ignoredSteps]) } : {}),
     read: (ctx: PipelineContext) => readSource(ctx, descriptor),
+    ignoring: (...stepIds: string[]) => {
+      if (stepIds.length === 0) throw new Error(`source("${name}").ignoring(): name at least one step id`);
+      const invalid = stepIds.find((id) => typeof id !== "string" || !id.trim());
+      if (invalid !== undefined) throw new Error(`source("${name}").ignoring(): step ids must be non-empty strings`);
+      return sourceDescriptor(name, command, [...new Set([...ignoredSteps, ...stepIds])]);
+    },
   });
   return descriptor;
 }

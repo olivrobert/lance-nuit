@@ -146,6 +146,22 @@ test("clearStamp removes one key; commitPass writes one stamp and the advances t
   expect(readLock(ctx.paths.workItemDir!).steps).toEqual({ a: stamp({ "source:tree": "2".repeat(64) }, {}) });
 });
 
+test("an advance moves only when before and after are both read and before is what the consumer records (L11)", () => {
+  const { ctx } = lockContext();
+  const recorded = "1".repeat(64);
+  commitPass(ctx, "a", stamp({ "source:tree": recorded }, {}), []);
+  commitPass(ctx, "n", stamp({ "source:tree": null }, {}), []);
+  commitPass(ctx, "r", undefined, [
+    { key: "a", source: "source:tree", before: recorded, after: null },
+    { key: "n", source: "source:tree", before: null, after: "2".repeat(64) },
+    { key: "absent", source: "source:tree", before: recorded, after: "2".repeat(64) },
+  ]);
+  expect(readLock(ctx.paths.workItemDir!).steps).toEqual({
+    a: stamp({ "source:tree": recorded }, {}),
+    n: stamp({ "source:tree": null }, {}),
+  });
+});
+
 test("a lot keys its steps apart", () => {
   expect(stampKey("plan")).toBe("plan");
   expect(stampKey("plan", { id: "LOT-2", title: "t", risk: 1 } as never)).toBe("LOT-2/plan");

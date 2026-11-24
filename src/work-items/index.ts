@@ -23,13 +23,16 @@ export {
   recordApproval,
   recordRejection,
   rejectionStatus,
+  sourceKey,
   stampKey,
   stepFreshness,
   workItemLayout,
 } from "./store/index.js";
 export type {
   ApprovalDecision,
+  Fingerprint,
   Freshness,
+  IgnoredAdvance,
   RecordedApproval,
   StepStamp,
   UnavailableSource,

@@ -2,6 +2,7 @@ import type { PipelineContext } from "../../shared/language/context.js";
 import {
   type Pipeline,
   type PipelineRework,
+  ignoringErrors,
   producerConflicts,
   stepsWithoutDeliverable,
   withoutDeliverableMessage,
@@ -180,7 +181,7 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
     if (unclassified.length > 0) {
       throw new Error(`Pipeline "${this.p.name}": ${withoutDeliverableMessage(unclassified)}`);
     }
-    const [conflict] = producerConflicts(this.p);
+    const [conflict] = [...producerConflicts(this.p), ...ignoringErrors(this.p)];
     if (conflict) throw new Error(`Pipeline "${this.p.name}": ${conflict}`);
     return this.p;
   }

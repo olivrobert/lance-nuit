@@ -4,7 +4,7 @@
 import type { BackendSpec, EffortLevel, JsonSchema } from "../contracts/backends.js";
 import { VERDICT_FIELD_NAMES } from "../contracts/verdict.js";
 import type { WorkQueue } from "../contracts/work-items.js";
-import { type Artifact, isSource, type StepInput } from "../work-items/index.js";
+import { type Artifact, isSource, type Source, type StepInput } from "../work-items/index.js";
 import type {
   AsyncTemplated,
   FixContext,
@@ -174,6 +174,9 @@ export interface PipelineStep {
    *  without asking: its side effects are safe to repeat. Implied by
    *  `rerun_on_resume`. */
   replay_interrupted?: boolean;
+  /** `stop`: a stamped step whose inputs changed since it succeeded stops the run
+   *  for a decision instead of running again. */
+  on_stale?: "stop";
   /** Approval subjects this step reworks when a human rejects them. On resume the
    *  step replays while one of them has a pending rejection, whatever its input
    *  freshness says: a rejection is not an input, it is the reason to run. */
@@ -351,6 +354,61 @@ export function producerConflicts(pipeline: Pick<Pipeline, "steps">): string[] {
     for (const input of named(step.sources, "input", step.id)) {
       if (!isSource(input) && written.has(input.name)) {
         errors.push(`step "${step.id}": artifact "${input.name}" is both its input and its output`);
+      }
+    }
+  }
+  return errors;
+}
+
+/** Why a step's `on_stale` is declared wrong, or `undefined`: only a stamp can be
+ *  stale. Shared with the structure validator, which sees raw definitions. */
+export function onStaleDeclarationError(step: PipelineStep): string | undefined {
+  if (step.on_stale === undefined) return undefined;
+  if (step.on_stale !== "stop") return 'on_stale must be "stop"';
+  if (step.runner === "pipeline" || step.rerun_on_resume === true || !declaresIo(step)) {
+    return "onStale applies only to a step that declares input or output, without rerunOnResume";
+  }
+  return undefined;
+}
+
+/** A consumer's source that does not count the changes of the step it is listed under. */
+export interface IgnoredBy {
+  consumer: string;
+  source: Source;
+}
+
+function ignoringSources(step: Pick<PipelineStep, "sources">): Source[] {
+  const sources = Array.isArray(step.sources) ? step.sources : [];
+  return sources.filter((input): input is Source => isSource(input) && (input.ignoredSteps?.length ?? 0) > 0);
+}
+
+/** For each step, the consumers whose source moves when it settles `done`. */
+export function ignoredSourcesByStep(steps: readonly Pick<PipelineStep, "id" | "sources">[]): Map<string, IgnoredBy[]> {
+  const byStep = new Map<string, IgnoredBy[]>();
+  for (const consumer of steps) {
+    for (const source of ignoringSources(consumer)) {
+      for (const stepId of source.ignoredSteps ?? []) {
+        byStep.set(stepId, [...(byStep.get(stepId) ?? []), { consumer: consumer.id, source }]);
+      }
+    }
+  }
+  return byStep;
+}
+
+/** Why the `ignoring` of a pipeline's sources names no step it could follow. */
+export function ignoringErrors(pipeline: Pick<Pipeline, "steps">): string[] {
+  const ids = new Set(pipeline.steps.map((step) => step.id));
+  const errors: string[] = [];
+  for (const consumer of pipeline.steps) {
+    for (const source of ignoringSources(consumer)) {
+      for (const stepId of source.ignoredSteps ?? []) {
+        if (stepId === consumer.id) {
+          errors.push(`step "${consumer.id}": source "${source.name}" cannot ignore the step that reads it`);
+        } else if (!ids.has(stepId)) {
+          errors.push(
+            `step "${consumer.id}": source "${source.name}" ignores "${stepId}", which is not a step of the pipeline`,
+          );
+        }
       }
     }
   }

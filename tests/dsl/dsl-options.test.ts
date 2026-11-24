@@ -777,3 +777,62 @@ test("D2: a raw definition is held to the same rule at validation", () => {
   );
   expect(structureFindings({ steps: steps.slice(1) }).filter((m) => m.includes("rerunOnResume"))).toEqual([]);
 });
+
+test("ignoring: a source keeps its name and command and accumulates the steps it ignores", () => {
+  const tree = externalSource("tree", { command: "git write-tree" });
+  const ignoring = tree.ignoring("a").ignoring("b", "a");
+  expect(ignoring.name).toBe("tree");
+  expect(ignoring.command).toBe("git write-tree");
+  expect(ignoring.ignoredSteps).toEqual(["a", "b"]);
+  expect(tree.ignoredSteps).toBeUndefined();
+  expect(() => tree.ignoring()).toThrow("name at least one step id");
+  expect(() => tree.ignoring(" ")).toThrow("step ids must be non-empty strings");
+});
+
+test("ignoring: an unknown step, the consumer itself, and an output are refused, at build and at validation (L12)", () => {
+  const tree = externalSource("tree", { command: "git write-tree" });
+  const build = (ignored: string) =>
+    pipeline("p")
+      .add(
+        bashStep({ id: "ui", name: "UI", command, input: [tree.ignoring(ignored)], output: [result] }),
+        bashStep({ id: "recheck", name: "Recheck", command, input: [tree] }),
+      )
+      .build();
+  expect(() => build("recheck")).not.toThrow();
+  expect(() => build("nope")).toThrow('step "ui": source "tree" ignores "nope", which is not a step of the pipeline');
+  expect(() => build("ui")).toThrow('step "ui": source "tree" cannot ignore the step that reads it');
+  expect(() =>
+    bashStep({ id: "ui", name: "UI", command, output: [tree.ignoring("recheck") as never] }).build(),
+  ).toThrow('source "tree" cannot be an output');
+
+  expect(
+    structureFindings({
+      steps: [{ id: "ui", name: "UI", command: "true", runner: "bash", sources: [tree.ignoring("nope", "ui")] }],
+    }),
+  ).toEqual(
+    expect.arrayContaining([
+      'step "ui": source "tree" ignores "nope", which is not a step of the pipeline',
+      'step "ui": source "tree" cannot ignore the step that reads it',
+    ]),
+  );
+});
+
+test("onStale: stop is recorded, run is the default, and a step without a stamp to be stale is refused (L12)", () => {
+  expect(bashStep({ id: "a", name: "A", command, input: [source], onStale: "stop" }).build().on_stale).toBe("stop");
+  expect(bashStep({ id: "a", name: "A", command, input: [source], onStale: "run" }).build().on_stale).toBeUndefined();
+  const refusal = "onStale applies only to a step that declares input or output, without rerunOnResume";
+  expect(() => bashStep({ id: "a", name: "A", command, rerunOnResume: true, onStale: "stop" }).build()).toThrow(
+    refusal,
+  );
+  expect(() =>
+    bashStep({ id: "a", name: "A", command, output: [result], rerunOnResume: true, onStale: "stop" }).build(),
+  ).toThrow(refusal);
+  expect(() => bashStep({ id: "a", name: "A", command, onStale: "later" as never })).toThrow(
+    'onStale must be "run" or "stop"',
+  );
+  expect(
+    structureFindings({
+      steps: [{ id: "a", name: "A", command: "true", runner: "bash", rerun_on_resume: true, on_stale: "stop" }],
+    }),
+  ).toContain(`step "a": ${refusal}`);
+});

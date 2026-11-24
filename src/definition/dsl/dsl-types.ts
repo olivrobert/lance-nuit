@@ -101,6 +101,12 @@ export interface StepOptionsBase {
    *  (crash, OOM, SIGKILL). Without it the resumed run stops and asks. Implied by
    *  `rerunOnResume`. */
   replayInterrupted?: boolean;
+  /** What a step does once its inputs changed since it succeeded: `"run"` (the
+   *  default) runs it again; `"stop"` stops the run for a decision, for a costly
+   *  step that must not replay unattended. A step without a stamp still runs, and
+   *  `--start-at` forces it. Requires `input` or `output`; refused with
+   *  `rerunOnResume`. */
+  onStale?: "run" | "stop";
   onFail?: OnFail;
 }
 

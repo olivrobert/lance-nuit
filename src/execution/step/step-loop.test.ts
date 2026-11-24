@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -24,6 +24,7 @@ import type { PipelineStep } from "../../definition/definition.ts";
 import type { Run, RunStep } from "../../run/record/run.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
 import { sha256Text } from "../../work-items/store/hash.ts";
+import * as stepLock from "../../work-items/store/step-lock.ts";
 import { commitPass, readInputs, readLock } from "../../work-items/store/step-lock.ts";
 import { runSpend } from "../../run/record/cost-accounting.ts";
 import { readRunEvents } from "../../run/record/run-journal.ts";
@@ -1505,6 +1506,170 @@ test("lock: a run carrying a lot stamps its steps under <lot.id>/<stepId>", asyn
   await executeRunSteps(run, { resuming: false }, writing(deps, values, { spec: [["spec.md", "written"]] }), ctx);
 
   expect(Object.keys(lockOf(ctx).steps)).toEqual(["LOT-1/spec"]);
+});
+
+test("onStale stop: a stale step with a stamp stops the run for a decision without spawning, its stamp kept (L10)", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  await producedOnce(ctx, values, derivedStep());
+  const stamp = JSON.stringify(lockOf(ctx).steps.spec);
+  values.set("ticket.md", "two");
+  const run = makeRun([derivedStep({ status: "done" }, { on_stale: "stop" }), bashStep("next", "cmd", {})]);
+  const { deps, calls } = fakeDeps();
+
+  const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);
+
+  expect(calls.exec).toBe(0);
+  expect(outcome.stopped).toBe(true);
+  const detail = "inputs of spec changed since it succeeded: --start-at spec to run it again";
+  expect(run.outcome?.stop).toEqual({ kind: "needs-decision", detail });
+  expect(run.steps[0]!.status).toBe("done");
+  expect(run.steps[1]!.status).toBe("pending");
+  expect(JSON.stringify(lockOf(ctx).steps.spec)).toBe(stamp);
+});
+
+test("onStale stop: a step without a stamp runs, a fresh one is skipped, and a fork's start step runs (L10)", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  const first = fakeDeps();
+  await executeRunSteps(
+    makeRun([derivedStep({}, { on_stale: "stop" })]),
+    { resuming: false },
+    writing(first.deps, values, { spec: [["spec.md", "written"]] }),
+    ctx,
+  );
+  expect(first.calls.ids).toEqual(["spec"]);
+
+  const fresh = fakeDeps();
+  await executeRunSteps(
+    makeRun([derivedStep({ status: "done" }, { on_stale: "stop" })]),
+    { resuming: true },
+    fresh.deps,
+    ctx,
+  );
+  expect(fresh.calls.exec).toBe(0);
+
+  values.set("ticket.md", "two");
+  const fork = makeRun([derivedStep({}, { on_stale: "stop" })]);
+  fork.startAt = "spec";
+  const forced = fakeDeps();
+  await executeRunSteps(fork, { resuming: true }, writing(forced.deps, values, { spec: [["spec.md", "again"]] }), ctx);
+  expect(forced.calls.ids).toEqual(["spec"]);
+  expect(lockOf(ctx).steps.spec?.inputs["artifacts/ticket.md"]).toBe(sha256Text("two"));
+});
+
+/** `ui` reads the tree but not what `recheck` does to it; `recheck` edits the tree. */
+function ignoringPipeline(treeFile: string, recheck: Partial<PipelineStep> = {}) {
+  const tree = source("tree", { command: `cat ${JSON.stringify(treeFile)}` });
+  return {
+    ui: (state: StepStateInput = {}) => bashStep("ui", "cmd", { sources: [tree.ignoring("recheck")] }, state),
+    recheck: (state: StepStateInput = {}) => bashStep("recheck", "cmd", { sources: [tree], ...recheck }, state),
+  };
+}
+
+function editingTree(deps: StepLoopDeps, treeFile: string, edits: Record<string, string>): StepLoopDeps {
+  const execute = deps.executeStep;
+  return {
+    ...deps,
+    executeStep: async (step, command, budget, context) => {
+      if (edits[step.id] !== undefined) writeFileSync(treeFile, edits[step.id]!);
+      return execute(step, command, budget, context);
+    },
+  };
+}
+
+test("ignoring: the consumer's tree moves with the ignored step, in one commitPass, and it is fresh next time (L11)", async () => {
+  const treeFile = join(mkdtempSync(join(tmpdir(), "steploop-tree-")), "tree.txt");
+  writeFileSync(treeFile, "a");
+  const { ctx } = artifactContext({ "ticket.md": "one" });
+  const steps = ignoringPipeline(treeFile);
+  const commits = spyOn(stepLock, "commitPass");
+  const first = fakeDeps();
+
+  await executeRunSteps(
+    makeRun([steps.ui(), steps.recheck()]),
+    { resuming: false },
+    editingTree(first.deps, treeFile, { recheck: "b" }),
+    ctx,
+  );
+
+  expect(first.calls.ids).toEqual(["ui", "recheck"]);
+  const recheckCommits = commits.mock.calls.filter(([, key]) => key === "recheck");
+  commits.mockRestore();
+  expect(recheckCommits).toHaveLength(1);
+  expect(recheckCommits[0]![2]).toBeDefined();
+  expect(recheckCommits[0]![3]).toEqual([
+    { key: "ui", source: "source:tree", before: sha256Text("a"), after: sha256Text("b") },
+  ]);
+  expect(lockOf(ctx).steps.ui?.inputs).toEqual({ "source:tree": sha256Text("b") });
+  expect(lockOf(ctx).steps.recheck?.inputs).toEqual({ "source:tree": sha256Text("b") });
+
+  const again = fakeDeps();
+  await executeRunSteps(
+    makeRun([steps.ui({ status: "done" }), steps.recheck({ status: "done" })]),
+    { resuming: true },
+    again.deps,
+    ctx,
+  );
+  expect(again.calls.exec).toBe(0);
+});
+
+test("ignoring: a tree moved by something else before the ignored step leaves the consumer's stamp alone (L11)", async () => {
+  const treeFile = join(mkdtempSync(join(tmpdir(), "steploop-tree-")), "tree.txt");
+  writeFileSync(treeFile, "a");
+  const { ctx } = artifactContext({ "ticket.md": "one" });
+  const steps = ignoringPipeline(treeFile);
+  await executeRunSteps(makeRun([steps.ui(), steps.recheck()]), { resuming: false }, fakeDeps().deps, ctx);
+  const recorded = JSON.stringify(lockOf(ctx).steps.ui);
+
+  writeFileSync(treeFile, "hand edit");
+  const resumed = fakeDeps();
+  await executeRunSteps(
+    makeRun([steps.ui({ status: "done" }), steps.recheck({ status: "done" })]),
+    { resuming: true, stepFilter: ["recheck"] },
+    editingTree(resumed.deps, treeFile, { recheck: "c" }),
+    ctx,
+  );
+
+  expect(resumed.calls.ids).toEqual(["recheck"]);
+  expect(JSON.stringify(lockOf(ctx).steps.ui)).toBe(recorded);
+  const next = fakeDeps();
+  await executeRunSteps(makeRun([steps.ui({ status: "done" })]), { resuming: true }, next.deps, ctx);
+  expect(next.calls.ids).toEqual(["ui"]);
+});
+
+test("ignoring: an unstamped ignored step still reads the tree at admission and moves the consumer's (L11)", async () => {
+  const treeFile = join(mkdtempSync(join(tmpdir(), "steploop-tree-")), "tree.txt");
+  writeFileSync(treeFile, "a");
+  const { ctx } = artifactContext({ "ticket.md": "one" });
+  const steps = ignoringPipeline(treeFile, { sources: undefined, rerun_on_resume: true });
+  await executeRunSteps(makeRun([steps.ui()]), { resuming: false }, fakeDeps().deps, ctx);
+  const stampBefore = lockOf(ctx).steps.ui!;
+
+  await executeRunSteps(
+    makeRun([steps.ui({ status: "done" }), steps.recheck()]),
+    { resuming: true },
+    editingTree(fakeDeps().deps, treeFile, { recheck: "b" }),
+    ctx,
+  );
+
+  expect(lockOf(ctx).steps.recheck).toBeUndefined();
+  expect(lockOf(ctx).steps.ui).toEqual({ ...stampBefore, inputs: { "source:tree": sha256Text("b") } });
+});
+
+test("ignoring: a lot moves the consumer's stamp under its lot key (L11)", async () => {
+  const treeFile = join(mkdtempSync(join(tmpdir(), "steploop-tree-")), "tree.txt");
+  writeFileSync(treeFile, "a");
+  const lot = { id: "LOT-1", title: "Lot", risk: 1 } as PipelineLot;
+  const { ctx } = artifactContext({ "ticket.md": "one" }, { lot });
+  const steps = ignoringPipeline(treeFile);
+
+  await executeRunSteps(
+    makeRun([steps.ui(), steps.recheck()]),
+    { resuming: false },
+    editingTree(fakeDeps().deps, treeFile, { recheck: "b" }),
+    ctx,
+  );
+
+  expect(lockOf(ctx).steps["LOT-1/ui"]?.inputs).toEqual({ "source:tree": sha256Text("b") });
 });
 
 test("fork: the start step runs even when its stamp holds, and only once (F5, F7)", async () => {

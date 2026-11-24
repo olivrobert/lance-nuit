@@ -287,7 +287,10 @@ context types. The structural primitives are:
 - `artifact(name, parser)` / `textArtifact(name, parser?)` for artifact descriptors,
   and `.approval(subject, artifact)` for approvable subjects;
 - `source(name, { command })` for state outside the work item a step declares
-  as `input` — see [External sources](#external-sources);
+  as `input`, and `source.ignoring(...stepIds)` for a consumer that does not
+  count what those steps change — see [External sources](#external-sources);
+- `onStale: "stop"` on a costly step that must stop rather than run again once
+  its inputs changed — see [Input freshness](#input-freshness);
 - `llmStep({ capture: { field: artifact | { artifact, schema } } })` to have the
   runner persist a field of the agent's verdict as an artifact — see
   [Captured outputs](#captured-outputs).
@@ -531,6 +534,16 @@ The rules:
   status becomes `skipped`. Adding or removing an input or an output therefore
   replays the step once, and an output edited by hand makes its producer run
   again and rewrite it.
+- **`onStale: "stop"`.** A step whose stamp exists but no longer matches stops
+  the run instead of running: `STOPPED`, stop kind `needs-decision`, detail
+  `inputs of <step> changed since it succeeded: --start-at <step> to run it
+  again`, nothing spawned, the stamp kept. Declare it on a costly step that must
+  not be paid again unattended, such as an implementation whose ticket or plan
+  moved. A step with no stamp yet runs, and so does the target of a
+  `--start-at` fork or a step reworking a pending rejection. An unreadable
+  source makes the stamp stale, so it stops too. The default, `"run"`, runs the
+  step. `onStale` on a step that is not stamped (no `input` or `output`, or
+  `rerunOnResume`) is a build error.
 - **When the stamp changes.** The stamp is deleted before the first spawn of
   every pass, and written only once the pass settled `done`, after that status
   is saved. A pass that failed, was aborted, was interrupted or stopped leaves
@@ -649,6 +662,36 @@ and `implement` — an agent step — is stale and paid again on every rerun.
 - **Untracked files.** `git diff HEAD` does not show them. A pipeline that must
   see new files marks them itself (`git add -N`), in a step or in the source's
   command; the runner never stages anything.
+
+##### Ignoring the changes of a step
+
+A later step may change a source on purpose without invalidating what an
+earlier one did: a quality repair edits the tree, and a UI review of that tree
+should not be paid again for it. The consumer declares the source with
+`ignoring`:
+
+```ts
+const tree = source("tree", { command: TREE_COMMAND });
+llmStep({ id: "ui-polish", input: [tree.ignoring("quality-recheck")], output: [polish], ... });
+bashStep({ id: "quality-recheck", input: [tree], ... });
+```
+
+- **Same source.** `tree.ignoring(...)` has the same name, command and lock key
+  (`source:tree`) as `tree`; calls accumulate.
+- **Rule.** When an ignored step `R` settles `done`, each consumer that ignores
+  it and has a stamp has its recorded `source:tree` moved to the tree as `R`
+  left it, but only if that record equals the tree as `R` found it at its
+  admission, both read. Otherwise the stamp is left alone: a change nobody
+  ignores (a hand edit, another step) still makes the consumer stale. Nothing
+  else in the consumer's stamp changes.
+- **One write.** `R`'s own stamp and these moves are written together, in one
+  update of `lock.json`.
+- **`R` itself.** It may be stamped (`input: [tree]`) or `rerunOnResume`: its
+  admission reads the ignored sources either way. A failure of `R` moves
+  nothing; a failure absorbed by `blocking: false` settles `done`, so it does.
+- **Build errors.** An ignored id that is not a step of the pipeline, a source
+  ignoring the step that reads it, and `ignoring` in `output`. Steps of child
+  pipelines are not visible: the rule holds within one pipeline.
 
 ### Failure handling and retry escalation
 

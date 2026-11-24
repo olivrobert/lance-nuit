@@ -29,9 +29,13 @@ import {
 import {
   clearStamp,
   commitPass,
+  type Fingerprint,
   type Freshness,
+  type IgnoredAdvance,
   isSource,
   readInputs,
+  type Source,
+  sourceKey,
   stampKey,
   type StepStamp,
 } from "../../work-items/index.js";
@@ -39,7 +43,7 @@ import {
 import type { runFixLoop } from "./fix-loop.js";
 import { failStep } from "./non-blocking.js";
 import { executePipelineOrchestration } from "./pipeline-orchestration.js";
-import type { StepAdmission } from "./step-admission.js";
+import type { IgnoredReading, StepAdmission } from "./step-admission.js";
 import { runAttempt, startFreshSession } from "./step-attempt.js";
 import { type ResolvedOutcome, resolveOutcome } from "./step-outcome.js";
 import { runReviewPhase } from "./step-review.js";
@@ -176,13 +180,17 @@ export async function runStepPass(
  * inputs as its admission read them, the sources and the outputs as they are now.
  * An absorbed failure vouches for no output: a step declaring some gets no stamp.
  */
-async function passStamp(env: StepPassEnv, step: RunStepView, admitted: Freshness): Promise<StepStamp | undefined> {
+async function passStamp(
+  env: StepPassEnv,
+  step: RunStepView,
+  admitted: Freshness,
+  sourcesNow: Record<string, Fingerprint>,
+): Promise<StepStamp | undefined> {
   const { run, baseCtx } = env;
   const outputs = step.def.outputs ?? [];
   const absorbed = step.errors !== undefined;
   if (absorbed && outputs.length > 0) return undefined;
-  const sources = await readInputs(baseCtx, (step.def.sources ?? []).filter(isSource));
-  for (const unavailable of sources.unavailable) recordUnavailableSource(run, step, unavailable);
+  const sources = Object.fromEntries(ownSources(step).map((source) => [source, sourcesNow[source] ?? null]));
   const produced = await readInputs(baseCtx, outputs);
   const hashes: Record<string, string> = {};
   for (const [key, hash] of Object.entries(produced.fingerprints)) {
@@ -195,17 +203,67 @@ async function passStamp(env: StepPassEnv, step: RunStepView, admitted: Freshnes
     // A run's directory is named after its id; an old snapshot may lack the field.
     runId: run.runId ?? basename(run.run_dir),
     stampedAt: new Date().toISOString(),
-    inputs: { ...admitted.inputs, ...sources.fingerprints },
+    inputs: { ...admitted.inputs, ...sources },
     outputs: hashes,
     ...(absorbed ? { absorbed: true as const } : {}),
   };
 }
 
-/** Write the stamp of a pass that settled `done`. A failure leaves the step `done`
- *  without a stamp, which only makes it run again: said, never fatal. */
-async function stampPass(env: StepPassEnv, step: RunStepView, admitted: Freshness): Promise<void> {
+function ownSources(step: RunStepView): string[] {
+  return (step.def.sources ?? []).filter(isSource).map((input) => sourceKey(input.name));
+}
+
+/** The sources a settled pass leaves behind, read once for its own stamp and for
+ *  the consumers that ignore it. Only its own unavailable sources are its fact. */
+async function sourcesAfterPass(
+  env: StepPassEnv,
+  step: RunStepView,
+  stamped: boolean,
+  ignored: IgnoredReading | undefined,
+): Promise<Record<string, Fingerprint>> {
+  const sources = new Map<string, Source>();
+  if (stamped) for (const input of (step.def.sources ?? []).filter(isSource)) sources.set(input.name, input);
+  for (const { source } of ignored?.consumers ?? []) if (!sources.has(source.name)) sources.set(source.name, source);
+  const read = await readInputs(env.baseCtx, [...sources.values()]);
+  const own = stamped ? ownSources(step) : [];
+  for (const unavailable of read.unavailable) {
+    if (own.includes(sourceKey(unavailable.source))) recordUnavailableSource(env.run, step, unavailable);
+  }
+  return read.fingerprints;
+}
+
+/** A consumer's source moves from what this pass found to what it left. */
+function ignoredAdvances(
+  env: StepPassEnv,
+  ignored: IgnoredReading,
+  sourcesNow: Record<string, Fingerprint>,
+): IgnoredAdvance[] {
+  return ignored.consumers.map(({ consumer, source }) => {
+    const key = sourceKey(source.name);
+    return {
+      key: stampKey(consumer, env.baseCtx.lot),
+      source: key,
+      before: ignored.before[key] ?? null,
+      after: sourcesNow[key] ?? null,
+    };
+  });
+}
+
+/** Write what a pass settled `done` vouches for, its stamp and the sources of the
+ *  consumers that ignore it, in one write. A failure leaves the step `done` without
+ *  a stamp, which only makes it, or a consumer, run again: said, never fatal. */
+async function commitSettledPass(
+  env: StepPassEnv,
+  step: RunStepView,
+  freshness: Freshness | undefined,
+  ignored: IgnoredReading | undefined,
+): Promise<void> {
+  if (!freshness && !ignored) return;
   try {
-    commitPass(env.baseCtx, stampKey(step.id, env.baseCtx.lot), await passStamp(env, step, admitted), []);
+    const sourcesNow = await sourcesAfterPass(env, step, freshness !== undefined, ignored);
+    const stamp = freshness ? await passStamp(env, step, freshness, sourcesNow) : undefined;
+    const advances = ignored ? ignoredAdvances(env, ignored, sourcesNow) : [];
+    commitPass(env.baseCtx, stampKey(step.id, env.baseCtx.lot), stamp, advances);
   } catch (error) {
     env.deps.output.emit({
       type: "runner.message",
@@ -225,7 +283,7 @@ async function passVerdict(env: StepPassEnv, step: RunStepView, produced: Resolv
 async function passStartedStep(
   env: StepPassEnv,
   step: RunStepView,
-  { command, stepLogDir, freshness }: Extract<StepAdmission, { kind: "ready" }>,
+  { command, stepLogDir, freshness, ignored }: Extract<StepAdmission, { kind: "ready" }>,
   stepIndex: number,
 ): Promise<StepLoopStop | undefined> {
   const { run, baseCtx, budget, abort, deps } = env;
@@ -303,6 +361,6 @@ async function passStartedStep(
   // absorbed its failure, which its warning already said.
   updateStep(run, step, "done");
   if (step.errors === undefined) deps.output.emit({ type: "step.done", step, suffix: verdict.doneSuffix });
-  if (freshness) await stampPass(env, step, freshness);
+  await commitSettledPass(env, step, freshness, ignored);
   return undefined;
 }

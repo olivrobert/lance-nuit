@@ -3,7 +3,7 @@
 // interruption guard and preflight. This module does not know sessions or
 // on_failure strategies; it decides whether execution may run.
 
-import type { InputAction, InputDecision, StepInputCondition } from "../../definition/index.js";
+import type { IgnoredBy, InputAction, InputDecision, StepInputCondition } from "../../definition/index.js";
 import { runBashAsync, stripStderrMarker } from "../../shared/process/bash-runner.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import { truncate } from "../../shared/lib/truncate.js";
@@ -25,8 +25,11 @@ import {
   stepLogDir,
 } from "../../run/index.js";
 import {
+  type Fingerprint,
   type Freshness,
   pendingRejection,
+  readInputs,
+  sourceKey,
   stampKey,
   stepFreshness,
   type UnavailableSource,
@@ -51,8 +54,17 @@ export type StepAdmission =
   | { kind: "stopped"; reason: string }
   | { kind: "failed"; reason: string }
   /** `freshness` is the reading of a stamped step, which its pass records
-   *  instead of hashing its artifact inputs again; absent for an unstamped one. */
-  | { kind: "ready"; command: string; stepLogDir: string; freshness?: Freshness };
+   *  instead of hashing its artifact inputs again; absent for an unstamped one.
+   *  `ignored` carries the consumers that ignore this step, with the sources as
+   *  this admission read them. */
+  | { kind: "ready"; command: string; stepLogDir: string; freshness?: Freshness; ignored?: IgnoredReading };
+
+/** The sources some consumer does not count this step's changes to, as the step
+ *  found them: what its pass compares to the consumers' stamps. */
+export interface IgnoredReading {
+  consumers: readonly IgnoredBy[];
+  before: Record<string, Fingerprint>;
+}
 
 /** Evaluate `when` admissions in declaration order. */
 export async function checkInputs(
@@ -162,20 +174,45 @@ export interface AdmitStepInput {
   replayInterrupted?: boolean;
   /** The pipeline's `work_item_source.step_id`, never stamped. */
   workItemSourceStepId?: string;
+  /** The consumers whose sources ignore this step (`Source.ignoring`). */
+  ignoredBy?: readonly IgnoredBy[];
 }
 
-/** A source that could not be read makes the step run without anyone seeing
- *  why: the journal keeps the reason, the console says it once. */
-function reportUnavailableSources(input: AdmitStepInput, unavailable: readonly UnavailableSource[]): void {
+/** A source that could not be read makes the step run, or stop on `onStale`,
+ *  without anyone seeing why: the journal keeps the reason, the console says it once. */
+function reportUnavailableSources(
+  input: AdmitStepInput,
+  unavailable: readonly UnavailableSource[],
+  then: "running" | "stopping",
+): void {
   const { run, step } = input;
   for (const { source, reason } of unavailable) {
     recordUnavailableSource(run, step, { source, reason });
     input.output.emit({
       type: "runner.message",
       level: "warn",
-      message: `${step.def.name} — source "${source}" unavailable, inputs stale, running: ${reason}`,
+      message: `${step.def.name} — source "${source}" unavailable, inputs stale, ${then}: ${reason}`,
     });
   }
+}
+
+/** The ignored sources as this step finds them, reusing what its own freshness
+ *  already read. A source that cannot be read is `null`: nothing will move. */
+async function readIgnoredSources(
+  ctx: PipelineContext,
+  consumers: readonly IgnoredBy[] | undefined,
+  freshness: Freshness | undefined,
+): Promise<IgnoredReading | undefined> {
+  if (!consumers?.length || !ctx.paths.workItemDir) return undefined;
+  const before: Record<string, Fingerprint> = {};
+  const unread = new Map<string, IgnoredBy["source"]>();
+  for (const { source } of consumers) {
+    const key = sourceKey(source.name);
+    if (freshness && key in freshness.inputs) before[key] = freshness.inputs[key] ?? null;
+    else unread.set(key, source);
+  }
+  Object.assign(before, (await readInputs(ctx, [...unread.values()])).fingerprints);
+  return { consumers, before };
 }
 
 /** Persist a guard rejection with the same blocking/non-blocking semantics. An
@@ -322,10 +359,18 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
       failStep(run, step, input.output, reason);
       return { kind: "failed", reason };
     }
-    reportUnavailableSources(input, freshness.unavailable);
     const forced = forkPending(run) && run.startAt === step.id;
+    const stopOnStale = freshness.value === "stale" && step.def.on_stale === "stop" && !rejected && !forced;
+    reportUnavailableSources(input, freshness.unavailable, stopOnStale ? "stopping" : "running");
     if (freshness.value === "fresh" && !rejected && !forced) {
       return applyInputDecision(run, step, input.output, "skip", SKIP_UP_TO_DATE, freshness.value);
+    }
+    if (stopOnStale) {
+      const detail = `inputs of ${step.id} changed since it succeeded: --start-at ${step.id} to run it again`;
+      return applyInputDecision(run, step, input.output, "stop", detail, undefined, {
+        kind: "needs-decision",
+        detail,
+      });
     }
   }
 
@@ -361,10 +406,12 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
     }
   }
 
+  const ignored = await readIgnoredSources(baseCtx, input.ignoredBy, freshness);
   return {
     kind: "ready",
     command,
     stepLogDir: stepLogDir(run.run_dir, step.id),
     ...(freshness ? { freshness } : {}),
+    ...(ignored ? { ignored } : {}),
   };
 }

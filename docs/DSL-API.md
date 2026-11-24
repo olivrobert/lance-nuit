@@ -182,6 +182,12 @@ export interface StepOptionsBase {
      *  (crash, OOM, SIGKILL). Without it the resumed run stops and asks. Implied by
      *  `rerunOnResume`. */
     replayInterrupted?: boolean;
+    /** What a step does once its inputs changed since it succeeded: `"run"` (the
+     *  default) runs it again; `"stop"` stops the run for a decision, for a costly
+     *  step that must not replay unattended. A step without a stamp still runs, and
+     *  `--start-at` forces it. Requires `input` or `output`; refused with
+     *  `rerunOnResume`. */
+    onStale?: "run" | "stop";
     onFail?: OnFail;
 }
 
@@ -751,6 +757,13 @@ export interface Source {
     readonly command: AsyncTemplated<PipelineContext>;
     /** Run the command and return its stdout; rejects when it fails. */
     read(ctx: PipelineContext): Promise<string>;
+    /** Steps whose changes to this source the consumer does not count: see `ignoring`. */
+    readonly ignoredSteps?: readonly string[];
+    /** The same source, under the same key, for a consumer that does not count the
+     *  changes these steps make to it: when one of them settles `done` and the
+     *  consumer's stamp still records the source as that step found it, the stamp
+     *  moves to the source as the step left it. */
+    ignoring(...stepIds: string[]): Source;
 }
 
 /** What a step may declare through `input`: artifacts it reads, and sources. */
