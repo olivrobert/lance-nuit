@@ -29,7 +29,7 @@ export function classifyPersistedRunOutcome(
   return "fixed";
 }
 
-/** Injectable boundaries, following the StepLoopDeps / FixLoopDeps pattern. */
+/** Injectable boundaries, following the StepLoopDeps / OnFailureDeps pattern. */
 export interface DispatchDeps {
   /** Whether this ticket's run is already complete (resume). */
   isTicketComplete(ticket: string, env: DispatchEnv): boolean;

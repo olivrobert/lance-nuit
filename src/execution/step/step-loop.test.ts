@@ -38,6 +38,7 @@ import { loadOrCreateRun } from "./load-or-create-run.ts";
 import { resolveRunDir } from "../../run/record/stores/run-storage.ts";
 import { resolveOutcome } from "./step-outcome.ts";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
+import { createDefaultAgentBackendRegistry } from "../../agents/default-registry.ts";
 import { createAbortScope } from "../abort.js";
 import { humanReview } from "../../definition/builtin-steps/lib/human-review.js";
 import { createInternalWorkItemSourceStep, bashStep as dslBashStep, pipeline } from "../../definition/dsl.js";
@@ -78,7 +79,8 @@ function fakeDeps(results: Array<Partial<StepResult>> = []): {
       };
     },
     extractErrors: async () => ({ hasErrors: false, errors: "" }),
-    runFixLoop: async () => ({ kind: "done" }),
+    runWithAgent: () => Promise.reject(new Error("no fix expected")),
+    registry: createDefaultAgentBackendRegistry(),
     output: NULL_RUN_OUTPUT,
   };
   return { deps, calls };
@@ -561,9 +563,9 @@ test("resolveOutcome: validates the contract", async () => {
   const run = makeRun([step]);
   const { deps } = fakeDeps();
   let fixCalled = false;
-  deps.runFixLoop = async () => {
+  deps.runWithAgent = async () => {
     fixCalled = true;
-    return { kind: "done" };
+    return { ok: true, stats: { duration_ms: 1 } };
   };
 
   const outcome = await resolveOutcome({
@@ -595,9 +597,9 @@ test("resolveOutcome: a BLOCKED: prefix without the cause no longer stops the ru
   const run = makeRun([step]);
   const { deps } = fakeDeps();
   let fixCalled = false;
-  deps.runFixLoop = async () => {
+  deps.runWithAgent = async () => {
     fixCalled = true;
-    return { kind: "done" };
+    return { ok: true, stats: { duration_ms: 1 } };
   };
 
   const outcome = await resolveOutcome({
@@ -1053,9 +1055,9 @@ test("step-loop: validates the integration contract", async () => {
   const run = makeRun(steps);
   let fixCalled = false;
   const { deps } = fakeDeps([{ ok: false }]);
-  deps.runFixLoop = async () => {
+  deps.runWithAgent = async () => {
     fixCalled = true;
-    return { kind: "done" };
+    return { ok: true, stats: { duration_ms: 1 } };
   };
   const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(fixCalled).toBe(true);
@@ -1116,9 +1118,9 @@ test("step-loop: validates the integration contract", async () => {
   const { deps, calls } = fakeDeps([
     { ok: false, failReason: "app unreachable at https://app.localhost", failCause: "blocked" },
   ]);
-  deps.runFixLoop = async () => {
+  deps.runWithAgent = async () => {
     fixCalled = true;
-    return { kind: "done" };
+    return { ok: true, stats: { duration_ms: 1 } };
   };
 
   const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
@@ -1141,9 +1143,9 @@ test("step-loop: validates the integration contract", async () => {
   const run = makeRun(steps);
   let fixCalled = false;
   const { deps, calls } = fakeDeps([{ ok: false, failReason: "app unreachable", failCause: "blocked" }, { ok: true }]);
-  deps.runFixLoop = async () => {
+  deps.runWithAgent = async () => {
     fixCalled = true;
-    return { kind: "done" };
+    return { ok: true, stats: { duration_ms: 1 } };
   };
 
   const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
@@ -1159,9 +1161,9 @@ test("step-loop: validates the integration contract", async () => {
   const run = makeRun(steps);
   let fixCalled = false;
   const { deps } = fakeDeps([{ ok: false, failReason: "UI-002: expected label is missing" }]);
-  deps.runFixLoop = async () => {
+  deps.runWithAgent = async () => {
     fixCalled = true;
-    return { kind: "done" };
+    return { ok: true, stats: { duration_ms: 1 } };
   };
 
   await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
@@ -1726,9 +1728,9 @@ function realSpawnDeps(): { deps: StepLoopDeps; fixCalls: () => number } {
     deps: {
       executeStep,
       extractErrors,
-      runFixLoop: async () => {
+      runWithAgent: async () => {
         fixCalls++;
-        return { kind: "done" };
+        return { ok: true, stats: { duration_ms: 1 } };
       },
       output: NULL_RUN_OUTPUT,
     },

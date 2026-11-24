@@ -404,7 +404,7 @@ function countingDeps(
         return result;
       },
       extractErrors: async () => ({ hasErrors: false, errors: "" }),
-      runFixLoop: async () => ({ kind: "done" }),
+      runWithAgent: () => Promise.reject(new Error("no fix expected")),
       output: NULL_RUN_OUTPUT,
     },
   };

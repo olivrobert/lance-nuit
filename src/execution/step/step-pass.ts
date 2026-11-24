@@ -10,7 +10,6 @@
 
 import { basename, join } from "node:path";
 import { backendSpecForStep } from "../../contracts/backends.js";
-import type { extractErrors } from "../report-extraction.js";
 import type { executeStep, StepResult } from "../runners.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../../shared/language/context.js";
 import { errorMessage } from "../../shared/lib/errors.js";
@@ -40,20 +39,17 @@ import {
   type StepStamp,
 } from "../../work-items/index.js";
 
-import type { runFixLoop } from "./fix-loop.js";
 import { failStep } from "./non-blocking.js";
 import { executePipelineOrchestration } from "./pipeline-orchestration.js";
 import type { ChildRunExecutor } from "./pipeline-orchestration-types.js";
 import type { IgnoredReading, StepAdmission } from "./step-admission.js";
+import type { OnFailureDeps } from "./on-failure.js";
 import { runAttempt, startFreshSession } from "./step-attempt.js";
 import { ABSORBED, DONE, failed, INTERRUPTED, signalsOf, type StepIssue, stopped } from "./step-issue.js";
 import { resolveOutcome } from "./step-outcome.js";
 import { runReviewPhase } from "./step-review.js";
 
-export interface StepLoopDeps {
-  executeStep: typeof executeStep;
-  extractErrors: typeof extractErrors;
-  runFixLoop: typeof runFixLoop;
+export interface StepLoopDeps extends OnFailureDeps {
   /** Structured destination for step progress AND for the loop's own messages.
    * Required, and so is `deps` itself on `executeRunSteps`: the port carries the
    * prose as well as the events, so a caller that omitted it would run mute. A
@@ -327,11 +323,7 @@ async function passStartedStep(
     abort,
     result: attempt.result,
     stepLog: attempt.stepLog,
-    deps: {
-      executeStep: deps.executeStep,
-      extractErrors: deps.extractErrors,
-      runFixLoop: deps.runFixLoop,
-    },
+    deps,
     output: deps.output,
   });
   if (abort.isRunAborted(run)) return INTERRUPTED;

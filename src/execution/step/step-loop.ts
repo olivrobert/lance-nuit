@@ -5,7 +5,7 @@
 // (`parallel-group.ts`). The loop keeps only global step order.
 
 import { extractErrors } from "../report-extraction.js";
-import { executeStep } from "../runners.js";
+import { executeStep, runWithAgent } from "../runners.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import { ignoredSourcesByStep, readmittedOnResume, rerunsOnResume } from "../../definition/index.js";
 import type { RunStepView, RunView } from "../../run/index.js";
@@ -23,7 +23,6 @@ import {
   stopRun,
 } from "../../run/index.js";
 
-import { runFixLoop } from "./fix-loop.js";
 import { admitStep, type StepAdmission, skipForOperatorSelection } from "./step-admission.js";
 import { type AdmittedStep, executionUnits, runParallelGroup } from "./parallel-group.js";
 import { DONE, haltsLoop, type StepIssue, signalsOf } from "./step-issue.js";
@@ -35,7 +34,7 @@ export type { StepLoopDeps };
  * output destination. Keeping the function boundaries required preserves the
  * existing injectable test contract. */
 export function stepLoopDeps(output: RunOutput): StepLoopDeps {
-  return { executeStep, extractErrors, runFixLoop, output };
+  return { executeStep, extractErrors, runWithAgent, output };
 }
 
 /** Re-exported for the entry point: the shape is owned by the run finalization

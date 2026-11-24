@@ -19,11 +19,11 @@ import type { ArtifactRef, WorkItemArtifactStore } from "../../shared/language/a
 import type { PipelineStep } from "../../definition/definition.ts";
 import type { Run, RunStep } from "../../run/record/run.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
+import { createDefaultAgentBackendRegistry } from "../../agents/default-registry.ts";
 import { createAbortScope } from "../abort.ts";
 import { setLogInterceptor } from "../../shared/runtime/logging.ts";
 import type { RunOutput, RunOutputEvent } from "../run-output.ts";
 import { makeRunStep } from "../../run/record/run-step.ts";
-import { failed } from "./step-issue.ts";
 import { type ResolveOutcomeInput, resolveOutcome } from "./step-outcome.ts";
 
 afterEach(() => setLogInterceptor(undefined));
@@ -75,7 +75,8 @@ function failedInput(def: Partial<PipelineStep>, output: RunOutput): ResolveOutc
         throw new Error("no attempt is expected on this path");
       },
       extractErrors: async () => ({ errors: "", hasErrors: false }),
-      runFixLoop: async () => failed(),
+      runWithAgent: () => Promise.reject(new Error("no fix expected")),
+      registry: createDefaultAgentBackendRegistry(),
     },
     output,
   };
@@ -146,9 +147,9 @@ function fixPolicyInput(
   );
   let fixCalls = 0;
   input.deps.extractErrors = async () => extraction;
-  input.deps.runFixLoop = async () => {
+  input.deps.runWithAgent = async () => {
     fixCalls++;
-    return failed();
+    return { ok: false, stats: { duration_ms: 1 } };
   };
   return { input, fixCalls: () => fixCalls };
 }
@@ -315,7 +316,8 @@ function refusedCaptureInput(
         return { output: "", ok: true, stats: { duration_ms: 1 }, ...reasked };
       },
       extractErrors: async () => ({ errors: "", hasErrors: false }),
-      runFixLoop: async () => failed(),
+      runWithAgent: () => Promise.reject(new Error("no fix expected")),
+      registry: createDefaultAgentBackendRegistry(),
     },
     output,
   };

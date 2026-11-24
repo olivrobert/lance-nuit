@@ -8,8 +8,7 @@ import type { Run, RunStep } from "../../run/record/run.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
 import { createDefaultAgentBackendRegistry } from "../../agents/default-registry.ts";
 import { stepLogPath } from "../../run/record/run-timeline.ts";
-import { failed } from "./step-issue.ts";
-import { type OnFailureContext, onFailureHandlerFor, rerunHandler } from "./on-failure.ts";
+import { type OnFailureContext, runOnFailure } from "./on-failure.ts";
 import { makeRunStep } from "../../run/record/run-step.ts";
 import { createAbortScope } from "../abort.js";
 import { NULL_RUN_OUTPUT } from "../run-output.js";
@@ -63,46 +62,27 @@ function makeCtx(
           timedOut: r.timedOut,
           failReason: r.failReason,
           budgetExceeded: r.budgetExceeded,
+          failCause: r.failCause,
         };
       },
-      runFixLoop: async () => {
+      extractErrors: async () => ({ hasErrors: false, errors: "" }),
+      runWithAgent: async () => {
         calls.fix++;
-        return { kind: "done" };
+        return { ok: true, stats: { duration_ms: 1 } };
       },
+      registry: createDefaultAgentBackendRegistry(),
     },
     ...overrides,
   };
   return { ctx, calls };
 }
 
-test("a fix policy forwards the resumed step id that drives the repair backend choice", async () => {
-  // The fix loop moves a bash step's repair onto the resumed session's provider
-  // only when `resume_session` names a step; the policy is the single source of it.
-  const seen: Array<string | undefined> = [];
-  for (const resumeSession of [undefined, "implement"]) {
-    const step = failingStep({ resume_session: resumeSession, max_retries: 1, fix_prompt: "fix" });
-    const run = makeRun(step);
-    const { ctx } = makeCtx(run, step, []);
-    ctx.deps.runFixLoop = async (_run, _step, _command, _output, _baseCtx, _budget, _reason, opts) => {
-      seen.push(opts.resumeSession);
-      return { kind: "done" };
-    };
-    await onFailureHandlerFor(step.def.on_failure!)(ctx);
-  }
-  expect(seen).toEqual([undefined, "implement"]);
-});
-
-test("a policy without a fix prompt selects the rerun handler: validates the contract", () => {
-  expect(onFailureHandlerFor({ max_retries: 2 })).toBe(rerunHandler);
-  expect(onFailureHandlerFor({ max_retries: 2, fix_prompt: "fix" })).not.toBe(rerunHandler);
-});
-
 test("on-failure: validates the integration contract", async () => {
   const step = failingStep({ max_retries: 3 });
   const run = makeRun(step);
   const { ctx, calls } = makeCtx(run, step, [{ ok: false }, { ok: true }]);
 
-  const out = await rerunHandler(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).not.toBe("failed");
   expect(step.status).toBe("running");
@@ -115,7 +95,7 @@ test("on-failure: validates the integration contract", async () => {
   const run = makeRun(step);
   const { ctx, calls } = makeCtx(run, step, [{ ok: false }, { ok: false, failReason: "exit code 2" }]);
 
-  const out = await rerunHandler(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).toBe("failed");
   expect(step.status).toBe("failed");
@@ -129,7 +109,7 @@ test("on-failure: validates the integration contract", async () => {
   const run = makeRun(step);
   const { ctx } = makeCtx(run, step, [{ ok: false }]);
 
-  const out = await rerunHandler(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).not.toBe("failed");
   expect(step.status).toBe("running");
@@ -141,7 +121,7 @@ test("on-failure: validates the integration contract", async () => {
   const run = makeRun(step, 1);
   const { ctx, calls } = makeCtx(run, step, [{ ok: true }], { budget: { cumulative: 5 } });
 
-  const out = await rerunHandler(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(calls.exec).toBe(0);
   expect(out.kind).toBe("failed");
@@ -174,7 +154,7 @@ test("on-failure: validates the integration contract", async () => {
     return inner(s, c, budget, pctx);
   };
 
-  await rerunHandler(ctx);
+  await runOnFailure(ctx);
 
   // Reruns 1-2: nominal settings (threshold not reached); rerun 3: effort; rerun 4: model.
   expect(seen).toEqual([
@@ -202,7 +182,7 @@ test("on-failure: validates the integration contract", async () => {
     return inner(s, c, budget, pctx);
   };
 
-  await rerunHandler(ctx);
+  await runOnFailure(ctx);
 
   expect(seen).toEqual([{ model: "opus[1m]", effort: "medium" }]);
 });
@@ -212,7 +192,7 @@ test("on-failure: validates the integration contract", async () => {
   const run = makeRun(step);
   const { ctx, calls } = makeCtx(run, step, [{ ok: true }], { timedOut: true });
 
-  const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).not.toBe("failed");
   expect(step.status).toBe("running");
@@ -228,20 +208,19 @@ test("on-failure: validates the integration contract", async () => {
   const { ctx, calls } = makeCtx(
     run,
     step,
-    [{ ok: false, output: "verdict FAIL authentique", failReason: "AC 3 non satisfait" }],
+    [{ ok: false, output: "verdict FAIL authentique", failReason: "AC 3 non satisfait" }, { ok: true }],
     { timedOut: true },
   );
   let fixInput: { output: string; reason?: string } | undefined;
-  ctx.deps.runFixLoop = async (_run, _step, _cmd, out, _c, _b, reason) => {
-    calls.fix++;
-    fixInput = { output: out, reason };
-    return { kind: "done" };
+  step.def.on_failure!.fix_prompt = (fixCtx) => {
+    fixInput = { output: fixCtx.stepOutput, reason: fixCtx.errors };
+    return "corrige";
   };
 
-  const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).not.toBe("failed");
-  expect(calls.exec).toBe(1);
+  expect(calls.exec).toBe(2);
   expect(calls.fix).toBe(1);
   expect(fixInput).toEqual({ output: "verdict FAIL authentique", reason: "AC 3 non satisfait" });
 });
@@ -259,7 +238,7 @@ test("on-failure: validates the integration contract", async () => {
     { timedOut: true },
   );
 
-  const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).toBe("failed");
   expect(step.status).toBe("failed");
@@ -279,18 +258,19 @@ test("on-failure: validates the integration contract", async () => {
     [
       { ok: false, timedOut: true },
       { ok: false, output: "verdict authentique", failReason: "AC 1 non satisfait" },
+      { ok: true },
     ],
     { timedOut: true },
   );
 
-  const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).not.toBe("failed");
-  expect(calls.exec).toBe(2);
+  expect(calls.exec).toBe(3);
   expect(calls.fix).toBe(1);
-  // Two post-timeout reruns consumed; the fix quota remains intact.
+  // Two post-timeout reruns consumed; the fix pass still had its own quota.
   expect(step.timeout_retries).toBe(2);
-  expect(step.retries).toBe(0);
+  expect(step.retries).toBe(1);
 });
 
 test("on-failure: validates the integration contract", async () => {
@@ -298,7 +278,7 @@ test("on-failure: validates the integration contract", async () => {
   const run = makeRun(step);
   const { ctx, calls } = makeCtx(run, step, [{ ok: false, timedOut: true }], { timedOut: true });
 
-  const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).not.toBe("failed");
   expect(step.status).toBe("running");
@@ -309,24 +289,23 @@ test("on-failure: validates the integration contract", async () => {
 test("on-failure: validates the integration contract", async () => {
   const step = failingStep({ resume_session: "implement", max_retries: 2, fix_prompt: "corrige" });
   const run = makeRun(step);
-  const { ctx, calls } = makeCtx(run, step, []);
+  const { ctx, calls } = makeCtx(run, step, [{ ok: true }]);
 
-  const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).not.toBe("failed");
-  expect(calls.exec).toBe(0);
+  expect(calls.exec).toBe(1);
   expect(calls.fix).toBe(1);
 });
 
 test("on-failure: validates the integration contract", async () => {
-  // The fix loop settles blocking vs non-blocking itself (settleStepFailure);
-  // the handler propagates its verdict verbatim.
+  // The loop settles blocking vs non-blocking itself (settleStepFailure).
   const step = failingStep({ max_retries: 1, fix_prompt: "corrige" });
   const run = makeRun(step);
   const { ctx } = makeCtx(run, step, []);
-  ctx.deps.runFixLoop = async () => failed();
+  ctx.deps.runWithAgent = async () => ({ ok: false, stats: { duration_ms: 1 } });
 
-  const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).toBe("failed");
 });
@@ -344,7 +323,7 @@ test("on-failure: an abort requested during a rerun ends the loop without anothe
     return original(...args);
   };
 
-  const out = await rerunHandler(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(calls.exec).toBe(1);
   expect(step.retries).toBe(1);
@@ -358,7 +337,7 @@ test("a non-blocking rerun withheld by the budget gate stays failed", async () =
   const run = makeRun(step, 1);
   const { ctx, calls } = makeCtx(run, step, [], { budget: { cumulative: 5 } });
 
-  const out = await rerunHandler(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(calls.exec).toBe(0);
   expect(out.kind).toBe("failed");
@@ -373,9 +352,24 @@ test("a rerun killed by the live guard stays failed and gives its quota back", a
     { ok: false, budgetExceeded: true, failReason: "process killed: budget exceeded" },
   ]);
 
-  const out = await rerunHandler(ctx);
+  const out = await runOnFailure(ctx);
 
   expect(out.kind).toBe("failed");
   expect(step.status).toBe("failed");
   expect(step.retries).toBe(0);
+});
+
+test("a rerun classified blocked stops the loop and hands the obstacle to the outcome phase", async () => {
+  const step = failingStep({ max_retries: 3 });
+  const run = makeRun(step);
+  const { ctx, calls } = makeCtx(run, step, [
+    { ok: false, failCause: "blocked", failReason: "registry unreachable" },
+    { ok: true },
+  ]);
+
+  const out = await runOnFailure(ctx);
+
+  expect(out).toEqual({ kind: "blocked", failReason: "registry unreachable" });
+  expect(calls.exec).toBe(1);
+  expect(step.retries).toBe(1);
 });

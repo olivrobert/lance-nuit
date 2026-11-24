@@ -5,24 +5,18 @@
 
 import { backendSpecForStep } from "../../contracts/backends.js";
 import type { ExtractionResult } from "../../contracts/extraction.js";
-import type { extractErrors } from "../report-extraction.js";
-import type { executeStep, StepResult } from "../runners.js";
+import type { StepResult } from "../runners.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../../shared/language/context.js";
 import type { RunStepView, RunView } from "../../run/index.js";
 import type { AbortScope } from "../abort.js";
 import type { RunOutput } from "../run-output.js";
-import { costGate, latestAttemptLog, type RunBudget, stopRun, updateStep } from "../../run/index.js";
-import type { runFixLoop } from "./fix-loop.js";
+import { latestAttemptLog, type RunBudget, stopRun, updateStep } from "../../run/index.js";
 import { absorbNonBlocking, settleStepFailure } from "./non-blocking.js";
-import { onFailureHandlerFor } from "./on-failure.js";
+import { type OnFailureDeps, runOnFailure, withholdWhenGated } from "./on-failure.js";
 import { runAttempt } from "./step-attempt.js";
 import { ABSORBED, DONE, failed, INTERRUPTED, type StepIssue, stopped } from "./step-issue.js";
 
-export interface ResolveOutcomeDeps {
-  executeStep: typeof executeStep;
-  extractErrors: typeof extractErrors;
-  runFixLoop: typeof runFixLoop;
-}
+export type ResolveOutcomeDeps = OnFailureDeps;
 
 export interface ResolveOutcomeInput {
   run: RunView;
@@ -84,17 +78,7 @@ async function reaskRefusedCapture(input: ResolveOutcomeInput): Promise<StepResu
   const backend = spec ? requireAgentBackendRegistry(baseCtx).resolve(spec) : undefined;
   if (!backend?.capabilities.resume) return undefined;
 
-  // A withheld re-ask is withheld work, recorded like a withheld retry so the
-  // report names the accounting stop rather than the step it left red.
-  const stop = costGate(run, budget, step.id);
-  if (stop) {
-    input.output.emit({
-      type: "runner.message",
-      level: "warn",
-      message: stop === "cost-unaccounted" ? "  Spending unaccounted, no re-ask" : "  Budget exceeded, no re-ask",
-    });
-    return undefined;
-  }
+  if (withholdWhenGated(run, step, budget, input.output, "no re-ask")) return undefined;
 
   input.output.emit({
     type: "runner.message",
@@ -213,7 +197,7 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<StepIs
     return failed();
   }
 
-  const outcome = await onFailureHandlerFor(step.def.on_failure)({
+  const outcome = await runOnFailure({
     run,
     step,
     command,
@@ -225,7 +209,7 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<StepIs
     timedOut: result.timedOut ?? false,
     ...(extraction ? { extraction } : {}),
     runOutput: input.output,
-    deps: { executeStep: deps.executeStep, runFixLoop: deps.runFixLoop },
+    deps,
   });
   if (run.aborted) return INTERRUPTED;
   if (outcome.kind === "blocked") {

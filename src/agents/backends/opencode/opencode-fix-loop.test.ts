@@ -70,21 +70,23 @@ test("fix loop: a repair resumes the session of the named step and forks it", as
     run_dir: mkdtempSync(join(tmpdir(), "opencode-fixloop-")),
     steps: [implement, step],
   };
-  const fx = prepareFixRun(
+  const fx = prepareFixRun({
     run,
     step,
-    "make test",
-    buildPipelineContext({ cwd: ".", runnerBin: "", runnerDir: "" }),
-    { cumulative: 0 },
-    {
-      resumeSession: "implement",
-      deps: { executeStep, runWithAgent, extractErrors: async () => ({ hasErrors: true, errors: "boom" }), registry },
-      output: NULL_RUN_OUTPUT,
-      abort: createAbortScope(),
-    },
-  );
+    baseCtx: buildPipelineContext({ cwd: ".", runnerBin: "", runnerDir: "" }),
+    budget: { cumulative: 0 },
+    deps: { executeStep, runWithAgent, extractErrors: async () => ({ hasErrors: true, errors: "boom" }), registry },
+    runOutput: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
 
-  const pass = await performFixAttempt(fx, { output: "KO", label: "1/1", banner: "fix 1/1", agentOptions: undefined });
+  const pass = await performFixAttempt(fx, {
+    output: "KO",
+    errors: "boom",
+    label: "1/1",
+    banner: "fix 1/1",
+    agentOptions: undefined,
+  });
 
   const args = seen().args;
   expect(args[args.indexOf("--session") + 1]).toBe("ses_coder");
@@ -116,21 +118,23 @@ test("fix loop: a fresh repair when the named step recorded no session neither r
     run_dir: mkdtempSync(join(tmpdir(), "opencode-fixloop-")),
     steps: [implement, step],
   };
-  const fx = prepareFixRun(
+  const fx = prepareFixRun({
     run,
     step,
-    "make test",
-    buildPipelineContext({ cwd: ".", runnerBin: "", runnerDir: "" }),
-    { cumulative: 0 },
-    {
-      resumeSession: "implement",
-      deps: { executeStep, runWithAgent, extractErrors: async () => ({ hasErrors: true, errors: "boom" }), registry },
-      output: NULL_RUN_OUTPUT,
-      abort: createAbortScope(),
-    },
-  );
+    baseCtx: buildPipelineContext({ cwd: ".", runnerBin: "", runnerDir: "" }),
+    budget: { cumulative: 0 },
+    deps: { executeStep, runWithAgent, extractErrors: async () => ({ hasErrors: true, errors: "boom" }), registry },
+    runOutput: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
 
-  await performFixAttempt(fx, { output: "KO", label: "1/1", banner: "fix 1/1", agentOptions: undefined });
+  await performFixAttempt(fx, {
+    output: "KO",
+    errors: "boom",
+    label: "1/1",
+    banner: "fix 1/1",
+    agentOptions: undefined,
+  });
 
   expect(seen().args).not.toContain("--session");
   expect(seen().args).not.toContain("--fork");

@@ -5,8 +5,8 @@ import {
   backendSpecForStep,
 } from "../../contracts/backends.js";
 import { fixProfileOptions, deriveContext } from "../../definition/index.js";
-import { extractErrors } from "../report-extraction.js";
-import { executeStep, runWithAgent } from "../runners.js";
+import type { extractErrors } from "../report-extraction.js";
+import type { executeStep, runWithAgent } from "../runners.js";
 import { truncateMiddle } from "../../shared/lib/truncate.js";
 import type { AgentBackendRegistry } from "../../contracts/backends.js";
 import { type FixContext, type PipelineContext, requireAgentBackendRegistry } from "../../shared/language/context.js";
@@ -32,7 +32,9 @@ export function buildFixContext(
   }) as FixContext;
 }
 
-export interface FixLoopDeps {
+/** What every on_failure pass runs on. Injected as a whole: the loop never falls
+ *  back to the production functions on its own. */
+export interface OnFailureDeps {
   executeStep: typeof executeStep;
   runWithAgent: typeof runWithAgent;
   extractErrors: typeof extractErrors;
@@ -41,33 +43,29 @@ export interface FixLoopDeps {
   registry?: AgentBackendRegistry;
 }
 
-const DEFAULT_DEPS: FixLoopDeps = { executeStep, runWithAgent, extractErrors };
-
-export interface FixLoopOpts {
-  /** `resumeSession: "<stepId>"`: id of the step whose recorded session hosts the
-   * fix. Absent: the fix runs in a fresh session. */
-  resumeSession?: string;
-  deps?: FixLoopDeps;
-  /** Structured step output destination. Required: `NULL_RUN_OUTPUT` is the way to
-   * ask for a silent fix loop. */
-  output: RunOutput;
-  /** Abort scope consulted between passes. Required: `createAbortScope()` is the
-   * way to ask for a loop only `run.aborted` can interrupt. */
+/** What the repair side of the loop needs from the policy's context. */
+export interface FixRunInput {
+  run: RunView;
+  step: RunStepView;
+  baseCtx: PipelineContext;
+  budget: RunBudget;
+  /** Abort scope consulted between passes. */
   abort: AbortScope;
+  runOutput: RunOutput;
+  deps: OnFailureDeps;
 }
 
 /** Values resolved once at entry: backends, prompt, limits, and dependencies. */
 export interface FixRun {
   run: RunView;
   step: RunStepView;
-  command: string;
   baseCtx: PipelineContext;
   budget: RunBudget;
-  opts: FixLoopOpts;
-  deps: FixLoopDeps;
+  deps: OnFailureDeps;
   registry: AgentBackendRegistry;
-  /** Step backend; absent for bash/noop steps that do not use an agent. */
-  backend?: AgentBackend;
+  /** `resume_session`: id of the step whose recorded session hosts the repair.
+   * Absent: the repair runs in a fresh session. */
+  resumeSession?: string;
   fixSpec: BackendSpec;
   /** Log-ready reason for the backend choice. Emitted by the retry loop when a
    * repair actually starts, never at preparation time: announcing it here would
@@ -84,38 +82,29 @@ export interface FixRun {
 const RESUME_THRESHOLD_KB_DEFAULT = 1000;
 
 /** Prepare repair session state without running a pass. */
-export function prepareFixRun(
-  run: RunView,
-  step: RunStepView,
-  command: string,
-  baseCtx: PipelineContext,
-  budget: RunBudget,
-  opts: FixLoopOpts,
-): FixRun {
-  const deps = opts.deps ?? DEFAULT_DEPS;
+export function prepareFixRun(input: FixRunInput): FixRun {
+  const { run, step, baseCtx, budget, deps } = input;
   const registry = deps.registry ?? requireAgentBackendRegistry(baseCtx);
   const failure = step.def.on_failure!;
-  const stepSpec = backendSpecForStep(step.def);
-  const choice = chooseFixBackend(run, step, baseCtx, registry, opts.resumeSession);
+  const resumeSession = failure.resume_session;
+  const choice = chooseFixBackend(run, step, baseCtx, registry, resumeSession);
   const fixSpec = choice.spec;
   return {
     run,
     step,
-    command,
     baseCtx,
     budget,
-    opts,
     deps,
     registry,
-    ...(stepSpec ? { backend: registry.resolve(stepSpec) } : {}),
+    ...(resumeSession !== undefined ? { resumeSession } : {}),
     fixSpec,
     fixReason: choice.reason,
     fixBackend: registry.resolve(fixSpec),
     backendOptions: choice.options,
     fixPrompt: failure.fix_prompt!,
     sizeThresholdKb: failure.resume_size_threshold_kb ?? RESUME_THRESHOLD_KB_DEFAULT,
-    output: opts.output,
-    abort: opts.abort,
+    output: input.runOutput,
+    abort: input.abort,
   };
 }
 

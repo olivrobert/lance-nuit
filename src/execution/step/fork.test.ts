@@ -105,7 +105,7 @@ function countingDeps(): { deps: StepLoopDeps; spawned: string[] } {
         return { output: "", ok: true, stats: { duration_ms: 1 } };
       },
       extractErrors: async () => ({ hasErrors: false, errors: "" }),
-      runFixLoop: async () => ({ kind: "done" }),
+      runWithAgent: () => Promise.reject(new Error("no fix expected")),
       output: NULL_RUN_OUTPUT,
     },
   };

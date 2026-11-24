@@ -1,22 +1,24 @@
-import type { StepResult } from "../runners.js";
 import { artifactScopeFor } from "../runners.js";
 import { resolveTemplateAsync } from "../../shared/language/context.js";
 import { bindSession } from "../../run/index.js";
 import { buildFixContext, type FixRun, selectResumedSession } from "./fix-loop-runtime.js";
-import { type FixResult, runAttempt, runFixAttempt, startFreshSession } from "./step-attempt.js";
+import { type FixResult, runFixAttempt } from "./step-attempt.js";
+import { headCommit, snapshotTree, type TreeSnapshot, treeChanges } from "./tree-snapshot.js";
 
-/** Repair-pass result and the extracted errors that fed it. */
+/** Repair-pass result. */
 export interface FixPassResult {
   fix: FixResult;
-  extractedErrors: string;
 }
 
-/** One repair pass: extraction, prompt, session, repair agent, and persistence of
- * the session forked by `--resume`. */
+/** One repair pass: prompt, session, repair agent, and persistence of the session
+ * forked by `--resume`. The errors it repairs are extracted by the caller, which
+ * owns the output they describe. */
 export async function performFixAttempt(
   fx: FixRun,
   input: {
     output: string;
+    /** Errors extracted from `output`. */
+    errors: string;
     lastFailReason?: string;
     /** Labels for the log line (`Fix claude (2/3)`) and separator (`fix 2/3`). */
     label: string;
@@ -25,13 +27,13 @@ export async function performFixAttempt(
     agentOptions: unknown;
   },
 ): Promise<FixPassResult | undefined> {
-  const { run, step, baseCtx, budget, opts, deps, fixSpec } = fx;
+  const { run, step, baseCtx, budget, deps, fixSpec, resumeSession } = fx;
   const { useResume, resumedSession } = selectResumedSession(
     run,
     fixSpec,
     fx.fixBackend,
     fx.sizeThresholdKb,
-    opts.resumeSession,
+    resumeSession,
     input.label,
     fx.output,
   );
@@ -39,15 +41,7 @@ export async function performFixAttempt(
     fx.output.emit({ type: "runner.message", level: "info", message: `  → Fix ${fixSpec.id} (${input.label})...` });
   }
 
-  const extraction = await deps.extractErrors(step, input.output);
-  if (fx.abort.isRunAborted(run)) return undefined;
-  const fixCtx = buildFixContext(
-    baseCtx,
-    input.output,
-    extraction.errors,
-    step.def.report_paths?.[0],
-    input.lastFailReason,
-  );
+  const fixCtx = buildFixContext(baseCtx, input.output, input.errors, step.def.report_paths?.[0], input.lastFailReason);
   const prompt = (await resolveTemplateAsync(fx.fixPrompt!, fixCtx))!;
   const fix = await runFixAttempt(run, step, {
     prompt,
@@ -55,7 +49,7 @@ export async function performFixAttempt(
     fixWithAgent: deps.runWithAgent,
     backendSpec: fixSpec,
     agentOptions: input.agentOptions,
-    banner: `${input.banner}${useResume ? ` (resume "${opts.resumeSession}")` : ""}`,
+    banner: `${input.banner}${useResume ? ` (resume "${resumeSession}")` : ""}`,
     spawn: {
       cwd: baseCtx.cwd,
       runnerDir: baseCtx.runnerDir,
@@ -69,26 +63,28 @@ export async function performFixAttempt(
 
   // The --resume fork contains the repairs; write it back to the resumed step so a
   // following gate does not resume the pristine pre-fix session.
-  if (useResume && opts.resumeSession !== undefined) {
-    const target = run.steps.find((candidate) => candidate.def.id === opts.resumeSession);
+  if (useResume && resumeSession !== undefined) {
+    const target = run.steps.find((candidate) => candidate.def.id === resumeSession);
     const resumed = fix.session ?? resumedSession;
     if (target && resumed) bindSession(run, target, resumed);
   }
 
-  return { fix, extractedErrors: extraction.errors };
+  return { fix };
 }
 
-/** Rerun the step command in a fresh session for a loop retry. */
-export async function runStepCommandFresh(fx: FixRun, label: string, banner: string): Promise<StepResult> {
-  const { run, step, budget, deps } = fx;
-  fx.output.emit({ type: "runner.message", level: "info", message: `  → ${label} ${step.def.name}...` });
-  const session = startFreshSession(run, step, fx.backend);
-  return runAttempt(run, step, {
-    command: fx.command,
-    context: fx.baseCtx,
-    budget,
-    executeStep: deps.executeStep,
-    banner,
-    spawn: { session },
-  });
+/** The working tree and head a repair may change. */
+export interface WorkState {
+  tree: TreeSnapshot;
+  head: string | undefined;
+}
+
+export async function workState(cwd: string): Promise<WorkState | undefined> {
+  const tree = await snapshotTree(cwd);
+  return tree && { tree, head: await headCommit(cwd) };
+}
+
+/** The run directory holds the runner's own logs and state, written by the fix pass
+ *  itself: a change there is not a repair. */
+export function workStateChanged(before: WorkState, after: WorkState, runDir: string): boolean {
+  return before.head !== after.head || treeChanges(before.tree, after.tree, [runDir]).length > 0;
 }

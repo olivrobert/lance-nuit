@@ -38,8 +38,9 @@ directions: `"blocked": false` with a `reason` that quotes `BLOCKED:` is not a b
 `"blocked": true` alongside `success: true` is ignored, with a warning: a step that
 succeeded has nothing to stop.
 
-The same holds for the replay that follows a repair: a block declared there stops
-the run the same way, without another repair pass, even with quota left.
+The same holds for every later attempt of the policy: a block declared by a rerun,
+a timeout-drain rerun, or the replay that follows a repair stops the run the same
+way, without another attempt, even with quota left.
 
 The cause is read from the signal the runner retains, never from a stray one. A
 blocked verdict left in the output of an attempt a timeout or the cost guard killed
@@ -233,6 +234,11 @@ output. An opencode attempt killed for emitting no first event within
 persistent timeout fails (or warns for a non-blocking step) without sending an
 uninformative fix prompt.
 
+The drain applies to every command attempt of the policy, not only the first: a
+replay that times out is drained before the next fix, and a timed-out replay
+moves the escalation latch like a timed-out rerun. A fix pass is the repair and
+its replay together.
+
 ### Repair only what the extractor could read
 
 By default a failing step is repaired even when its `errorExtractor` returned
@@ -403,6 +409,8 @@ or review fix a cost gate withheld, stays `failed` and the run stops resumable. 
 `--budget` (or `--allow-unmetered`) replays that step. The guard's kill does not
 start the step's `onFail` policy, and a retry or fix pass the guard cut short does
 not count against `retries`: the resume that approves the spend can still run it.
+A fix pass covers the repair and its replay: cutting either short gives the pass
+back.
 
 The same gate withholds retries and fix passes when a capped run's spend stops
 being priceable: the run reports `COST UNACCOUNTED` instead, and the retry loop

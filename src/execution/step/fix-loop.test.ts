@@ -10,8 +10,10 @@ import type { PipelineContext } from "../../shared/language/context.ts";
 import type { PipelineStep, StepFailure } from "../../definition/definition.ts";
 import type { Run, RunStep } from "../../run/record/run.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
-import { buildFixContext, type FixLoopDeps, runFixLoop } from "./fix-loop.ts";
-import { chooseFixBackend } from "./fix-loop-runtime.ts";
+import { buildFixContext, chooseFixBackend } from "./fix-loop-runtime.ts";
+import { type OnFailureDeps, runOnFailure } from "./on-failure.ts";
+import type { StepIssue } from "./step-issue.ts";
+import type { AbortScope } from "../abort.js";
 import { makeRunStep } from "../../run/record/run-step.ts";
 import { executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
@@ -91,6 +93,47 @@ function makeStep(onFailure: StepFailure, def: Partial<PipelineStep> = {}): RunS
   );
 }
 
+/** The policy on its own, from a failed attempt whose output is `output`. */
+function runPolicy(
+  run: Run,
+  step: RunStep,
+  command: string,
+  output: string,
+  baseCtx: PipelineContext,
+  budget: { cumulative: number },
+  lastFailReason: string | undefined,
+  opts: { resumeSession?: string; deps: OnFailureDeps; output: RunOutput; abort: AbortScope },
+): Promise<StepIssue> {
+  return runOnFailure({
+    run,
+    step,
+    command,
+    output,
+    baseCtx,
+    budget,
+    lastFailReason,
+    timedOut: false,
+    abort: opts.abort,
+    runOutput: opts.output,
+    deps: opts.deps,
+  });
+}
+
+/** Step-loop dependencies where the first attempt answers `initial` and every
+ *  later one (drain, replay) answers the programmed `deps`. */
+function loopDepsAfter(initial: StepResult, deps: OnFailureDeps, output: RunOutput): StepLoopDeps {
+  let first = true;
+  return {
+    ...deps,
+    executeStep: async (...args) => {
+      if (!first) return deps.executeStep(...args);
+      first = false;
+      return initial;
+    },
+    output,
+  };
+}
+
 /** Programmable results and call counters. */
 function fakes(opts: {
   fix?: Array<{
@@ -116,7 +159,7 @@ function fakes(opts: {
   let fi = 0,
     ri = 0,
     ei = 0;
-  const deps: FixLoopDeps = {
+  const deps: OnFailureDeps = {
     runWithAgent: async (_p, spec, agentOptions, budget) => {
       const r = opts.fix?.[fi++] ?? { ok: true };
       r.effect?.();
@@ -182,7 +225,7 @@ test("fix loop: validates the contract", async () => {
   const step = makeStep(FIX);
   const run = makeRun(step);
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -197,7 +240,7 @@ test("fix loop: validates the contract", async () => {
   const step = makeStep(FIX);
   const run = makeRun(step);
   const { deps, calls } = fakes({ fix: [{ ok: false }] });
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -212,7 +255,7 @@ test("fix loop: validates the contract", async () => {
   const step = makeStep(FIX);
   const run = makeRun(step, 1);
   const { deps, calls } = fakes({});
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 5 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 5 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -228,7 +271,7 @@ test("fix loop: validates the contract", async () => {
   const run = makeRun(step, 1);
   const { deps, calls } = fakes({ fix: [{ ok: true, cost: 2 }] });
   const budget = { cumulative: 0 };
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, budget, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, budget, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -247,7 +290,7 @@ test("a single fix attempt: validates the contract", async () => {
     retry: [{ ok: false, failReason: "constraints still failing" }],
   });
 
-  const res = await runFixLoop(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -264,7 +307,7 @@ test("a fix without replay settles the step on the original failure, marked unve
   const run = makeRun(step);
   const { deps, calls } = fakes({ fix: [{ ok: true }] });
 
-  const res = await runFixLoop(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "1 MUST violation", {
+  const res = await runPolicy(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "1 MUST violation", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -282,7 +325,7 @@ test("a failed fix without replay keeps the original reason unannotated", async 
   const run = makeRun(step);
   const { deps, calls } = fakes({ fix: [{ ok: false }] });
 
-  await runFixLoop(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "1 MUST violation", {
+  await runPolicy(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "1 MUST violation", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -297,7 +340,7 @@ test("resumed fix: validates the contract", async () => {
   const run = makeRun(step);
   resumeTarget(run); // the target step recorded no session
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -316,7 +359,7 @@ test("resumed fix: validates the contract", async () => {
   const run = makeRun(step);
   resumeTarget(run, { provider: "claude", id: "coder-1", resumable: true });
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }], sizeKb: 500 });
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -335,7 +378,7 @@ test("resumed fix: validates the contract", async () => {
   const run = makeRun(step);
   resumeTarget(run, { provider: "claude", id: "coder-1", resumable: true });
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }], sizeKb: 100 });
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -362,7 +405,7 @@ test("resumed fix: validates the contract", async () => {
     };
   };
 
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -385,7 +428,7 @@ test("resumed fix: validates the contract", async () => {
     sizeKb: 100,
   });
 
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -406,7 +449,7 @@ test("a resumed fix on a bash step follows the resumed session provider", async 
   const implement = resumeTarget(run, { provider: "codex", id: "codex-1", resumable: true });
   const { deps, calls } = fakes({ fix: [{ ok: true, sessionId: "codex-1-fork" }], retry: [{ ok: true }], sizeKb: 100 });
 
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -434,7 +477,7 @@ test("a resumed fix on a bash step re-reads the fix profile on the resumed sessi
   resumeTarget(run, { provider: "codex", id: "codex-1", resumable: true });
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }], sizeKb: 100 });
 
-  await runFixLoop(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -459,7 +502,7 @@ test("a resumed fix keeps the default backend when the fix profile has no policy
   resumeTarget(run, { provider: "codex", id: "codex-1", resumable: true });
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }], sizeKb: 100 });
 
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -477,7 +520,7 @@ test("a resumed fix keeps the default backend when the resumed session provider 
   resumeTarget(run, { provider: "gemini", id: "g-1", resumable: true });
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }], sizeKb: 100 });
 
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -495,7 +538,7 @@ test("a fresh fix on a bash step ignores the sessions recorded by other steps", 
   resumeTarget(run, { provider: "codex", id: "codex-1", resumable: true });
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }], sizeKb: 100 });
 
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -514,7 +557,7 @@ test("a fresh fix on a bash step repairs on the backend named by the fix policy"
   resumeTarget(run, { provider: "claude", id: "claude-1", resumable: true });
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }], sizeKb: 100 });
 
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -534,7 +577,7 @@ test("a resumed fix on an agent step keeps the declared backend over the resumed
   resumeTarget(run, { provider: "codex", id: "codex-1", resumable: true });
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }], sizeKb: 100 });
 
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -546,12 +589,76 @@ test("a resumed fix on an agent step keeps the declared backend over the resumed
   expect(calls.fix[0].budget.resumeSession?.id).toBeUndefined();
 });
 
+test("a replay that timed out is drained with fresh reruns before the next fix", async () => {
+  const step = makeStep(FIX);
+  const run = makeRun(step);
+  const { deps, calls } = fakes({
+    fix: [{ ok: true }, { ok: true }],
+    retry: [
+      { ok: false, timedOut: true, output: "truncated" },
+      { ok: false, output: "authentic verdict", failReason: "AC 1 unmet" },
+      { ok: true },
+    ],
+  });
+
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+    deps,
+    output: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
+
+  expect(res.kind).toBe("done");
+  expect(calls.retry).toBe(3);
+  expect(step.timeout_retries).toBe(1);
+  expect(step.retries).toBe(2);
+  expect(calls.extractOutputs).toEqual(["out", "authentic verdict"]);
+});
+
+test("a replay that timed out moves the escalation latch like a rerun that timed out", async () => {
+  const step = makeStep(
+    { fix_prompt: "fix", max_retries: 2, escalate_model: "opus", backend_options: { model: "sonnet" } },
+    { runner: "agent", backend: { id: "claude" } },
+  );
+  const run = makeRun(step);
+  const { deps, calls } = fakes({
+    fix: [{ ok: true }, { ok: true }],
+    retry: [{ ok: false, timedOut: true }, { ok: false, failReason: "AC 1 unmet" }, { ok: true }],
+  });
+
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+    deps,
+    output: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
+
+  expect(calls.fix.map((call) => call.agentOptions?.model)).toEqual(["sonnet", "opus"]);
+});
+
+test("a replay cut short by the live guard gives the fix pass its quota back", async () => {
+  const step = makeStep({ fix_prompt: "fix", max_retries: 2 }, { blocking: false });
+  const run = makeRun(step, 5);
+  const { deps } = fakes({
+    fix: [{ ok: true }],
+    retry: [{ ok: false, budgetExceeded: true, failReason: "process killed: budget exceeded" }],
+  });
+
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+    deps,
+    output: NULL_RUN_OUTPUT,
+    abort: createAbortScope(),
+  });
+
+  expect(res.kind).toBe("failed");
+  expect(step.status).toBe("failed");
+  expect(step.retries).toBe(0);
+});
+
 test("fix loop non bloquant: validates the contract", async () => {
   const step = makeStep(FIX, { blocking: false });
   const run = makeRun(step);
   const { deps } = fakes({ fix: [{ ok: false, failReason: "le fix a plante" }] });
 
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -571,7 +678,7 @@ test("single fix attempt non bloquant: validates the contract", async () => {
     retry: [{ ok: false, failReason: "constraints still failing" }],
   });
 
-  const res = await runFixLoop(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make check", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -600,7 +707,7 @@ test("escalade model: validates the contract", async () => {
     fix: [{ ok: true }, { ok: true }, { ok: true }],
     retry: [{ ok: false }, { ok: false }, { ok: false }],
   });
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -613,7 +720,7 @@ test("fix-loop: validates the integration contract", async () => {
   const run = makeRun(step);
   // Fix succeeds, retry is killed (timedOut) -> the retry extractor block is bypassed.
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: false, timedOut: true, output: "tronque" }] });
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -630,7 +737,7 @@ test("fix-loop: validates the integration contract", async () => {
   const step = makeStep({ fix_prompt: "fix", max_retries: 1 }, { runner: "fn" });
   const run = makeRun(step);
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
-  await runFixLoop(run, step, "", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -654,18 +761,16 @@ test("a fix policy with retries: 1 records step, fix, step and one retry", async
   // Only the fix pass and the replay run through the fix loop; the initial
   // command attempt belongs to the step loop, hence the real wiring here.
   const { deps: fixDeps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
-  const loopDeps: StepLoopDeps = {
-    executeStep: async () => ({
+  const loopDeps = loopDepsAfter(
+    {
       output: "make test: 1 failure",
       ok: false,
       stats: { duration_ms: 1 },
       failReason: "make test failed",
-    }),
-    extractErrors: async () => ({ hasErrors: true, errors: "err" }),
-    runFixLoop: (r, s, command, output, ctx, budget, reason, opts) =>
-      runFixLoop(r, s, command, output, ctx, budget, reason, { ...opts, deps: fixDeps }),
-    output: NULL_RUN_OUTPUT,
-  };
+    },
+    fixDeps,
+    NULL_RUN_OUTPUT,
+  );
 
   const outcome = await executeRunSteps(run, { resuming: false }, loopDeps, buildPipelineContext({}));
 
@@ -690,13 +795,11 @@ test("a replay that declares a block stops the run cleanly without another repai
     fix: [{ ok: true }, { ok: true }],
     retry: [{ ok: false, failReason: "staging unreachable", failCause: "blocked" }, { ok: true }],
   });
-  const loopDeps: StepLoopDeps = {
-    executeStep: async () => ({ output: "", ok: false, stats: { duration_ms: 1 }, failReason: "make test failed" }),
-    extractErrors: async () => ({ hasErrors: true, errors: "err" }),
-    runFixLoop: (r, s, command, output, ctx, budget, reason, opts) =>
-      runFixLoop(r, s, command, output, ctx, budget, reason, { ...opts, deps: fixDeps }),
-    output: NULL_RUN_OUTPUT,
-  };
+  const loopDeps = loopDepsAfter(
+    { output: "", ok: false, stats: { duration_ms: 1 }, failReason: "make test failed" },
+    fixDeps,
+    NULL_RUN_OUTPUT,
+  );
 
   const outcome = await executeRunSteps(run, { resuming: false }, loopDeps, buildPipelineContext({}));
 
@@ -745,18 +848,11 @@ test("stopIfUnchanged: a repair that changed nothing stops the run as blocked wi
   });
   const run = makeRun(step);
   const { deps: fixDeps, calls } = fakes({ fix: [{ ok: true }, { ok: true }], retry: [{ ok: false }, { ok: false }] });
-  const loopDeps: StepLoopDeps = {
-    executeStep: async () => ({
-      output: "",
-      ok: false,
-      stats: { duration_ms: 1 },
-      failReason: "acceptance criterion not met",
-    }),
-    extractErrors: async () => ({ hasErrors: true, errors: "err" }),
-    runFixLoop: (r, s, command, output, ctx, budget, reason, opts) =>
-      runFixLoop(r, s, command, output, ctx, budget, reason, { ...opts, deps: fixDeps }),
-    output: NULL_RUN_OUTPUT,
-  };
+  const loopDeps = loopDepsAfter(
+    { output: "", ok: false, stats: { duration_ms: 1 }, failReason: "acceptance criterion not met" },
+    fixDeps,
+    NULL_RUN_OUTPUT,
+  );
 
   const outcome = await executeRunSteps(run, { resuming: false }, loopDeps, ctxIn(root));
 
@@ -774,7 +870,7 @@ test("without stopIfUnchanged, a repair that changed nothing is still replayed",
   const run = makeRun(step);
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
 
-  const res = await runFixLoop(run, step, "make test", "out", ctxIn(root), { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", ctxIn(root), { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -796,7 +892,7 @@ for (const [change, effect] of [
     const run = makeRun(step);
     const { deps, calls } = fakes({ fix: [{ ok: true, effect: () => effect(root) }], retry: [{ ok: true }] });
 
-    const res = await runFixLoop(run, step, "make test", "out", ctxIn(root), { cumulative: 0 }, "r0", {
+    const res = await runPolicy(run, step, "make test", "out", ctxIn(root), { cumulative: 0 }, "r0", {
       deps,
       output: NULL_RUN_OUTPUT,
       abort: createAbortScope(),
@@ -822,7 +918,7 @@ test("a resumed fix whose target recorded no session falls back to the default b
   expect(choice.spec.id).toBe("claude");
   expect(choice.reason).toBe('default backend (step "implement" has no session)');
 
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -842,7 +938,7 @@ test("a resumed fix whose target is absent from the run falls back to the defaul
   const run = makeRun(step);
   const { deps, calls } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
 
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -869,7 +965,7 @@ test("two gates resuming the same step: the second one resumes the fork left by 
     sizeKb: 100,
   });
 
-  await runFixLoop(run, first, "make lint", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, first, "make lint", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -877,7 +973,7 @@ test("two gates resuming the same step: the second one resumes the fork left by 
   });
   expect(implement.session?.id).toBe("fork-lint");
 
-  await runFixLoop(run, second, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, second, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     resumeSession: RESUMED,
     deps,
     output: NULL_RUN_OUTPUT,
@@ -914,7 +1010,7 @@ test("a fix quota already consumed announces the spent quota and launches no rep
   const { deps, calls } = fakes({});
   const { output, messages } = messageRecorder();
 
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output,
     abort: createAbortScope(),
@@ -935,7 +1031,7 @@ test("the fix backend choice is announced when a repair actually starts", async 
   const { deps } = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
   const { output, messages } = messageRecorder();
 
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output,
     abort: createAbortScope(),
@@ -953,7 +1049,7 @@ test("a cost stop before the first repair announces no fix backend", async () =>
   const { deps, calls } = fakes({});
   const { output, messages } = messageRecorder();
 
-  await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 5 }, "r0", {
+  await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 5 }, "r0", {
     deps,
     output,
     abort: createAbortScope(),
@@ -971,7 +1067,7 @@ test("a non-blocking step whose repair the budget gate withholds stays failed", 
   const run = makeRun(step, 1);
   const { deps, calls } = fakes({});
 
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 5 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 5 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -992,7 +1088,7 @@ test("a non-blocking step whose replay the live guard kills stays failed", async
     retry: [{ ok: false, budgetExceeded: true, failReason: "process killed: budget exceeded" }],
   });
 
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -1009,7 +1105,7 @@ test("a repair killed by the live guard gives its quota back to the --budget res
   const run = makeRun(step, 1);
   const first = fakes({ fix: [{ ok: false, budgetExceeded: true, failReason: "process killed: budget exceeded" }] });
 
-  const res = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const res = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps: first.deps,
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
@@ -1023,7 +1119,7 @@ test("a repair killed by the live guard gives its quota back to the --budget res
   run.max_cost_usd = 5;
   const second = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
   const { output, messages } = messageRecorder();
-  const again = await runFixLoop(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
+  const again = await runPolicy(run, step, "make test", "out", baseCtx, { cumulative: 0 }, "r0", {
     deps: second.deps,
     output,
     abort: createAbortScope(),
@@ -1049,19 +1145,17 @@ test("a non-blocking step with a fix policy killed by the live guard replays and
   });
   const run = makeRun(step, 1);
   const first = fakes({});
-  const killedDeps: StepLoopDeps = {
-    executeStep: async () => ({
+  const killedDeps = loopDepsAfter(
+    {
       output: "",
       ok: false,
       stats: { duration_ms: 1, total_cost_usd: 0.3, cost_estimated: true },
       budgetExceeded: true,
       failReason: "process killed: budget exceeded ($1.10 estimated > $1.00 remaining)",
-    }),
-    extractErrors: async () => ({ hasErrors: true, errors: "err" }),
-    runFixLoop: (r, s, command, output, ctx, budget, reason, opts) =>
-      runFixLoop(r, s, command, output, ctx, budget, reason, { ...opts, deps: first.deps }),
-    output: NULL_RUN_OUTPUT,
-  };
+    },
+    first.deps,
+    NULL_RUN_OUTPUT,
+  );
 
   const outcome = await executeRunSteps(run, { resuming: false }, killedDeps, buildPipelineContext({}));
 
@@ -1078,18 +1172,16 @@ test("a non-blocking step with a fix policy killed by the live guard replays and
   const resumed = makeRun(resumedStep, 5);
   const second = fakes({ fix: [{ ok: true }], retry: [{ ok: true }] });
   const { output, messages } = messageRecorder();
-  const resumedDeps: StepLoopDeps = {
-    executeStep: async () => ({
+  const resumedDeps = loopDepsAfter(
+    {
       output: "make test: 1 failure",
       ok: false,
       stats: { duration_ms: 1 },
       failReason: "make test failed",
-    }),
-    extractErrors: async () => ({ hasErrors: true, errors: "err" }),
-    runFixLoop: (r, s, command, out, ctx, budget, reason, opts) =>
-      runFixLoop(r, s, command, out, ctx, budget, reason, { ...opts, deps: second.deps }),
+    },
+    second.deps,
     output,
-  };
+  );
 
   const again = await executeRunSteps(resumed, { resuming: true }, resumedDeps, buildPipelineContext({}));
 

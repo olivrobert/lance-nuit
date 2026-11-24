@@ -38,9 +38,7 @@ import { makeRunStep, type StepStateInput } from "../../run/record/run-step.ts";
 import { abortRun, finalizeRun, reportLiveCost } from "../../run/record/run-transitions.ts";
 import { createAbortScope } from "../abort.ts";
 import { NULL_RUN_OUTPUT } from "../run-output.ts";
-import { failed } from "./step-issue.ts";
-import { type FixLoopDeps, runFixLoop } from "./fix-loop.ts";
-import { rerunHandler } from "./on-failure.ts";
+import { type OnFailureDeps, runOnFailure } from "./on-failure.ts";
 import { childLaunchGate } from "./pipeline-orchestration-child.ts";
 import { runAttempt, runTrackedAttempt } from "./step-attempt.ts";
 import { admitStep } from "./step-admission.ts";
@@ -88,7 +86,7 @@ function scriptedDeps(script: Array<Partial<StepResult> | ((step: RunStepView) =
       return { output: "", ok: r.ok ?? true, stats: r.stats ?? { duration_ms: 1 }, ...r } as StepResult;
     },
     extractErrors: async () => ({ hasErrors: false, errors: "" }),
-    runFixLoop: async () => failed(),
+    runWithAgent: () => Promise.reject(new Error("no fix expected")),
     output: NULL_RUN_OUTPUT,
   };
 }
@@ -540,7 +538,7 @@ function fakeFixBackend(id: string): AgentBackendFactory {
   return { id, capabilities, create: () => backend };
 }
 
-function fixDeps(onFix: () => void): FixLoopDeps {
+function fixDeps(onFix: () => void): OnFailureDeps {
   return {
     runWithAgent: async () => {
       onFix();
@@ -552,6 +550,22 @@ function fixDeps(onFix: () => void): FixLoopDeps {
     extractErrors: async () => ({ hasErrors: true, errors: "err" }),
     registry: new AgentBackendRegistry().register(fakeFixBackend("claude"), { default: true }),
   };
+}
+
+function repair(run: Run, step: RunStep, budget: RunBudget, deps: OnFailureDeps) {
+  return runOnFailure({
+    run,
+    step,
+    command: "echo s",
+    output: "out",
+    baseCtx: context(),
+    budget,
+    lastFailReason: "r0",
+    timedOut: false,
+    abort: createAbortScope(),
+    runOutput: NULL_RUN_OUTPUT,
+    deps,
+  });
 }
 
 const context = (): PipelineContext => buildPipelineContext({ ...builtinRegistries(), cwd: process.cwd() });
@@ -585,7 +599,7 @@ const GATES: Record<string, (state: BudgetState) => Promise<{ run: Run; budget: 
           throw new Error("the gate withholds the re-ask");
         },
         extractErrors: async () => ({ errors: "", hasErrors: false }),
-        runFixLoop: async () => failed(),
+        runWithAgent: () => Promise.reject(new Error("no fix expected")),
       },
       output: NULL_RUN_OUTPUT,
     });
@@ -595,22 +609,12 @@ const GATES: Record<string, (state: BudgetState) => Promise<{ run: Run; budget: 
     const step = bashStep("s", { on_failure: { max_retries: 1 } }, { status: "running" });
     const run = makeRun([step], 1);
     const budget = budgetIn(state);
-    await rerunHandler({
-      run,
-      step,
-      command: "echo s",
-      output: "",
-      baseCtx: context(),
-      budget,
-      abort: createAbortScope(),
-      timedOut: false,
-      runOutput: NULL_RUN_OUTPUT,
-      deps: {
-        executeStep: async () => {
-          throw new Error("the gate withholds the rerun");
-        },
-        runFixLoop: async () => failed(),
+    await repair(run, step, budget, {
+      executeStep: async () => {
+        throw new Error("the gate withholds the rerun");
       },
+      extractErrors: async () => ({ errors: "", hasErrors: false }),
+      runWithAgent: () => Promise.reject(new Error("no fix expected")),
     });
     return { run, budget };
   },
@@ -618,13 +622,14 @@ const GATES: Record<string, (state: BudgetState) => Promise<{ run: Run; budget: 
     const step = bashStep("s", { on_failure: { fix_prompt: "fix", max_retries: 1 } }, { status: "running" });
     const run = makeRun([step], 1);
     const budget = budgetIn(state);
-    await runFixLoop(run, step, "echo s", "out", context(), budget, "r0", {
-      deps: fixDeps(() => {
+    await repair(
+      run,
+      step,
+      budget,
+      fixDeps(() => {
         throw new Error("the gate withholds the repair");
       }),
-      output: NULL_RUN_OUTPUT,
-      abort: createAbortScope(),
-    });
+    );
     return { run, budget };
   },
   "replay after a repair": async (state) => {
@@ -632,11 +637,12 @@ const GATES: Record<string, (state: BudgetState) => Promise<{ run: Run; budget: 
     const run = makeRun([step], 1);
     const budget: RunBudget = { cumulative: 0 };
     // The repair itself costs nothing; what it leaves is the state under test.
-    await runFixLoop(run, step, "echo s", "out", context(), budget, "r0", {
-      deps: fixDeps(() => Object.assign(budget, budgetIn(state))),
-      output: NULL_RUN_OUTPUT,
-      abort: createAbortScope(),
-    });
+    await repair(
+      run,
+      step,
+      budget,
+      fixDeps(() => Object.assign(budget, budgetIn(state))),
+    );
     return { run, budget };
   },
   "composed child launch": async (state) => {
