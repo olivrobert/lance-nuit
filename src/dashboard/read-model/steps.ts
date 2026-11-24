@@ -15,7 +15,7 @@
 
 import type { StepFailCause, StepFailKind } from "../../contracts/backends.js";
 import type { RawJournalEvent, RunJournalKnownEvent, PersistedStepState } from "../../run/index.js";
-import { lastJournalEvent } from "../../run/index.js";
+import { lastFeedEvent } from "../../run/index.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
 import type {
@@ -100,14 +100,11 @@ function eventView(event: RawJournalEvent | RunJournalKnownEvent): RunEventView 
   };
 }
 
-/** Last line of `events.jsonl`, or `undefined` when the journal is absent, empty,
- *  or made only of lines no reader can parse.
- *
- *  Any line, not only the contracted events: the journal is also the live feed,
- *  and the answer to "is anything happening right now" is usually one of the
- *  feed's own lines, which the journal contract does not describe. */
+/** Last line of `feed.jsonl`, or `undefined` when the feed is absent, empty, or
+ *  made only of lines no reader can parse: the answer to "is anything happening
+ *  right now". */
 function lastEvent(runDir: string): RunEventView | undefined {
-  const event = lastJournalEvent(runDir, TAIL_BYTES);
+  const event = lastFeedEvent(runDir, TAIL_BYTES);
   return event ? eventView(event) : undefined;
 }
 

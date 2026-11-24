@@ -13,9 +13,9 @@
 //   child run keeps its own snapshot, journal, attempts and figures.
 // - `runId` binds the reference to one child run directory. It is written before
 //   the child boots, so a crash in the window can retry the initialization under
-//   the same id. Once `pipeline.child.started` is in the parent journal, that id
-//   has been used: a missing or damaged child snapshot is refused rather than
-//   turned into a second child (`bindChildRunDir`).
+//   the same id. Once `startedAt` is on the reference, that id has been used: a
+//   missing or damaged child snapshot is refused rather than turned into a second
+//   child (`bindChildRunDir`).
 // - `accountedCostUsd`, `accountedDurationMs` and `accountedUsage` belong to cost
 //   accounting (`chargeChildReconciliation`, `run/record/cost-accounting.ts`): what
 //   the parent already charged for this child, so a resumed child re-reporting
@@ -36,10 +36,10 @@
 // bound `runId`. `declareChild` finds or creates the reference and refuses a
 // definition that no longer matches the persisted call.
 //
-// Every operation writes its group of fields, the journal event that records the
-// transition when there is one (`pipeline.child.started`,
-// `pipeline.child.finished`), then the parent snapshot — event first, snapshot
-// second, like the run transitions (`run/record/run-transitions.ts`).
+// Every operation writes its group of fields, the parent snapshot, then the
+// journal event that records the transition when there is one
+// (`pipeline.child.started`, `pipeline.child.finished`) — snapshot first, like
+// the run transitions (`run/record/run-transitions.ts`).
 //
 // The node's own state, which holds those references, has two writes of its
 // own: `openOrchestration` finds or creates it on the step (and records the
@@ -56,11 +56,10 @@ import type {
 } from "../persisted.js";
 import type { ChildRefView, OrchestrationView, RunStepView, RunView } from "../run.js";
 import { writable } from "./run.js";
-import { appendRunEvent, readRunEvents } from "./run-journal.js";
+import { appendRunEvent } from "./run-journal.js";
 import { isSettledStatus } from "./run-predicates.js";
 import type { StrictSnapshotRead } from "./run-opening.js";
 import { saveRun } from "./run-repository.js";
-import { hasRunSnapshotEntry } from "./run-snapshot.js";
 import { isCompleted } from "./run-status.js";
 import { allocateRunId, pipelineRunsDir, STATE_FILE } from "./stores/run-storage.js";
 
@@ -171,8 +170,8 @@ export function commitChildCall(parentView: RunView, refView: ChildRefView): voi
 
 /**
  * Bind the reference to the child run it will drive. Persisted BEFORE the child
- * boots, so a crash in between leaves a reference with a `runId` and no start
- * event, which the next generation retries under the same id. A reference
+ * boots, so a crash in between leaves a reference with a `runId` and no
+ * `startedAt`, which the next generation retries under the same id. A reference
  * already bound keeps its id: the caller derived `runId` from it.
  */
 export function bindChildRun(parentView: RunView, refView: ChildRefView, runId: string): void {
@@ -185,18 +184,6 @@ export function bindChildRun(parentView: RunView, refView: ChildRefView, runId: 
   ref.runId = runId;
   ref.status = "running";
   saveRun(parent);
-}
-
-/**
- * Whether the parent journal proves that a child under this identity started.
- * The bound `runId` alone allows a retry of the initialization; this fact
- * forbids it. An unreadable journal throws rather than reading as "never
- * started": the read is strict for exactly this question.
- */
-export function hasJournaledChildStart(parent: RunView, ref: ChildRefView): boolean {
-  if (ref.runId === undefined) return false;
-  const runId = ref.runId;
-  return readRunEvents(parent).some((event) => event.type === "pipeline.child.started" && event.childRunId === runId);
 }
 
 /** Where a child call runs once its reference is bound. */
@@ -217,14 +204,9 @@ function newChildRunId(pipelineDir: string, pipeline: string): string {
 
 /**
  * Bind the reference to its child run directory, under its bound id or a fresh
- * one allocated in the child pipeline's runs directory.
- *
- * Whether that identity was already used is read BEFORE the binding is
- * persisted: a `pipeline.child.started` in the parent journal, or a snapshot
- * entry already in the directory (a crash between the child's first snapshot and
- * the start event).
+ * one allocated in the child pipeline's runs directory. The identity was already
+ * used when the reference carries `startedAt`.
  */
-
 export function bindChildRunDir(
   parent: RunView,
   ref: ChildRefView,
@@ -234,7 +216,7 @@ export function bindChildRunDir(
   const runId = ref.runId ?? newChildRunId(pipelineDir, child.pipeline);
   const runDir = join(pipelineDir, runId);
   const snapshotPath = join(runDir, STATE_FILE);
-  const used = hasJournaledChildStart(parent, ref) || hasRunSnapshotEntry(snapshotPath);
+  const used = ref.startedAt !== undefined;
   bindChildRun(parent, ref, runId);
   if (!used) return { runDir };
   return {
@@ -247,9 +229,18 @@ export function bindChildRunDir(
   };
 }
 
-/** Journal that the child run booted under its identity. Event only: the
- *  reference already carries the id, and the snapshot follows at settlement. */
-export function recordChildStarted(parent: RunView, step: RunStepView, child: RunView): void {
+/** The child run's snapshot exists and none of its steps has run yet: from
+ *  here on its identity is spent. */
+export function recordChildStarted(
+  parentView: RunView,
+  refView: ChildRefView,
+  step: RunStepView,
+  child: RunView,
+): void {
+  const parent = writable(parentView);
+  const ref = writable(refView);
+  ref.startedAt ??= new Date().toISOString();
+  saveRun(parent);
   appendRunEvent(parent, "pipeline.child.started", {
     parentNodeId: step.id,
     childRunId: child.runId ?? null,
@@ -293,12 +284,7 @@ export function completedSuccessfully(child: RunView): boolean {
 /**
  * Settle the reference from the child run's own verdict, after cost accounting
  * has posted the child's spend (`chargeChildReconciliation`; `delta` is what it
- * charged). Journals `pipeline.child.finished`, then writes the parent snapshot.
- *
- * A crash between the two leaves a finished child the snapshot still calls
- * `running`: the next generation re-enters the child, finds it terminal, is
- * charged a zero delta and settles it again, so the journal carries a second
- * finish and readers take the last one.
+ * charged). Writes the parent snapshot, then journals `pipeline.child.finished`.
  *
  * Returns whether the child completed successfully.
  */
@@ -315,6 +301,7 @@ export function settleChild(
   const success = completedSuccessfully(child);
   ref.status = success ? "done" : "failed";
   ref.outcome = child.outcome;
+  saveRun(parent);
   appendRunEvent(parent, "pipeline.child.finished", {
     parentNodeId: step.id,
     childRunId: child.runId ?? null,
@@ -324,7 +311,6 @@ export function settleChild(
     deltaCostUsd: delta,
     outcome: ref.outcome ?? null,
   });
-  saveRun(parent);
   return success;
 }
 

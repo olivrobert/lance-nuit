@@ -1,5 +1,6 @@
 /** Persisted run schema: the durable shapes written to disk (snapshot, journal).
- *  The snapshot is the source of truth for resuming. The authoring model lives in
+ *  The snapshot is the only execution record: resume, numbering, spend and child
+ *  identity are read from it, never from the journal. The authoring model lives in
  *  `definition/definition.ts`, the in-memory shapes in `run/run.ts`. */
 import type { AgentSession, StepControl, StepFailCause, StepFailKind, StepUsage } from "../contracts/backends.js";
 import type { PipelineLot } from "../shared/language/context.js";
@@ -87,6 +88,10 @@ export interface PersistedPipelineChildRef {
    *  re-donate the tokens of its first pass. */
   accountedUsage?: StepUsage;
   outcome?: RunOutcomeState;
+  /** When the child run's snapshot existed, written before the child's first
+   *  step: from then on its identity is spent, and a resume of the parent never
+   *  re-initializes it. */
+  startedAt?: string;
 }
 
 /** Durable resume state for a runPipeline/forEachPipeline node. */
@@ -97,9 +102,7 @@ export interface PersistedPipelineOrchestrationState {
   children: PersistedPipelineChildRef[];
 }
 
-/** Durable fact corresponding to a step or fix attempt. Step aggregates remain
- * useful for budgets; this list preserves session, cost, and log-file detail
- * without inventing attempts overwritten by older formats. */
+/** One attempt of a step, `running` in the snapshot before its spawn. */
 export interface PersistedAttempt {
   attempt: number;
   /** `step` runs the step command, `fix` repairs, `review` judges the outputs of
@@ -148,20 +151,20 @@ export interface PersistedStepState {
   /** Reruns consumed while draining timeouts. Quota SEPARATE from `retries`:
    *  a drain that exhausted `retries` would deprive the step of every fix pass. */
   timeout_retries?: number;
-  /** Highest attempt number allocated. Kept in the snapshot so a missing journal
-   * event can never make a resume reuse an existing attempt log. */
-  last_attempt?: number;
   /** Requeued by `--start-at`: the operator asked to run the step again, so
    * admission runs it even when its declared outputs are fresh, and resume keeps
    * it pending over the `done` its earlier pass journaled. Cleared when the step
    * settles (`done` or `skipped`). Absent by default; the schema is unchanged. */
   replay?: true;
   orchestration?: PersistedPipelineOrchestrationState;
+  /** Every attempt of the step, numbered without reuse: the next one is the
+   *  highest number plus one. */
+  attempts?: PersistedAttempt[];
 }
 
 /** Persisted run snapshot. References the pipeline by path for reloading. */
 export interface PersistedRun {
-  schemaVersion?: 1;
+  schemaVersion?: 2;
   runId?: string;
   name: string;
   ticket?: string;

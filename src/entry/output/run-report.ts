@@ -301,7 +301,7 @@ export function buildRunReport(
 ): RunReport {
   const registry = options.registry;
   const failed =
-    run.steps.find((step) => step.status === "failed") ??
+    run.steps.find((step) => step.status === "failed" && !outcome.setAside?.includes(step.id)) ??
     (run.outcome?.phase ? run.steps.find((step) => step.id === run.outcome!.phase) : undefined);
   const kind = reportKind(run, outcome);
   const resources: RunReportResource[] = [

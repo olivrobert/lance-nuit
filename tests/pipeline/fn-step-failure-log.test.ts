@@ -26,7 +26,7 @@ test("a code step that throws leaves its message and stack in the output.log the
     },
   });
   const run: Run = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: "fn-throw",
     name: "fn-throw",
     pipeline: "fn-throw",

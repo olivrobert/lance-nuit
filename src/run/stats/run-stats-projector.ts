@@ -59,7 +59,7 @@ function lastFinishedAgentSession(run: RunView): AgentSession | undefined {
 }
 
 export function projectRunStatsEntry(run: RunView, options: RunStatsProjectionOptions = {}): RunStatsEntry {
-  const { eventStore, logStore } = run;
+  const { logStore } = run;
   const aggregate: ProjectionAccumulator = {
     phases: {},
     models: {},
@@ -72,14 +72,14 @@ export function projectRunStatsEntry(run: RunView, options: RunStatsProjectionOp
   for (const step of run.steps) {
     if (step.started_at && (!startedAt || step.started_at < startedAt)) startedAt = step.started_at;
     if (step.finished_at && (!endedAt || step.finished_at > endedAt)) endedAt = step.finished_at;
-    projectStepStats(run, step, eventStore, aggregate);
+    projectStepStats(run, step, aggregate);
   }
 
   // `finalizeRun` status is authoritative; otherwise derive it identically.
   const status = recordedVerdict(run);
   const failed = run.steps.find((s) => s.status === "failed");
   const outcome = outcomeOf(run, status, failed, options);
-  const warnings = warningsForSteps(run, eventStore);
+  const warnings = warningsForSteps(run);
   const runId = run.runId ?? basename(run.run_dir);
   const lastAgentSession = lastFinishedAgentSession(run);
 
@@ -112,7 +112,7 @@ export function projectRunStatsEntry(run: RunView, options: RunStatsProjectionOp
     // Emission metadata is filled by emitRunStats.
     commit: null,
     branch: null,
-    fixEvents: runnerFixEvents(run, eventStore, logStore),
+    fixEvents: runnerFixEvents(run, logStore),
     sourceRunDir: null,
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(spend.usd !== undefined ? { costUsd: spend.usd } : {}),

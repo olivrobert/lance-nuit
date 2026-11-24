@@ -198,7 +198,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
   writeFileSync(
     join(childRunDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: childRunId,
       name: "child",
       ticket: "P-01",
@@ -285,7 +285,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
   writeFileSync(
     join(childRunDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: childRunId,
       name: "child",
       ticket: "P-01",
@@ -417,10 +417,18 @@ export default ({ pipeline, forEachPipeline, actionStep, textArtifact }) => pipe
   expect(childState.budgetScopeId).toBe(first.run.budgetScopeId);
 
   const beforeResume = readFileSync(join(root, "trace.log"), "utf8");
-  const resumed = await executeParent(parentPath, root, "P", runDir, false);
-  expect(resumed.run.status).toBe("PASS");
+  const { run: reopened } = await loadOrCreateRun({
+    pipelinePath: parentPath,
+    ticket: "P",
+    runDir,
+    fresh: false,
+    context: buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY }),
+    worktree: false,
+  });
+  expect(reopened.readOnly).toBe(true);
+  expect(reopened.status).toBe("PASS");
   expect(readFileSync(join(root, "trace.log"), "utf8")).toBe(beforeResume);
-  expect(resumed.run.steps[0]!.orchestration!.children).toEqual(orchestration.children);
+  expect(reopened.steps[0]!.orchestration!.children).toEqual(orchestration.children);
 });
 
 test("pipeline-orchestration: preserves a terminal child verdict on resume", async () => {
@@ -457,7 +465,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
   writeFileSync(
     join(childRunDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: childRunId,
       name: "child",
       ticket: "P-01",
@@ -884,6 +892,8 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
   // Interruption after reconciliation: resuming the node must not recharge
   // the cost already charged to the parent step.
   updateStep(firstResume.run, firstResume.run.steps[0]!, "failed", "interruption after accounting");
+  writable(firstResume.run).status = "FAIL";
+  saveRun(writable(firstResume.run));
   const secondResume = await executeParent(parentPath, root, "P", join(root, "parent-run"), false, context);
   expect(secondResume.outcome.failed).toBe(false);
   expect(secondResume.run.steps[0]!.control?.total_cost_usd).toBeCloseTo(0.4, 10);
@@ -1501,6 +1511,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
         runId: childRunId,
         status: "running",
         accountedCostUsd: 0,
+        ...(started ? { startedAt: "2026-01-01T00:00:00.000Z" } : {}),
       },
     ],
   };
@@ -1518,10 +1529,10 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
   return { parentPath, parentRunDir, childRunDir };
 }
 
-// Invariant: a child identity the parent journaled as started is never reused
-// for a fresh child. The parent records the runId before booting the child, so
-// the runId alone allows a retry; `pipeline.child.started` forbids it.
-test("invariant: a journaled child start with a lost child snapshot never starts a second child under that identity", async () => {
+// Invariant (S6): a child identity whose reference has `startedAt` is never
+// reused for a fresh child. The parent records the runId before booting the
+// child, so the runId alone allows a retry; `startedAt` forbids it.
+test("invariant: a started child with a lost child snapshot never starts a second child under that identity", async () => {
   const root = mkdtempSync(join(tmpdir(), "pipeline-invariant-child-identity-"));
   const { parentPath, parentRunDir, childRunDir } = await parentWithNamedChild(root, true);
 
@@ -1536,24 +1547,8 @@ test("invariant: a journaled child start with a lost child snapshot never starts
   expect(existsSync(childRunDir)).toBe(false);
 });
 
-// Invariant: an unreadable parent journal must not read as "child never started".
-// The read fails the parent instead of launching a child, since a second child
-// under a journaled identity is the one outcome the journal exists to prevent.
-test("invariant: an unreadable parent journal launches no child", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pipeline-invariant-unreadable-journal-"));
-  const { parentPath, parentRunDir, childRunDir } = await parentWithNamedChild(root, false);
-  // A directory where the journal file should be: EISDIR, not ENOENT.
-  rmSync(join(parentRunDir, "events.jsonl"));
-  mkdirSync(join(parentRunDir, "events.jsonl"));
-
-  await expect(executeParent(parentPath, root, "P", parentRunDir, false)).rejects.toThrow(/EISDIR/);
-
-  expect(existsSync(join(root, "trace.log"))).toBe(false);
-  expect(existsSync(childRunDir)).toBe(false);
-});
-
-// Invariant: a reference bound to a run id the journal never saw started is a
-// crash between `bindChildRun` and the child boot. The next generation retries
+// Invariant: a reference bound to a run id without `startedAt` is a crash
+// between `bindChildRun` and the child boot. The next generation retries
 // the initialization under the SAME id, and the child runs exactly once.
 test("invariant: a child bound but never started is retried under the same identity", async () => {
   const root = mkdtempSync(join(tmpdir(), "pipeline-invariant-child-bound-"));
@@ -1634,6 +1629,7 @@ test("pipeline-orchestration: a child already finished is settled without runnin
   delete firstStep.control;
   delete firstStep.usage;
   updateStep(first.run, firstStep, "failed", "crash before settlement");
+  writable(first.run).status = "RUNNING";
   saveRun(writable(first.run));
 
   // A second launch of the child would hit this trap and fail the run.
@@ -1710,7 +1706,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   writeFileSync(
     join(childRunDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: childRunId,
       name: "child",
       ticket: "C-1",

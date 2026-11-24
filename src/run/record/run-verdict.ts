@@ -20,6 +20,9 @@ export interface RunVerdictSignals {
    *  It fails like a budget stop — the pipeline did not finish its work — and
    *  stays resumable. */
   costUnaccounted?: boolean;
+  /** Steps this invocation's selection left out: their earlier failure or
+   *  interruption is not what ended this invocation. */
+  setAside?: readonly string[];
 }
 
 type VerdictInput = DeepReadonly<Pick<PersistedRun, "aborted" | "steps" | "stopped_reason">>;
@@ -32,10 +35,11 @@ type VerdictInput = DeepReadonly<Pick<PersistedRun, "aborted" | "steps" | "stopp
  * persisted stop reason counts like the loop's own signal.
  */
 export function deriveRunStatus(run: VerdictInput, signals: RunVerdictSignals = {}): RunVerdict {
+  const judged = run.steps.filter((step) => !signals.setAside?.includes(step.id));
   return runEnding({
-    aborted: run.aborted === true || run.steps.some((step) => step.status === "aborted"),
+    aborted: run.aborted === true || judged.some((step) => step.status === "aborted"),
     stopped: signals.stopped === true || Boolean(run.stopped_reason),
-    failed: signals.failed === true || run.steps.some((step) => step.status === "failed"),
+    failed: signals.failed === true || judged.some((step) => step.status === "failed"),
     budgetExceeded: signals.budgetExceeded,
     costUnaccounted: signals.costUnaccounted,
     settled: allStepsSettled(run.steps),

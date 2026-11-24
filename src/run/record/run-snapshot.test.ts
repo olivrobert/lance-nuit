@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { hasRunSnapshotEntry, isRunSnapshot, readRunSnapshot, readRunSnapshotDiagnostic } from "./run-snapshot.js";
 
 test("run snapshot: validates the contract", () => {
-  const valid = { schemaVersion: 1, runId: "run-1", name: "feature", pipeline: "feature", steps: [] };
+  const valid = { schemaVersion: 2, runId: "run-1", name: "feature", pipeline: "feature", steps: [] };
   expect(isRunSnapshot(valid)).toBe(true);
-  expect(isRunSnapshot({ ...valid, schemaVersion: 2 })).toBe(false);
+  expect(isRunSnapshot({ ...valid, schemaVersion: 1 })).toBe(false);
   expect(isRunSnapshot({ ...valid, runId: 12 })).toBe(false);
   expect(isRunSnapshot({ ...valid, name: undefined })).toBe(false);
   expect(isRunSnapshot({ ...valid, pipeline: undefined })).toBe(false);
@@ -16,12 +16,12 @@ test("run snapshot: validates the contract", () => {
 });
 
 test("run snapshot: rejects malformed step state without throwing", () => {
-  const run = { schemaVersion: 1, runId: "run-1", name: "feature", pipeline: "feature" };
+  const run = { schemaVersion: 2, runId: "run-1", name: "feature", pipeline: "feature" };
   expect(isRunSnapshot({ ...run, steps: [null] })).toBe(false);
   expect(isRunSnapshot({ ...run, steps: [{ id: "build", status: "pendng" }] })).toBe(false);
   expect(isRunSnapshot({ ...run, steps: [{ id: "", status: "pending" }] })).toBe(false);
   expect(isRunSnapshot({ ...run, steps: [{ id: "build", status: "pending", retries: -1 }] })).toBe(false);
-  expect(isRunSnapshot({ ...run, steps: [{ id: "build", status: "pending", last_attempt: -1 }] })).toBe(false);
+  expect(isRunSnapshot({ ...run, steps: [{ id: "build", status: "pending", attempts: "x" }] })).toBe(false);
   expect(
     isRunSnapshot({
       ...run,
@@ -41,20 +41,20 @@ test("run snapshot: validates the contract", () => {
   const broken = join(dir, "broken.json");
   writeFileSync(
     valid,
-    JSON.stringify({ schemaVersion: 1, runId: "run-1", name: "feature", pipeline: "feature", steps: [] }),
+    JSON.stringify({ schemaVersion: 2, runId: "run-1", name: "feature", pipeline: "feature", steps: [] }),
   );
   writeFileSync(broken, "not-json");
 
   expect(readRunSnapshot(join(dir, "missing.json"))).toBeNull();
   expect(readRunSnapshot(broken)).toBeNull();
-  expect(readRunSnapshot(valid)).toMatchObject({ schemaVersion: 1, runId: "run-1", steps: [] });
+  expect(readRunSnapshot(valid)).toMatchObject({ schemaVersion: 2, runId: "run-1", steps: [] });
 });
 
 test("readRunSnapshot rejects structurally corrupt JSON", () => {
   const dir = mkdtempSync(join(tmpdir(), "run-snapshot-structure-"));
   const nullStep = join(dir, "null-step.json");
   const invalidStatus = join(dir, "invalid-status.json");
-  const base = { schemaVersion: 1, runId: "run-1", name: "feature", pipeline: "feature" };
+  const base = { schemaVersion: 2, runId: "run-1", name: "feature", pipeline: "feature" };
   writeFileSync(nullStep, JSON.stringify({ ...base, steps: [null] }));
   writeFileSync(invalidStatus, JSON.stringify({ ...base, steps: [{ id: "build", status: "pendng" }] }));
 
@@ -68,10 +68,13 @@ test("diagnostic reader distinguishes missing, denied, malformed, incompatible, 
   const incompatible = join(dir, "incompatible.json");
   const valid = join(dir, "valid.json");
   writeFileSync(malformed, "{");
-  writeFileSync(incompatible, JSON.stringify({ schemaVersion: 2 }));
+  writeFileSync(
+    incompatible,
+    JSON.stringify({ schemaVersion: 1, runId: "run-1", name: "feature", pipeline: "feature", steps: [] }),
+  );
   writeFileSync(
     valid,
-    JSON.stringify({ schemaVersion: 1, runId: "run-1", name: "feature", pipeline: "feature", steps: [] }),
+    JSON.stringify({ schemaVersion: 2, runId: "run-1", name: "feature", pipeline: "feature", steps: [] }),
   );
 
   expect(readRunSnapshotDiagnostic(join(dir, "missing.json"))).toEqual({

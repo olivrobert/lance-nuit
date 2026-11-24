@@ -260,6 +260,7 @@ function reachedShapes(
 /** A whole run snapshot read from disk: every shape it holds. */
 const RUN_COPY = [
   "AgentSession",
+  "PersistedAttempt",
   "PersistedPipelineChildRef",
   "PersistedPipelineOrchestrationState",
   "PersistedRun",
@@ -280,7 +281,7 @@ const EVENT_VALUES = ["AgentSession", "RunOutcomeState", "RunStopState", "StepCo
 // fails here until it returns a view. A type export has no position of its own:
 // whatever it holds is listed, input or output.
 const HANDED_OUT: Record<string, string[]> = {
-  // Readers: a snapshot reconciled with its journal, read from disk for the call.
+  // Readers: a snapshot read from disk for the call.
   RunRead: RUN_COPY,
   readRun: RUN_COPY,
   readLatestRun: RUN_COPY,
@@ -290,7 +291,7 @@ const HANDED_OUT: Record<string, string[]> = {
   readRunHistory: [...EVENT_VALUES, "PersistedAttempt"].sort(),
   RunJournalReport: EVENT_VALUES,
   readRunJournal: EVENT_VALUES,
-  lastJournalEvent: EVENT_VALUES,
+  lastFeedEvent: EVENT_VALUES,
   // The file stores: they read copies from disk, and are given what the run
   // record writes (see GIVEN_TO_STORES).
   FileRunEventStore: EVENT_VALUES,

@@ -84,7 +84,7 @@ export function readRunJourney(
   const resolved = resolveRun(projectName, ticket, options);
   if (!resolved) return undefined;
   const { runDir, state, pipeline } = resolved.run;
-  const history = readRunHistory(runDir);
+  const history = readRunHistory(runDir, state);
   const treePathOf = (inRun: string): string => runTreePath(resolved.workItemDir, runDir, inRun);
 
   const attempts: RunJourneyAttempt[] = [];

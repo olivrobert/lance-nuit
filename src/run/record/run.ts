@@ -22,8 +22,6 @@ import type { RunEventStore, RunLogStore, RunStateStore } from "../storage-ports
  *  Definition fields are not persisted in the state. */
 export interface RunStep extends PersistedStepState {
   readonly def: StepDefinition;
-  /** Attempts of this step, projected from the journal on resume. Runtime-only:
-   *  the snapshot no longer carries them. */
   attempts: PersistedAttempt[];
 }
 
@@ -55,6 +53,8 @@ export interface Run extends Omit<PersistedRun, "pipeline_path" | "steps"> {
   eventStore?: RunEventStore;
   /** Runtime-only dependency; never included in PersistedRun. */
   logStore?: RunLogStore;
+  /** Opened finished (`PASS`): `saveRun` refuses to write it. Runtime-only. */
+  readOnly?: true;
 }
 
 type Writable = Run | RunStep | PersistedAttempt | PersistedPipelineOrchestrationState | PersistedPipelineChildRef;

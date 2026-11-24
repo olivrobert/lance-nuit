@@ -20,6 +20,7 @@ import type { AgentSession, StepControl, StepFailKind, StepUsage } from "../../c
 import type { AssertAssignable, Plain } from "../../shared/lib/type-assertions.js";
 import type { PipelineLot } from "../../shared/language/context.js";
 import type {
+  PersistedAttempt,
   PersistedPipelineChildRef,
   PersistedPipelineOrchestrationState,
   PersistedRun,
@@ -157,12 +158,27 @@ const PersistedPipelineChildRefSchema = z.looseObject({
   accountedDurationMs: z.number().optional(),
   accountedUsage: StepUsageSchema.optional(),
   outcome: RunOutcomeStateSchema.optional(),
+  startedAt: z.string().optional(),
 });
 
 const PersistedPipelineOrchestrationStateSchema = z.looseObject({
   kind: z.enum(["runPipeline", "forEachPipeline"]),
   items: z.array(z.string()).optional(),
   children: z.array(PersistedPipelineChildRefSchema),
+});
+
+const PersistedAttemptSchema = z.looseObject({
+  attempt: z.number().int().positive(),
+  kind: z.enum(["step", "fix", "review"]),
+  status: z.enum(["running", "done", "failed", "aborted"]),
+  started_at: z.string(),
+  finished_at: z.string().optional(),
+  session: AgentSessionSchema.optional(),
+  log_path: z.string(),
+  control: StepControlSchema.optional(),
+  usage: StepUsageSchema.optional(),
+  errors: z.string().optional(),
+  interrupted: z.literal(true).optional(),
 });
 
 export const PersistedStepStateSchema = z.looseObject({
@@ -179,14 +195,21 @@ export const PersistedStepStateSchema = z.looseObject({
   fail_kind: z.enum(FAIL_KINDS).optional(),
   fail_cause: z.enum(FAIL_CAUSES).optional(),
   timeout_retries: nonNegativeInt.optional(),
-  last_attempt: nonNegativeInt.optional(),
   replay: z.literal(true).optional(),
   orchestration: PersistedPipelineOrchestrationStateSchema.optional(),
+  attempts: z
+    .array(PersistedAttemptSchema)
+    .refine((attempts) => new Set(attempts.map((entry) => entry.attempt)).size === attempts.length, {
+      error: "attempt numbers must be unique",
+    })
+    .default([]),
 });
 
 /** Every field of `PersistedRun`, with the identity a snapshot must carry. */
+export const RUN_SNAPSHOT_VERSION = 2;
+
 export const RunSnapshotSchema = z.looseObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(RUN_SNAPSHOT_VERSION),
   runId: z.string().min(1),
   name: z.string().min(1),
   ticket: z.string().optional(),
@@ -227,7 +250,7 @@ export type RunSnapshotInput = z.input<typeof RunSnapshotSchema>;
 
 /** Normalized snapshot: what every reader consumes. */
 export type RunSnapshot = PersistedRun & {
-  schemaVersion: 1;
+  schemaVersion: typeof RUN_SNAPSHOT_VERSION;
   runId: string;
   steps: PersistedRun["steps"];
 };
@@ -262,6 +285,7 @@ type _Orchestration = AssertAssignable<
   z.output<typeof PersistedPipelineOrchestrationStateSchema>,
   PersistedPipelineOrchestrationState
 >;
+type _Attempt = AssertAssignable<z.output<typeof PersistedAttemptSchema>, PersistedAttempt>;
 type _Session = AssertAssignable<z.output<typeof AgentSessionSchema>, AgentSession>;
 type _Control = AssertAssignable<z.output<typeof StepControlSchema>, StepControl>;
 type _Usage = AssertAssignable<z.output<typeof StepUsageSchema>, StepUsage>;

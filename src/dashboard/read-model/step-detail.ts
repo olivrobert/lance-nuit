@@ -14,7 +14,7 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PersistedAttempt } from "../../run/index.js";
-import { attemptCommandPath, figuresSpend, readRunHistory } from "../../run/index.js";
+import { attemptCommandPath, figuresSpend } from "../../run/index.js";
 import { reportedCost } from "./cost.js";
 import { readLock, stampKey } from "../../work-items/index.js";
 import { isPathWithin } from "../../shared/lib/path-safety.js";
@@ -112,13 +112,11 @@ function producedBy(workItemDir: string, stepKey: string): string[] {
     .sort();
 }
 
-/** The attempts of step `stepId` in `resolved`, or `undefined` when the run has
- *  no such step: a step id travels from the browser, and only an id the
- *  snapshot lists is ever looked up in the journal. */
+/** The attempts of step `stepId` in `resolved`, from its snapshot, or
+ *  `undefined` when the run has no such step. */
 function attemptsOf(resolved: ResolvedRun, stepId: string): PersistedAttempt[] | undefined {
-  const { runDir, state } = resolved.run;
-  if (!state.steps.some((step) => step.id === stepId)) return undefined;
-  return readRunHistory(runDir).attempts.get(stepId) ?? [];
+  const step = resolved.run.state.steps.find((candidate) => candidate.id === stepId);
+  return step ? (step.attempts ?? []) : undefined;
 }
 
 /**

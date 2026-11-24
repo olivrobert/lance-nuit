@@ -16,9 +16,9 @@ function tempDir(): string {
   return dir;
 }
 
-test("resolves events.jsonl by default from run dir", () => {
+test("resolves feed.jsonl by default from run dir", () => {
   const runDir = tempDir();
-  expect(new FileLiveFeed({ runDir }).path()).toBe(join(runDir, "events.jsonl"));
+  expect(new FileLiveFeed({ runDir }).path()).toBe(join(runDir, "feed.jsonl"));
 });
 
 test("accepts injected path, creates file, and appends JSONL in order", () => {
@@ -34,14 +34,14 @@ test("accepts injected path, creates file, and appends JSONL in order", () => {
 
 test("preserves existing feed and absorbs unavailable path", () => {
   const dir = tempDir();
-  const existing = join(dir, "events.jsonl");
+  const existing = join(dir, "feed.jsonl");
   writeFileSync(existing, "old line\n");
   new FileLiveFeed(existing).ensure();
   expect(readFileSync(existing, "utf-8")).toBe("old line\n");
 
   const blocker = join(dir, "not-a-directory");
   writeFileSync(blocker, "x");
-  const unavailable = new FileLiveFeed(join(blocker, "events.jsonl"));
+  const unavailable = new FileLiveFeed(join(blocker, "feed.jsonl"));
   expect(() => unavailable.ensure()).not.toThrow();
   expect(() => unavailable.append({ ignored: true })).not.toThrow();
   expect(existsSync(unavailable.path())).toBe(false);

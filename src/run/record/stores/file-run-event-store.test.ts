@@ -117,17 +117,17 @@ test("file-run-event-store: validates the integration contract", () => {
   expect(store.readAt(explicit)).toEqual([]);
 });
 
-test("file-run-event-store: an absent journal is empty, an unreadable one throws", () => {
+test("file-run-event-store: an absent or unreadable journal reads as empty", () => {
   const runDir = mkdtempSync(join(tmpdir(), "file-run-event-store-unreadable-"));
   const store = new FileRunEventStore({ runDir });
 
   expect(store.readAt(runDir)).toEqual([]);
   expect(store.readJournalAt(runDir)).toEqual({ entries: [], skipped: 0, invalid: 0, unknown: 0 });
 
-  // A directory where the file should be: EISDIR, not ENOENT. The journal owns
-  // the attempts, so this must not read as a run that has not written yet.
+  // A directory where the file should be: EISDIR. The journal is display only,
+  // so it never blocks a read.
   mkdirSync(join(runDir, "events.jsonl"));
-  expect(() => store.readAt(runDir)).toThrow(/EISDIR/);
-  expect(() => store.readJournalAt(runDir)).toThrow(/EISDIR/);
-  expect(() => store.read("run-1")).toThrow(/EISDIR/);
+  expect(store.readAt(runDir)).toEqual([]);
+  expect(store.readJournalAt(runDir)).toEqual({ entries: [], skipped: 0, invalid: 0, unknown: 0 });
+  expect(store.read("run-1")).toEqual([]);
 });

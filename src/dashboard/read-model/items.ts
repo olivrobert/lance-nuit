@@ -6,8 +6,8 @@
 // need from me now", not "what did each pipeline do". The other runs stay
 // visible in the explorer (ticket 03).
 //
-// Every read goes through the runner's own readers: the run record's `readRun`
-// and `readRunHistory`, the work-item store's `WorkItemArtifactStore` and
+// Every read goes through the runner's own readers: the run record's `readRun`,
+// the work-item store's `WorkItemArtifactStore` and
 // `gateDecisionStatus`. This module composes them, it never parses `state.json`
 // or the journal itself. Nothing is
 // cached across calls — a per-call cache is enough for a few dozen work items
@@ -24,8 +24,6 @@ import {
   isFailure,
   lastPassInterrupted,
   owesWork,
-  type RunHistory,
-  readRunHistory,
   runSpend,
   type HistoryEntry,
   readHistory,
@@ -99,29 +97,14 @@ function itemFailureOf(failure: RunFailure): ItemFailure {
  * The step whose last attempt the runner died in, which only a run authorized
  * with `--replay-interrupted` replays.
  *
- * Two situations, both read from the journal because `state.json` keeps no
- * attempt: a crashed run not resumed yet, whose attempt is still open; and a run
- * a plain resume settled then stopped on that attempt (`step-admission.ts`), a
- * stop with no subject. Any other run cannot be in either, so its journal is not
- * read at all.
+ * Two situations, both read from the attempts of `state.json`: a crashed run not
+ * resumed yet, whose attempt is still open; and a run a plain resume settled then
+ * stopped on that attempt (`step-admission.ts`), a stop with no subject.
  */
-function interruptedStepOf(
-  runDir: string,
-  state: PersistedRun,
-  interrupted: boolean,
-  stop: RunStop | undefined,
-): string | undefined {
+function interruptedStepOf(state: PersistedRun, interrupted: boolean, stop: RunStop | undefined): string | undefined {
   if (!interrupted && !(stop && !stop.subject)) return undefined;
-  let attemptsByStep: RunHistory["attempts"];
-  try {
-    attemptsByStep = readRunHistory(runDir).attempts;
-  } catch {
-    // An unreadable journal only loses the replay offer: the item keeps the
-    // verbs it would have had without it.
-    return undefined;
-  }
   const step = state.steps.find((candidate) => {
-    const attempts = attemptsByStep.get(candidate.id);
+    const attempts = candidate.attempts;
     if (lastPassInterrupted({ status: candidate.status, attempts })) return true;
     return interrupted && owesWork(candidate.status) && attempts?.at(-1)?.status === "running";
   });
@@ -237,7 +220,7 @@ async function buildItem(project: ProjectEntry, ticket: string, cache: RequestCa
   const runId = state.runId ?? "";
   const stop = stopOf(state, status);
   const failure = failureOf(state, status, interrupted);
-  const interruptedStep = interruptedStepOf(selected.runDir, state, interrupted, stop);
+  const interruptedStep = interruptedStepOf(state, interrupted, stop);
   const approval = stop?.subject ? await approvalOf(project, ticket, stop.subject) : undefined;
   const url = ticketUrl(project, ticket);
   const branch = runId ? branchOf(project, runId, cache) : undefined;

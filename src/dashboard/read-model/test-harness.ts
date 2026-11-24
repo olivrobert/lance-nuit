@@ -78,7 +78,7 @@ export function writeRun(root: string, ticket: string, pipeline: string, run: Ru
   const runDir = join(pipelineDir, run.runId);
   mkdirSync(runDir, { recursive: true });
   const state: PersistedRun = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     name: pipeline,
     pipeline,
     ticket,
@@ -109,6 +109,12 @@ export function writeWorkItemFile(root: string, ticket: string, relativePath: st
 export function writeRunEvents(runDir: string, events: Record<string, unknown>[]): void {
   mkdirSync(runDir, { recursive: true });
   writeFileSync(join(runDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+}
+
+/** The live feed, `feed.jsonl`, one JSON object per line. */
+export function writeRunFeed(runDir: string, events: Record<string, unknown>[]): void {
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, "feed.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
 }
 
 /** A pid no process can hold: a just-exited child would do too, until the

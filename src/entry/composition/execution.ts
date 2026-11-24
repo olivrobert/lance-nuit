@@ -127,6 +127,11 @@ export async function prepareRun(ready: ReadyRun, onRunCreated: (run: RunView) =
       worktree: worktreeMode,
       strictSnapshot: target.explicit?.strictSnapshot,
     }));
+    if (run.readOnly) {
+      throw new Error(
+        `Run ${run.runId} already passed and is never written again. Use --start-at <step> to run steps again in a new run.`,
+      );
+    }
   } catch (error) {
     target.explicit?.release();
     throw error;

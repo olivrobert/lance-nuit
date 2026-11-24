@@ -1,8 +1,8 @@
 // What opening a run writes, in order: the snapshots and the journal events a
 // new run, a resumed run, a run a crash left behind and a composed child resumed
-// on its own leave on disk before the first step runs. A resume reads these two
-// files back, so the order is part of the contract, not an implementation
-// detail.
+// on its own leave on disk before the first step runs. The snapshot is written
+// before the journal events that trace it, so the order is part of the
+// contract, not an implementation detail.
 
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -13,11 +13,11 @@ import type { PipelineContext } from "../../shared/language/context.js";
 import type { PersistedRun } from "../../run/persisted.js";
 import type { RunJournalEvent } from "../../run/journal.js";
 import { buildPipelineContext } from "../../definition/pipeline/context.js";
-import { appendRunEvent, readRunEvents } from "../../run/record/run-journal.js";
-import { saveRun } from "../../run/record/run-repository.js";
+import { openAttempt } from "../../run/record/attempt-lifecycle.js";
+import { readRunEvents } from "../../run/record/run-journal.js";
 import { selectExplicitRun } from "../../run/record/run-selection.js";
 import { readRunSnapshot } from "../../run/record/run-snapshot.js";
-import { abortRun, finalizeRun, updateStep } from "../../run/record/run-transitions.js";
+import { abortRun, finalizeRun, stopRun, updateStep } from "../../run/record/run-transitions.js";
 import { FileRunEventStore } from "../../run/record/stores/file-run-event-store.js";
 import { FileRunStateStore } from "../../run/record/stores/file-run-state-store.js";
 import { pipelineRunsDir, resolveRunDir } from "../../run/record/stores/run-storage.js";
@@ -118,7 +118,7 @@ test("opening a new run writes its snapshot, then journals the start", async () 
   expect(writes).toEqual(["snapshot RUNNING", "run.started"]);
   const snapshot = snapshotAt(f.dir);
   expect(snapshot).toMatchObject({
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: basename(f.dir),
     status: "RUNNING",
     max_cost_usd: 3,
@@ -146,7 +146,7 @@ test("opening a new authorized run journals the authorization after the start", 
   expect(snapshotAt(f.dir).allow_unmetered).toBe(true);
 });
 
-test("resuming an interrupted run journals the resume, then rewrites the snapshot as running", async () => {
+test("resuming an interrupted run rewrites the snapshot as running, then journals the resume", async () => {
   const f = fixture("open-interrupted-", "T-int");
   const { run } = await open(f, "T-int");
   updateStep(run, run.steps[0]!, "done");
@@ -156,7 +156,7 @@ test("resuming an interrupted run journals the resume, then rewrites the snapsho
 
   const { run: resumed, writes } = await open(f, "T-int");
 
-  expect(writes).toEqual(["run.resumed", "snapshot RUNNING"]);
+  expect(writes).toEqual(["snapshot RUNNING", "run.resumed"]);
   expect(journalTypes(f.dir)).toEqual([...before, "run.resumed"]);
   const snapshot = snapshotAt(f.dir);
   expect(snapshot.status).toBe("RUNNING");
@@ -166,26 +166,26 @@ test("resuming an interrupted run journals the resume, then rewrites the snapsho
   expect(resumed.steps.map((step) => step.status)).toEqual(["done", "pending"]);
 });
 
-test("resuming after a crash during an attempt settles it, saves, then journals the resume and saves again", async () => {
+test("resuming after a crash during an attempt settles it in the one save, then journals the resume and the settled attempt", async () => {
   const f = fixture("open-crash-", "T-crash");
   const run = writable((await open(f, "T-crash")).run);
   const step = run.steps[0]!;
   updateStep(run, step, "running");
-  appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
-  saveRun(run);
+  openAttempt(run, step, { kind: "step", command: "" });
 
   const { run: resumed, writes } = await open(f, "T-crash");
 
-  expect(writes).toEqual(["step.attempt.finished", "snapshot RUNNING", "run.resumed", "snapshot RUNNING"]);
+  expect(writes).toEqual(["snapshot RUNNING", "run.resumed", "step.attempt.finished"]);
   expect(resumed.steps[0]!.attempts.map((attempt) => [attempt.status, attempt.interrupted])).toEqual([
     ["failed", true],
   ]);
-  // Loading it again finds the attempt closed: only the resume marker is added.
+  expect(snapshotAt(f.dir).steps[0]!.attempts).toMatchObject([{ attempt: 1, status: "failed", interrupted: true }]);
+  // Loading it again finds the attempt closed: only the resume is recorded.
   const { writes: again } = await open(f, "T-crash");
-  expect(again).toEqual(["run.resumed", "snapshot RUNNING"]);
+  expect(again).toEqual(["snapshot RUNNING", "run.resumed"]);
 });
 
-test("reopening a terminal run from the same place writes nothing", async () => {
+test("reopening a passed run writes nothing and opens it read-only", async () => {
   const f = fixture("open-terminal-", "T-pass");
   const { run } = await open(f, "T-pass");
   for (const step of run.steps) updateStep(run, step, "done");
@@ -196,10 +196,11 @@ test("reopening a terminal run from the same place writes nothing", async () => 
 
   expect(writes).toEqual([]);
   expect(reopened.status).toBe("PASS");
+  expect(reopened.readOnly).toBe(true);
   expect(readFileSync(join(f.dir, "state.json"), "utf-8")).toBe(bytes);
 });
 
-test("reopening a terminal run from another place records the new place without journaling a resume", async () => {
+test("reopening a passed run from another place keeps the place it ran from", async () => {
   const f = fixture("open-terminal-moved-", "T-moved");
   const { run } = await open(f, "T-moved");
   for (const step of run.steps) updateStep(run, step, "done");
@@ -209,22 +210,38 @@ test("reopening a terminal run from another place records the new place without 
 
   const { writes } = await open(f, "T-moved", { ctx });
 
-  expect(writes).toEqual(["snapshot PASS"]);
-  expect(snapshotAt(f.dir)).toMatchObject({ status: "PASS", cwd: elsewhere });
+  expect(writes).toEqual([]);
+  expect(snapshotAt(f.dir)).toMatchObject({ status: "PASS", cwd: f.root });
 });
 
-test("resuming with a new authorization journals it before the resume, with one snapshot for each", async () => {
+test("reopening a finished run that did not pass from another place records the new place without journaling a resume", async () => {
+  const f = fixture("open-terminal-failed-moved-", "T-fmoved");
+  const { run } = await open(f, "T-fmoved");
+  for (const step of run.steps) updateStep(run, step, "done");
+  stopRun(run, run.steps[1]!, "stopped at the last step");
+  finalizeRun(run, {});
+  expect(snapshotAt(f.dir).status).toBe("STOPPED");
+  const elsewhere = mkdtempSync(join(tmpdir(), "open-terminal-failed-moved-wt-"));
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: elsewhere, ticket: "T-fmoved" });
+
+  const { writes } = await open(f, "T-fmoved", { ctx });
+
+  expect(writes).toEqual(["snapshot STOPPED"]);
+  expect(snapshotAt(f.dir)).toMatchObject({ status: "STOPPED", cwd: elsewhere });
+});
+
+test("resuming with a new authorization saves once, then journals the resume and the authorization", async () => {
   const f = fixture("open-authorize-", "T-auth");
   const { run } = await open(f, "T-auth");
   abortRun(run, "SIGINT");
 
   const { run: resumed, writes } = await open(f, "T-auth", { allowUnmetered: true });
 
-  expect(writes).toEqual(["run.unmetered.authorized", "snapshot RUNNING", "run.resumed", "snapshot RUNNING"]);
+  expect(writes).toEqual(["snapshot RUNNING", "run.resumed", "run.unmetered.authorized"]);
   expect(resumed.allow_unmetered).toBe(true);
   // Applied once: the next resume finds it persisted and journals nothing new.
   const { writes: again } = await open(f, "T-auth", { allowUnmetered: true });
-  expect(again).toEqual(["run.resumed", "snapshot RUNNING"]);
+  expect(again).toEqual(["snapshot RUNNING", "run.resumed"]);
 });
 
 test("a composed child resumed on its own with --run keeps its lineage and refuses an authorization its scope withheld", async () => {
@@ -267,7 +284,7 @@ test("a composed child resumed on its own with --run keeps its lineage and refus
   });
   explicit.commit();
 
-  expect(writes).toEqual(["run.resumed", "snapshot RUNNING"]);
+  expect(writes).toEqual(["snapshot RUNNING", "run.resumed"]);
   expect(resumed).toMatchObject({
     status: "RUNNING",
     parentRunId: "parent-1",
@@ -328,7 +345,7 @@ test("the opening says whether it resumed: a new run, then the same run reopened
   for (const step of live.run.steps) updateStep(live.run, step, "done");
   finalizeRun(live.run, {});
   const terminal = await open(f, "T-res");
-  expect(terminal).toMatchObject({ resumed: true, run: { status: "PASS" } });
+  expect(terminal).toMatchObject({ resumed: true, run: { status: "PASS", readOnly: true } });
 });
 
 test("the opening records the location its caller gives, never the worktree flag of the environment", async () => {

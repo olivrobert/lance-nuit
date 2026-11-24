@@ -47,7 +47,6 @@ export type ChildRefView = DeepReadonly<PersistedPipelineChildRef>;
  *  read-only at every depth. */
 export interface RunStepView extends DeepReadonly<PersistedStepState> {
   readonly def: StepDefinition;
-  /** Attempts of this step, projected from the journal on resume. */
   readonly attempts: readonly RunAttemptView[];
 }
 
@@ -66,4 +65,6 @@ export interface RunView extends DeepReadonly<Omit<PersistedRun, "pipeline_path"
   /** The journal and attempt-log stores a caller injected, if any. */
   readonly eventStore?: RunEventStore;
   readonly logStore?: RunLogStore;
+  /** Opened finished (`PASS`): nothing may write it. */
+  readonly readOnly?: true;
 }

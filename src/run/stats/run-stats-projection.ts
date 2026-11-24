@@ -1,9 +1,8 @@
 import { basename } from "node:path";
 import type { StepControl, StepUsage } from "../../contracts/backends.js";
-import type { RunJournalEvent } from "../journal.js";
 import type { PersistedAttempt } from "../persisted.js";
 import type { DeepReadonly, RunStepView, RunView } from "../run.js";
-import { createLogRef, type RunEventStore, type RunLogStore, runRefFromRun } from "../storage-ports.js";
+import { createLogRef, type RunLogStore, runRefFromRun } from "../storage-ports.js";
 import { measuredTokens, relativeRunPath } from "../record/index.js";
 import type { PhaseStats, RunStatsEntry, TokenCounts, UsageStatus } from "./stats-core.js";
 import { addTokens, zeroTokens } from "./stats-core.js";
@@ -50,69 +49,9 @@ export function mergeMeasurementStatus(current: UsageStatus | undefined, next: U
   return current === "partial" || next === "partial" ? "partial" : "unavailable";
 }
 
-function isAttemptKind(value: unknown): value is AttemptFact["kind"] {
-  return value === "step" || value === "fix" || value === "review";
-}
-
-function isAttemptStatus(value: unknown): value is AttemptFact["status"] {
-  return value === "running" || value === "done" || value === "failed" || value === "aborted";
-}
-
-function eventsOf(run: RunView, eventStore?: RunEventStore): RunJournalEvent[] {
-  const store = eventStore ?? run.eventStore;
-  if (!store) return [];
-  const runId = run.runId ?? basename(run.run_dir);
-  try {
-    return store.read(runId);
-  } catch {
-    // Projection remains available from the snapshot when event telemetry is unavailable.
-    return [];
-  }
-}
-
-type AttemptEvent = Extract<RunJournalEvent, { type: "step.attempt.started" | "step.attempt.finished" }>;
-
-/** The closed union no longer lets a `startsWith` narrow the event; the two
- *  attempt types are named instead. */
-const ATTEMPT_TYPES: ReadonlySet<RunJournalEvent["type"]> = new Set<RunJournalEvent["type"]>([
-  "step.attempt.started",
-  "step.attempt.finished",
-]);
-
-function isAttemptEvent(event: RunJournalEvent): event is AttemptEvent {
-  return ATTEMPT_TYPES.has(event.type);
-}
-
-/** Return execution facts without reconstructing attempts from `step.retries`. The
- * journal is preferred; snapshots provide fallback for in-memory projections. */
-export function attemptFacts(run: RunView, step: RunStepView, eventStore?: RunEventStore): AttemptFact[] {
-  const facts = new Map<number, AttemptFact>();
-  for (const event of eventsOf(run, eventStore)) {
-    if (!isAttemptEvent(event) || event.stepId !== step.id) continue;
-    const attempt = typeof event.attempt === "number" ? event.attempt : undefined;
-    if (attempt == null || !Number.isInteger(attempt) || attempt < 1) continue;
-    const previous = facts.get(attempt);
-    const kind = isAttemptKind(event.kind) ? event.kind : previous?.kind;
-    if (!kind) continue;
-    const status =
-      event.type === "step.attempt.started"
-        ? "running"
-        : isAttemptStatus(event.status)
-          ? event.status
-          : (previous?.status ?? "running");
-    facts.set(attempt, {
-      attempt,
-      kind,
-      status,
-      ...(typeof event.logPath === "string"
-        ? { logPath: relativeRunPath(run.run_dir, event.logPath) ?? undefined }
-        : previous?.logPath
-          ? { logPath: previous.logPath }
-          : {}),
-    });
-  }
-  if (facts.size > 0) return [...facts.values()].sort((a, b) => a.attempt - b.attempt);
-  return (step.attempts ?? []).map((attempt) => ({
+/** The attempts of a step, from the snapshot. */
+export function attemptFacts(run: RunView, step: RunStepView): AttemptFact[] {
+  return step.attempts.map((attempt) => ({
     attempt: attempt.attempt,
     kind: attempt.kind,
     status: attempt.status,
@@ -137,10 +76,10 @@ function logTail(run: RunView, stepId: string, attempt: number, logStore?: RunLo
   }
 }
 
-export function runnerFixEvents(run: RunView, eventStore?: RunEventStore, logStore?: RunLogStore): unknown[] {
+export function runnerFixEvents(run: RunView, logStore?: RunLogStore): unknown[] {
   const out: unknown[] = [];
   for (const step of run.steps) {
-    for (const attempt of attemptFacts(run, step, eventStore).filter((item) => item.status === "failed")) {
+    for (const attempt of attemptFacts(run, step).filter((item) => item.status === "failed")) {
       out.push({
         kind: attempt.kind === "fix" ? "fix" : "fail",
         phase: step.id,
@@ -205,13 +144,8 @@ function projectProfiles(step: RunStepView, tokens: TokenCounts, aggregate: Proj
 }
 
 /** Projects one step into phase, model, profile and total aggregates. */
-export function projectStepStats(
-  run: RunView,
-  step: RunStepView,
-  eventStore: RunEventStore | undefined,
-  aggregate: ProjectionAccumulator,
-): void {
-  const facts = attemptFacts(run, step, eventStore);
+export function projectStepStats(run: RunView, step: RunStepView, aggregate: ProjectionAccumulator): void {
+  const facts = attemptFacts(run, step);
   const hasAbortedAttempt = step.status === "aborted" || facts.some((attempt) => attempt.status === "aborted");
   if (!step.control && !step.usage) {
     if (hasAbortedAttempt) aggregate.usageStatus = mergeMeasurementStatus(aggregate.usageStatus, "unavailable");
@@ -258,15 +192,12 @@ export function projectStepStats(
   }
 }
 
-export function warningsForSteps(run: RunView, eventStore?: RunEventStore): Array<{ phase: string; reason: string }> {
+export function warningsForSteps(run: RunView): Array<{ phase: string; reason: string }> {
   const warnings = run.steps
     .filter((step) => step.def.blocking === false && !!step.errors)
     .map((step) => ({ phase: step.id, reason: step.errors! }));
   for (const step of run.steps) {
-    if (
-      step.status === "aborted" ||
-      attemptFacts(run, step, eventStore).some((attempt) => attempt.status === "aborted")
-    ) {
+    if (step.status === "aborted" || attemptFacts(run, step).some((attempt) => attempt.status === "aborted")) {
       warnings.push({
         phase: step.id,
         reason: "usage/cost unavailable or partial: attempt interrupted before its usage report",

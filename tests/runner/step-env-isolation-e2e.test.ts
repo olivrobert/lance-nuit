@@ -100,7 +100,7 @@ test("a --worktree runner started by a step applies the worktree guards", () => 
   expect(existsSync(worktreePath(worktrees, repo, "T2"))).toBe(false);
 }, 60_000);
 
-test("a process started by a step does not write to the parent journal", () => {
+test("a process started by a step does not write to the parent feed", () => {
   // The marker goes only through liveFeedFilePath(), never to stdout, so the
   // step's own output capture cannot copy it into the journal.
   const foreign = [
@@ -114,7 +114,7 @@ test("a process started by a step does not write to the parent journal", () => {
   expect(result.status).toBe(0);
 
   const journals = readdirSync(join(cwd, ".lance-nuit"), { recursive: true, encoding: "utf8" }).filter(
-    (entry) => entry.endsWith("events.jsonl") && !entry.includes("latest"),
+    (entry) => entry.endsWith("feed.jsonl") && !entry.includes("latest"),
   );
   expect(journals).toHaveLength(1);
   const journal = readFileSync(join(cwd, ".lance-nuit", journals[0]!), "utf8");

@@ -1,15 +1,15 @@
 //
 // The two ends of a tracked attempt, as the step layer sees them: `openAttempt`
 // before spawn and `settleAttempt` once the spawn returned or rejected. Each one
-// writes every record its end touches, in a fixed order, and the snapshot last,
-// so the step layer runs the attempt and reports it without sequencing the
-// numbering, the journal, the verdict, the ledger and the stops by hand.
+// writes every record its end touches in a fixed order — memory, then the
+// snapshot, then the journal — so the step layer runs the attempt and reports it
+// without sequencing the numbering, the verdict, the ledger and the stops by hand.
 //
 // The rules stay with their owners: closure in `attempt-closure.ts`, figures in
 // `cost-accounting.ts`, stops in `cost-stop-events.ts`, the step verdict in
 // `run-transitions.ts`. This file only orders them. Two other closers end an
 // attempt without this file: the signal handler (`abortRun`), which has no ledger
-// in scope, and crash settlement on resume (`settleCrashedAttempts`); the ledger
+// in scope, and crash settlement on opening (`settleCrashedAttempts`); the ledger
 // of the next generation is seeded from the step totals they charge.
 
 import type { AgentSession, AttemptStats, StepFailCause, StepFailKind } from "../../contracts/backends.js";
@@ -17,7 +17,7 @@ import type { PersistedAttempt } from "../persisted.js";
 import type { RunAttemptView, RunStepView, RunView } from "../run.js";
 import type { Run, RunStep } from "./run.js";
 import { writable } from "./run.js";
-import { closeAttempt } from "./attempt-closure.js";
+import { closeAttempt, journalAttemptClosed } from "./attempt-closure.js";
 import type { RunBudget } from "./budget.js";
 import { chargeAttemptToLedger, isUnpricedSpend } from "./cost-accounting.js";
 import { recordCostStop } from "./cost-stop-events.js";
@@ -36,14 +36,10 @@ export interface OpenedAttempt {
 
 /**
  * Number the next attempt, allocate its log and register it `running` on the
- * step. Memory only: `openAttempt` journals and persists it.
- *
- * The number is set on `last_attempt` before the log is allocated, so a store
- * that refuses the allocation still burns the number rather than reusing it.
+ * step. Memory only: `openAttempt` persists and journals it.
  */
 export function allocateAttempt(run: Run, step: RunStep, kind: PersistedAttempt["kind"] = "step"): OpenedAttempt {
   const number = nextAttemptNumber(step);
-  step.last_attempt = number;
   const logPath = attemptLogPath(run, step, number);
   const attempt: PersistedAttempt = {
     attempt: number,
@@ -67,8 +63,8 @@ export interface AttemptOpening {
 
 /**
  * Open an attempt: number and register it, keep its command beside its log,
- * journal `step.attempt.started`, and persist the snapshot BEFORE spawn — a kill
- * may come before the runner can persist anything else.
+ * persist the `running` attempt BEFORE spawn — a kill may come before the runner
+ * can persist anything else — then journal `step.attempt.started`.
  */
 export function openAttempt(runView: RunView, stepView: RunStepView, opening: AttemptOpening): OpenedAttempt {
   const run = writable(runView);
@@ -82,6 +78,7 @@ export function openAttempt(runView: RunView, stepView: RunStepView, opening: At
       // failing the attempt over it would cost the run.
     }
   }
+  saveRun(run);
   appendRunEvent(run, "step.attempt.started", {
     stepId: step.id,
     attempt: opened.attempt.attempt,
@@ -89,7 +86,6 @@ export function openAttempt(runView: RunView, stepView: RunStepView, opening: At
     sessionId: opening.session?.id ?? null,
     logPath: opened.attempt.log_path,
   });
-  saveRun(run);
   return opened;
 }
 
@@ -119,8 +115,8 @@ export interface CostWarning {
 /**
  * Settle an attempt opened by `openAttempt`, whether its spawn returned or
  * rejected: closure, then — for an accepted closure only — the step verdict, the
- * ledger charge, the stops a live guard established, the unaccounted-cost event,
- * and the snapshot.
+ * ledger charge, the snapshot and the closure event, the stops a live guard
+ * established, and the unaccounted-cost event.
  *
  * A refused closure means another closer already settled the attempt — the
  * signal handler, or crash settlement — and this late result no longer describes
@@ -140,7 +136,7 @@ export function settleAttempt(
   const logPath = run.logStore
     ? logicalAttemptLogPath(step.id, attempt.attempt)
     : (relativeRunPath(run.run_dir, opened.logPath) ?? attempt.log_path);
-  const settled = closeAttempt(run, step, attempt, {
+  const settled = closeAttempt(step, attempt, {
     status: result.ok ? "done" : "failed",
     stats: result.stats,
     session: result.session,
@@ -160,6 +156,8 @@ export function settleAttempt(
   chargeAttemptToLedger(run, budget, settled.control, settled.usage, {
     guardProvedUnpriced: result.costUnaccounted === true,
   });
+  saveRun(run);
+  journalAttemptClosed(run, step, attempt);
   // A guard kill is a stop, not a technical break: recorded like a gate's, so the
   // retry loops stop and the report names the cost stop instead of the process
   // the guard had to kill to reach it.
@@ -177,6 +175,5 @@ export function settleAttempt(
     };
     appendRunEvent(run, "step.cost.unaccounted", { stepId: step.id, model: control.model ?? null });
   }
-  saveRun(run);
   return costWarning ? { costWarning } : {};
 }

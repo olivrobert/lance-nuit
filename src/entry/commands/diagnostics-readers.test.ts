@@ -17,7 +17,7 @@ import { recordApproval, recordRejection } from "../../work-items/store/decision
 
 function snapshot(runId: string, pipeline: string, updatedAt: string): PersistedRun {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId,
     name: pipeline,
     pipeline,
@@ -244,7 +244,7 @@ test("inspectTicket says so when a run has no readable journal", async () => {
   expect(await inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("journal: —");
 });
 
-test("inspectTicket names an unreadable journal instead of counting it as empty", async () => {
+test("inspectTicket reads an unreadable journal as an empty one", async () => {
   const runDir = mkdtempSync(join(tmpdir(), "diagnose-journal-unreadable-"));
   mkdirSync(join(runDir, "events.jsonl"));
   const stateStore = new FakeStateStore([
@@ -252,12 +252,10 @@ test("inspectTicket names an unreadable journal instead of counting it as empty"
   ]);
 
   const [diagnostic] = diagnoseRunJournals(context, "PROJ-1", { stateStore });
-  expect(diagnostic?.readError).toMatch(/EISDIR/);
+  expect(diagnostic?.readError).toBeUndefined();
   expect(diagnostic).toMatchObject({ known: 0, unknown: 0, invalid: 0, skipped: 0 });
 
-  const inspected = await inspectTicket(context, "PROJ-1", undefined, { stateStore });
-  expect(inspected).toContain("journal: unreadable — ");
-  expect(inspected).not.toContain("journal: —");
+  expect(await inspectTicket(context, "PROJ-1", undefined, { stateStore })).toContain("journal: —");
 });
 
 test("inspectTicket tells whether the gate a stopped run waits on is already approved", async () => {

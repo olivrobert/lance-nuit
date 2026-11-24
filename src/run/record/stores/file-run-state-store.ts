@@ -6,6 +6,7 @@ import type { PipelineContext } from "../../../shared/language/context.js";
 import type { PersistedRun } from "../../persisted.js";
 import { createRunRef, type RunStateSnapshot, type RunStateStore } from "../../storage-ports.js";
 import { readRunSnapshot } from "../run-snapshot.js";
+import { RUN_SNAPSHOT_VERSION } from "../schema.js";
 import { FileRunSnapshotCatalog } from "./file-run-snapshot-catalog.js";
 import {
   latestRunDir,
@@ -92,7 +93,7 @@ export class FileRunStateStore implements RunStateStore {
   saveAt(run: PersistedRun, runDir: string): void {
     const snapshot: PersistedRun = {
       ...run,
-      schemaVersion: 1,
+      schemaVersion: RUN_SNAPSHOT_VERSION,
       runId: run.runId ?? basename(runDir),
       updatedAt: new Date().toISOString(),
     };

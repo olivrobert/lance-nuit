@@ -36,7 +36,7 @@ test("stopRun: stopped_reason persisted, remaining work preserved", () => {
   expect(run.steps[1]!.status).toBe("pending");
   expect(run.steps[2]!.status).toBe("pending");
   expect(run.stopped_reason).toBe("escalated: too sensitive");
-  expect(run.status).toBe("STOPPED");
+  expect(run.status).toBeUndefined();
   const saved = JSON.parse(readFileSync(join(run.run_dir, "state.json"), "utf-8"));
   expect(saved.stopped_reason).toBe("escalated: too sensitive");
   expect(saved.steps[2].status).toBe("pending");
@@ -69,7 +69,6 @@ test("stopRun: a stop that describes nothing stays valid", () => {
   // `stop` either, so the field must remain absent rather than half-filled.
   stopRun(run, run.steps[1]!, "waiting");
   const saved = JSON.parse(readFileSync(join(run.run_dir, "state.json"), "utf-8"));
-  expect(saved.status).toBe("STOPPED");
   expect(saved.outcome.stop).toBeUndefined();
 });
 

@@ -1,6 +1,5 @@
 // Every reader of a run takes it from the run record (`readRun`, `readRunHistory`):
-// a runner that died after its journal recorded a step finished, and before its
-// snapshot did, leaves the same steps and the same attempts in every view, and
+// a runner that died inside a step leaves the same steps and the same attempts in every view, and
 // no code outside `src/run/record/` reads the snapshot or the journal by another
 // path.
 
@@ -25,7 +24,6 @@ import {
   SPEC_PATH,
   writeProjectsFile,
   writeRun,
-  writeRunEvents,
   writeRunLock,
 } from "../../src/dashboard/read-model/test-harness.js";
 import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
@@ -41,43 +39,32 @@ function listedProject(): { project: string; options: { env: NodeJS.ProcessEnv }
   return { project, options: { env: { ...process.env, PIPELINE_HOME: home } } };
 }
 
-/** The runner recorded `coder`'s attempt and its `done` in the journal, then
- *  died before rewriting the snapshot, which still says `running`. */
-function runBehindItsJournal(project: string): string {
+/** The runner died inside `coder`: its attempt is still `running` in the snapshot. */
+function runDiedInsideStep(project: string): string {
+  const attempt = (started: string, status: "done" | "running", finished?: string) => ({
+    attempt: 1,
+    kind: "step" as const,
+    status,
+    started_at: started,
+    ...(finished ? { finished_at: finished } : {}),
+    log_path: "",
+  });
   const runDir = writeRun(project, TICKET, "feature", {
     runId: "r-1",
     status: "RUNNING",
     createdAt: "2026-09-05T08:00:00.000Z",
     updatedAt: "2026-09-05T08:04:00.000Z",
     steps: [
-      { id: "plan", status: "done", retries: 0 },
-      { id: "coder", status: "running", retries: 0 },
+      {
+        id: "plan",
+        status: "done",
+        retries: 0,
+        attempts: [attempt("2026-09-05T08:01:00.000Z", "done", "2026-09-05T08:02:00.000Z")],
+      },
+      { id: "coder", status: "running", retries: 0, attempts: [attempt("2026-09-05T08:03:01.000Z", "running")] },
       { id: "review", status: "pending", retries: 0 },
     ],
   });
-  writeRunEvents(runDir, [
-    { ts: "2026-09-05T08:01:00.000Z", type: "step.attempt.started", stepId: "plan", attempt: 1, kind: "step" },
-    {
-      ts: "2026-09-05T08:02:00.000Z",
-      type: "step.attempt.finished",
-      stepId: "plan",
-      attempt: 1,
-      kind: "step",
-      status: "done",
-    },
-    { ts: "2026-09-05T08:02:01.000Z", type: "step.status.changed", stepId: "plan", status: "done" },
-    { ts: "2026-09-05T08:03:00.000Z", type: "step.status.changed", stepId: "coder", status: "running" },
-    { ts: "2026-09-05T08:03:01.000Z", type: "step.attempt.started", stepId: "coder", attempt: 1, kind: "step" },
-    {
-      ts: "2026-09-05T08:05:00.000Z",
-      type: "step.attempt.finished",
-      stepId: "coder",
-      attempt: 1,
-      kind: "step",
-      status: "done",
-    },
-    { ts: "2026-09-05T08:05:01.000Z", type: "step.status.changed", stepId: "coder", status: "done" },
-  ]);
   writeRunLock(runDir, DEAD_PID);
   return runDir;
 }
@@ -102,10 +89,10 @@ function inspectedSteps(report: string): string[] {
     .map((match) => `${match[2]}:${match[1]}`);
 }
 
-test("a run behind its journal reads the same status, steps and attempts in every reader", async () => {
+test("a run whose runner died reads the same run status in every reader", async () => {
   const { project, options } = listedProject();
-  runBehindItsJournal(project);
-  const expected = ["plan:done", "coder:done", "review:pending"];
+  runDiedInsideStep(project);
+  const expected = ["plan:done", "coder:aborted", "review:pending"];
 
   const item = await readItem("demo-app", TICKET, options);
   const steps = readSteps("demo-app", TICKET, options);
@@ -122,33 +109,29 @@ test("a run behind its journal reads the same status, steps and attempts in ever
   }).toEqual({ sheet: "ABORTED", steps: "ABORTED", recap: "ABORTED", costs: "ABORTED", inspect: "ABORTED" });
 
   expect(statusesOf(steps?.steps)).toEqual(expected);
-  // Before the run record owned the read, the recap and `--inspect` read the
-  // snapshot alone: `coder` was `aborted` in one and `running` in the other.
   expect(statusesOf(recap?.steps)).toEqual(expected);
-  expect(inspectedSteps(inspected)).toEqual(expected);
-  // The runner died between two steps, in none of them: the item names no
-  // phase rather than the step the journal knows finished.
-  expect(item?.failure?.phase).toBe("");
+  // `--inspect` prints the snapshot's step statuses as stored.
+  expect(inspectedSteps(inspected)).toEqual(["plan:done", "coder:running", "review:pending"]);
+  expect(item?.failure?.phase).toBe("coder");
 
   const detail = readStepDetail("demo-app", TICKET, "coder", undefined, options);
   const journey = readRunJourney("demo-app", TICKET, options);
-  expect(detail?.attempts.map((attempt) => [attempt.attempt, attempt.status])).toEqual([[1, "done"]]);
+  expect(detail?.attempts.map((attempt) => [attempt.attempt, attempt.status])).toEqual([[1, "running"]]);
   expect(
     journey?.attempts
       .filter((attempt) => attempt.stepId === "coder")
       .map((attempt) => [attempt.attempt, attempt.status]),
-  ).toEqual([[1, "done"]]);
+  ).toEqual([[1, "running"]]);
 
   expect(closeLatestRun(project, TICKET, "feature", "olivier")).toMatchObject({ ok: true });
 });
 
-test("a run a live runner holds is read from its snapshot, without parsing its journal", () => {
+test("a run a live runner holds is read from its snapshot", () => {
   const { project, options } = listedProject();
-  const runDir = runBehindItsJournal(project);
+  const runDir = runDiedInsideStep(project);
   writeRunLock(runDir, process.ppid);
 
   expect(readSteps("demo-app", TICKET, options)).toMatchObject({ status: "RUNNING" });
-  // At most one write behind: the snapshot follows the event it lags.
   expect(statusesOf(readSteps("demo-app", TICKET, options)?.steps)).toEqual([
     "plan:done",
     "coder:running",
@@ -166,7 +149,7 @@ const SRC = join(ROOT, "src");
 /** What reads a run without the projection: the stores and the projection
  *  itself, the raw snapshot and journal readers, and the file names. */
 const RAW_READS =
-  /\b(FileRunStateStore|FileRunEventStore|projectRunState|projectStepAttempts|readRunSnapshot|readRunEvents|readRunSnapshotDiagnostic|resolveLatestRunSnapshot)\b|["'`](state\.json|events\.jsonl)["'`]/g;
+  /\b(FileRunStateStore|FileRunEventStore|readRunSnapshot|readRunEvents|readRunSnapshotDiagnostic|resolveLatestRunSnapshot)\b|["'`](state\.json|events\.jsonl)["'`]/g;
 
 /**
  * The files outside the run record that still name a raw read, each with why.
@@ -175,9 +158,6 @@ const RAW_READS =
 const ALLOWED: Record<string, string[]> = {
   "entry/composition/startup.ts": ["FileRunStateStore"],
   "execution/step/pipeline-orchestration-child.ts": ["FileRunStateStore"],
-  // The journal of the run this process just executed, handed to the statistics
-  // projection as its event store.
-  "run/stats/run-stats.ts": ["FileRunEventStore"],
   // The default store `--inspect`, `--logs` and `clean` list snapshots from;
   // each listed snapshot is then read through `readListedRun`.
   "entry/commands/diagnostics-readers.ts": ["FileRunStateStore"],

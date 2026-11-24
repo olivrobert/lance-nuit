@@ -7,7 +7,7 @@
 
 import { lstatSync, readFileSync } from "node:fs";
 import { errnoCode, isErrno } from "../../shared/lib/errors.js";
-import { parseRunSnapshot, type RunSnapshot, type RunSnapshotInput } from "./schema.js";
+import { parseRunSnapshot, RUN_SNAPSHOT_VERSION, type RunSnapshot, type RunSnapshotInput } from "./schema.js";
 
 export { diagnoseRunSnapshot, type RunSnapshot, type RunSnapshotInput } from "./schema.js";
 
@@ -83,7 +83,7 @@ export function readRunSnapshotDiagnostic(
   } catch {
     return { kind: "unreadable", path, reason: "json", diagnostic: "invalid JSON" };
   }
-  if (isRecord(parsed) && "schemaVersion" in parsed && parsed.schemaVersion !== 1) {
+  if (isRecord(parsed) && "schemaVersion" in parsed && parsed.schemaVersion !== RUN_SNAPSHOT_VERSION) {
     return { kind: "incompatible", path, reason: "schema-version", diagnostic: "unsupported schema version" };
   }
   const snapshot = parseRunSnapshot(parsed);

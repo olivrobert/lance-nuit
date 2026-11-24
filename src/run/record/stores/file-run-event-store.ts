@@ -1,6 +1,6 @@
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync } from "node:fs";
 import { join } from "node:path";
-import { errorMessage, isErrno } from "../../../shared/lib/errors.js";
+import { errorMessage } from "../../../shared/lib/errors.js";
 import type { JournalEntry, RunJournalCounts, RunJournalEvent } from "../../journal.js";
 import type { RunEventPage, RunEventStore } from "../../storage-ports.js";
 import { parseJournalEntry } from "../journal-schema.js";
@@ -15,6 +15,8 @@ export const DEFAULT_EVENT_PAGE_BYTES = 512 * 1024;
 export interface RunEventPageOptions {
   /** Maximum number of bytes read at once. */
   maxBytes?: number;
+  /** Read the run's feed (`feed.jsonl`) instead of its journal. */
+  feed?: true;
 }
 
 function emptyPage(): RunEventPage {
@@ -72,6 +74,13 @@ export function runEventsFilePath(runDir: string): string {
   return join(runDir, EVENTS_FILE);
 }
 
+/** The live feed of a run: runner output, bash output and the raw backend
+ *  stream. Never part of the journal contract. */
+export const FEED_FILE = "feed.jsonl";
+export function runFeedFilePath(runDir: string): string {
+  return join(runDir, FEED_FILE);
+}
+
 export class FileRunEventStore implements RunEventStore {
   private readonly runDir?: string;
 
@@ -98,15 +107,12 @@ export class FileRunEventStore implements RunEventStore {
       mkdirSync(runDir, { recursive: true });
       appendFileSync(this.pathFor(runDir), `${JSON.stringify(event)}\n`, { encoding: "utf-8" });
     } catch (error) {
-      // Best effort by design: an observability failure must not lose code progress.
-      // But a persistently failing journal (disk full, permissions) silently breaks
-      // attempt numbering on resume, so surface the first failure once.
+      // Best effort by design: the journal is a trace, and the snapshot already
+      // holds the transition. Surface the first failure once.
       if (!this.appendFailureReported) {
         this.appendFailureReported = true;
         const message = errorMessage(error);
-        console.error(
-          `[pipeline] WARNING: run journal append failed (${message}); attempt numbering may be unreliable on resume.`,
-        );
+        console.error(`[pipeline] WARNING: run journal append failed (${message}); the trace is incomplete.`);
       }
     }
   }
@@ -127,16 +133,14 @@ export class FileRunEventStore implements RunEventStore {
     return { entries, skipped, invalid, unknown };
   }
 
-  /** An absent journal is a run that has not written yet: empty. Any other
-   *  failure (permissions, I/O, a directory in place of the file) propagates:
-   *  the journal owns the attempts and the child-start facts, so a read that
-   *  fails must not be told apart from an empty one by nobody. */
+  /** The journal is a trace no decision reads: an absent or unreadable file
+   *  reads as empty. */
   private classifyAt(runDir: string): ClassifiedLines {
     try {
       return classify(readFileSync(this.pathFor(runDir), "utf-8"));
-    } catch (error) {
-      if (isErrno(error, "ENOENT")) return { events: [], entries: [], skipped: 0, invalid: 0, unknown: 0 };
-      throw error;
+    } catch {
+      // A trace no decision depends on: losing it costs a display, never a resume.
+      return { events: [], entries: [], skipped: 0, invalid: 0, unknown: 0 };
     }
   }
 
@@ -144,7 +148,7 @@ export class FileRunEventStore implements RunEventStore {
   readTailAt(runDir: string, options: RunEventPageOptions = {}): RunEventPage {
     const maxBytes = Math.max(1, options.maxBytes ?? DEFAULT_EVENT_PAGE_BYTES);
 
-    return this.withFile(runDir, (fd, size) => {
+    return this.withFile(options.feed ? runFeedFilePath(runDir) : this.pathFor(runDir), (fd, size) => {
       if (size === 0) return emptyPage();
 
       const start = Math.max(0, size - maxBytes);
@@ -159,10 +163,10 @@ export class FileRunEventStore implements RunEventStore {
     });
   }
 
-  private withFile(runDir: string, read: (fd: number, size: number) => RunEventPage): RunEventPage {
+  private withFile(path: string, read: (fd: number, size: number) => RunEventPage): RunEventPage {
     let fd: number | null = null;
     try {
-      fd = openSync(this.pathFor(runDir), "r");
+      fd = openSync(path, "r");
       return read(fd, fstatSync(fd).size);
     } catch {
       // Readers use the typed empty page fallback when the journal is unavailable.

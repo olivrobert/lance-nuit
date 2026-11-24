@@ -10,7 +10,7 @@
 // caller can reach them.
 
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StepControl, StepUsage } from "../../contracts/backends.js";
@@ -23,9 +23,6 @@ import {
   chargeChildReconciliation,
   chargeClosedAttempt,
   isUnpricedSpend,
-  projectStepSpend,
-  restoreAttemptSpend,
-  restoreRunTotals,
   runProvesUnpricedSpend,
   runSpend,
   runUsage,
@@ -294,6 +291,9 @@ test("chargeChildReconciliation: a child is charged once, by difference", () => 
   expect(budget.cumulative).toBeCloseTo(1.5, 8);
   // The reference remembers the three figures already charged, not only the dollars.
   expect(ref).toMatchObject({ accountedCostUsd: 1.5, accountedDurationMs: 40, accountedUsage: { output_tokens: 200 } });
+  // Saved before the reconciliation event: the snapshot alone holds the charge.
+  const saved = JSON.parse(readFileSync(join(parent.run_dir, "state.json"), "utf-8"));
+  expect(saved.steps[0].control.total_cost_usd).toBeCloseTo(1.5, 8);
 
   // The resumed child re-reports its whole history: the delta is zero and nothing
   // is paid a second time — no dollars, no milliseconds, no tokens.
@@ -333,58 +333,6 @@ test("chargeChildReconciliation: a child that could not price itself latches the
   expect(step.control?.cost_unknown).toBe(true);
   expect(budget.costUnknown).toBe(true);
   expect(parent.cost_unaccounted).toBe(true);
-});
-
-test("projectStepSpend: the journal wins only when it knows of more spend", () => {
-  const state = { id: "verify", status: "failed", control: { duration_ms: 5, total_cost_usd: 1 } } as never;
-  const attempts = [
-    {
-      attempt: 1,
-      kind: "step",
-      status: "failed",
-      started_at: "",
-      log_path: "",
-      control: { duration_ms: 5, total_cost_usd: 1 },
-    },
-    {
-      attempt: 2,
-      kind: "step",
-      status: "done",
-      started_at: "",
-      log_path: "",
-      control: { duration_ms: 5, total_cost_usd: 0.5 },
-    },
-  ] as PersistedAttempt[];
-  expect(projectStepSpend(state, attempts).control?.total_cost_usd).toBeCloseTo(1.5, 8);
-  // The snapshot already holds at least as much: it stays the record.
-  expect(projectStepSpend(state, [attempts[0]!]).control?.total_cost_usd).toBe(1);
-  expect(projectStepSpend(state, undefined).control?.total_cost_usd).toBe(1);
-});
-
-test("restoreAttemptSpend: figures are put back, never charged again", () => {
-  const attempt: PersistedAttempt = { attempt: 1, kind: "step", status: "done", started_at: "", log_path: "" };
-  restoreAttemptSpend(attempt, { duration_ms: 3, total_cost_usd: 0.2 }, { output_tokens: 5 });
-  expect(attempt.control?.total_cost_usd).toBe(0.2);
-  expect(attempt.usage?.output_tokens).toBe(5);
-  // Replaying the same event does not double anything: it is an assignment.
-  restoreAttemptSpend(attempt, { duration_ms: 3, total_cost_usd: 0.2 }, { output_tokens: 5 });
-  expect(attempt.control?.total_cost_usd).toBe(0.2);
-  expect(attempt.usage?.output_tokens).toBe(5);
-  // Absent figures leave what the attempt already carried.
-  restoreAttemptSpend(attempt, undefined, undefined);
-  expect(attempt.control?.total_cost_usd).toBe(0.2);
-});
-
-test("restoreRunTotals: a terminal snapshot keeps its totals, a live resume derives them", () => {
-  const persisted = { total_control: { duration_ms: 5, total_cost_usd: 3 }, total_usage: { output_tokens: 7 } };
-  expect(restoreRunTotals(persisted, true)).toEqual(persisted);
-  // Nothing to trust: the steps are the record until the next finalization.
-  expect(restoreRunTotals(persisted, false)).toEqual({ total_control: undefined, total_usage: undefined });
-  const steps = [
-    { control: { duration_ms: 1, total_cost_usd: 1 }, usage: { output_tokens: 2 } },
-  ] as unknown as RunStep[];
-  expect(runSpend({ steps, ...restoreRunTotals(persisted, false) }).usd).toBe(1);
-  expect(runSpend({ steps, ...restoreRunTotals(persisted, true) }).usd).toBe(3);
 });
 
 test("chargeChildReconciliation: a reconciled child invalidates the parent's materialized totals", () => {

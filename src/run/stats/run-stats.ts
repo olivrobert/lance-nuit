@@ -7,7 +7,7 @@ import { resolveTicketDir } from "../../shared/env/tickets.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import type { RunView } from "../run.js";
 import { runRefFromRun } from "../storage-ports.js";
-import { FileRunEventStore, FileRunLogStore, findStepLog, logicalAttemptLogPath } from "../record/index.js";
+import { FileRunLogStore, findStepLog, logicalAttemptLogPath } from "../record/index.js";
 import { projectRunStatsEntry, type RunStatsEntry } from "./run-stats-projector.js";
 import { FileRunStatsSink } from "./run-stats-sink.js";
 
@@ -16,10 +16,8 @@ import { FileRunStatsSink } from "./run-stats-sink.js";
  * not attached stores to Run. The projector remains pure.
  */
 export function buildRunStatsEntry(run: RunView, context?: PipelineContext): RunStatsEntry {
-  const eventStore = run.eventStore ?? new FileRunEventStore({ runDir: run.run_dir });
   const logStore = run.logStore ?? new FileRunLogStore({ runDir: run.run_dir });
-  const projectedRun =
-    run.eventStore === eventStore && run.logStore === logStore ? run : { ...run, eventStore, logStore };
+  const projectedRun = run.logStore === logStore ? run : { ...run, logStore };
   const ticketDir = run.ticket
     ? resolveTicketDir(run.ticket, context?.config.specPath, context?.cwd ?? process.cwd())
     : null;

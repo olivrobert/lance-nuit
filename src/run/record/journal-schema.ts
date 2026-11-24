@@ -22,13 +22,6 @@
 //   same reason: an event refused whole is an event absent from the projections,
 //   and the readers already cope with a missing field through their own
 //   fallbacks (`attemptKind`, `attemptStatus`, `attemptSession`).
-//
-// The cost of getting this wrong is not academic. `closeAttempt` appends
-// `step.attempt.finished` BEFORE it writes the snapshot: a crash in that window
-// leaves the attempt's price in the journal alone. `reconcileStepSpend`
-// (`run/record/run-projection.ts`) rebuilds the step total from those events, so an
-// event refused for a mistyped `kind` would read as a free attempt and let the
-// resume spend past `max_cost_usd`.
 
 import * as z from "zod";
 import { FAIL_CAUSES } from "../../contracts/backends.js";

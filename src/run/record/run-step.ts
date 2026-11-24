@@ -6,10 +6,7 @@ import type { PipelineStep } from "../../definition/index.js";
 import type { StepDefinition } from "../run.js";
 import type { RunStep } from "./run.js";
 
-/** Initial step state supplied by a new run, a snapshot, or the journal. It covers
- *  `RunStep` rather than `PersistedStepState`: `attempts` live in memory only, but
- *  hydration still has to seed them. A field the snapshot carries and `RunStep`
- *  no longer declares (`last_command`, written by older releases) is not copied. */
+/** Initial step state supplied by a new run or a snapshot. */
 export type StepStateInput = Partial<Omit<RunStep, "id" | "def">>;
 
 /** Freeze the step definition to protect the DSL/runtime boundary from untyped JS. */
@@ -35,9 +32,6 @@ export function makeRunStep(def: PipelineStep, state: StepStateInput = {}): RunS
     errors: state.errors,
     fail_kind: state.fail_kind,
     fail_cause: state.fail_cause,
-    // The log-numbering floor when the journal is missing; dropping it on
-    // hydration would let a resume renumber from 1 and overwrite earlier logs.
-    last_attempt: state.last_attempt,
     replay: state.replay,
     attempts: state.attempts ? state.attempts.map((attempt) => ({ ...attempt })) : [],
     orchestration: state.orchestration,

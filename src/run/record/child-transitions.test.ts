@@ -1,5 +1,5 @@
 // The persisted child reference has one writer. These scenarios pin what each
-// operation writes — fields, journal event, parent snapshot — and what a settled
+// operation writes — fields, parent snapshot, journal event — and what a settled
 // reference refuses.
 
 import { expect, test } from "bun:test";
@@ -15,7 +15,6 @@ import {
   completedSuccessfully,
   declareChild,
   failChildLaunch,
-  hasJournaledChildStart,
   isChildSettled,
   recordChildStarted,
   settleChild,
@@ -89,12 +88,11 @@ test("commitChildCall then bindChildRun: the call is durable before the identity
   commitChildCall(parent, ref);
   expect(snapshotChildren(parent)[0]).toMatchObject({ status: "running" });
   expect(snapshotChildren(parent)[0].runId).toBeUndefined();
-  expect(hasJournaledChildStart(parent, ref)).toBe(false);
 
   bindChildRun(parent, ref, "after-run");
   expect(snapshotChildren(parent)[0]).toMatchObject({ status: "running", runId: "after-run" });
-  // Bound, but not started: nothing in the journal yet, so a retry may reuse the id.
-  expect(hasJournaledChildStart(parent, ref)).toBe(false);
+  // Bound, but not started: no `startedAt`, so a retry may reuse the id.
+  expect(snapshotChildren(parent)[0].startedAt).toBeUndefined();
   expect(readRunEvents(parent)).toEqual([]);
 
   // Rebinding to the same id is the resume path; another id is a defect.
@@ -102,13 +100,13 @@ test("commitChildCall then bindChildRun: the call is durable before the identity
   expect(() => bindChildRun(parent, ref, "other-run")).toThrow(/bound to run after-run, not other-run/);
 });
 
-test("recordChildStarted: the start fact is the journal's, and it spends the identity", () => {
+test("recordChildStarted: persists startedAt on the reference, which spends the identity, then journals the start", () => {
   const { parent, step, state } = makeParent();
   const ref = declareChild(parent, state, { key: "main", kind: "main", pipeline: "./child.ts", ticket: "T-1" });
   bindChildRun(parent, ref, "child-run");
   const child = makeChild({ rootRunId: "parent-run", budgetScopeId: "parent-run", max_cost_usd: 2 });
 
-  recordChildStarted(parent, step, child);
+  recordChildStarted(parent, ref, step, child);
 
   expect(readRunEvents(parent)).toEqual([
     expect.objectContaining({
@@ -122,9 +120,13 @@ test("recordChildStarted: the start fact is the journal's, and it spends the ide
       maxCostUsd: 2,
     }),
   ]);
-  expect(hasJournaledChildStart(parent, ref)).toBe(true);
-  // Another identity under the same node is not started by this fact.
-  expect(hasJournaledChildStart(parent, { ...ref, runId: "another" })).toBe(false);
+  const startedAt = ref.startedAt;
+  expect(Date.parse(startedAt!)).toBeGreaterThan(0);
+  expect(snapshotChildren(parent)[0]).toMatchObject({ runId: "child-run", startedAt });
+
+  // A resumed generation booting the same child keeps the first start.
+  recordChildStarted(parent, ref, step, child);
+  expect(ref.startedAt).toBe(startedAt);
 });
 
 test("skipChild: a decision not to call is final and carries its reason", () => {
@@ -162,7 +164,7 @@ test("failChildLaunch: the child never ran, the reference stays resumable under 
   expect(ref.status).toBe("running");
 });
 
-test("settleChild: done from a PASS, failed otherwise, journaled then persisted", () => {
+test("settleChild: done from a PASS, failed otherwise, persisted then journaled", () => {
   const { parent, step, state } = makeParent();
   const ref = writable(
     declareChild(parent, state, { key: "main", kind: "main", pipeline: "./child.ts", ticket: "T-1" }),

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { PipelineStep } from "../../definition/definition.ts";
 import type { Run } from "./run.ts";
 import { saveRun } from "./run-repository.ts";
+import { nextAttemptNumber } from "./run-timeline.ts";
 import { makeRunStep } from "./run-step.ts";
 
 const def: PipelineStep = { id: "a", name: "A", command: "true", runner: "bash" };
@@ -46,11 +47,9 @@ test("saveRun: validates the contract", () => {
   const saved = JSON.parse(readFileSync(join(dir, "state.json"), "utf-8"));
   // Resume format is UNCHANGED by the definition/state split: runs already on
   // disk remain readable, and no definition leaks into the snapshot.
-  expect(saved.steps[0]).toEqual({ id: "a", status: "done", retries: 2 });
+  expect(saved.steps[0]).toEqual({ id: "a", status: "done", retries: 2, attempts: [] });
   expect(saved.steps[0].def).toBeUndefined();
   expect(saved.steps[0].command).toBeUndefined();
-  // Attempts belong to the journal, never the snapshot.
-  expect(saved.steps[0].attempts).toBeUndefined();
 });
 
 test("saveRun: preserves the timeout retry quota across a snapshot round trip", () => {
@@ -70,23 +69,28 @@ test("saveRun: preserves the timeout retry quota across a snapshot round trip", 
   expect(makeRunStep(def, saved.steps[0]).timeout_retries).toBe(2);
 });
 
-test("saveRun: preserves the attempt-numbering floor across a snapshot round trip", () => {
-  const dir = mkdtempSync(join(tmpdir(), "runstep-last-attempt-"));
+test("saveRun: attempts round-trip through the snapshot and set the next attempt number", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runstep-attempts-"));
+  const attempt = (n: number) => ({
+    attempt: n,
+    kind: "step" as const,
+    status: "done" as const,
+    started_at: "2026-01-01T00:00:00.000Z",
+    log_path: `steps/a/attempt-00${n}/output.log`,
+  });
   const run: Run = {
     name: "p",
     pipeline: "p",
     pipeline_path: "p.ts",
     run_dir: dir,
-    steps: [makeRunStep(def, { last_attempt: 3 })],
+    steps: [makeRunStep(def, { attempts: [attempt(1), attempt(3)] })],
   };
 
   saveRun(run);
 
   const saved = JSON.parse(readFileSync(join(dir, "state.json"), "utf-8"));
-  expect(saved.steps[0].last_attempt).toBe(3);
-  // Without the floor, a resume with a lost journal renumbers from 1 and
-  // overwrites the previous run's attempt logs.
-  expect(makeRunStep(def, saved.steps[0]).last_attempt).toBe(3);
+  expect(saved.steps[0].attempts).toEqual([attempt(1), attempt(3)]);
+  expect(nextAttemptNumber(makeRunStep(def, saved.steps[0]))).toBe(4);
 });
 
 test("saveRun: validates the contract", () => {

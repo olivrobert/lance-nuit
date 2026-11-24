@@ -1,26 +1,20 @@
 //
 // Run snapshot repository: project memory state and write atomically. Transitions
 // and resume logic live in their own modules.
-// respectively.
 
 import { basename, isAbsolute, relative } from "node:path";
 import type { PersistedRun, PersistedStepState } from "../persisted.js";
 import type { Run, RunStep } from "./run.js";
+import { RUN_SNAPSHOT_VERSION } from "./schema.js";
 import { FileRunStateStore } from "./stores/file-run-state-store.js";
 
-/** Extract persistable step state without its definition.
- *
- * `attempts` are deliberately absent: the journal already holds every attempt,
- * and each attempt's `command.txt` the full prompt it was given. Older releases
- * also wrote the last prompt here (`last_command`), rewritten in full on every
- * transition; such a snapshot still reads, and the next save drops it. */
+/** Extract persistable step state without its definition. */
 function persistedStep(step: RunStep): PersistedStepState {
   return {
     id: step.id,
     status: step.status,
     retries: step.retries,
     timeout_retries: step.timeout_retries,
-    last_attempt: step.last_attempt,
     replay: step.replay,
     started_at: step.started_at,
     finished_at: step.finished_at,
@@ -32,6 +26,7 @@ function persistedStep(step: RunStep): PersistedStepState {
     fail_kind: step.fail_kind,
     fail_cause: step.fail_cause,
     orchestration: step.orchestration,
+    attempts: step.attempts,
   };
 }
 
@@ -40,7 +35,7 @@ function persistedRun(run: Run): PersistedRun {
     ? relative(process.cwd(), run.pipeline_path).replaceAll("\\", "/")
     : run.pipeline_path;
   return {
-    schemaVersion: 1,
+    schemaVersion: RUN_SNAPSHOT_VERSION,
     runId: run.runId,
     name: run.name,
     ticket: run.ticket,
@@ -77,14 +72,21 @@ function persistedRun(run: Run): PersistedRun {
 
 /**
  * Write a complete snapshot through a temporary file and atomic rename. A kill
- * during the write must never leave truncated resume JSON.
+ * during the write must never leave truncated resume JSON. A write error
+ * propagates: the journal event a transition appends after this call must never
+ * describe a state that was not saved.
  */
 export function saveRun(run: Run): void {
+  if (run.readOnly) {
+    throw new Error(
+      `Run ${run.runId ?? run.run_dir} is finished (${run.status}): its snapshot is never written again.`,
+    );
+  }
   // SIGINT/SIGTERM persists ABORTED first. In-flight awaits may then save their
   // result; do not let them overwrite the abort snapshot with transient state.
   // abortRun and finalizeRun have already set status=ABORTED and are allowed through.
   if (run.aborted && run.status !== "ABORTED") return;
-  run.schemaVersion = 1;
+  run.schemaVersion = RUN_SNAPSHOT_VERSION;
   run.runId ??= basename(run.run_dir);
   run.updatedAt = new Date().toISOString();
   const snapshot = persistedRun(run);

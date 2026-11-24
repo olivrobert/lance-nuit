@@ -34,7 +34,7 @@ own ID. The `fork` option forces either behaviour when a pipeline needs it.
 ## What is persisted
 
 For each step the runner records the session, provider usage, and step totals
-in `state.json`, and every attempt with its log path in `events.jsonl` (see
+in `state.json`, with every attempt and its log path (see
 [which record is authoritative](persistence.md#which-record-is-authoritative)).
 Attempt output is stored at:
 
@@ -42,13 +42,15 @@ Attempt output is stored at:
 runs/<pipeline>/<run-id>/
 ├── state.json
 ├── events.jsonl
+├── feed.jsonl
 └── steps/<step>/attempt-001/
     ├── output.log
     └── command.txt   # the rendered command or prompt, written when the attempt starts
 ```
 
-The event journal is append-only and is also the live feed; a resume does not
-truncate it. Its event types and the way a reader classifies the lines it does not
+The event journal (`events.jsonl`) is an append-only trace of the contract
+events; the live feed (`feed.jsonl`) carries the runner's output events, the bash
+output and the raw backend stream. A resume truncates neither. Its event types and the way a reader classifies the lines it does not
 recognize are described in [persistence](persistence.md#the-event-journal). Cost
 uncertainty is traced there rather than only on the console:
 `step.cost.unaccounted` records each attempt whose tokens could not be priced,
@@ -91,7 +93,7 @@ point itself): a few helpers reached from inside a run are in the same position,
 notably the attempt lifecycle that warns when spend could not be priced (`Cost
 not computable … the ceiling is no longer guaranteed`) and the warning about a
 stale report that could not be removed. Those lines reach the console with their glyph but
-**not** `events.jsonl`, so a post-mortem reading only the feed will not see them.
+**not** `feed.jsonl`, so a post-mortem reading only the feed will not see them.
 A message never takes both paths, so nothing is ever printed twice.
 
 Claude may expose a session file location, which the final report includes when it

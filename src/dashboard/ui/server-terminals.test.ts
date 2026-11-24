@@ -9,7 +9,6 @@ import {
   makeTempDir,
   writeProjectsFile,
   writeRun,
-  writeRunEvents,
   writeRunLock,
 } from "../read-model/test-harness.js";
 import { USER_COOKIE } from "./cookies.js";
@@ -357,28 +356,22 @@ test("sessions: the coder session opens in the run's directory, 409 while runnin
 test("sessions: a finished attempt's session opens while the run runs, read-only; a running one has none yet", async () => {
   const { url, tmux, project } = await fixture();
   const triage = { provider: "claude", id: "6bd3dbb0-0923-4814-9958-449272a0d545", resumable: true };
+  const attempt = { attempt: 1, kind: "step" as const, started_at: "2026-09-05T07:00:00.000Z", log_path: "" };
   const runDir = writeRun(project, "PROJ-12", "feature", {
     runId: "r-1",
     status: "RUNNING",
     steps: [
-      { id: "triage", status: "done", retries: 0, session: triage },
-      { id: "code", status: "running", retries: 0, profile: "coder" },
+      {
+        id: "triage",
+        status: "done",
+        retries: 0,
+        session: triage,
+        attempts: [{ ...attempt, status: "done", session: triage }],
+      },
+      { id: "code", status: "running", retries: 0, profile: "coder", attempts: [{ ...attempt, status: "running" }] },
     ],
   });
   writeRunLock(runDir, process.ppid);
-  writeRunEvents(runDir, [
-    { ts: "2026-09-05T07:00:00.000Z", type: "step.attempt.started", stepId: "triage", attempt: 1, kind: "step" },
-    {
-      ts: "2026-09-05T07:01:00.000Z",
-      type: "step.attempt.finished",
-      stepId: "triage",
-      attempt: 1,
-      kind: "step",
-      status: "done",
-      session: triage,
-    },
-    { ts: "2026-09-05T07:02:00.000Z", type: "step.attempt.started", stepId: "code", attempt: 1, kind: "step" },
-  ]);
 
   expect((await openSession(url, { step: "code", attempt: 1 })).status).toBe(404);
   expect((await openSession(url, { step: "unknown", attempt: 1 })).status).toBe(404);

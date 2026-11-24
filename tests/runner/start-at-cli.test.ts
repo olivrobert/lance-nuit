@@ -87,14 +87,15 @@ test("--start-at replays the target and every later step after a manual fix", ()
   expect(trace(cwd)).toEqual(["implement", "acceptance", "commit", "publish", "acceptance", "commit", "publish"]);
 });
 
-test("--run on a PASS run with --start-at replays from the target in the same run", () => {
+test("--run on a PASS run with --start-at is refused, the run is never written again", () => {
   const cwd = scratchProject();
   expect(replayAfterFix(cwd).status).toBe(0);
   const runId = latestRunId(cwd);
 
   const again = runRunner(cwd, "T-1", "--run", runId, "--start-at", "publish");
 
-  expect(again.status).toBe(0);
-  expect(trace(cwd).slice(-2)).toEqual(["publish", "publish"]);
+  expect(again.status).not.toBe(0);
+  expect(again.stderr).toContain(`Run ${runId} already passed and is never written again`);
+  expect(trace(cwd)).toHaveLength(7);
   expect(latestRunId(cwd)).toBe(runId);
 });

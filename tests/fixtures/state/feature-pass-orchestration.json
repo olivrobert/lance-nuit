@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "runId": "20260902T121037.058Z-feature-bed32f",
   "name": "feature",
   "ticket": "DEMO-380",
@@ -27,12 +27,24 @@
       "id": "ticket",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:10:37.060Z",
       "finished_at": "2026-09-02T12:10:37.681Z",
       "control": {
         "duration_ms": 600
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:10:37.060Z",
+          "log_path": "logs/ticket-1.log",
+          "finished_at": "2026-09-02T12:10:37.681Z",
+          "control": {
+            "duration_ms": 600
+          }
+        }
+      ]
     },
     {
       "id": "preflight",
@@ -63,63 +75,160 @@
             }
           }
         ]
-      }
+      },
+      "attempts": []
     },
     {
       "id": "preflight-project",
       "status": "skipped",
       "retries": 0,
-      "finished_at": "2026-09-02T12:10:40.039Z"
+      "finished_at": "2026-09-02T12:10:40.039Z",
+      "attempts": []
     },
     {
       "id": "acceptance-criteria-present",
       "status": "done",
       "retries": 0,
-      "last_attempt": 3,
       "started_at": "2026-09-02T13:05:14.028Z",
       "finished_at": "2026-09-02T13:05:15.048Z",
       "control": {
         "duration_ms": 2993
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "failed",
+          "started_at": "2026-09-02T13:05:14.028Z",
+          "log_path": "logs/acceptance-criteria-present-1.log",
+          "finished_at": "2026-09-02T13:05:15.048Z"
+        },
+        {
+          "attempt": 2,
+          "kind": "step",
+          "status": "failed",
+          "started_at": "2026-09-02T13:05:14.028Z",
+          "log_path": "logs/acceptance-criteria-present-2.log",
+          "finished_at": "2026-09-02T13:05:15.048Z"
+        },
+        {
+          "attempt": 3,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T13:05:14.028Z",
+          "log_path": "logs/acceptance-criteria-present-3.log",
+          "finished_at": "2026-09-02T13:05:15.048Z",
+          "control": {
+            "duration_ms": 2993
+          }
+        }
+      ]
     },
     {
       "id": "ticket-file",
       "status": "done",
       "retries": 0,
-      "last_attempt": 3,
       "started_at": "2026-09-02T13:05:15.049Z",
       "finished_at": "2026-09-02T13:05:16.063Z",
       "control": {
         "duration_ms": 2608
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "failed",
+          "started_at": "2026-09-02T13:05:15.049Z",
+          "log_path": "logs/ticket-file-1.log",
+          "finished_at": "2026-09-02T13:05:16.063Z"
+        },
+        {
+          "attempt": 2,
+          "kind": "step",
+          "status": "failed",
+          "started_at": "2026-09-02T13:05:15.049Z",
+          "log_path": "logs/ticket-file-2.log",
+          "finished_at": "2026-09-02T13:05:16.063Z"
+        },
+        {
+          "attempt": 3,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T13:05:15.049Z",
+          "log_path": "logs/ticket-file-3.log",
+          "finished_at": "2026-09-02T13:05:16.063Z",
+          "control": {
+            "duration_ms": 2608
+          }
+        }
+      ]
     },
     {
       "id": "inputs-dir",
       "status": "done",
       "retries": 0,
-      "last_attempt": 3,
       "started_at": "2026-09-02T13:05:16.064Z",
       "finished_at": "2026-09-02T13:05:16.078Z",
       "control": {
         "duration_ms": 22
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "failed",
+          "started_at": "2026-09-02T13:05:16.064Z",
+          "log_path": "logs/inputs-dir-1.log",
+          "finished_at": "2026-09-02T13:05:16.078Z"
+        },
+        {
+          "attempt": 2,
+          "kind": "step",
+          "status": "failed",
+          "started_at": "2026-09-02T13:05:16.064Z",
+          "log_path": "logs/inputs-dir-2.log",
+          "finished_at": "2026-09-02T13:05:16.078Z"
+        },
+        {
+          "attempt": 3,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T13:05:16.064Z",
+          "log_path": "logs/inputs-dir-3.log",
+          "finished_at": "2026-09-02T13:05:16.078Z",
+          "control": {
+            "duration_ms": 22
+          }
+        }
+      ]
     },
     {
       "id": "spec-refresh",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:10:41.987Z",
       "finished_at": "2026-09-02T12:10:41.988Z",
       "control": {
         "duration_ms": 1
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:10:41.987Z",
+          "log_path": "logs/spec-refresh-1.log",
+          "finished_at": "2026-09-02T12:10:41.988Z",
+          "control": {
+            "duration_ms": 1
+          }
+        }
+      ]
     },
     {
       "id": "triage",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:10:41.989Z",
       "finished_at": "2026-09-02T12:13:59.197Z",
       "session": {
@@ -143,20 +252,37 @@
         "cache_read_tokens": 1139042,
         "cache_creation_tokens": 54852,
         "tools_used": ["Read", "Grep", "Glob", "Write"]
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:10:41.989Z",
+          "log_path": "logs/triage-1.log",
+          "finished_at": "2026-09-02T12:13:59.197Z",
+          "control": {
+            "duration_ms": 196359,
+            "total_cost_usd": 1.4128439999999998,
+            "model": "claude-opus-5",
+            "last_turn_context_tokens": 58033,
+            "context_window": 200000
+          }
+        }
+      ]
     },
     {
       "id": "spec-fast",
       "status": "skipped",
       "retries": 0,
       "finished_at": "2026-09-02T12:13:59.206Z",
-      "profile": "reviewer"
+      "profile": "reviewer",
+      "attempts": []
     },
     {
       "id": "spec",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:13:59.207Z",
       "finished_at": "2026-09-02T12:16:30.405Z",
       "session": {
@@ -180,76 +306,143 @@
         "cache_read_tokens": 637956,
         "cache_creation_tokens": 41664,
         "tools_used": ["Bash"]
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:13:59.207Z",
+          "log_path": "logs/spec-1.log",
+          "finished_at": "2026-09-02T12:16:30.405Z",
+          "control": {
+            "duration_ms": 150104,
+            "total_cost_usd": 0.987453,
+            "model": "claude-opus-5",
+            "last_turn_context_tokens": 52216,
+            "context_window": 200000
+          }
+        }
+      ]
     },
     {
       "id": "spec-amend",
       "status": "skipped",
       "retries": 0,
       "finished_at": "2026-09-02T12:16:30.407Z",
-      "profile": "reviewer"
+      "profile": "reviewer",
+      "attempts": []
     },
     {
       "id": "spec-stamp",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:16:30.407Z",
       "finished_at": "2026-09-02T12:16:30.411Z",
       "control": {
         "duration_ms": 2
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:16:30.407Z",
+          "log_path": "logs/spec-stamp-1.log",
+          "finished_at": "2026-09-02T12:16:30.411Z",
+          "control": {
+            "duration_ms": 2
+          }
+        }
+      ]
     },
     {
       "id": "escalate-inputs",
       "status": "skipped",
       "retries": 0,
-      "finished_at": "2026-09-02T12:16:30.412Z"
+      "finished_at": "2026-09-02T12:16:30.412Z",
+      "attempts": []
     },
     {
       "id": "inputs-gate",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:16:30.413Z",
       "finished_at": "2026-09-02T12:16:30.414Z",
       "control": {
         "duration_ms": 0
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:16:30.413Z",
+          "log_path": "logs/inputs-gate-1.log",
+          "finished_at": "2026-09-02T12:16:30.414Z",
+          "control": {
+            "duration_ms": 0
+          }
+        }
+      ]
     },
     {
       "id": "escalate-assumptions",
       "status": "skipped",
       "retries": 0,
-      "finished_at": "2026-09-02T12:16:30.415Z"
+      "finished_at": "2026-09-02T12:16:30.415Z",
+      "attempts": []
     },
     {
       "id": "assumptions-gate",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:16:30.416Z",
       "finished_at": "2026-09-02T12:16:30.417Z",
       "control": {
         "duration_ms": 0
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:16:30.416Z",
+          "log_path": "logs/assumptions-gate-1.log",
+          "finished_at": "2026-09-02T12:16:30.417Z",
+          "control": {
+            "duration_ms": 0
+          }
+        }
+      ]
     },
     {
       "id": "plan-refresh",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:16:30.425Z",
       "finished_at": "2026-09-02T12:16:30.428Z",
       "control": {
         "duration_ms": 2
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:16:30.425Z",
+          "log_path": "logs/plan-refresh-1.log",
+          "finished_at": "2026-09-02T12:16:30.428Z",
+          "control": {
+            "duration_ms": 2
+          }
+        }
+      ]
     },
     {
       "id": "plan",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:16:30.429Z",
       "finished_at": "2026-09-02T12:33:57.401Z",
       "session": {
@@ -273,104 +466,196 @@
         "cache_read_tokens": 5343064,
         "cache_creation_tokens": 253727,
         "tools_used": ["Bash", "agent(Explore)", "Write", "agent(pipeline-core:plan-writer)", "Read", "Edit"]
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:16:30.429Z",
+          "log_path": "logs/plan-1.log",
+          "finished_at": "2026-09-02T12:33:57.401Z",
+          "control": {
+            "duration_ms": 1045753,
+            "total_cost_usd": 6.613853000000003,
+            "model": "claude-opus-5",
+            "last_turn_context_tokens": 59981,
+            "context_window": 200000
+          }
+        }
+      ]
     },
     {
       "id": "lots-partition",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:33:57.402Z",
       "finished_at": "2026-09-02T12:33:57.404Z",
       "control": {
         "duration_ms": 1
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:33:57.402Z",
+          "log_path": "logs/lots-partition-1.log",
+          "finished_at": "2026-09-02T12:33:57.404Z",
+          "control": {
+            "duration_ms": 1
+          }
+        }
+      ]
     },
     {
       "id": "plan-audit",
       "status": "skipped",
       "retries": 0,
       "finished_at": "2026-09-02T12:33:57.405Z",
-      "profile": "planner"
+      "profile": "planner",
+      "attempts": []
     },
     {
       "id": "lots-partition-post-audit",
       "status": "skipped",
       "retries": 0,
-      "finished_at": "2026-09-02T12:33:57.406Z"
+      "finished_at": "2026-09-02T12:33:57.406Z",
+      "attempts": []
     },
     {
       "id": "plan-stamp",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:33:57.406Z",
       "finished_at": "2026-09-02T12:33:57.408Z",
       "control": {
         "duration_ms": 1
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:33:57.406Z",
+          "log_path": "logs/plan-stamp-1.log",
+          "finished_at": "2026-09-02T12:33:57.408Z",
+          "control": {
+            "duration_ms": 1
+          }
+        }
+      ]
     },
     {
       "id": "escalate-plan",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:33:57.408Z",
       "finished_at": "2026-09-02T12:34:03.184Z",
       "control": {
         "duration_ms": 5762
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:33:57.408Z",
+          "log_path": "logs/escalate-plan-1.log",
+          "finished_at": "2026-09-02T12:34:03.184Z",
+          "control": {
+            "duration_ms": 5762
+          }
+        }
+      ]
     },
     {
       "id": "plan-gate",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:47:24.709Z",
       "finished_at": "2026-09-02T12:47:24.710Z",
       "control": {
         "duration_ms": 0
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:47:24.709Z",
+          "log_path": "logs/plan-gate-1.log",
+          "finished_at": "2026-09-02T12:47:24.710Z",
+          "control": {
+            "duration_ms": 0
+          }
+        }
+      ]
     },
     {
       "id": "escalate-lots",
       "status": "skipped",
       "retries": 0,
-      "finished_at": "2026-09-02T12:47:24.711Z"
+      "finished_at": "2026-09-02T12:47:24.711Z",
+      "attempts": []
     },
     {
       "id": "lots-gate",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:47:24.712Z",
       "finished_at": "2026-09-02T12:47:24.713Z",
       "control": {
         "duration_ms": 0
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:47:24.712Z",
+          "log_path": "logs/lots-gate-1.log",
+          "finished_at": "2026-09-02T12:47:24.713Z",
+          "control": {
+            "duration_ms": 0
+          }
+        }
+      ]
     },
     {
       "id": "escalate-reuse",
       "status": "skipped",
       "retries": 0,
-      "finished_at": "2026-09-02T12:47:24.713Z"
+      "finished_at": "2026-09-02T12:47:24.713Z",
+      "attempts": []
     },
     {
       "id": "reuse-gate",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:47:24.714Z",
       "finished_at": "2026-09-02T12:47:24.714Z",
       "control": {
         "duration_ms": 0
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:47:24.714Z",
+          "log_path": "logs/reuse-gate-1.log",
+          "finished_at": "2026-09-02T12:47:24.714Z",
+          "control": {
+            "duration_ms": 0
+          }
+        }
+      ]
     },
     {
       "id": "branch-name",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T12:47:24.715Z",
       "finished_at": "2026-09-02T12:47:54.252Z",
       "session": {
@@ -393,18 +678,55 @@
         "cache_read_tokens": 52224,
         "tools_used": ["Bash", "FileChange"],
         "reasoning_tokens": 56
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T12:47:24.715Z",
+          "log_path": "logs/branch-name-1.log",
+          "finished_at": "2026-09-02T12:47:54.252Z",
+          "control": {
+            "duration_ms": 29533,
+            "total_cost_usd": 0.00539208,
+            "cost_estimated": true,
+            "model": "gpt-5.6-luna",
+            "provider": "codex"
+          }
+        }
+      ]
     },
     {
       "id": "branch-checkout",
       "status": "done",
       "retries": 0,
-      "last_attempt": 2,
       "started_at": "2026-09-02T13:05:16.079Z",
       "finished_at": "2026-09-02T13:05:16.106Z",
       "control": {
         "duration_ms": 137
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "failed",
+          "started_at": "2026-09-02T13:05:16.079Z",
+          "log_path": "logs/branch-checkout-1.log",
+          "finished_at": "2026-09-02T13:05:16.106Z"
+        },
+        {
+          "attempt": 2,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T13:05:16.079Z",
+          "log_path": "logs/branch-checkout-2.log",
+          "finished_at": "2026-09-02T13:05:16.106Z",
+          "control": {
+            "duration_ms": 137
+          }
+        }
+      ]
     },
     {
       "id": "implement-lots",
@@ -521,47 +843,73 @@
           }
         ],
         "items": ["LOT-01", "LOT-02"]
-      }
+      },
+      "attempts": []
     },
     {
       "id": "quality-full",
       "status": "skipped",
       "retries": 0,
-      "finished_at": "2026-09-02T14:08:41.795Z"
+      "finished_at": "2026-09-02T14:08:41.795Z",
+      "attempts": []
     },
     {
       "id": "commit-finalize",
       "status": "skipped",
       "retries": 0,
-      "finished_at": "2026-09-02T14:08:41.812Z"
+      "finished_at": "2026-09-02T14:08:41.812Z",
+      "attempts": []
     },
     {
       "id": "merge-request",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T14:08:43.147Z",
       "finished_at": "2026-09-02T14:08:45.185Z",
       "control": {
         "duration_ms": 2034
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T14:08:43.147Z",
+          "log_path": "logs/merge-request-1.log",
+          "finished_at": "2026-09-02T14:08:45.185Z",
+          "control": {
+            "duration_ms": 2034
+          }
+        }
+      ]
     },
     {
       "id": "work-item-review",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T14:08:45.186Z",
       "finished_at": "2026-09-02T14:08:48.895Z",
       "control": {
         "duration_ms": 3705
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T14:08:45.186Z",
+          "log_path": "logs/work-item-review-1.log",
+          "finished_at": "2026-09-02T14:08:48.895Z",
+          "control": {
+            "duration_ms": 3705
+          }
+        }
+      ]
     },
     {
       "id": "constraints-retrospective",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T14:08:48.905Z",
       "finished_at": "2026-09-02T14:13:27.872Z",
       "session": {
@@ -585,7 +933,24 @@
         "cache_read_tokens": 1126659,
         "cache_creation_tokens": 51056,
         "tools_used": ["Bash"]
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T14:08:48.905Z",
+          "log_path": "logs/constraints-retrospective-1.log",
+          "finished_at": "2026-09-02T14:13:27.872Z",
+          "control": {
+            "duration_ms": 277745,
+            "total_cost_usd": 1.5650344999999999,
+            "model": "claude-opus-5",
+            "last_turn_context_tokens": 61608,
+            "context_window": 200000
+          }
+        }
+      ]
     }
   ],
   "total_control": {

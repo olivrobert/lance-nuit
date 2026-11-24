@@ -163,7 +163,7 @@ export async function executeChild(
   }
 
   // 5. Start fact: from here on the identity is spent.
-  recordChildStarted(parent, step, childRun);
+  recordChildStarted(parent, ref, step, childRun);
 
   // 6. Execution, unless the child owes nothing. A terminal child with only
   //    done/skipped steps must be reported as-is; a settled snapshot that never

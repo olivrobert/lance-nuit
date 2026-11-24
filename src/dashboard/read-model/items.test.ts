@@ -15,7 +15,6 @@ import {
   writeHistory,
   writeProjectsFile,
   writeRun,
-  writeRunEvents,
   writeRunLock,
 } from "./test-harness.ts";
 
@@ -169,28 +168,34 @@ test("items: a RUNNING run whose runner died is an interrupted failure, one whos
 test("items: a run that died inside an attempt names the step to replay", async () => {
   const project = listedProject();
   const ts = "2026-09-05T08:00:00.000Z";
-  const started = { ts, type: "step.attempt.started", stepId: "coder", attempt: 1, kind: "step" };
-  const steps = [{ id: "coder", status: "running" as const, retries: 0 }];
+  const running = { attempt: 1, kind: "step" as const, status: "running" as const, started_at: ts, log_path: "" };
+  const interrupted = { ...running, status: "failed" as const, interrupted: true as const };
+  const done = { ...running, status: "done" as const };
 
-  // (a) crashed with an attempt still open in the journal.
-  const open = writeRun(project, "DEMO-1", "feature", { runId: "r-1", status: "RUNNING", updatedAt: ts, steps });
+  // (a) crashed with an attempt still open in the snapshot.
+  const open = writeRun(project, "DEMO-1", "feature", {
+    runId: "r-1",
+    status: "RUNNING",
+    updatedAt: ts,
+    steps: [{ id: "coder", status: "running", retries: 0, attempts: [running] }],
+  });
   writeRunLock(open, DEAD_PID);
-  writeRunEvents(open, [started]);
 
   // (b) crashed between attempts: nothing to replay.
-  const between = writeRun(project, "DEMO-2", "feature", { runId: "r-2", status: "RUNNING", updatedAt: ts, steps });
+  const between = writeRun(project, "DEMO-2", "feature", {
+    runId: "r-2",
+    status: "RUNNING",
+    updatedAt: ts,
+    steps: [{ id: "coder", status: "running", retries: 0, attempts: [done] }],
+  });
   writeRunLock(between, DEAD_PID);
-  writeRunEvents(between, [
-    started,
-    { ts, type: "step.attempt.finished", stepId: "coder", attempt: 1, kind: "step", status: "done" },
-  ]);
 
   // (c) a plain resume settled the crashed attempt, then stopped on it.
-  const stoppedDir = writeRun(project, "DEMO-3", "feature", {
+  writeRun(project, "DEMO-3", "feature", {
     runId: "r-3",
     status: "STOPPED",
     updatedAt: ts,
-    steps: [{ id: "coder", status: "pending", retries: 0 }],
+    steps: [{ id: "coder", status: "pending", retries: 0, attempts: [interrupted] }],
     outcome: {
       phase: "coder",
       reason: "interrupted",
@@ -199,25 +204,13 @@ test("items: a run that died inside an attempt names the step to replay", async 
       stop: { kind: "needs-decision", detail: "the runner died inside coder" },
     },
   });
-  writeRunEvents(stoppedDir, [
-    started,
-    {
-      ts,
-      type: "step.attempt.finished",
-      stepId: "coder",
-      attempt: 1,
-      kind: "step",
-      status: "failed",
-      interrupted: true,
-    },
-  ]);
 
-  // (d) stopped at a gate: the journal is not consulted.
-  const gateDir = writeRun(project, "DEMO-4", "feature", {
+  // (d) stopped at a gate: the attempts are not consulted.
+  writeRun(project, "DEMO-4", "feature", {
     runId: "r-4",
     status: "STOPPED",
     updatedAt: ts,
-    steps: [{ id: "coder", status: "pending", retries: 0 }],
+    steps: [{ id: "coder", status: "pending", retries: 0, attempts: [interrupted] }],
     outcome: {
       phase: "plan",
       reason: "waiting",
@@ -226,7 +219,6 @@ test("items: a run that died inside an attempt names the step to replay", async 
       stop: { subject: "plan", kind: "needs-decision", detail: "plan needs approval" },
     },
   });
-  writeRunEvents(gateDir, [started]);
 
   expect((await readItem("demo-app", "DEMO-1"))!.interruptedStep).toBe("coder");
   expect((await readItem("demo-app", "DEMO-2"))!.interruptedStep).toBeUndefined();

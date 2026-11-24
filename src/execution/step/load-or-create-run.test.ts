@@ -11,25 +11,25 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.js";
-import type { PipelineContext } from "../../shared/language/context.js";
-import { appendRunEvent, readRunEvents } from "../../run/record/run-journal.js";
-import { type LoadOrCreateRunOptions, loadOrCreateRun } from "./load-or-create-run.js";
+import { allocateAttempt, openAttempt, settleAttempt } from "../../run/record/attempt-lifecycle.js";
+import { openRunLedger, runSpend } from "../../run/record/cost-accounting.js";
+import { writable } from "../../run/record/run.js";
+import { readRunEvents } from "../../run/record/run-journal.js";
 import { pendingSteps, resumeDecision } from "../../run/record/run-predicates.js";
 import { saveRun } from "../../run/record/run-repository.js";
+import { selectExplicitRun } from "../../run/record/run-selection.js";
 import { readRunSnapshot } from "../../run/record/run-snapshot.js";
 import { abortRun, finalizeRun, updateStep } from "../../run/record/run-transitions.js";
-import { allocateAttempt } from "../../run/record/attempt-lifecycle.js";
-import { runSpend } from "../../run/record/cost-accounting.js";
-import { resolveRunDir } from "../../run/record/stores/run-storage.js";
 import { FileRunStateStore } from "../../run/record/stores/file-run-state-store.js";
-import { selectExplicitRun } from "../../run/record/run-selection.js";
-import { builtinRegistries } from "../../../tests/builtin-registries.ts";
-import { NULL_RUN_OUTPUT } from "../run-output.js";
-import { executeRunSteps, type StepLoopDeps } from "./step-loop.js";
-import { writable } from "../../run/record/run.js";
+import { resolveRunDir } from "../../run/record/stores/run-storage.js";
+import type { PipelineContext } from "../../shared/language/context.js";
 import { sha256Text } from "../../work-items/store/hash.js";
 import { commitPass } from "../../work-items/store/step-lock.js";
+import { NULL_RUN_OUTPUT } from "../run-output.js";
+import { type LoadOrCreateRunOptions, loadOrCreateRun } from "./load-or-create-run.js";
+import { executeRunSteps, type StepLoopDeps } from "./step-loop.js";
 
 function pipelineFile(root: string): string {
   const path = join(root, "p.ts");
@@ -256,294 +256,13 @@ test("a caller must say whether the run it opens is in a worktree", () => {
   expect(given.worktree).toBe(false);
 });
 
-test("resume: an attempt priced in the journal but missing from the snapshot still counts", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-journal-cost-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-4" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-4", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-4",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  updateStep(run, run.steps[0]!, "running");
-  appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
-  // `finishAttempt` appends the finish event, then writes the snapshot. Die in between.
-  appendRunEvent(run, "step.attempt.finished", {
-    stepId: "a",
-    attempt: 1,
-    kind: "step",
-    status: "done",
-    control: { duration_ms: 1, total_cost_usd: 1 },
-    usage: { input_tokens: 10 },
-    logPath: "steps/a/1.log",
-  });
-
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-4",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(resumed.steps[0]!.attempts?.[0]?.control?.total_cost_usd).toBe(1);
-  // The budget ledger seeds from step totals: the journaled spend must reach them.
-  expect(resumed.steps[0]!.control?.total_cost_usd).toBe(1);
-  expect(resumed.steps[0]!.usage?.input_tokens).toBe(10);
-  expect(runSpend(resumed).usd).toBe(1);
-});
-
-test("resume: the snapshot total wins when it already covers the journaled attempts", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-snapshot-cost-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-5" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-5", undefined, true, ctx);
-  const run = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-5",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
-  appendRunEvent(run, "step.attempt.finished", {
-    stepId: "a",
-    attempt: 1,
-    kind: "step",
-    status: "done",
-    control: { duration_ms: 1, total_cost_usd: 1 },
-    logPath: "steps/a/1.log",
-  });
-  run.steps[0]!.control = { duration_ms: 5, total_cost_usd: 1.5, model: "m" };
-  updateStep(run, run.steps[0]!, "done");
-
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-5",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(resumed.steps[0]!.control).toEqual({ duration_ms: 5, total_cost_usd: 1.5, model: "m" });
-});
-
-test("resume: a fix pass left running by a crash is closed as failed and unpriced, down to the step total", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-crashed-attempt-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-6", undefined, true, ctx);
-  const run = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-6",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  updateStep(run, run.steps[0]!, "running");
-  // A priced step attempt, then a fix pass that never reported: the runner died.
-  run.steps[0]!.control = { duration_ms: 5, total_cost_usd: 1, model: "m" };
-  appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
-  appendRunEvent(run, "step.attempt.finished", {
-    stepId: "a",
-    attempt: 1,
-    kind: "step",
-    status: "failed",
-    control: { duration_ms: 5, total_cost_usd: 1, model: "m" },
-    logPath: "steps/a/1.log",
-  });
-  appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 2, kind: "fix", logPath: "steps/a/2.log" });
-  saveRun(run);
-
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-6",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  const step = resumed.steps[0]!;
-  expect(step.attempts.map((attempt) => attempt.status)).toEqual(["failed", "failed"]);
-  expect(step.attempts[1]).toMatchObject({
-    kind: "fix",
-    control: { cost_estimated: true, cost_unknown: true },
-    errors: "runner died before the attempt reported its result (crash, OOM, or SIGKILL)",
-  });
-  expect(step.attempts[1]?.finished_at).toBeDefined();
-  // The uncertainty reaches the step total that seeds the ledger; the priced part stays.
-  expect(step.control).toMatchObject({ total_cost_usd: 1, model: "m", cost_unknown: true });
-
-  // The decision is durable: the journal carries the finish with the flag.
-  const finished = readRunEvents(dir).filter((event) => event.type === "step.attempt.finished" && event.attempt === 2);
-  expect(finished).toHaveLength(1);
-  expect(finished[0]).toMatchObject({
-    stepId: "a",
-    kind: "fix",
-    status: "failed",
-    control: { cost_unknown: true },
-    logPath: "steps/a/2.log",
-    reason: "runner died before the attempt reported its result (crash, OOM, or SIGKILL)",
-  });
-
-  // Settled once: a second resume finds nothing left running and writes no new finish.
-  const { run: again } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-6",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(again.steps[0]!.attempts.map((attempt) => attempt.status)).toEqual(["failed", "failed"]);
-  expect(readRunEvents(dir).filter((event) => event.type === "step.attempt.finished")).toHaveLength(2);
-});
-
-test("resume: an attempt left running by a crash is projected as interrupted on every later resume", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-interrupted-attempt-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6b" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-6b", undefined, true, ctx);
-  const run = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-6b",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  updateStep(run, run.steps[0]!, "running");
-  appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
-  saveRun(run);
-
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-6b",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(resumed.steps[0]!.attempts[0]).toMatchObject({ status: "failed", interrupted: true });
-  const finished = readRunEvents(dir).filter((event) => event.type === "step.attempt.finished");
-  expect(finished).toHaveLength(1);
-  expect(finished[0]).toMatchObject({ stepId: "a", attempt: 1, interrupted: true });
-
-  // Settlement wrote the marker once; the next resume reads it back from the journal.
-  const { run: again } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-6b",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(again.steps[0]!.attempts[0]).toMatchObject({ status: "failed", interrupted: true });
-});
-
-test("resume: an attempt the loop opened is read back and settled after a crash during its spawn", async () => {
-  // The state the other crash tests fabricate, produced here by the loop itself:
-  // what `openAttempt` persisted before spawn is all a killed runner leaves.
-  const root = mkdtempSync(join(tmpdir(), "resume-crash-in-spawn-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-6f" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-6f", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-6f",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  const { deps } = countingDeps(ctx, []);
-  const spawn = deps.executeStep;
-  const lockPath = join(ctx.paths.artifactsDir!, "lock.json");
-  let onDisk: { state: string; events: string; lock: string } | undefined;
-  deps.executeStep = async (...args) => {
-    if (args[0].id === "b") {
-      onDisk = {
-        state: readFileSync(join(dir, "state.json"), "utf8"),
-        events: readFileSync(join(dir, "events.jsonl"), "utf8"),
-        lock: readFileSync(lockPath, "utf8"),
-      };
-    }
-    return spawn(...args);
-  };
-  await executeRunSteps(run, { resuming: false }, deps, ctx);
-  if (!onDisk) throw new Error("step b never spawned");
-  // The runner dies while b's process runs: the disk keeps what it held then.
-  writeFileSync(join(dir, "state.json"), onDisk.state);
-  writeFileSync(join(dir, "events.jsonl"), onDisk.events);
-  writeFileSync(lockPath, onDisk.lock);
-
-  const snapshot = readRunSnapshot(join(dir, "state.json"));
-  expect(snapshot?.steps.map((step) => [step.id, step.status, step.last_attempt])).toEqual([
-    ["a", "done", 1],
-    ["b", "running", 1],
-    ["c", "pending", undefined],
-  ]);
-
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-6f",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  const b = resumed.steps[1]!;
-  expect(b.attempts).toHaveLength(1);
-  expect(b.attempts[0]).toMatchObject({
-    attempt: 1,
-    kind: "step",
-    status: "failed",
-    interrupted: true,
-    errors: "runner died before the attempt reported its result (crash, OOM, or SIGKILL)",
-  });
-  expect(b.last_attempt).toBe(1);
-  const finished = readRunEvents(dir).filter((event) => event.type === "step.attempt.finished" && event.stepId === "b");
-  expect(finished).toHaveLength(1);
-  expect(finished[0]).toMatchObject({ attempt: 1, status: "failed", interrupted: true });
-
-  // Settled as an interrupted pass: the next execution asks before replaying it.
-  const next = countingDeps(ctx, []);
-  expect((await executeRunSteps(resumed, { resuming: true }, next.deps, ctx)).stopped).toBe(true);
-  expect(next.spawned).toEqual([]);
-});
-
 /** Leave step `id` as a runner death leaves it: `running`, its attempt started
  *  and never finished. */
 function crashDuring(opened: Awaited<ReturnType<typeof loadOrCreateRun>>["run"], id: string): void {
   const run = writable(opened);
   const step = run.steps.find((candidate) => candidate.id === id)!;
   updateStep(run, step, "running");
-  const attempt = step.attempts.length + 1;
-  appendRunEvent(run, "step.attempt.started", {
-    stepId: id,
-    attempt,
-    kind: "step",
-    logPath: `steps/${id}/${attempt}.log`,
-  });
-  saveRun(run);
+  openAttempt(run, step, { kind: "step", command: id });
 }
 
 test("resume: a step interrupted by a crash stops the run instead of replaying, until --replay-interrupted authorizes it", async () => {
@@ -577,6 +296,7 @@ test("resume: a step interrupted by a crash stops the run instead of replaying, 
   const outcome = await executeRunSteps(resumed, { resuming: true }, first.deps, ctx);
   expect(outcome.stopped).toBe(true);
   expect(first.spawned).toEqual([]);
+  finalizeRun(resumed, outcome);
   const snapshot = readRunSnapshot(join(dir, "state.json"))!;
   expect(snapshot.status).toBe("STOPPED");
   expect(snapshot.outcome).toMatchObject({ phase: "a", resumable: true, stop: { kind: "needs-decision" } });
@@ -1075,173 +795,6 @@ test("--start-at leaves the steps before it as they are at boot", async () => {
   expect(resumed.steps.map((step) => step.status)).toEqual(["done", "pending", "pending"]);
 });
 
-// Invariant: the journal owns the attempts. A resume that cannot read it must
-// fail, not come back with zero attempts and a budget that forgot their price.
-test("invariant: a resume over an unreadable journal fails instead of forgetting the attempts", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-invariant-unreadable-journal-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-9" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-9", undefined, true, ctx);
-  const { run } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-9",
-    runDir: dir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  updateStep(run, run.steps[0]!, "running");
-  appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
-  appendRunEvent(run, "step.attempt.finished", {
-    stepId: "a",
-    attempt: 1,
-    kind: "step",
-    status: "done",
-    control: { duration_ms: 1, total_cost_usd: 1 },
-    logPath: "steps/a/1.log",
-  });
-  rmSync(join(dir, "events.jsonl"));
-  mkdirSync(join(dir, "events.jsonl"));
-
-  await expect(
-    loadOrCreateRun({ pipelinePath: path, ticket: "T-9", runDir: dir, fresh: false, context: ctx, worktree: false }),
-  ).rejects.toThrow(/EISDIR/);
-  // The snapshot is untouched: restoring the journal makes the run resumable again.
-  expect(readRunSnapshot(join(dir, "state.json"))?.steps[0]?.status).toBe("running");
-});
-
-// Authority of the run totals. `total_control` / `total_usage` are materialized by
-// a finalization and describe that generation only: a terminal snapshot may hand
-// them back, a live resume derives them from the steps.
-test("resume: materialized totals are trusted on a terminal snapshot and derived on a live one", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-run-totals-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-totals" });
-  const path = pipelineFile(root);
-
-  // A PASS run: nothing left to execute, so the finalized totals are the record.
-  const passDir = resolveRunDir("p", "T-totals", undefined, true, ctx);
-  const passed = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-totals",
-        runDir: passDir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  for (const step of passed.steps) {
-    step.control = { duration_ms: 1, total_cost_usd: 1 };
-    updateStep(passed, step, "done");
-  }
-  finalizeRun(passed);
-  expect(readRunSnapshot(join(passDir, "state.json"))?.total_control?.total_cost_usd).toBe(3);
-  const { run: terminal } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-totals",
-    runDir: passDir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(terminal.status).toBe("PASS");
-  expect(terminal.total_control?.total_cost_usd).toBe(3);
-
-  // A run with work left: a total written by an earlier generation is dropped, and
-  // the ledger seed reads the steps, which know of the spend that came after it.
-  const liveDir = resolveRunDir("p", "T-totals", undefined, true, ctx);
-  const live = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-totals",
-        runDir: liveDir,
-        fresh: false,
-        context: ctx,
-        worktree: false,
-      })
-    ).run,
-  );
-  live.steps[0]!.control = { duration_ms: 1, total_cost_usd: 1 };
-  updateStep(live, live.steps[0]!, "done");
-  live.total_control = { duration_ms: 1, total_cost_usd: 0.25 };
-  live.total_usage = { output_tokens: 1 };
-  saveRun(live);
-  expect(readRunSnapshot(join(liveDir, "state.json"))?.total_control?.total_cost_usd).toBe(0.25);
-  const { run: resumed } = await loadOrCreateRun({
-    pipelinePath: path,
-    ticket: "T-totals",
-    runDir: liveDir,
-    fresh: false,
-    context: ctx,
-    worktree: false,
-  });
-  expect(resumed.status).toBe("RUNNING");
-  expect(resumed.total_control).toBeUndefined();
-  expect(resumed.total_usage).toBeUndefined();
-  expect(runSpend(resumed).usd).toBe(1);
-});
-
-// Attempt identity when the journal lost the attempt. The snapshot's
-// `last_attempt` is the numbering floor: an append that failed, or a journal
-// rewritten without its head, must not let a resume reuse an existing number.
-test("resume: a failed journal append keeps the attempt numbering through the snapshot", async () => {
-  const root = mkdtempSync(join(tmpdir(), "resume-append-failure-"));
-  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-append" });
-  const path = pipelineFile(root);
-  const dir = resolveRunDir("p", "T-append", undefined, true, ctx);
-  // A store that can be read but never written: every fact of this generation is lost.
-  const journal: unknown[] = [];
-  const eventStore = {
-    append: () => {
-      throw new Error("journal unavailable");
-    },
-    read: () => journal as never[],
-  };
-  const run = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-append",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        eventStore,
-        worktree: false,
-      })
-    ).run,
-  );
-  updateStep(run, run.steps[0]!, "running");
-  const first = allocateAttempt(run, run.steps[0]!, "step").logPath;
-  expect(first).toContain("attempt-001");
-  run.steps[0]!.attempts[0]!.status = "failed";
-  run.steps[0]!.control = { duration_ms: 1, total_cost_usd: 1 };
-  updateStep(run, run.steps[0]!, "failed", "boom");
-  expect(readRunSnapshot(join(dir, "state.json"))?.steps[0]?.last_attempt).toBe(1);
-
-  const resumed = writable(
-    (
-      await loadOrCreateRun({
-        pipelinePath: path,
-        ticket: "T-append",
-        runDir: dir,
-        fresh: false,
-        context: ctx,
-        eventStore,
-        worktree: false,
-      })
-    ).run,
-  );
-  const step = resumed.steps[0]!;
-  // The attempt itself is gone with the journal; its number and its spend are not.
-  expect(step.attempts).toEqual([]);
-  expect(step.last_attempt).toBe(1);
-  expect(step.control?.total_cost_usd).toBe(1);
-  expect(allocateAttempt(resumed, step, "step").logPath).toContain("attempt-002");
-});
-
 // Resuming is idempotent: a second load of the same run reads the same spend and
 // allocates the same next attempt, and the journal grows by the resume marker only.
 test("resume: loading the same run twice neither adds spend nor reuses an attempt number", async () => {
@@ -1258,17 +811,14 @@ test("resume: loading the same run twice neither adds spend nor reuses an attemp
     worktree: false,
   });
   updateStep(run, run.steps[0]!, "running");
-  appendRunEvent(run, "step.attempt.started", { stepId: "a", attempt: 1, kind: "step", logPath: "steps/a/1.log" });
-  appendRunEvent(run, "step.attempt.finished", {
-    stepId: "a",
-    attempt: 1,
-    kind: "step",
-    status: "failed",
-    control: { duration_ms: 1, total_cost_usd: 1 },
-    usage: { input_tokens: 10 },
-    logPath: "steps/a/1.log",
-  });
-  // Die before the snapshot: the journal is the only record of the priced attempt.
+  const opened = openAttempt(run, run.steps[0]!, { kind: "step", command: "a" });
+  settleAttempt(
+    run,
+    run.steps[0]!,
+    opened,
+    { ok: false, stats: { duration_ms: 1, total_cost_usd: 1, input_tokens: 10 } },
+    openRunLedger(run),
+  );
 
   const { run: once } = await loadOrCreateRun({
     pipelinePath: path,
@@ -1318,7 +868,10 @@ test("resume: --start-at requeues the target and every later step, keeping their
   updateStep(run, run.steps[0]!, "done");
   writeOutputs(ctx, "a");
   run.steps[1]!.retries = 1;
-  run.steps[1]!.last_attempt = 2;
+  run.steps[1]!.attempts.push(
+    { attempt: 1, kind: "step", status: "failed", started_at: "t", log_path: "steps/b/attempt-001/output.log" },
+    { attempt: 2, kind: "fix", status: "done", started_at: "t", log_path: "steps/b/attempt-002/output.log" },
+  );
   run.steps[1]!.control = { duration_ms: 1, total_cost_usd: 1 };
   updateStep(run, run.steps[1]!, "done");
   updateStep(run, run.steps[2]!, "failed", "publish refused");
@@ -1338,7 +891,11 @@ test("resume: --start-at requeues the target and every later step, keeping their
     ["pending", true],
     ["pending", true],
   ]);
-  expect(resumed.steps[1]).toMatchObject({ retries: 1, last_attempt: 2, control: { total_cost_usd: 1 } });
+  expect(resumed.steps[1]).toMatchObject({
+    retries: 1,
+    attempts: [{ attempt: 1 }, { attempt: 2 }],
+    control: { total_cost_usd: 1 },
+  });
   expect(runSpend(resumed).usd).toBe(1);
 
   const deps = countingDeps(ctx, [{ ok: true }, { ok: true }]);
@@ -1394,7 +951,7 @@ test("resume: a step requeued by --start-at stays pending when the next invocati
   expect(deps.spawned).toEqual(["b", "c"]);
 });
 
-test("resume: --start-at on an explicitly selected PASS run replays from the target", async () => {
+test("resume: an explicitly selected PASS run opens read-only, even with --start-at, and nothing writes it", async () => {
   const root = mkdtempSync(join(tmpdir(), "resume-start-at-pass-"));
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket: "T-pass" });
   const path = pipelineFile(root);
@@ -1431,15 +988,11 @@ test("resume: --start-at on an explicitly selected PASS run replays from the tar
     strictSnapshot: selection.strictSnapshot,
     worktree: false,
   });
-  // Loaded live, with totals derived from the steps rather than the PASS verdict.
-  expect(resumed.status).toBe("RUNNING");
-  expect(resumed.outcome).toBeUndefined();
-  expect(resumed.total_control).toBeUndefined();
+  expect(resumed.readOnly).toBe(true);
+  expect(resumed.status).toBe("PASS");
   expect(runSpend(resumed).usd).toBe(3);
-
-  const deps = countingDeps(ctx, [{ ok: true }]);
-  await executeRunSteps(resumed, { resuming: true }, deps.deps, ctx);
-  expect(deps.spawned).toEqual(["c"]);
+  expect(() => updateStep(resumed, resumed.steps[2]!, "running")).toThrow(/never written again/);
+  expect(readRunSnapshot(join(dir, "state.json"))?.status).toBe("PASS");
   selection.release();
 });
 

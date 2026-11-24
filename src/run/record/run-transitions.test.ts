@@ -135,7 +135,7 @@ test("report: validates the integration contract", () => {
   expect(Date.parse(saved.outcome.at)).toBeGreaterThan(0);
 });
 
-test("report: fail_cause reaches the run outcome, the journal, and the resumed generation", () => {
+test("report: fail_cause reaches the journal, then the run outcome through finalization", () => {
   const runDir = mkdtempSync(join(tmpdir(), "report-failcause-"));
   const run: Run = {
     name: "p",
@@ -148,7 +148,7 @@ test("report: fail_cause reaches the run outcome, the journal, and the resumed g
 
   step.fail_cause = "blocked";
   updateStep(run, step, "failed", "the release branch does not exist");
-  expect(run.outcome?.failCause).toBe("blocked");
+  expect(run.outcome).toBeUndefined();
   const changed = readRunEvents(runDir).filter((event) => event.type === "step.status.changed");
   expect(changed.at(-1)).toMatchObject({ stepId: "deploy", status: "failed", failCause: "blocked" });
 
@@ -403,7 +403,7 @@ test("recordStepVerdict: set on failure, cleared on success and by the next atte
   expect(() => snapshotOf(run)).toThrow();
 
   updateStep(run, step, "failed", "the release branch is missing");
-  expect(run.outcome).toMatchObject({ phase: "b", failKind: "verdict", failCause: "blocked" });
+  expect(JSON.parse(snapshotOf(run)).steps[1]).toMatchObject({ fail_kind: "verdict", fail_cause: "blocked" });
 
   recordStepVerdict(run, step, { ok: false, failKind: "technical" });
   expect(step.fail_kind).toBe("technical");
@@ -460,6 +460,7 @@ test("updateStep: a skipped step drops the failure of the pass it abandons and k
 
 test("absorbStepFailure: the reason stays on the step, which its pass then settles done", () => {
   const run = twoStepRun("transitions-absorb-");
+  run.status = "RUNNING";
   const step = run.steps[1]!;
   updateStep(run, step, "running");
 
@@ -477,13 +478,15 @@ test("absorbStepFailure: the reason stays on the step, which its pass then settl
   expect(JSON.parse(snapshotOf(run)).steps[1]).toMatchObject({ status: "done", errors: "lint warnings" });
 });
 
-test("stopRun: the run stops, the remaining work is preserved, finalization keeps STOPPED", () => {
+test("stopRun: the run stays RUNNING with the remaining work preserved, finalization turns it STOPPED", () => {
   const run = twoStepRun("transitions-stop-");
+  run.status = "RUNNING";
   const step = run.steps[1]!;
 
   stopRun(run, step, "needs a decision", { kind: "needs-decision", detail: "needs a decision", subject: "go" });
 
-  expect(run.status).toBe("STOPPED");
+  expect(run.status).toBe("RUNNING");
+  expect(JSON.parse(snapshotOf(run))).toMatchObject({ status: "RUNNING", stopped_reason: "needs a decision" });
   expect(run.stopped_reason).toBe("needs a decision");
   expect(step.status).toBe("pending");
   expect(run.outcome).toMatchObject({ phase: "b", resumable: true, stop: { kind: "needs-decision", subject: "go" } });
@@ -509,6 +512,8 @@ test("finalizeRun: success and failure, from the steps and the loop signals", ()
   updateStep(failed, failed.steps[1]!, "running");
   recordStepVerdict(failed, failed.steps[1]!, { ok: false, failKind: "technical" });
   updateStep(failed, failed.steps[1]!, "failed", "exit code 2");
+  expect(failed.status).toBeUndefined();
+  expect(failed.outcome).toBeUndefined();
   finalizeRun(failed, { failed: true });
   expect(failed.status).toBe("FAIL");
   expect(failed.outcome).toMatchObject({ phase: "b", reason: "exit code 2", failKind: "technical", resumable: true });
@@ -732,9 +737,17 @@ test("abortRun: every step in flight closes on its own estimate, and the outcome
   expect(run.outcome?.logPath).toBe(first.attempts[0]?.log_path);
   expect(run.executing?.size).toBe(0);
   const events = readRunEvents(run.run_dir);
-  const aborted = events.filter((event) => event.type === "step.status.changed" && event.status === "aborted");
-  expect(aborted.map((event) => (event as { stepId: string }).stepId)).toEqual(["a", "b"]);
-  expect(events.filter((event) => event.type === "run.aborted")).toHaveLength(1);
+  expect(events.slice(-5).map((event) => `${event.type}:${(event as { stepId?: string }).stepId ?? ""}`)).toEqual([
+    "step.attempt.finished:a",
+    "step.status.changed:a",
+    "step.attempt.finished:b",
+    "step.status.changed:b",
+    "run.aborted:",
+  ]);
+  expect(JSON.parse(snapshotOf(run))).toMatchObject({
+    status: "ABORTED",
+    steps: [{ status: "aborted" }, { status: "aborted" }],
+  });
 });
 
 test("abortRun: a step left running by a dead runner is not one this process is executing", () => {

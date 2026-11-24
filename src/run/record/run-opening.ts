@@ -1,9 +1,11 @@
 //
 // Open the run an invocation executes: select its directory, read its snapshot,
-// and either restore it — the snapshot projected with its journal, merged with
-// the definition, crashed attempts settled, the fields a resume rewrites — or
-// create it. Every snapshot and journal write of the opening happens here, and
-// the caller learns whether it resumed instead of deriving it again.
+// and either restore it — the snapshot merged with the definition, crashed
+// attempts settled, the fields a resume rewrites — or create it. Every snapshot
+// and journal write of the opening happens here, and the caller learns whether
+// it resumed instead of deriving it again. The journal is never read: the
+// snapshot is the whole execution record. A finished (`PASS`) run is opened
+// read-only and nothing here writes it.
 //
 // What the invocation asks for stays with its caller (`execution/step/load-or-create-run.ts`): the
 // definition a snapshot runs against, and the `--start-at` requeue to apply to
@@ -20,11 +22,12 @@ import type { DeepReadonly, RunView } from "../run.js";
 import type { Run, RunStep } from "./run.js";
 import type { RunEventStore, RunLogStore, RunStateStore } from "../storage-ports.js";
 import { log } from "../../shared/runtime/logging.js";
-import { restoreRunTotals } from "./cost-accounting.js";
-import { appendRunEvent, readRunEvents } from "./run-journal.js";
+import type { PersistedAttempt } from "../persisted.js";
+import { closeAttempt, journalAttemptClosed } from "./attempt-closure.js";
+import { appendRunEvent } from "./run-journal.js";
 import { remainingWork } from "./run-predicates.js";
-import { type ProjectedRunState, projectRunState, settleCrashedAttempts } from "./run-projection.js";
 import { saveRun } from "./run-repository.js";
+import { RUN_SNAPSHOT_VERSION } from "./schema.js";
 import { describeRunSnapshotProblem, hasRunSnapshotEntry, readRunSnapshotDiagnostic } from "./run-snapshot.js";
 import { makeRunStep, type StepStateInput } from "./run-step.js";
 import { FileRunEventStore } from "./stores/file-run-event-store.js";
@@ -67,8 +70,8 @@ export interface StrictSnapshotRead {
 }
 
 /** What the invocation's selection does to the steps of a resumed run. The caller
- *  decides it on the journal-reconciled states; the opening applies it before the
- *  states become the run's steps. `--steps` and `--skip` are not here: they last
+ *  decides it on the persisted states; the opening applies it before the states
+ *  become the run's steps. `--steps` and `--skip` are not here: they last
  *  one invocation, and the step loop applies them. */
 export interface ResumedSelection {
   /** Steps requeued for replay, whatever their status: `pending`, marked `replay`. */
@@ -79,9 +82,8 @@ export interface ResumedSelection {
 export interface RunOpeningPolicy {
   /** The definition a snapshot about to be resumed runs against. */
   resumeDefinition(saved: DeepReadonly<PersistedRun>): Promise<Pipeline>;
-  /** The selection for a resumed run's steps, each already reconciled with the
-   *  journal. A throw refuses the resume, and the run lock this opening took is
-   *  released. */
+  /** The selection for a resumed run's steps. A throw refuses the resume, and
+   *  the run lock this opening took is released. */
   selectResumed(states: readonly DeepReadonly<PersistedStepState>[]): ResumedSelection;
   /** The initial state of one step of a new run. */
   selectNew(def: PipelineStep): StepStateInput;
@@ -108,8 +110,8 @@ export interface OpenRunRequest {
 export interface OpenedRun {
   run: RunView;
   /** An existing snapshot was restored, rather than a new run created. A run
-   *  that already has its verdict and is reopened (`--run` on a finished run)
-   *  counts too: true does not mean the run had work left. */
+   *  that already has its verdict and is reopened counts too: true does not mean
+   *  the run had work left. A `PASS` run is opened read-only (`readOnly`). */
   resumed: boolean;
 }
 
@@ -132,14 +134,9 @@ function strictSnapshotError(
   );
 }
 
-/** Merge pipeline definition with projected persisted state to produce the in-memory Run. */
-function hydrate(
-  pipeline: Pipeline,
-  pipelinePath: string,
-  persisted: PersistedRun,
-  scope: RunScope,
-  projected: ProjectedRunState,
-): Run {
+/** Merge pipeline definition with persisted state to produce the in-memory Run.
+ *  A finished run keeps its verdict whatever the definition now declares. */
+function hydrate(pipeline: Pipeline, pipelinePath: string, persisted: PersistedRun, scope: RunScope): Run {
   const definitionIds = new Set(pipeline.steps.map((step) => step.id));
   const removedIds = persisted.steps.map((step) => step.id).filter((id) => !definitionIds.has(id));
   if (removedIds.length > 0) {
@@ -149,22 +146,17 @@ function hydrate(
       )}. Restore those step IDs or start a fresh run.`,
     );
   }
-  const steps: RunStep[] = pipeline.steps.map((def) => {
-    const state = projected.steps.get(def.id);
-    return makeRunStep(def, {
-      ...state?.state,
-      // The journal owns the attempts; resume projects them from it.
-      attempts: state?.attempts,
-    });
-  });
+  const stateById = new Map(persisted.steps.map((state) => [state.id, state]));
+  const steps: RunStep[] = pipeline.steps.map((def) => makeRunStep(def, stateById.get(def.id)));
   const remaining = remainingWork({ status: persisted.status, outcome: persisted.outcome, steps });
+  const finished = persisted.status === "PASS";
   // A settled snapshot that never received a verdict is not terminal, it is a
   // run that still owes a `finalizeRun`: RUNNING is a crash in that window, and
   // ABORTED with no step left in flight is a SIGINT in the same window. Loading
   // either as terminal strands it — the parent of a child run then fails on
   // every resume, and a top-level run replays from scratch in a new directory.
   const awaitingVerdict = remaining.settled && remaining.owed;
-  const terminal = persisted.status !== undefined && remaining.settled && !awaitingVerdict;
+  const terminal = finished || (persisted.status !== undefined && remaining.settled && !awaitingVerdict);
   return {
     name: persisted.name,
     ticket: persisted.ticket,
@@ -198,10 +190,10 @@ function hydrate(
     worktree: persisted.worktree,
     cwd: persisted.cwd,
     steps,
-    // Materialized totals belong to the previous finalized generation: trusted on
-    // a terminal snapshot, derived from the steps on a live resume. Cost
-    // accounting owns the rule; this is where the `terminal` fact is known.
-    ...restoreRunTotals(persisted, terminal),
+    // Every charge drops the totals before the snapshot that follows it, so the
+    // persisted ones always match the step totals.
+    total_control: persisted.total_control,
+    total_usage: persisted.total_usage,
     aborted: terminal ? persisted.aborted : false,
     stopped_reason: terminal ? persisted.stopped_reason : undefined,
     // A guard stop is durable until a human approves more spend: `--budget` (or a
@@ -219,6 +211,7 @@ function hydrate(
     // `applyUnmeteredAuthorization`, which owns the scope rule and the journal.
     allow_unmetered: persisted.allow_unmetered,
     specPath: persisted.specPath ?? DEFAULT_SPEC_PATH,
+    ...(finished ? { readOnly: true as const } : {}),
   };
 }
 
@@ -234,8 +227,8 @@ function hydrate(
  * A capped child refuses and names the run to authorize instead; an uncapped one
  * has no strict policy to weaken and takes the flag.
  */
-function applyUnmeteredAuthorization(run: Run, persisted: PersistedRun, scope: RunScope): void {
-  if (scope.allowUnmetered !== true || run.allow_unmetered === true) return;
+function applyUnmeteredAuthorization(run: Run, persisted: PersistedRun, scope: RunScope): boolean {
+  if (scope.allowUnmetered !== true || run.allow_unmetered === true) return false;
   const resumedDirectly = scope.parentRunId === undefined && persisted.parentRunId !== undefined;
   if (resumedDirectly && run.max_cost_usd !== undefined) {
     log.warn(
@@ -243,13 +236,43 @@ function applyUnmeteredAuthorization(run: Run, persisted: PersistedRun, scope: R
         `answers to budget scope ${run.budgetScopeId ?? "unknown"}. Authorize the run that owns that scope; the ` +
         `authorization propagates to its children.`,
     );
-    return;
+    return false;
   }
   run.allow_unmetered = true;
+  return true;
+}
+
+function journalUnmeteredAuthorization(run: Run): void {
   appendRunEvent(run, "run.unmetered.authorized", {
     budgetScopeId: run.budgetScopeId ?? null,
     maxCostUsd: run.max_cost_usd ?? null,
   });
+}
+
+const CRASHED_ATTEMPT_REASON = "runner died before the attempt reported its result (crash, OOM, or SIGKILL)";
+
+/**
+ * Close, in memory, every attempt the snapshot left `running`. Opening a run with
+ * no live holder means the process that opened them died (SIGKILL, OOM, power
+ * loss): only a signal handler closes an attempt from outside the loop, and it
+ * writes a finish. Such an attempt spent tokens nobody measured; closing it
+ * failed and unpriced (`closeAttempt` applies the `cost_unknown` rule) keeps the
+ * ledger from reading it as free.
+ */
+function settleCrashedAttempts(run: Run): { step: RunStep; attempt: PersistedAttempt }[] {
+  const settled: { step: RunStep; attempt: PersistedAttempt }[] = [];
+  for (const step of run.steps) {
+    for (const attempt of step.attempts) {
+      const closed = closeAttempt(step, attempt, {
+        status: "failed",
+        control: attempt.control,
+        reason: attempt.errors ?? CRASHED_ATTEMPT_REASON,
+        interrupted: true,
+      });
+      if (closed) settled.push({ step, attempt });
+    }
+  }
+  return settled;
 }
 
 /** Give the snapshot a pending entry for every definition step it never recorded.
@@ -365,37 +388,35 @@ function applySelection(states: readonly PersistedStepState[], selection: Resume
   }
 }
 
-/** Restore a snapshot: project it with its journal, apply the invocation's
- *  selection, merge it with the definition, then record what this opening
- *  changed — a new authorization, the crashed attempts it settled, its location
- *  — and, for a run that goes on, the resume. */
+/** Restore a snapshot: apply the invocation's selection, merge it with the
+ *  definition, then record what this opening changed — its location, a new
+ *  authorization, the crashed attempts it settled — in one save, and journal
+ *  the resume before the facts it settled. */
 async function restore(request: OpenRunRequest, selected: SelectedDirectory, saved: PersistedRun): Promise<Run> {
   const { dir, eventStore } = selected;
   const { policy, scope, location } = request;
   const pipeline = await policy.resumeDefinition(saved);
   seedNewDefinitionSteps(pipeline, saved);
-  const projected = projectRunState(saved, readRunEvents({ run_dir: dir, runId: saved.runId, eventStore }));
-  const states = [...projected.steps.values()].flatMap((step) => (step.state ? [step.state] : []));
-  applySelection(states, policy.selectResumed(states));
-  const run = hydrate(pipeline, request.pipelinePath, saved, scope, projected);
+  applySelection(saved.steps, policy.selectResumed(saved.steps));
+  const run = hydrate(pipeline, request.pipelinePath, saved, scope);
   run.run_dir = dir;
   run.stateStore = selected.stateStore;
   run.eventStore = eventStore;
   run.logStore = selected.logStore;
-  if (saved.schemaVersion === 1) run.runId ??= basename(dir);
+  if (run.readOnly) return run;
   // A resume may run from another place than the invocation that created the
   // run (main clone instead of worktree, or the reverse): record where this one
   // runs, since that is where it will read and write from now on.
   const moved = run.worktree !== location.worktree || run.cwd !== location.cwd;
   run.worktree = location.worktree;
   run.cwd = location.cwd;
-  const authorizedNow = run.allow_unmetered !== true && scope.allowUnmetered === true;
-  applyUnmeteredAuthorization(run, saved, scope);
-  if (settleCrashedAttempts(run) || moved || (authorizedNow && run.allow_unmetered === true)) saveRun(run);
-  if (run.status === "RUNNING") {
-    appendRunEvent(run, "run.resumed", { pipeline: run.pipeline });
-    saveRun(run);
-  }
+  const authorized = applyUnmeteredAuthorization(run, saved, scope);
+  const settled = settleCrashedAttempts(run);
+  const resumed = run.status === "RUNNING";
+  if (resumed || moved || authorized || settled.length > 0) saveRun(run);
+  if (resumed) appendRunEvent(run, "run.resumed", { pipeline: run.pipeline });
+  for (const { step, attempt } of settled) journalAttemptClosed(run, step, attempt);
+  if (authorized) journalUnmeteredAuthorization(run);
   return run;
 }
 
@@ -405,7 +426,7 @@ function create(request: OpenRunRequest, selected: SelectedDirectory): Run {
   const { dir } = selected;
   const runId = basename(dir);
   const run: Run = {
-    schemaVersion: 1,
+    schemaVersion: RUN_SNAPSHOT_VERSION,
     runId,
     name: pipeline.name,
     ticket: request.ticket,
@@ -441,12 +462,7 @@ function create(request: OpenRunRequest, selected: SelectedDirectory): Run {
 
   saveRun(run);
   appendRunEvent(run, "run.started", { pipeline: run.pipeline, ticket: run.ticket ?? null });
-  if (run.allow_unmetered === true) {
-    appendRunEvent(run, "run.unmetered.authorized", {
-      budgetScopeId: run.budgetScopeId ?? null,
-      maxCostUsd: run.max_cost_usd ?? null,
-    });
-  }
+  if (run.allow_unmetered === true) journalUnmeteredAuthorization(run);
   return run;
 }
 
@@ -456,7 +472,7 @@ export async function openRun(request: OpenRunRequest): Promise<OpenedRun> {
   const selected = selectDirectory(request);
   const { saved } = selected;
   try {
-    if (saved?.schemaVersion === 1 && typeof saved.runId === "string" && Array.isArray(saved.steps)) {
+    if (saved?.schemaVersion === RUN_SNAPSHOT_VERSION && typeof saved.runId === "string") {
       return { run: await restore(request, selected, saved), resumed: true };
     }
     return { run: create(request, selected), resumed: false };

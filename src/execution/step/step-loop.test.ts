@@ -1611,13 +1611,20 @@ test("step-loop: an agent step timeout kills the process tree, closes the attemp
   const snapshot = readRunSnapshot(join(run.run_dir, "state.json"));
   expect(isPersistedRunResumable(snapshot)).toBe(true);
   expect(pendingSteps(snapshot).map((step) => step.id)).toEqual(["implement", "after"]);
-  // The snapshot carries no attempt list on purpose (the journal does), so what
-  // must survive here is the attempt count and the uncertain spend that seeds the
-  // ledger on the next invocation.
-  expect(snapshot?.steps[0]).toMatchObject({ status: "failed", last_attempt: 1 });
+  // The closed attempt and its uncertain spend survive in the snapshot: the next
+  // invocation numbers its attempt and seeds the ledger from them.
+  expect(snapshot?.steps[0]).toMatchObject({
+    status: "failed",
+    attempts: [{ attempt: 1, status: "failed", control: { cost_unknown: true } }],
+  });
   expect(snapshot?.steps[0]?.control).toMatchObject({ cost_unknown: true });
-  expect(String(snapshot?.outcome?.reason)).toContain("timeout");
-  expect(snapshot?.outcome?.resumable).toBe(true);
+
+  // 4. The verdict names the timeout and keeps the run resumable.
+  finalizeRun(run, outcome);
+  const finalized = readRunSnapshot(join(run.run_dir, "state.json"));
+  expect(finalized?.status).toBe("FAIL");
+  expect(String(finalized?.outcome?.reason)).toContain("timeout");
+  expect(finalized?.outcome?.resumable).toBe(true);
 }, 30_000);
 
 test("step-loop: a run resumed after an interruption replays the aborted step and nothing already done", async () => {

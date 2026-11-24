@@ -8,7 +8,7 @@ import { FileRunStateStore } from "./file-run-state-store.js";
 
 function persistedRun(runId: string): PersistedRun {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId,
     name: "feature",
     ticket: "PROJ-1",
@@ -72,7 +72,7 @@ test("file-run-state-store: validates the integration contract", () => {
 
   expect(run).toEqual({ name: "feature", pipeline: "feature", status: "PASS", steps: [] });
   const saved = JSON.parse(readFileSync(store.pathFor(runDir), "utf8"));
-  expect(saved).toMatchObject({ schemaVersion: 1, runId: "computed-id", name: "feature" });
+  expect(saved).toMatchObject({ schemaVersion: 2, runId: "computed-id", name: "feature" });
   expect(saved.updatedAt).toBeString();
 });
 

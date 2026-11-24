@@ -144,10 +144,7 @@ test("run-journal: validates the integration contract", () => {
   };
   const run = { runId: "run-1", run_dir: "/unused", eventStore };
 
-  // A failed append must not stop the run; a failed read must not pass for an
-  // empty journal, since the attempts and child-start facts live only here.
   expect(() => appendRunEvent(run, "run.started", { pipeline: "quality", ticket: null })).not.toThrow();
-  expect(() => readRunEvents(run)).toThrow("observability unavailable");
 });
 
 test("run-journal: validates the integration contract", async () => {
@@ -189,18 +186,19 @@ test("run-journal: validates the integration contract", async () => {
   });
 
   expect(resumed.eventStore).toBe(eventStore);
-  expect(calls).toEqual(["event:run.resumed", "snapshot"]);
+  expect(calls).toEqual(["snapshot", "event:run.resumed"]);
   expect(eventStore.read(basename(runDir)).map((event) => event.type)).toEqual(["run.started", "run.resumed"]);
 });
 
-test("readRunEvents tells an absent journal from an unreadable one", () => {
+test("readRunEvents reads an absent or unreadable journal as empty", () => {
   const runDir = mkdtempSync(join(tmpdir(), "run-journal-unreadable-"));
+  const empty = { entries: [], skipped: 0, invalid: 0, unknown: 0 };
 
   expect(readRunEvents(runDir)).toEqual([]);
-  expect(readRunJournal(runDir)).toEqual({ entries: [], skipped: 0, invalid: 0, unknown: 0 });
+  expect(readRunJournal(runDir)).toEqual(empty);
 
   mkdirSync(join(runDir, "events.jsonl"));
-  expect(() => readRunEvents(runDir)).toThrow(/EISDIR/);
-  expect(() => readRunEvents({ run_dir: runDir, runId: undefined, eventStore: undefined })).toThrow(/EISDIR/);
-  expect(() => readRunJournal(runDir)).toThrow(/EISDIR/);
+  expect(readRunEvents(runDir)).toEqual([]);
+  expect(readRunEvents({ run_dir: runDir, runId: undefined, eventStore: undefined })).toEqual([]);
+  expect(readRunJournal(runDir)).toEqual(empty);
 });

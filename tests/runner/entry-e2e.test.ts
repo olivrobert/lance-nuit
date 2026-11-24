@@ -94,7 +94,7 @@ test("a step-loop warning reaches stderr and the feed through the real fan-out",
   expect(result.out).toContain("⚠ Soft check — non-blocking warning");
 
   const feeds = readdirSync(cwd, { recursive: true, encoding: "utf8" }).filter(
-    (entry) => entry.endsWith("events.jsonl") && !entry.includes("/latest/"),
+    (entry) => entry.endsWith("feed.jsonl") && !entry.includes("/latest/"),
   );
   expect(feeds).toHaveLength(1);
   const messages = readFileSync(join(cwd, feeds[0]!), "utf8")

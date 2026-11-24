@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { type LiveFeed, liveFeedPathFromEnvironment } from "../../shared/runtime/live-feed.js";
-import { runEventsFilePath } from "../../run/index.js";
+import { runFeedFilePath } from "../../run/index.js";
 
 export type FileLiveFeedOptions = { filePath: string; runDir?: never } | { runDir: string; filePath?: never };
 
@@ -17,7 +17,7 @@ export class FileLiveFeed implements LiveFeed {
         ? filePathOrOptions
         : filePathOrOptions.filePath !== undefined
           ? filePathOrOptions.filePath
-          : runEventsFilePath(filePathOrOptions.runDir);
+          : runFeedFilePath(filePathOrOptions.runDir);
   }
 
   path(): string {

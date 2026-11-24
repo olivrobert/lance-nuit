@@ -100,15 +100,15 @@ export interface RecordedDecision {
   round?: number;
 }
 
-/** Journal the decision the invocation recorded, then persist the run. A
+/** Persist the run, then journal the decision the invocation recorded. A
  *  decision that is not a rejection is journaled as an approval. */
 export function recordDecision(runView: RunView, recorded: RecordedDecision): void {
   const run = writable(runView);
+  saveRun(run);
   appendRunEvent(run, "decision.recorded", {
     subject: recorded.subject,
     decision: recorded.decision === "rejected" ? "rejected" : "approved",
     ...(recorded.reason !== undefined ? { reason: recorded.reason } : {}),
     ...(recorded.round !== undefined ? { round: recorded.round } : {}),
   });
-  saveRun(run);
 }

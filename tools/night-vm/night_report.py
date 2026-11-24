@@ -224,12 +224,18 @@ def ticket_run(ticket: str, entry: dict, states: list[dict]) -> dict | None:
     return max(mine, key=lambda state: str(state.get("updatedAt", "")), default=None)
 
 
+def last_attempt(step: dict):
+    attempts = step.get("attempts")
+    numbers = [entry.get("attempt") for entry in attempts if isinstance(entry, dict)] if isinstance(attempts, list) else []
+    return max((n for n in numbers if isinstance(n, int) and not isinstance(n, bool)), default=None)
+
+
 def step_view(step: dict) -> dict:
     control = mapping(step.get("control"))
     return {
         "id": text(step.get("id"), 128),
         "status": text(step.get("status"), 32),
-        "attempt": number(step.get("last_attempt")),
+        "attempt": number(last_attempt(step)),
         "startedAt": text(step.get("started_at"), 40),
         "finishedAt": text(step.get("finished_at"), 40),
         "durationMs": number(control.get("duration_ms")),

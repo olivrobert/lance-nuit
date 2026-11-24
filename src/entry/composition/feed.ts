@@ -8,8 +8,9 @@ import { openWatcherPane } from "../output/watcher.js";
 import { RUNNER_STATE_ENV } from "../../shared/env/runner-env.js";
 import { type LiveFeed, setRunnerLiveFeed } from "../../shared/runtime/live-feed.js";
 
-/** Read the canonical run journal directly so resumes do not truncate it.
- * `events.jsonl` is both the live view and the append-only audit source. */
+/** The run's live feed (`feed.jsonl`): runner output, bash output and the raw
+ * backend stream, appended so a resume does not truncate it. The journal
+ * (`events.jsonl`) keeps the contract events only. */
 export function startLiveFeed(runDir: string, watch: boolean, options: { autoClose?: boolean } = {}): LiveFeed {
   const feed = new FileLiveFeed({ runDir });
   const path = feed.path();

@@ -309,9 +309,9 @@ the work-item paths from `workItemLayout` and a stopped gate's decision from
 (the run lock, or for a composed child the lock of the run that composed it, up
 to the root): a snapshot without a verdict that no live process holds is served
 as an interrupted `ABORTED` run, so the dashboard and a later resume agree on
-what is live. The steps of such a run are the snapshot reconciled with the
-journal by the projection a resume applies; the attempts of a step and the run's
-timeline come from `readRunHistory`. Two of its readers take
+what is live. The steps and attempts of a run are read from its snapshot; the
+run's timeline comes from `readRunHistory`, which adds the journal events for
+display. Two of its readers take
 content a pipeline wrote rather than runner state: `Item.title`, the first
 `# ` heading of `artifacts/ticket.md` (a leading ticket key dropped), read
 from a bounded prefix of the file and absent when there is none, and `readReport`, which validates
@@ -463,8 +463,9 @@ boundaries only — the verdict parser and the normalization of a backend result
 step loop reads the resulting `failCause` field and never prose. See
 [failures, retries, escalation](failures-retries-escalation.md).
 
-Every attempt has a durable identity and log. The event journal is the source for
-timeline and statistics projections; the state snapshot is the fast resume surface.
+Every attempt has a durable identity and log. The state snapshot is the
+execution record, attempts included; the event journal is a trace the timeline
+displays.
 
 ### Who decides that a step runs
 
@@ -521,6 +522,7 @@ A run keeps operational state close to its work item:
 ├── runs/<pipeline>/<run-id>/
 │   ├── state.json
 │   ├── events.jsonl
+│   ├── feed.jsonl
 │   └── steps/<step>/attempt-001/output.log
 └── decisions/       approval records when the pipeline declares them
 ```
@@ -546,9 +548,8 @@ honest:
   malformed `pricing.json` is reported once by name and treated as absent
   (`shared/env/pricing.schema.ts`), because pricing is optional and statistics readers
   must keep working without it; **no line of the run journal (`events.jsonl`,
-  `run/record/journal-schema.ts`) is ever discarded** — the file doubles as the live
-  feed, so a reader classifies every line as `known`, `unknown` (a type outside
-  the contract, which is most of a real journal), `invalid` (a contracted type
+  `run/record/journal-schema.ts`) is ever discarded** — a reader classifies every
+  line as `known`, `unknown` (a type outside the contract), `invalid` (a contracted type
   whose payload was refused, kept with its reason) or `skipped` (not an event at
   all), and the four counters are reported per run by `--inspect`
   (`diagnoseRunJournal`). As in the history schema, an optional field of the
@@ -629,15 +630,10 @@ headline and the entry point its exit code. The dashboard, `--inspect`,
 `lancenuit close`, `clean --keep-failed`, the statistics, the stack stop, the
 signal handler and a composing parent all ask it instead of comparing statuses
 (`tests/runner/run-status-readers.test.ts` refuses a copy). Reading a run has
-one owner as well, `run/record/run-read.ts`: `readRun` returns the snapshot, its
-steps reconciled with the journal when the runner died before writing what the
-journal holds, and the status a reader shows; `readRunHistory` returns the
-attempts and events only the journal records. The journal is parsed only for an
-interrupted run that still has a step owing work (`owesWork`: pending, running,
-failed or aborted, wider than the pending or running steps a journal event can
-move): a live runner's
-snapshot is at most one write behind, and a verdict is written after every event
-of its pass. The dashboard, `--inspect`, `--logs`, `clean`, `close`, the dispatch
+one owner as well, `run/record/run-read.ts`: `readRun` returns the snapshot as
+written and the status a reader shows; `readRunHistory` returns the snapshot's
+attempts with the journal events, for display. Every transition saves the
+snapshot before it journals, so no reader reconciles the two. The dashboard, `--inspect`, `--logs`, `clean`, `close`, the dispatch
 loop and `--run` read through it, and a run is opened for execution by
 `openRun` (below); outside the module, only a few ports still name a store
 (`tests/runner/run-read-readers.test.ts` lists each exception). After an interruption only `finalizeRun`
@@ -647,13 +643,14 @@ snapshot. Attempt closure (`run/record/attempt-closure.ts`), cost figures
 (`run/record/cost-accounting.ts`) and budget stops (`run/record/cost-stop-events.ts`) keep
 their own owners. The step layer reaches them through three operations of the
 entry: `openAttempt` and `settleAttempt` (`run/record/attempt-lifecycle.ts`)
-number, journal and persist an attempt before spawn, then close it, record its
-verdict, charge the ledger, record a live guard's stops and persist it; every
+number and persist an attempt before spawn, then journal it; close it, record
+its verdict, charge the ledger, persist it, journal its end and record a live
+guard's stops; every
 site about to spend asks `costGate`, which decides and records the stop; and
 `openRunLedger` opens the ledger an execution spends against. The other fields
 the step layer and the entry point move during execution have named operations
 too (`run/record/step-bookkeeping.ts`), each of which writes its field, the
-journal event that already recorded it, and the snapshot: a retry quota spent or
+snapshot, and the journal event that records it: a retry quota spent or
 given back (`consumeRetry`, `refundRetry`), the session a step continues
 (`bindSession`), a source it could not read (`recordUnavailableSource`, journal
 only) and the decision `--approve` or `--reject` recorded (`recordDecision`); no
@@ -671,11 +668,11 @@ accounting for the child's spend and `finalizeRun` for its verdict, without
 restating their rules. Restoration
 on resume rebuilds state and is not a transition. Opening a run is one
 operation of the entry, `openRun` (`run/record/run-opening.ts`): it selects the
-run directory, reads the snapshot, projects it with the journal
-(`run/record/run-projection.ts`), merges it with the definition, settles the
-attempts a crash left open, records this invocation's location and a new
-unmetered authorization, and journals `run.resumed`, or creates the run and
-journals `run.started`; it returns whether it resumed, which the step loop
+run directory, reads the snapshot (never the journal), merges it with the
+definition, settles the attempts a crash left open, records this invocation's
+location and a new unmetered authorization in one save, then journals
+`run.resumed` before the facts it settled, or creates the run and journals
+`run.started`; a `PASS` run is opened read-only and written by nothing; it returns whether it resumed, which the step loop
 reads instead of deriving it again. `execution/step/load-or-create-run.ts` keeps the policy:
 the definition a snapshot runs against and the selection, which `openRun`
 calls at the point where each applies; it reads the steps and says which to

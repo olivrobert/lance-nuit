@@ -42,13 +42,13 @@ function heldLatestRun(context: ReturnType<typeof approvedContext>): void {
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: "run-1",
       name: "budgeted",
       pipeline: "budgeted",
       ticket: "PROJ-9",
       status: "STOPPED",
-      steps: [{ id: "noop", status: "pending" }],
+      steps: [{ id: "noop", status: "pending", retries: 0, attempts: [] }],
     }),
   );
   symlinkSync("run-1", join(runsDir, "latest"));

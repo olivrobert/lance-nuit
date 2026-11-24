@@ -32,7 +32,7 @@ import {
   runSpend,
 } from "../../run/record/cost-accounting.ts";
 import { readRunEvents } from "../../run/record/run-journal.ts";
-import { settleCrashedAttempts } from "../../run/record/run-projection.ts";
+import { closeAttempt } from "../../run/record/attempt-closure.ts";
 import { readRunSnapshot } from "../../run/record/run-snapshot.ts";
 import { makeRunStep, type StepStateInput } from "../../run/record/run-step.ts";
 import { abortRun, finalizeRun, reportLiveCost } from "../../run/record/run-transitions.ts";
@@ -282,7 +282,8 @@ test("an attempt the runner died in is settled unpriced on resume and does not s
   ];
   const run = makeRun([step], 1);
 
-  expect(settleCrashedAttempts(run)).toBe(true);
+  // What opening the run does to an attempt left running (`run-opening.ts`).
+  expect(closeAttempt(step, step.attempts[0]!, { status: "failed", interrupted: true })).toBeDefined();
   expect(step.attempts[0]).toMatchObject({ status: "failed", interrupted: true });
   expect(step.control?.cost_unknown).toBe(true);
 
@@ -354,8 +355,8 @@ test("a live guard kill records both stops after the attempt's closure, in one o
  * Opening an attempt.
  * ------------------------------------------------------------------------- */
 
-test("an attempt is numbered past the journal's holes and persisted before it spawns", async () => {
-  const step = bashStep("a", {}, { status: "running", last_attempt: 2 });
+test("an attempt is numbered past the holes of its step and persisted before it spawns", async () => {
+  const step = bashStep("a", {}, { status: "running" });
   step.attempts = [
     {
       attempt: 1,
@@ -386,7 +387,10 @@ test("an attempt is numbered past the journal's holes and persisted before it sp
     },
   });
 
-  expect(persistedBeforeSpawn).toMatchObject({ last_attempt: 4, status: "running" });
+  expect(persistedBeforeSpawn).toMatchObject({
+    status: "running",
+    attempts: [{ attempt: 1 }, { attempt: 3 }, { attempt: 4, status: "running" }],
+  });
   expect(step.attempts.at(-1)).toMatchObject({
     attempt: 4,
     kind: "step",

@@ -21,7 +21,6 @@ import type { ArtifactRef, WorkItemArtifactStore } from "../../shared/language/a
 import type { Run } from "./run.js";
 import { buildPipelineContext } from "../../definition/pipeline/context.js";
 import { makeRunStep } from "./run-step.js";
-import { projectStepAttempts } from "./attempt-projection.js";
 import {
   decisionMatchesArtifact,
   readDecision,
@@ -77,7 +76,7 @@ function contextFor(root: string, ticket = "PROJ-1") {
 
 function runFor(root: string, ticket = "PROJ-1", runDir = join(root, "run")): Run {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: "20260731T120000.000Z-feature-abcdef",
     name: "feature",
     ticket,
@@ -127,7 +126,7 @@ test("persisted format: a damaged latest snapshot is never replaced implicitly",
   expect(latestRunDir("feature", "PROJ-1", ctx)).toBe(realpathSync(featureDir));
   expect(latestRunDir("quality", "PROJ-1", ctx)).toBe(realpathSync(qualityDir));
   expect(existsSync(join(featureDir, "feature.json"))).toBe(false);
-  expect(readRunFile(join(featureDir, "state.json"))?.schemaVersion).toBe(1);
+  expect(readRunFile(join(featureDir, "state.json"))?.schemaVersion).toBe(2);
 });
 
 test("persisted format: the stop cause and the run location round-trip without a schema bump", () => {
@@ -149,7 +148,7 @@ test("persisted format: the stop cause and the run location round-trip without a
   saveRun(run);
 
   const saved = readRunFile(join(runDir, "state.json"))!;
-  expect(saved.schemaVersion).toBe(1);
+  expect(saved.schemaVersion).toBe(2);
   expect(saved.outcome?.stop).toEqual({ subject: "plan", kind: "needs-decision", detail: "plan needs a decision" });
   expect(saved.worktree).toBe(true);
   expect(saved.cwd).toBe(join(root, "worktree"));
@@ -158,7 +157,7 @@ test("persisted format: the stop cause and the run location round-trip without a
   const minimal = runFor(root, "PROJ-1", resolveRunDir("minimal", "PROJ-1", undefined, false, ctx));
   saveRun(minimal);
   const savedMinimal = readRunFile(join(minimal.run_dir, "state.json"))!;
-  expect(savedMinimal.schemaVersion).toBe(1);
+  expect(savedMinimal.schemaVersion).toBe(2);
   expect(savedMinimal.outcome?.stop).toBeUndefined();
   expect(savedMinimal.worktree).toBeUndefined();
   expect(savedMinimal.cwd).toBeUndefined();
@@ -181,7 +180,7 @@ test("persisted format: the cost stop kind round-trips, and a snapshot written w
   saveRun(run);
 
   const saved = readRunFile(join(runDir, "state.json"))!;
-  expect(saved.schemaVersion).toBe(1);
+  expect(saved.schemaVersion).toBe(2);
   expect(saved.outcome?.stopKind).toBe("budget-exceeded");
   // Additive and optional, so no schema bump: an outcome written before the field
   // existed still validates, and reads as "no cost stop claimed".
@@ -190,7 +189,7 @@ test("persisted format: the cost stop kind round-trips, and a snapshot written w
   minimal.outcome = { phase: "implement", reason: "exit 1", logPath: null, resumable: true };
   saveRun(minimal);
   const savedMinimal = readRunFile(join(minimal.run_dir, "state.json"))!;
-  expect(savedMinimal.schemaVersion).toBe(1);
+  expect(savedMinimal.schemaVersion).toBe(2);
   expect(savedMinimal.outcome?.reason).toBe("exit 1");
   expect(savedMinimal.outcome?.stopKind).toBeUndefined();
 });
@@ -216,7 +215,7 @@ test("persisted format: fail_cause round-trips on the step and the outcome, and 
   saveRun(run);
 
   const saved = readRunFile(join(runDir, "state.json"))!;
-  expect(saved.schemaVersion).toBe(1);
+  expect(saved.schemaVersion).toBe(2);
   expect(saved.steps?.[0]?.fail_cause).toBe("blocked");
   expect(saved.outcome?.failCause).toBe("blocked");
   // And a resume restores it: the hydrated step carries the cause the snapshot
@@ -236,7 +235,7 @@ test("persisted format: fail_cause round-trips on the step and the outcome, and 
   minimal.outcome = { phase: "quality.tests", reason: "exit 1", logPath: null, resumable: true, failKind: "technical" };
   saveRun(minimal);
   const savedMinimal = readRunFile(join(minimal.run_dir, "state.json"))!;
-  expect(savedMinimal.schemaVersion).toBe(1);
+  expect(savedMinimal.schemaVersion).toBe(2);
   expect(savedMinimal.steps?.[0]?.fail_kind).toBe("technical");
   expect(savedMinimal.steps?.[0]?.fail_cause).toBeUndefined();
   expect(savedMinimal.outcome?.failCause).toBeUndefined();
@@ -296,11 +295,9 @@ test("persisted format: validates the contract", () => {
   saveRun(run);
 
   const saved = readRunFile(join(runDir, "state.json"));
-  expect(saved?.schemaVersion).toBe(1);
+  expect(saved?.schemaVersion).toBe(2);
   expect(saved?.runId).toBe(run.runId);
-  // The snapshot no longer carries the attempts; the journal projects them back.
-  expect((saved?.steps[0] as Record<string, unknown> | undefined)?.attempts).toBeUndefined();
-  expect(projectStepAttempts(readRunEvents(runDir)).get(step.id)).toHaveLength(2);
+  expect(saved?.steps[0]?.attempts?.map((attempt) => attempt.attempt)).toEqual([1, 2]);
   expect(readFileSync(firstLog, "utf-8")).toContain("first attempt");
   expect(readFileSync(secondLog, "utf-8")).toContain("second attempt");
   const events = readRunEvents(runDir);
@@ -630,7 +627,7 @@ test("persisted format: a snapshot written before cost_unaccounted existed still
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: basename(runDir),
       name: "p",
       ticket: "PROJ-9",
@@ -699,7 +696,7 @@ test("persisted format: a snapshot that still carries a step's last_command open
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: basename(runDir),
       name: "p",
       ticket: "PROJ-11",
@@ -759,7 +756,7 @@ test("persisted format: a minimal step flagged cost_unknown with nothing measure
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: basename(runDir),
       name: "p",
       ticket: "PROJ-10",

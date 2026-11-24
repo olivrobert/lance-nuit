@@ -6,9 +6,8 @@ import { join } from "node:path";
 import { CODEX_MODEL } from "../../agents/backends/codex/types.js";
 import { textArtifact } from "../../definition/dsl/artifact.js";
 import type { Run } from "../record/run.js";
-import { createLogRef, type RunLogStore } from "../storage-ports.js";
 import { makeRunStep } from "../record/run-step.js";
-import { appendRunEvent } from "../record/run-journal.js";
+import { createLogRef, type RunLogStore } from "../storage-ports.js";
 import { buildRunStatsEntry, emitRunStats } from "./run-stats.js";
 
 function fakeRun(overrides: Partial<Run> = {}): Run {
@@ -373,14 +372,26 @@ test("run-stats: validates the integration contract", () => {
           status: "failed",
           retries: 99,
           control: { duration_ms: 1 },
+          attempts: [
+            {
+              attempt: 1,
+              kind: "step",
+              status: "failed",
+              started_at: "t",
+              log_path: "steps/checks/attempt-001/output.log",
+            },
+            {
+              attempt: 2,
+              kind: "fix",
+              status: "done",
+              started_at: "t",
+              log_path: "steps/checks/attempt-002/output.log",
+            },
+          ],
         },
       ),
     ],
   });
-  appendRunEvent(run, "step.attempt.started", { stepId: "checks", attempt: 1, kind: "step" });
-  appendRunEvent(run, "step.attempt.finished", { stepId: "checks", attempt: 1, kind: "step", status: "failed" });
-  appendRunEvent(run, "step.attempt.started", { stepId: "checks", attempt: 2, kind: "fix" });
-  appendRunEvent(run, "step.attempt.finished", { stepId: "checks", attempt: 2, kind: "fix", status: "done" });
 
   const entry = buildRunStatsEntry(run);
   expect(entry.phases.checks!.fixLoops).toBe(1);

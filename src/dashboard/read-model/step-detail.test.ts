@@ -8,7 +8,6 @@ import {
   makeTempDir,
   writeProjectsFile,
   writeRun,
-  writeRunEvents,
   writeRunLock,
   writeWorkItemFile,
 } from "./test-harness.ts";
@@ -40,71 +39,61 @@ function logPath(stepId: string, attempt: number): string {
 }
 
 /** A test step that failed once, was repaired by a fix pass, and an audit step
- *  that ran once: the journal as the runner appends it. */
+ *  that ran once: the attempts as the snapshot carries them. */
 function runWithAttempts(project: string): string {
   const runDir = writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
     status: "PASS",
     updatedAt: "2026-09-05T08:00:00.000Z",
     steps: [
-      { id: "audit", status: "done", retries: 0 },
-      { id: "tests", status: "done", retries: 1 },
+      {
+        id: "audit",
+        status: "done",
+        retries: 0,
+        attempts: [
+          {
+            attempt: 1,
+            kind: "step",
+            status: "running",
+            started_at: "2026-09-05T07:04:00.000Z",
+            log_path: logPath("audit", 1),
+          },
+        ],
+      },
+      {
+        id: "tests",
+        status: "done",
+        retries: 1,
+        attempts: [
+          {
+            attempt: 1,
+            kind: "step",
+            status: "failed",
+            started_at: "2026-09-05T07:00:00.000Z",
+            finished_at: "2026-09-05T07:02:00.000Z",
+            control: { duration_ms: 120000 },
+            log_path: logPath("tests", 1),
+            errors: "1 fail\nexpected 2, got 3",
+          },
+          {
+            attempt: 2,
+            kind: "fix",
+            status: "done",
+            started_at: "2026-09-05T07:02:01.000Z",
+            finished_at: "2026-09-05T07:03:00.000Z",
+            control: { duration_ms: 59000, total_cost_usd: 0.4, model: "claude-opus-5-5" },
+            log_path: logPath("tests", 2),
+          },
+        ],
+      },
     ],
   });
-  writeRunEvents(runDir, [
-    {
-      ts: "2026-09-05T07:00:00.000Z",
-      type: "step.attempt.started",
-      stepId: "tests",
-      attempt: 1,
-      kind: "step",
-      logPath: logPath("tests", 1),
-    },
-    {
-      ts: "2026-09-05T07:02:00.000Z",
-      type: "step.attempt.finished",
-      stepId: "tests",
-      attempt: 1,
-      kind: "step",
-      status: "failed",
-      control: { duration_ms: 120000 },
-      logPath: logPath("tests", 1),
-      reason: "1 fail\nexpected 2, got 3",
-    },
-    {
-      ts: "2026-09-05T07:02:01.000Z",
-      type: "step.attempt.started",
-      stepId: "tests",
-      attempt: 2,
-      kind: "fix",
-      logPath: logPath("tests", 2),
-    },
-    {
-      ts: "2026-09-05T07:03:00.000Z",
-      type: "step.attempt.finished",
-      stepId: "tests",
-      attempt: 2,
-      kind: "fix",
-      status: "done",
-      costUsd: 0.4,
-      control: { duration_ms: 59000, total_cost_usd: 0.4, model: "claude-opus-5-5" },
-      logPath: logPath("tests", 2),
-    },
-    {
-      ts: "2026-09-05T07:04:00.000Z",
-      type: "step.attempt.started",
-      stepId: "audit",
-      attempt: 1,
-      kind: "step",
-      logPath: logPath("audit", 1),
-    },
-  ]);
   writeAttemptFiles(runDir, "tests", 1, { "output.log": "1 fail\n", "command.txt": "bun test" });
   writeAttemptFiles(runDir, "tests", 2, { "output.log": "fixed it\n", "command.txt": "Repair the failing test" });
   return runDir;
 }
 
-test("step detail: attempts come from the journal, in order, with what each one cost and why it ended", () => {
+test("step detail: attempts come from the snapshot, in order, with what each one cost and why it ended", () => {
   const project = listedProject();
   runWithAttempts(project);
 
@@ -206,12 +195,11 @@ test("step detail: an unreadable lock lists nothing as produced", () => {
 
 test("step detail: an unknown step, attempt-less step or unknown run answers without guessing", () => {
   const project = listedProject();
-  const runDir = writeRun(project, "DEMO-1", "feature", {
+  writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
     status: "RUNNING",
     steps: [{ id: "review", status: "pending", retries: 0 }],
   });
-  writeRunEvents(runDir, []);
 
   expect(readStepDetail("demo-app", "DEMO-1", "../state.json", undefined)).toBeUndefined();
   expect(readStepDetail("demo-app", "DEMO-2", "review", undefined)).toBeUndefined();
@@ -223,21 +211,27 @@ test("step detail: an unknown step, attempt-less step or unknown run answers wit
 
 test("step detail: a journal log path leaving the run is never opened", () => {
   const project = listedProject();
-  const runDir = writeRun(project, "DEMO-1", "feature", {
+  writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
     status: "FAIL",
-    steps: [{ id: "tests", status: "failed", retries: 0 }],
+    steps: [
+      {
+        id: "tests",
+        status: "failed",
+        retries: 0,
+        attempts: [
+          {
+            attempt: 1,
+            kind: "step",
+            status: "running",
+            started_at: "2026-09-05T07:00:00.000Z",
+            log_path: "../../../secret.log",
+          },
+        ],
+      },
+    ],
   });
   writeWorkItemFile(project, "DEMO-1", "secret.log", "secret");
-  writeRunEvents(runDir, [
-    {
-      ts: "2026-09-05T07:00:00.000Z",
-      type: "step.attempt.started",
-      stepId: "tests",
-      attempt: 1,
-      logPath: "../../../secret.log",
-    },
-  ]);
 
   const detail = readStepDetail("demo-app", "DEMO-1", "tests", undefined);
 
@@ -248,26 +242,31 @@ test("step detail: a journal log path leaving the run is never opened", () => {
 test("step session: an attempt's resumable session, where its run ran; none for an attempt without one", () => {
   const project = listedProject();
   const session = { provider: "claude", id: "6bd3dbb0-0923-4814-9958-449272a0d545", resumable: true };
+  const finished = (attempt: number, extra: Record<string, unknown>) => ({
+    attempt,
+    kind: "step" as const,
+    status: "done" as const,
+    started_at: "2026-09-05T07:00:00.000Z",
+    log_path: "",
+    ...extra,
+  });
   const runDir = writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
     status: "RUNNING",
-    steps: [{ id: "triage", status: "done", retries: 1 }],
+    steps: [
+      {
+        id: "triage",
+        status: "done",
+        retries: 1,
+        attempts: [
+          finished(1, { session: { ...session, resumable: false } }),
+          finished(2, { session }),
+          finished(3, { status: "running" }),
+        ],
+      },
+    ],
   });
   writeRunLock(runDir, process.ppid);
-  const finished = (attempt: number, extra: Record<string, unknown>) => ({
-    ts: "2026-09-05T07:00:00.000Z",
-    type: "step.attempt.finished",
-    stepId: "triage",
-    attempt,
-    kind: "step",
-    status: "done",
-    ...extra,
-  });
-  writeRunEvents(runDir, [
-    finished(1, { session: { ...session, resumable: false } }),
-    finished(2, { session }),
-    { ts: "2026-09-05T07:01:00.000Z", type: "step.attempt.started", stepId: "triage", attempt: 3, kind: "step" },
-  ]);
 
   expect(readStepSession("demo-app", "DEMO-1", "triage", 2)).toEqual({
     pipeline: "feature",

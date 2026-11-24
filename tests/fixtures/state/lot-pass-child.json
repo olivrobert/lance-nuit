@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "runId": "20260902T165929.442Z-lot-2faf43",
   "name": "lot",
   "ticket": "DEMO-386",
@@ -42,7 +42,6 @@
       "id": "implement-fast",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T16:59:29.449Z",
       "finished_at": "2026-09-02T17:13:46.276Z",
       "session": {
@@ -65,14 +64,32 @@
         "cache_read_tokens": 4657408,
         "tools_used": ["Bash", "FileChange"],
         "reasoning_tokens": 11076
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T16:59:29.449Z",
+          "log_path": "logs/implement-fast-1.log",
+          "finished_at": "2026-09-02T17:13:46.276Z",
+          "control": {
+            "duration_ms": 856822,
+            "total_cost_usd": 0.17295636,
+            "cost_estimated": true,
+            "model": "gpt-5.6-luna",
+            "provider": "codex"
+          }
+        }
+      ]
     },
     {
       "id": "implement",
       "status": "skipped",
       "retries": 0,
       "finished_at": "2026-09-02T17:13:46.278Z",
-      "profile": "coder"
+      "profile": "coder",
+      "attempts": []
     },
     {
       "id": "quality",
@@ -106,24 +123,36 @@
             }
           }
         ]
-      }
+      },
+      "attempts": []
     },
     {
       "id": "reuse-skill",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T18:20:27.780Z",
       "finished_at": "2026-09-02T18:20:27.825Z",
       "control": {
         "duration_ms": 44
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T18:20:27.780Z",
+          "log_path": "logs/reuse-skill-1.log",
+          "finished_at": "2026-09-02T18:20:27.825Z",
+          "control": {
+            "duration_ms": 44
+          }
+        }
+      ]
     },
     {
       "id": "reuse",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T18:20:27.831Z",
       "finished_at": "2026-09-02T18:22:08.175Z",
       "session": {
@@ -147,24 +176,52 @@
         "cache_read_tokens": 417116,
         "cache_creation_tokens": 54570,
         "tools_used": ["Bash"]
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T18:20:27.831Z",
+          "log_path": "logs/reuse-1.log",
+          "finished_at": "2026-09-02T18:22:08.175Z",
+          "control": {
+            "duration_ms": 99167,
+            "total_cost_usd": 0.9359430000000001,
+            "model": "claude-opus-5",
+            "last_turn_context_tokens": 54572,
+            "context_window": 200000
+          }
+        }
+      ]
     },
     {
       "id": "tree-fingerprint",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T18:22:08.175Z",
       "finished_at": "2026-09-02T18:22:08.202Z",
       "control": {
         "duration_ms": 26
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T18:22:08.175Z",
+          "log_path": "logs/tree-fingerprint-1.log",
+          "finished_at": "2026-09-02T18:22:08.202Z",
+          "control": {
+            "duration_ms": 26
+          }
+        }
+      ]
     },
     {
       "id": "criteria-fast",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T18:22:08.204Z",
       "finished_at": "2026-09-02T18:26:56.811Z",
       "session": {
@@ -187,48 +244,90 @@
         "cache_read_tokens": 1102848,
         "tools_used": ["Bash", "FileChange"],
         "reasoning_tokens": 5601
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T18:22:08.204Z",
+          "log_path": "logs/criteria-fast-1.log",
+          "finished_at": "2026-09-02T18:26:56.811Z",
+          "control": {
+            "duration_ms": 288596,
+            "total_cost_usd": 0.06207996,
+            "cost_estimated": true,
+            "model": "gpt-5.6-luna",
+            "provider": "codex"
+          }
+        }
+      ]
     },
     {
       "id": "acceptance-skill",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T18:26:56.812Z",
       "finished_at": "2026-09-02T18:26:56.854Z",
       "control": {
         "duration_ms": 40
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T18:26:56.812Z",
+          "log_path": "logs/acceptance-skill-1.log",
+          "finished_at": "2026-09-02T18:26:56.854Z",
+          "control": {
+            "duration_ms": 40
+          }
+        }
+      ]
     },
     {
       "id": "ui-checks-agent",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T18:26:56.860Z",
       "finished_at": "2026-09-02T18:26:56.902Z",
       "control": {
         "duration_ms": 41
-      }
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T18:26:56.860Z",
+          "log_path": "logs/ui-checks-agent-1.log",
+          "finished_at": "2026-09-02T18:26:56.902Z",
+          "control": {
+            "duration_ms": 41
+          }
+        }
+      ]
     },
     {
       "id": "ui-app-reachable",
       "status": "skipped",
       "retries": 0,
-      "finished_at": "2026-09-02T18:26:56.903Z"
+      "finished_at": "2026-09-02T18:26:56.903Z",
+      "attempts": []
     },
     {
       "id": "criteria",
       "status": "skipped",
       "retries": 0,
       "finished_at": "2026-09-02T18:26:56.904Z",
-      "profile": "reviewer"
+      "profile": "reviewer",
+      "attempts": []
     },
     {
       "id": "constraints",
       "status": "done",
       "retries": 0,
-      "last_attempt": 1,
       "started_at": "2026-09-02T18:26:56.908Z",
       "finished_at": "2026-09-02T18:28:48.314Z",
       "session": {
@@ -254,7 +353,24 @@
         "tools_used": ["Bash", "agent(quality-constraints:quality-constraints-checker)", "Read"]
       },
       "errors": "3 violations MUST (functional-test #4) : statut HTTP lu via getResponse()->isForbidden()/isRedirect() au lieu des assertions assertResponse* dans InscriptionControllerTest.php:199 (Acheteur), ResendCodeControllerTest.php:22 (Acheteur), ResendCodeControllerTest.php:21 (Fournisseur). 0 warning. Rapport : .claude/quality/code/reports/constraints/20260902-182706-constraints.md",
-      "fail_kind": "verdict"
+      "fail_kind": "verdict",
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "step",
+          "status": "done",
+          "started_at": "2026-09-02T18:26:56.908Z",
+          "log_path": "logs/constraints-1.log",
+          "finished_at": "2026-09-02T18:28:48.314Z",
+          "control": {
+            "duration_ms": 110213,
+            "total_cost_usd": 0.8502973,
+            "model": "claude-opus-5",
+            "last_turn_context_tokens": 44858,
+            "context_window": 200000
+          }
+        }
+      ]
     },
     {
       "id": "quality-after-fix",
@@ -285,7 +401,8 @@
             }
           }
         ]
-      }
+      },
+      "attempts": []
     }
   ],
   "total_control": {

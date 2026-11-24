@@ -47,6 +47,7 @@ import type { Run } from "./run.js";
 import { writable } from "./run.js";
 import { type CostStop, costDecision, type RunBudget } from "./budget.js";
 import { appendRunEvent } from "./run-journal.js";
+import { saveRun } from "./run-repository.js";
 
 /**
  * Where a stop was observed. The origin decides which facts the stop
@@ -80,10 +81,9 @@ export interface CostStopOrigin {
 export function recordCostStop(run: Run, budget: RunBudget, stop: CostStop, origin: CostStopOrigin): void {
   if (stop === "budget-exceeded") {
     if (origin.kind === "live-guard") {
-      // Journaled BEFORE the latch is set, so `estimated` is not read from a state
-      // this very kill established.
-      journalBudgetExceeded(run, budget, { stepId: origin.stepId, estimated: true });
       latchBudgetExceeded(run, budget);
+      saveRun(run);
+      journalBudgetExceeded(run, budget, { stepId: origin.stepId, estimated: true });
       return;
     }
     // `estimated` distinguishes the two roads to a gate: a ledger that reached the

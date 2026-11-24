@@ -21,7 +21,7 @@ function projectWithRun(status: string): { cwd: string; runDir: string } {
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: "r-1",
       name: "feature",
       pipeline: "feature",

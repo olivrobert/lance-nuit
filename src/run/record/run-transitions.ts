@@ -4,17 +4,19 @@
 // change with them. This module neither builds nor loads pipeline definitions;
 // it persists mutations through the repository.
 //
-// Every operation below writes a GROUP of fields that belong together and the
-// journal event that records the transition, so a caller never synchronizes
-// `run.status`, `run.outcome` and `step.status` by hand. The groups:
+// Every operation below writes a GROUP of fields that belong together, saves
+// the snapshot, then appends the journal event that records the transition, so
+// a caller never synchronizes `run.status`, `run.outcome` and `step.status` by
+// hand. `run.status` has four writers only: `openRun` (back to RUNNING on a
+// resume), `abortRun`, `finalizeRun`, and the creation of a run. The groups:
 //
-// - `updateStep`          step status, its timestamps and reason, and the run
-//                         status/outcome a failure implies;
+// - `updateStep`          step status, its timestamps and reason;
 // - `recordStepVerdict`   what the latest attempt established about the step
 //                         (`fail_kind`, `fail_cause`), before its status moves;
 // - `absorbStepFailure`   a `blocking: false` failure kept as the reason of
 //                         the step, which its pass then settles `done`;
-// - `stopRun`             a clean stop that preserves the work left to do;
+// - `stopRun`             a clean stop that preserves the work left to do; the
+//                         run stays RUNNING until `finalizeRun`;
 // - `reportLiveCost`      the live estimate of a step's attempt in flight, which
 //                         `abortRun` charges; runtime-only, so nothing is saved;
 // - `abortRun`            a SIGINT/SIGTERM interruption, from the signal handler;
@@ -23,7 +25,7 @@
 //                         last snapshot.
 //
 // Restoration is not a transition and is not here: `run/record/run-opening.ts`
-// and `run/record/run-projection.ts` rebuild statuses from the snapshot and the journal.
+// opens the snapshot.
 // The persisted child references of a composed run have their own owner
 // (`run/record/child-transitions.ts`). Attempt closure has its own owner
 // (`run/record/attempt-closure.ts`); the figures belong to `run/record/cost-accounting.ts`.
@@ -42,7 +44,7 @@ import type { RunStopState } from "../persisted.js";
 import type { RunStepView, RunView } from "../run.js";
 import type { Run, RunStep } from "./run.js";
 import { writable } from "./run.js";
-import { closeAttempt } from "./attempt-closure.js";
+import { closeAttempt, journalAttemptClosed } from "./attempt-closure.js";
 import { type CostStop, costStopOf } from "./budget.js";
 import { aggregateControl, sumStepUsage } from "./cost-accounting.js";
 import { appendRunEvent, relativeRunPath } from "./run-journal.js";
@@ -101,19 +103,9 @@ export function updateStep(runView: RunView, stepView: RunStepView, status: RunS
   // Persist failure reason unless an error_extractor already supplied one.
   if (status === "failed" && errors && !step.errors) step.errors = errors;
   const attemptLog = latestAttemptLog(run, step);
-  if (status === "running") {
-    run.status = "RUNNING";
-  } else if (status === "failed") {
-    run.status = "FAIL";
-    run.outcome = {
-      phase: step.id,
-      reason: step.errors ?? errors ?? null,
-      logPath: relativeRunPath(run.run_dir, attemptLog),
-      resumable: true,
-      ...(step.fail_kind ? { failKind: step.fail_kind } : {}),
-      ...(step.fail_cause ? { failCause: step.fail_cause } : {}),
-    };
-  }
+  // A failed step does not decide the run's status: parallel siblings may still
+  // be running, and `finalizeRun` derives the verdict once the loop returns.
+  saveRun(run);
   // Unconditional fields, never a conditional spread: excess-property checking
   // does not reach a spread, so a misspelled name would land in the journal.
   // `undefined` is dropped by `JSON.stringify`; the shape on disk is unchanged.
@@ -126,7 +118,6 @@ export function updateStep(runView: RunView, stepView: RunStepView, status: RunS
     // snapshot has been rewritten by a later generation.
     failCause: step.fail_cause,
   });
-  saveRun(run);
 }
 
 /** What one attempt established about the step it executed. */
@@ -192,11 +183,17 @@ export function clearLiveCost(runView: RunView, stepView: RunStepView): void {
   if (run.executing?.has(stepView.id)) run.executing.set(stepView.id, {});
 }
 
-/** Close one step this process was executing when the signal arrived, and return
- *  the log of its attempt. The live estimate is what keeps the ledger from losing
- *  everything the interrupted agent consumed, and its model is the only record of
- *  what that attempt ran on for a step that recorded none before. */
-function abortExecutingStep(run: Run, step: RunStep, reason: string, now: string): string | null {
+interface AbortedStep {
+  step: RunStep;
+  attempt?: RunStep["attempts"][number];
+  logPath: string | null;
+}
+
+/** Close, in memory, one step this process was executing when the signal
+ *  arrived. The live estimate is what keeps the ledger from losing everything
+ *  the interrupted agent consumed, and its model is the only record of what that
+ *  attempt ran on for a step that recorded none before. */
+function abortExecutingStep(run: Run, step: RunStep, reason: string, now: string): AbortedStep {
   const attempt = [...(step.attempts ?? [])].reverse().find((candidate) => candidate.status === "running");
   const logPath = attempt?.log_path ?? relativeRunPath(run.run_dir, latestAttemptLog(run, step));
   const estimate = run.executing?.get(step.id);
@@ -219,20 +216,23 @@ function abortExecutingStep(run: Run, step: RunStep, reason: string, now: string
       provider: step.control?.provider ?? step.session?.provider,
       cost_estimated: true,
     };
-    closeAttempt(run, step, attempt, { status: "aborted", control, reason });
+    closeAttempt(step, attempt, { status: "aborted", control, reason });
   }
+  return { step, attempt, logPath };
+}
 
+function journalAbortedStep(run: Run, aborted: AbortedStep, reason: string): void {
+  if (aborted.attempt) journalAttemptClosed(run, aborted.step, aborted.attempt);
   appendRunEvent(run, "step.status.changed", {
-    stepId: step.id,
+    stepId: aborted.step.id,
     status: "aborted",
     reason,
-    logPath: logPath ?? undefined,
+    logPath: aborted.logPath ?? undefined,
     // Absent in practice — an interruption is not a cause the step established
     // — but written unconditionally like every other field of this event, so
     // the two `step.status.changed` sites keep the same shape.
-    failCause: step.fail_cause,
+    failCause: aborted.step.fail_cause,
   });
-  return logPath;
 }
 
 /** Finalize bookkeeping when the process receives SIGINT/SIGTERM. Every step this
@@ -243,8 +243,8 @@ export function abortRun(runView: RunView, signal: "SIGINT" | "SIGTERM"): void {
   const reason = `${signal}: run interrupted manually`;
   const now = new Date().toISOString();
   const activeSteps = run.steps.filter((step) => run.executing?.has(step.id) && step.status === "running");
-  const logPaths = activeSteps.map((step) => abortExecutingStep(run, step, reason, now));
-  const logPath = logPaths[0] ?? null;
+  const aborted = activeSteps.map((step) => abortExecutingStep(run, step, reason, now));
+  const logPath = aborted[0]?.logPath ?? null;
 
   run.aborted = true;
   run.status = "ABORTED";
@@ -258,12 +258,14 @@ export function abortRun(runView: RunView, signal: "SIGINT" | "SIGTERM"): void {
   };
   run.total_control = aggregateControl(run.steps);
   run.total_usage = sumStepUsage(run.steps);
-  appendRunEvent(run, "run.aborted", { status: run.status, reason, logPath });
   saveRun(run);
+  for (const entry of aborted) journalAbortedStep(run, entry, reason);
+  appendRunEvent(run, "run.aborted", { status: run.status, reason, logPath });
 }
 
 /**
- * Clean run stop: the run stops now, but the work left to do is preserved.
+ * Clean run stop: the loop stops now, but the work left to do is preserved. The
+ * run stays RUNNING: `finalizeRun` turns `stopped_reason` into STOPPED.
  *
  * Step statuses belong to the caller. A stop is not a decision about the
  * remaining steps: marking them `skipped` would erase the resume cursor, and
@@ -282,7 +284,6 @@ export function stopRun(runView: RunView, stepView: RunStepView, reason: string,
   const step = writable(stepView);
   if (run.aborted) return;
   run.stopped_reason = reason;
-  run.status = "STOPPED";
   run.outcome = {
     phase: step.id,
     reason,
@@ -290,13 +291,13 @@ export function stopRun(runView: RunView, stepView: RunStepView, reason: string,
     resumable: true,
     ...(stop ? { stop } : {}),
   };
+  saveRun(run);
   appendRunEvent(run, "run.stopped", {
     phase: step.id,
     reason,
     logPath: relativeRunPath(run.run_dir, latestAttemptLog(run, step)),
     stop,
   });
-  saveRun(run);
 }
 
 /**
@@ -365,16 +366,19 @@ export function finalizeRun(runView: RunView, outcome?: RunFinalizationSignals):
   const run = writable(runView);
   run.total_control = aggregateControl(run.steps);
   run.total_usage = sumStepUsage(run.steps);
-  // A failed step the selection set aside did not end this invocation: naming
-  // it would point the outcome at a step that never ran, away from the real stop.
-  const failed = run.steps.find((step) => step.status === "failed" && !outcome?.setAside?.includes(step.id));
+  // A step the selection set aside did not end this invocation, whether it
+  // failed or was interrupted earlier: neither its status nor its log speaks for
+  // the verdict, which would otherwise point away from the real stop.
+  const setAside = outcome?.setAside ?? [];
+  const failed = run.steps.find((step) => step.status === "failed" && !setAside.includes(step.id));
   const logPath = failed ? relativeRunPath(run.run_dir, latestAttemptLog(run, failed)) : (run.outcome?.logPath ?? null);
-  // Case precedence lives in run-verdict.ts, shared with projection.
+  // Case precedence lives in run-verdict.ts, shared with the stats projection.
   const status = deriveRunStatus(run, {
     failed: outcome?.failed,
     stopped: outcome?.stopped,
     budgetExceeded: outcome?.budgetExceeded,
     costUnaccounted: outcome?.costUnaccounted,
+    setAside,
   });
   const resumable = isResumableStatus(status);
   run.status = status;
@@ -412,7 +416,7 @@ export function finalizeRun(runView: RunView, outcome?: RunFinalizationSignals):
     // outcome — could never see its child's block.
     run.outcome = {
       phase: failed?.id ?? run.outcome?.phase ?? null,
-      reason: run.stopped_reason ?? run.outcome?.reason ?? "clean stop",
+      reason: run.stopped_reason ?? failed?.errors ?? run.outcome?.reason ?? "clean stop",
       logPath: logPath ?? run.outcome?.logPath ?? null,
       resumable,
       at,
@@ -436,9 +440,9 @@ export function finalizeRun(runView: RunView, outcome?: RunFinalizationSignals):
   } else {
     run.outcome = { phase: null, reason: "run not completed", logPath, resumable, at };
   }
+  saveRun(run);
   appendRunEvent(run, "run.finished", {
     status: run.status,
     outcome: run.outcome,
   });
-  saveRun(run);
 }

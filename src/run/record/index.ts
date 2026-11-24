@@ -42,7 +42,7 @@ export {
 // reader shows, the attempts and events only the journal holds, and the journal
 // health `--inspect` reports.
 export {
-  lastJournalEvent,
+  lastFeedEvent,
   type RunHistory,
   type RunRead,
   readLatestRun,
@@ -51,7 +51,7 @@ export {
   readRunHistory,
 } from "./run-read.js";
 export { type RunJournalReport, readRunJournal } from "./run-journal.js";
-export { runEventsFilePath } from "./stores/file-run-event-store.js";
+export { runEventsFilePath, runFeedFilePath } from "./stores/file-run-event-store.js";
 
 // Attempts and their logs, and the cost ledger and budget a run is held to: an
 // attempt is opened and settled here, the ledger an execution spends against is

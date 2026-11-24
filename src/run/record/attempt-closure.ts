@@ -1,6 +1,6 @@
 //
 // The single writer of an attempt's end. Normal completion (`settleAttempt`), a
-// SIGINT/SIGTERM interruption (`abortRun`) and a hard crash detected on resume
+// SIGINT/SIGTERM interruption (`abortRun`) and a hard crash detected on opening
 // (`settleCrashedAttempts`) all close their attempt through `closeAttempt`, so the
 // status, the stats and the `step.attempt.finished` event have one shape and one
 // set of rules.
@@ -11,8 +11,8 @@
 // is not money: the status, the timestamps, the session, the log path, and the
 // event.
 //
-// Synchronous and free of I/O beyond the journal: `abortRun` calls it from the
-// signal handler. Persisting the snapshot (`saveRun`) is left to the callers.
+// Synchronous and free of I/O: `abortRun` calls it from the signal handler. Each
+// caller saves the snapshot, then journals the closure (`journalAttemptClosed`).
 
 import type { AgentSession, AttemptStats, StepControl, StepUsage } from "../../contracts/backends.js";
 import { isAgentStep } from "../../contracts/backends.js";
@@ -60,10 +60,10 @@ export interface AttemptOutcome {
 }
 
 /**
- * Close one attempt: status, timestamps, the charge onto the attempt and the step
- * total, and the `step.attempt.finished` event. Returns `undefined` without
- * touching anything when the attempt is no longer `running`: the first closer
- * wins, whichever path it came from (loop, signal handler, resume).
+ * Close one attempt in memory: status, timestamps, and the charge onto the
+ * attempt and the step total. Returns `undefined` without touching anything when
+ * the attempt is no longer `running`: the first closer wins, whichever path it
+ * came from (loop, signal handler, opening).
  *
  * An accepted closure returns the figures it stored, so whatever else the attempt
  * must reach (the in-loop ledger, for a tracked attempt) is fed the same numbers
@@ -74,7 +74,6 @@ export interface AttemptOutcome {
  * with their callers.
  */
 export function closeAttempt(
-  run: Run,
   step: RunStep,
   attempt: PersistedAttempt,
   outcome: AttemptOutcome,
@@ -92,31 +91,31 @@ export function closeAttempt(
   // the step total that seeds the budget ledger on resume, and returns what it
   // wrote for the event below.
   const charged = chargeClosedAttempt(step, attempt, settled);
-  const { control, usage } = charged;
   if (outcome.reason !== undefined) attempt.errors = outcome.reason;
   if (outcome.logPath !== undefined) attempt.log_path = outcome.logPath;
   if (outcome.interrupted) attempt.interrupted = true;
+  return charged;
+}
 
+/** Journal a closure the caller has already saved. */
+export function journalAttemptClosed(run: Run, step: RunStep, attempt: PersistedAttempt): void {
   // Every field is passed unconditionally, never through a conditional spread:
   // excess-property checking does not reach a spread, so a misspelled field name
-  // would compile and land in the journal. `undefined` is dropped by
-  // `JSON.stringify`, so the shape written to disk is unchanged.
+  // would compile and land in the journal.
   appendRunEvent(run, "step.attempt.finished", {
     stepId: step.id,
     attempt: attempt.attempt,
     kind: attempt.kind,
     status: attempt.status,
     sessionId: attempt.session?.id,
-    // The full session, so resume can project the attempt without the snapshot.
     session: attempt.session,
-    provider: control.provider ?? attempt.session?.provider,
-    model: control.model,
-    costUsd: control.total_cost_usd,
-    control,
-    usage,
+    provider: attempt.control?.provider ?? attempt.session?.provider,
+    model: attempt.control?.model,
+    costUsd: attempt.control?.total_cost_usd,
+    control: attempt.control,
+    usage: attempt.usage,
     logPath: attempt.log_path,
     reason: attempt.errors,
     interrupted: attempt.interrupted,
   });
-  return charged;
 }

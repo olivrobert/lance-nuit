@@ -202,7 +202,8 @@ lancenuit run PROJ-42 --pipeline nightly
 A fresh run refuses to start on a dirty Git tree.
 
 If the process is interrupted or a step fails, run the same command again. It
-resumes. Add `--fresh` only when you want a brand-new run. Either way, a step that
+resumes from its `state.json`, the run's only execution record; a run that
+passed is never written again. Add `--fresh` only when you want a brand-new run. Either way, a step that
 already succeeded is skipped while the inputs and outputs it declares are
 unchanged ([input freshness](guide/dsl.md#input-freshness)).
 

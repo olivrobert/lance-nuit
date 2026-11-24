@@ -28,7 +28,7 @@ afterEach(() => {
 async function execute(def: Pipeline, context: PipelineContext, ticket: string): Promise<Run> {
   const runDir = mkdtempSync(join(tmpdir(), "pipeline-example-run-"));
   const run: Run = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: `example-${def.name}`,
     name: def.name,
     pipeline: def.name,

@@ -32,7 +32,7 @@ test("generic bash pipeline: an arbitrary identifier never accesses the Jira gat
     command: "printf 'generic-ok'",
   });
   const run: Run = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: "phase5-generic",
     name: "generic-shell",
     pipeline: "generic-shell",

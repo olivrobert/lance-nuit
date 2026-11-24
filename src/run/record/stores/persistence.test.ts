@@ -30,7 +30,7 @@ function writeRun(obj: any): string {
   const f = join(dir, "default.json");
   writeFileSync(
     f,
-    JSON.stringify({ schemaVersion: 1, runId: "fixture-run", name: "default", pipeline: "default", ...obj }),
+    JSON.stringify({ schemaVersion: 2, runId: "fixture-run", name: "default", pipeline: "default", ...obj }),
   );
   return f;
 }
@@ -289,7 +289,7 @@ test("AUDIT #1: validates the contract", async () => {
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: "hydrate-loss",
       name: "default",
       pipeline: "default",
@@ -331,7 +331,7 @@ test("hydrate: an ABORTED run whose steps are all settled loads as live so it ca
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: "aborted-settled",
       name: "default",
       pipeline: "default",
@@ -369,7 +369,7 @@ test("hydrate: an ABORTED settled run that opted out of resuming stays terminal"
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: "aborted-optout",
       name: "default",
       pipeline: "default",
@@ -392,7 +392,7 @@ test("hydrate: an ABORTED settled run that opted out of resuming stays terminal"
   expect(run.aborted).toBe(true);
 });
 
-test("hydrate derives live totals from steps instead of a stale finalized aggregate", async () => {
+test("hydrate restores the persisted run totals as written", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hydrate-stats-"));
   const pipelinePath = writePipelineFixture(dir);
   const runDir = join(dir, "run");
@@ -400,12 +400,12 @@ test("hydrate derives live totals from steps instead of a stale finalized aggreg
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: "hydrate-stats",
       name: "default",
       pipeline: "default",
       pipeline_path: pipelinePath,
-      total_control: { duration_ms: 100, total_cost_usd: 0.1 },
+      total_control: { duration_ms: 100, total_cost_usd: 0.4 },
       total_usage: { output_tokens: 40 },
       steps: [
         {
@@ -429,13 +429,13 @@ test("hydrate derives live totals from steps instead of a stale finalized aggreg
     control: { duration_ms: 100, total_cost_usd: 0.4 },
     usage: { output_tokens: 40 },
   });
-  expect(run.total_control).toBeUndefined();
-  expect(run.total_usage).toBeUndefined();
+  expect(run.total_control).toEqual({ duration_ms: 100, total_cost_usd: 0.4 });
+  expect(run.total_usage).toEqual({ output_tokens: 40 });
   expect(runSpend(run).usd).toBe(0.4);
 
   const reread = JSON.parse(readFileSync(join(runDir, "state.json"), "utf-8"));
   expect(reread.steps[0].control).toEqual({ duration_ms: 100, total_cost_usd: 0.4 });
-  expect(reread.total_control).toBeUndefined();
+  expect(reread.total_control).toEqual({ duration_ms: 100, total_cost_usd: 0.4 });
 });
 
 test("loadOrCreateRun refuses to erase a persisted step removed from the definition", async () => {
@@ -446,7 +446,7 @@ test("loadOrCreateRun refuses to erase a persisted step removed from the definit
   writeFileSync(
     join(runDir, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: "definition-drift",
       name: "default",
       pipeline: "default",
@@ -465,17 +465,22 @@ test("loadOrCreateRun refuses to erase a persisted step removed from the definit
   expect(unchanged.steps).toHaveLength(2);
 });
 
-test("last_attempt prevents log-number reuse when the journal is missing", () => {
+test("the persisted attempts prevent log-number reuse", () => {
   const dir = mkdtempSync(join(tmpdir(), "attempt-counter-"));
   const run = makeRun(dir);
   const step = run.steps[0]!;
-  step.last_attempt = 4;
-  step.attempts = [];
+  step.attempts = [4].map((attempt) => ({
+    attempt,
+    kind: "step" as const,
+    status: "done" as const,
+    started_at: "2026-01-01T00:00:00.000Z",
+    log_path: `steps/${step.id}/attempt-00${attempt}/output.log`,
+  }));
 
   expect(allocateAttempt(run, step).logPath).toContain("attempt-005");
   saveRun(run);
   const saved = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
-  expect(saved.steps[0].last_attempt).toBe(5);
+  expect(saved.steps[0].attempts.map((entry: { attempt: number }) => entry.attempt)).toEqual([4, 5]);
 });
 
 test("saveRun: validates the contract", () => {

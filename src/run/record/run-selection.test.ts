@@ -31,7 +31,7 @@ function writeRun(
   mkdirSync(runDir, { recursive: true });
   writeFileSync(
     join(runDir, "state.json"),
-    JSON.stringify({ schemaVersion: 1, runId, name: pipeline, pipeline, ticket, ...state }),
+    JSON.stringify({ schemaVersion: 2, runId, name: pipeline, pipeline, ticket, ...state }),
   );
   return runDir;
 }
@@ -194,11 +194,9 @@ test("--run resumes a run whose only missing piece is the verdict", () => {
   expect(resolveExplicitRunDir("feature", "DEMO-1", "run-sigint", aborted)).toBe(abortedDir);
 });
 
-test("--run reads what is left as every reader does: a step the journal finished is done", () => {
-  // The runner died after the journal recorded the last step done and before the
-  // snapshot did. Read alone, the snapshot owes `create-mr`; projected, the run
-  // owes only its verdict. Both are selectable, and the notice counts what a
-  // resume would actually run.
+test("--run reads what is left from the snapshot alone: a step the journal finished is still owed", () => {
+  // The journal is a trace written after each save: a `done` it holds beyond the
+  // snapshot is never read back, so the notice counts the step the snapshot owes.
   const context = fixtureContext();
   const runDir = writeRun(context, "feature", "DEMO-1", "run-dead", {
     status: "RUNNING",
@@ -214,7 +212,7 @@ test("--run reads what is left as every reader does: a step the journal finished
   );
   pointLatest(context, "feature", "DEMO-1", "run-dead");
 
-  expect(discardedResumeNotice("feature", "DEMO-1", context)).toContain("its verdict was never stamped");
+  expect(discardedResumeNotice("feature", "DEMO-1", context)).toContain("1 step(s) remained");
   expect(resolveExplicitRunDir("feature", "DEMO-1", "run-dead", context)).toBe(runDir);
 });
 

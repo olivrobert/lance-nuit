@@ -169,7 +169,7 @@ function invokeRunner(env) {
 function assertState(path, expectedStatus, expectedSteps) {
   assert(existsSync(path), `snapshot is missing: ${path}`);
   const state = JSON.parse(readFileSync(path, "utf8"));
-  assert(state.schemaVersion === 1, `expected schemaVersion 1, got ${state.schemaVersion}`);
+  assert(state.schemaVersion === 2, `expected schemaVersion 2, got ${state.schemaVersion}`);
   assert(state.status === expectedStatus, `expected run status ${expectedStatus}, got ${state.status}`);
   const statuses = Object.fromEntries(state.steps.map((step) => [step.id, step.status]));
   for (const [id, status] of Object.entries(expectedSteps)) {

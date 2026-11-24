@@ -22,7 +22,7 @@ function runningStep(runner: "bash" | "agent" = "bash"): RunStep {
   );
 }
 
-test("openAttempt: registers, journals and persists the attempt before anything spawns", () => {
+test("openAttempt: registers, persists and journals the attempt before anything spawns", () => {
   const step = runningStep();
   const run = makeRun(step);
 
@@ -32,7 +32,9 @@ test("openAttempt: registers, journals and persists the attempt before anything 
   expect(opened.attempt).toMatchObject({ attempt: 1, kind: "fix", status: "running" });
   expect(opened.logPath).toBe(join(run.run_dir, "steps/a/attempt-001/output.log"));
   expect(readRunEvents(run.run_dir).map((event) => event.type)).toEqual(["step.attempt.started"]);
-  expect(readRunSnapshot(join(run.run_dir, "state.json"))?.steps[0]?.last_attempt).toBe(1);
+  expect(readRunSnapshot(join(run.run_dir, "state.json"))?.steps[0]?.attempts).toMatchObject([
+    { attempt: 1, kind: "fix", status: "running" },
+  ]);
 });
 
 test("settleAttempt: a result arriving after the signal handler closed the attempt changes nothing", () => {

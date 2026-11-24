@@ -15,8 +15,9 @@ item normally looks like this:
 └── runs/<pipeline>/
     ├── latest -> <run-id>     # authoritative resumable selector
     └── <run-id>/
-        ├── state.json
-        ├── events.jsonl       # append-only event journal and live feed
+        ├── state.json         # the execution record
+        ├── events.jsonl       # append-only trace of the journal events
+        ├── feed.jsonl         # live feed: runner output, bash output, raw backend stream
         └── steps/<step>/attempt-001/
             ├── output.log
             └── command.txt    # the rendered command or prompt the attempt was given
@@ -60,8 +61,8 @@ present. Such a child has the same `artifacts/`, `reports/`, `decisions/`, and
 
 ## The run record and the deliverables
 
-The run record, `state.json` and `events.jsonl` in the run directory, is the
-run's journal and ledger: what each step did and how its last pass ended
+The run record, `state.json` in the run directory, is the run's ledger, with
+`events.jsonl` as its trace: what each step did and how its last pass ended
 (done, failed, aborted, interrupted), its attempts and retries, the agent
 sessions it opened, and what it cost against the budget. The deliverables live
 beside it, in the work item: the artifacts in `artifacts/` and the stamps that
@@ -175,38 +176,36 @@ awaiting a gate before upgrading.
 
 ## Run snapshots and resume
 
-The reader accepts schema version 1, validates the full structure, and fails
-closed on any other version. Keep the matching event journals when moving runs to
-an installed package: a snapshot alone does not contain the attempt history.
+`state.json` is the execution record, written as schema version 2 by one
+writer (`run/record/run-repository.ts`): step status, retries, sessions,
+profile attribution, usage/cost control data, every attempt of each step
+(`attempts`: number, kind, status, session, log path and its own figures), the
+child references of a composed node, and the run-level verdict, totals, and
+cost decisions. The next attempt number is the highest `attempts[].attempt`
+plus one, so a number, and its log directory, is never reused. Each attempt
+copies the command it was given to `command.txt` beside its log, once, when it
+starts; that copy is diagnostic, read only by the dashboard, and an attempt
+whose copy cannot be written still runs. The pipeline definition and
+configuration are reloaded when a run resumes, while persisted step state
+(including the profile and session) is retained for correct attribution.
 
-`state.json` is written as schema version 1 and contains the durable run state: step status,
-retries, sessions, profile attribution, usage/cost control data, the highest
-attempt number allocated per step (`last_attempt`), and the run-level verdict,
-totals, and cost decisions. It does **not** carry the attempts: they are
-projected from the journal on resume (`run/record/run-repository.ts` is the one
-writer of the snapshot, and `run/record/run.ts` marks them as runtime-only).
-A snapshot written by an older release may still carry `last_command`, the last
-rendered prompt of a step: it reads as before, the field is ignored, and the
-next save drops it. Each attempt copies the command it was given to
-`command.txt` beside its log, once, when it starts; that copy is diagnostic,
-read only by the dashboard, and an attempt whose copy cannot be written still
-runs. The pipeline definition and configuration are reloaded when a run
-resumes, while persisted step state (including the profile and session) is
-retained for correct attribution. Which of the two files is believed when they
-disagree is settled per concept in [Which record is authoritative](#which-record-is-authoritative).
+The reader accepts schema version 2 only, validates the full structure, and
+fails closed on any other version. A run written by an earlier release (schema
+version 1, whose attempts lived in the journal) is no longer readable: readers
+treat it as absent, and execution refuses to resume it. Finish it with the
+release that started it, or start a new run with `--fresh`.
 
 The run record opens the run (`openRun`, `run/record/run-opening.ts`): it
-selects the directory, reads the snapshot, projects the persisted state with
-the journal, and assembles the in-memory run from the definition and the
-projected steps, or creates a new run; every snapshot write and journal event of
-the opening is its own, and it tells its caller whether it resumed.
+selects the directory, reads the snapshot, and assembles the in-memory run from
+the definition and the persisted steps, or creates a new run; it never reads the
+journal. Every snapshot write and journal event of the opening is its own, and
+it tells its caller whether it resumed.
 `execution/step/load-or-create-run.ts` supplies the policy: it loads the definition — again, for a
 resume, under the snapshot's spec path and lot — validates `--start-at`, and
-decides the `--start-at` requeue of the projected steps, which `openRun` hands
-it read-only before hydration and then applies. The requeue comes after the
-projection, so it judges what the journal knows. `--start-at X` requeues `X`
-and every later step, so the run is hydrated live with totals derived from the
-steps even when the snapshot had passed; attempts, retries and spend are kept.
+decides the `--start-at` requeue of the persisted steps, which `openRun` hands
+it read-only before hydration and then applies. `--start-at X` requeues `X`
+and every later step, so the run is hydrated live; attempts, retries and spend
+are kept.
 
 The `--steps`/`--skip` selectors, and the steps before a `--start-at` target,
 last one invocation, so the snapshot never holds an exclusion: boot excludes
@@ -237,18 +236,10 @@ step being executed, so `updateStep` records the steps this process put in
 only. A signal that lands while no step executes
 (during an admission, or before the first step) marks no step `aborted`.
 
-`run/record/` only reads, projects and reconciles
-(`run/record/run-projection.ts`): it reconciles each persisted step with the attempts
-the journal holds and settles the attempts a crash left running, without ever
-knowing about a pipeline definition.
-
-The readers see the same reconciliation (`readRun`, `run/record/run-read.ts`).
-When a runner died after the journal recorded a step finished and before the
-snapshot did, the dashboard, `--inspect`, `close` and `--run` all show that step
-finished, as the resume will treat it, and number its attempts the same way. The
-journal is parsed for that only when it can say more than the snapshot: the run
-has no verdict, no live process holds it, and a step is still pending or
-running. A live run is read from its snapshot alone, at most one write behind.
+The readers (`readRun`, `run/record/run-read.ts`) — the dashboard, `--inspect`,
+`close`, `--run` — see the snapshot as written, statuses and attempts included:
+each transition is saved before it is journaled, so there is nothing to
+reconcile.
 
 Readers validate a snapshot against a runtime schema (`run/record/schema.ts`) that
 mirrors the `PersistedRun` interfaces. Unknown fields are kept, so a snapshot
@@ -304,10 +295,9 @@ A snapshot also records where and why the run stands where it does:
   run, or of a composed child folded into it, spent tokens no pricing table could
   price. Nothing clears it — no resume, no later priced attempt, no `--budget` —
   because nothing can retroactively price a closed attempt. A capped run carrying
-  it stops with `cost-unaccounted` unless it is authorized. It is a projection of
-  the reconciled attempts made durable, so a snapshot written before the field
-  existed still stops: the ledger reads the same fact from the attempts' own
-  `cost_unknown`, and the next generation writes the latch.
+  it stops with `cost-unaccounted` unless it is authorized. It is the attempts'
+  own `cost_unknown` made durable: the ledger reads the same fact from the
+  attempts, and writes the latch when only they carry it.
 - `allow_unmetered` records that a human authorized that unknown spend with
   `--allow-unmetered`. It lifts the accounting stop only: `max_cost_usd` still
   governs what the runner could price. Absent means strict — a missing
@@ -315,11 +305,11 @@ A snapshot also records where and why the run stands where it does:
   launched in the run's budget scope, and a composed child cannot set it for
   itself while an ancestor's ceiling governs it.
 
-All of these are optional and the writer keeps schema version 1: a snapshot written
-before they existed remains valid, and a stop raised by an admission that
-describes nothing carries `stopped_reason` alone.
+All of these are optional: a stop raised by an admission that describes nothing
+carries `stopped_reason` alone.
 
-Each attempt gets its own log; resuming never truncates `events.jsonl`. The
+Each attempt gets its own log; resuming never truncates `events.jsonl` or
+`feed.jsonl`. The
 `latest` symlink is reused only when its snapshot is resumable (`pending`,
 `running`, `failed`, or `aborted` work remains). A completed (`PASS`) run is not
 resumed; a run interrupted by SIGINT, stopped cleanly at a gate, or stopped by its
@@ -329,6 +319,12 @@ between the last step snapshot and finalization — is also resumed, so the next
 invocation stamps its verdict instead of replaying the whole pipeline. Use
 `--fresh` to force a new timestamped run, or `--run <runId>` to select an
 existing run explicitly for inspection, logs, or resume.
+
+A `PASS` run is never written again: it is opened read-only, and `saveRun`
+refuses to write it. `--run <runId>` that would execute it fails and points to
+`--start-at <step>`, which runs steps again in a new run; a parent that
+re-enters a `PASS` child opens it read-only and settles its reference from the
+child's snapshot.
 
 A run directory is held by a single writer: `runner.lock` records the owning pid,
 and a dead holder is reclaimed automatically. Reclaiming a stale lock goes through
@@ -384,11 +380,12 @@ intentional recovery action.
 
 An attempt is closed exactly once, whichever path ends it: a normal completion in
 the step loop, a SIGINT/SIGTERM caught by the signal handler, or a hard crash
-detected when the run is resumed. The three paths go through the same writer
-(`run/record/attempt-closure.ts`), which sets the attempt status and `finished_at`,
-normalizes its control data, charges it (see
-[Where spend is written](budgets-timeouts.md#where-spend-is-written)), and appends
-one `step.attempt.finished` event. A second closer finds the attempt no longer
+detected when the run is opened. The three paths go through the same writer
+(`closeAttempt`, `run/record/attempt-closure.ts`), which sets the attempt status
+and `finished_at`, normalizes its control data and charges it (see
+[Where spend is written](budgets-timeouts.md#where-spend-is-written)); each
+caller then saves the snapshot and appends one `step.attempt.finished` event
+(`journalAttemptClosed`). A second closer finds the attempt no longer
 `running` and does nothing, so an interruption that races with a completing
 attempt never charges it twice or records two endings.
 
@@ -408,7 +405,7 @@ The `step.attempt.finished` payload has one shape for every path:
 | `status` | always | `done`, `failed`, or `aborted` |
 | `control` | always | normalized control data, including `cost_unknown` / `cost_estimated` |
 | `logPath` | always | attempt log, run-relative |
-| `sessionId`, `session` | when the backend reported one | session reference and the full session object, so a resume can project the attempt without the snapshot |
+| `sessionId`, `session` | when the backend reported one | session reference and the full session object |
 | `provider`, `model` | when known | from the control data, or the session for the provider |
 | `costUsd` | when priced | `control.total_cost_usd`; an abort carries its live estimate |
 | `usage` | when measured | token counts |
@@ -420,82 +417,78 @@ are the discriminators.
 
 ### Which record is authoritative
 
-A resume reads two files that were written at different instants, and a crash
-can leave either one behind the other. Rather than rebuilding everything from the
-events, each concept has one authoritative record, and a documented rule for the
-case where the other record knows more. `run/record/run-opening.ts` assembles the
-run from the definition and the projection; `run/record/run-projection.ts` and
-`run/record/attempt-projection.ts` apply the rules below; `run/record/cost-accounting.ts`
-owns the spend rules among them (`projectStepSpend`, `restoreAttemptSpend`,
-`restoreRunTotals`). None of them charges anything: a figure read back is a
-projection of spend already accounted for when the attempt closed.
-
-| Concept | Authority | Derived from it | When the other record knows more |
-| --- | --- | --- | --- |
-| Step status, timestamps, reason | snapshot | — | A **terminal** `step.status.changed` (`done`, `failed`, `skipped`, `aborted`) over an **unfinished** snapshot status (`pending`, `running`) wins, with the event's instant, reason and fail cause. One-way only: a terminal snapshot is the later record, and a journal that walked the step back to `running` describes a pass the snapshot has since closed. A `pending` step carrying `replay` is not superseded: its terminal event is the pass `--start-at` asked to replay. Once that replay is `running`, a terminal event closes it as usual and drops `replay`. |
-| Attempts (number, kind, status, session, log path, own figures) | journal (`step.attempt.started` / `step.attempt.finished`) | in-memory `step.attempts`; the next attempt number | The snapshot holds none. A finish without its start is kept (the numbering must not shift); an attempt still `running` at load is settled by `settleCrashedAttempts` as failed and unpriced, through the same `closeAttempt` as any other ending, and the finish is journaled with `interrupted: true` so the next resume projects it instead of deciding again. That marker, on the step's last attempt, is what makes admission ask for an authorization before replaying the step ([Interrupted steps](dsl.md#interrupted-steps)). |
-| Retry quotas (`retries`, `timeout_retries`), step session, orchestration node state and its frozen items | snapshot | — | Written only by named operations of `run-record`, each of which saves the snapshot itself: `consumeRetry` before a rerun or repair runs and `refundRetry` for one the cost guard cut short, `bindSession` for a fresh session, the one a step attempt reported or a resumed repair's fork, `openOrchestration` and `freezeOrchestrationItems` for a composed node. The journal does not carry them: an attempt event names the attempt's session, never the step's. |
-| Attempt numbering floor | snapshot `last_attempt` | next attempt = max(`last_attempt`, journaled attempts, list length) + 1 | The journal cannot lower it. It is kept precisely for the journal that lost an attempt (a failed append, a rewritten file): without it a resume would reuse a number and append into an existing log. It stays until a replacement proves the same guarantee with an incomplete journal. |
-| Step spend total (`control`, `usage`) | snapshot | budget ledger seed on resume | The journal wins **only when its priced sum exceeds the snapshot's** (`projectStepSpend`): the finish event is appended before the snapshot, so a crash in that window leaves a priced attempt the step total never received. An attempt lost with no price in the journal does not change the total: the snapshot stays the record, and the attempt keeps its own figures where they were read. |
-| Run totals (`total_control`, `total_usage`) | derived from the steps | materialized by `finalizeRun` and `abortRun`; read through `runSpend` / `runUsage` (`controlForRun` seeds the ledger the same way) | Trusted on a **terminal** snapshot only (finalized, and no executable step left under the current definition); dropped on a live resume (`restoreRunTotals`). Every charge that reaches the run — an attempt to the ledger, a child reconciliation — drops them too, so a total from a previous generation never hides spend incurred after it. |
-| Run status, outcome, `aborted`, `stopped_reason` | snapshot | — | Restored as persisted on a terminal snapshot; on a live resume they describe the previous invocation's ending and are reset to a running state. A `RUNNING` (or resumable `ABORTED`) snapshot whose steps are all settled is not terminal: it owes a `finalizeRun`, and is loaded live so the next invocation stamps it. |
-| `budget_exceeded`, `cost_unaccounted`, `allow_unmetered`, `budget_approved` | snapshot | budget ledger flags on resume | The journal is a trace, never the source. `--budget` clears `budget_exceeded` and nothing else; `cost_unaccounted` is a latch nothing clears, and a snapshot written before it existed reads the same fact from the attempts' `cost_unknown`; a new `--allow-unmetered` is applied once at boot and journaled then. |
-| Composed child reference (`status`, `runId`, `outcome`, in the parent snapshot) | parent snapshot | — | The parent's own progress record for one child call, written by `run/record/child-transitions.ts`: `done` and `skipped` are final and never re-entered; `pending`, `running` and `failed` are re-entered by the next generation under the same bound `runId`. The child run's verdict lives in the child snapshot; the reference carries a copy of its outcome as the parent step's answer. |
-| Composed child identity (`pipeline.child.started`) | journal | — | The reference's `runId` alone is not proof the child started; the start fact lives in the journal only, which is why an unreadable journal fails the resume instead of reading as empty. |
-| Composed child spend (`accountedCostUsd`, `accountedDurationMs`, `accountedUsage`) | parent snapshot | the parent node's `control` and `usage`, the parent ledger | What the parent already charged for this child (`chargeChildReconciliation`). A resumed child re-reports its whole history and is charged by difference; a reference reloaded from a snapshot written before the last reconciliation is charged the missing difference again, never twice. |
-| Location (`worktree`, `cwd`) | snapshot | — | Rewritten by every resume with the invocation's own location. |
-| Selection (`replay`, skipped steps) | snapshot, then the current selectors | — | No exclusion is written or kept: the step loop applies `--steps`, `--skip`, and the steps before a `--start-at` target to this invocation only, and an `excluded` mark an older runner wrote is ignored. `--start-at X` requeues `X` and every later step, whatever their status, as `pending` with `replay`; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
+`state.json` is the execution record: statuses, attempts and their numbering,
+sessions, spend, child references and the verdict are read from it alone.
+`events.jsonl` is a trace that no execution logic reads.
 
 ### Interruption windows
 
-Every transition appends its journal event, then writes the snapshot through a
-temporary file and rename. A crash therefore leaves one of three states: neither
-written, the event alone, or both. The event-alone window is the one the rules
-above exist for:
+Every transition changes the run in memory, writes the snapshot through a
+temporary file and rename, then appends its journal event. A crash therefore
+leaves neither written, the snapshot alone, or both; the snapshot alone loses
+only the trace event, never a fact a resume needs. A crash **before** the save
+leaves nothing of the transition, and the resume replays it. One side effect can
+survive: an attempt's log directory is allocated before its save, so an orphan
+`attempt-NNN/` may be reused by the replayed attempt.
 
-| Transition | Order | Event alone leaves | Resolved on resume by |
-| --- | --- | --- | --- |
-| Run opening (`openRun`) | new run: snapshot → `run.started` (→ `run.unmetered.authorized`); resume: a new authorization's event and the crashed attempts' finishes → snapshot (only when one of them, or the location, changed) → `run.resumed` → snapshot | on a new run the snapshot comes first, so a crash leaves a run whose journal never recorded its start; on a resume, a `run.resumed` (or an authorization) over a snapshot that still describes the previous ending | nothing: the snapshot stays the record, the next opening settles nothing twice, applies an authorization only if it is given again, and journals its own `run.resumed` |
-| Attempt start (`openAttempt`) | attempt pushed in memory → `step.attempt.started` → snapshot (`last_attempt`) | an attempt the journal calls `running` and the snapshot never numbered | `settleCrashedAttempts` closes it failed and unpriced, journals the finish with `interrupted: true`; the number is taken from the journal |
-| Attempt end (`settleAttempt`) | `closeAttempt` (`step.attempt.finished`, step total in memory) → verdict → ledger → live-guard stops → `step.cost.unaccounted` → snapshot | a priced attempt absent from the step total | `projectStepSpend` rebuilds the step total from the journal when it holds more |
-| Step status (`updateStep`) | `step.status.changed` → snapshot | a step the journal finished and the snapshot still runs | `reconcileStepStatus`, terminal event over unfinished snapshot |
-| Clean stop / interruption / verdict (`stopRun`, `abortRun`, `finalizeRun`) | event → snapshot | a `run.finished` (or `run.stopped`, `run.aborted`) with a snapshot that still says `RUNNING` | the settled-but-unfinalized rule: the run is resumed and finalized again, so the journal carries a second `run.finished`; readers take the last one |
-| Composed child launch (`bindChildRun`, `recordChildStarted`) | parent snapshot (reference `running`, bound to its `runId`) → child run booted (child snapshot) → `pipeline.child.started` | a reference with a `runId` and no start event, or a start event with a child snapshot that later went missing | the reference alone is not proof the child started, so the parent retries the initialization under the same id; once the start event is durable, a missing or damaged child snapshot is refused instead of becoming a second child (`run/record/child-transitions.ts` owns this rule) |
-| Composed child settlement (`settleChild`) | `chargeChildReconciliation` (`pipeline.child.cost.reconciled`, node total and ledger in memory) → `pipeline.child.finished` → parent snapshot | a finished, reconciled child the parent snapshot still calls `running`, with `accounted*` figures behind the charge | the reference is re-entered: the child snapshot is terminal, so nothing executes; the reconciliation charges the difference the snapshot missed, and the settlement is journaled again — readers take the last `pipeline.child.finished` |
+| Transition | Order |
+| --- | --- |
+| Run creation (`openRun`) | snapshot → `run.started` (→ `run.unmetered.authorized`) |
+| Run opening on resume (`openRun`) | one snapshot (location, a new authorization, crashed attempts settled, status back to `RUNNING`) → `run.resumed` when the run goes on → the settled attempts' `step.attempt.finished` → `run.unmetered.authorized` |
+| Attempt start (`openAttempt`) | the attempt `running` in the snapshot, before the spawn → `step.attempt.started` |
+| Attempt end (`settleAttempt`) | closure, verdict and ledger charge in memory → snapshot → `step.attempt.finished` → live-guard stops → `step.cost.unaccounted` |
+| Step status (`updateStep`) | snapshot → `step.status.changed` |
+| Clean stop, interruption, verdict (`stopRun`, `abortRun`, `finalizeRun`) | snapshot → `run.stopped`, `run.aborted` or `run.finished` |
+| Composed child launch (`bindChildRun`, `recordChildStarted`) | parent snapshot (reference bound to its `runId`) → child snapshot → parent snapshot (reference `startedAt`) → `pipeline.child.started` |
+| Composed child settlement (`chargeChildReconciliation`, `settleChild`) | parent snapshot (`accounted*` figures) → `pipeline.child.cost.reconciled` → parent snapshot (reference settled) → `pipeline.child.finished` |
 
-A crash **before** the event leaves nothing of the transition: the attempt never
-existed, the step keeps its previous status, and the resume replays it. One
-side effect can survive: the attempt's log directory is allocated before the
-start event, so an orphan `attempt-NNN/` may be reused by the replayed attempt.
+What a crash leaves is resolved from the snapshot alone:
 
-The write policies differ by file, and that asymmetry is deliberate:
+- An attempt still `running` when the run is opened with no live holder belonged
+  to a dead process. The opening closes it `failed` with `interrupted: true`,
+  through the same `closeAttempt` as any other ending (an agent attempt without
+  figures is marked `cost_unknown`), in its single save, then journals the
+  finish. That marker, on the step's last attempt, is what makes admission ask
+  for an authorization before replaying the step
+  ([Interrupted steps](dsl.md#interrupted-steps)).
+- A child reference without `startedAt` is retried under the same `runId`. Once
+  `startedAt` is saved, a missing or damaged child snapshot is refused instead
+  of becoming a second child (`run/record/child-transitions.ts` owns this rule).
+- A settlement lost before its save re-enters the reference: the child is
+  terminal, so nothing executes, and the reconciliation charges only the
+  difference the `accounted*` figures miss.
+- A `RUNNING` snapshot whose steps are all settled is a crash before
+  `finalizeRun`: it is resumed and finalized.
 
-- The **snapshot** write is atomic and its failure propagates as an error: the
-  store never swallows it, so the transition that asked for the write decides.
+`run.status` is written by run creation, `openRun` (back to `RUNNING` when a
+`FAIL`, `STOPPED` or `ABORTED` run is resumed), `abortRun` and `finalizeRun`
+only. A failed step does not fail the run by itself, and `stopRun` records
+`stopped_reason` and `outcome.stop` but leaves `RUNNING`: `finalizeRun` derives
+`FAIL` or `STOPPED` once the loop returns.
+
+The write policies differ by file:
+
+- The **snapshot** write is atomic and its failure propagates as an error, so no
+  journal event ever describes a state that was not saved.
 - The **journal** append is best effort: the first failure is reported once on
-  stderr and the run keeps going. What is lost is the attempts and the child
-  start facts of that window; the step totals and `last_attempt` in the snapshot
-  keep the spend and the numbering, so a later resume is short of history, not
-  of money. Turning a failed append into a hard stop is a functional decision
-  with consequences on every run whose journal sits on a full or read-only
-  disk, not a refactoring: the current policy stands until that decision is
-  made explicitly.
-- The **journal read** is strict: an absent file is an empty journal, any other
-  failure throws, because an unreadable journal read as empty would restart the
-  attempt numbering and let a parent launch a second child under the same
-  identity.
+  stderr and the run keeps going; only the trace is short.
+- The **journal read** is tolerant: an absent or unreadable file reads as empty.
 
-Resuming is idempotent under these rules: loading the same run twice reads the
-same spend, allocates the same next attempt number, and grows the journal by the
+Resuming is idempotent: loading the same run twice reads the same spend,
+allocates the same next attempt number, and grows the journal by the
 `run.resumed` marker only — a crashed attempt settled by the first load is found
 closed by the second.
 
 ## The event journal
 
-`events.jsonl` is append-only and is also the live feed, so one file holds three
-kinds of line: the journal events below, the runner's own output events
-(`step.started`, `step.done`, `step.logs`, `runner-event`, …), and the raw stream
-of whatever backend was running. Only the first kind is a contract.
+`events.jsonl` is append-only and holds the journal events below only: a trace
+appended after the snapshot of each transition, read by displays and
+diagnostics, never by execution. The runner's own output events
+(`step.started`, `step.done`, `step.logs`, `runner-event`, …), the bash output
+and the raw stream of whatever backend was running go to `feed.jsonl` (its path
+is exported to child processes as `RUNNER_LIVE_FEED`), which the watcher pane
+and the dashboard's activity line read. A reader that took the raw backend
+stream from `events.jsonl` must read `feed.jsonl` instead.
 
 Reading is tolerant line by line and writing is strict. A reader classifies
 every line and discards none:
@@ -503,36 +496,25 @@ every line and discards none:
 | Line | Classification |
 | --- | --- |
 | a journal event whose payload passes its schema | `known` — what the typed readers receive |
-| a type outside the list below | `unknown` — kept as read; this is most of a real journal |
+| a type outside the list below | `unknown` — kept as read, such as an event of a later release |
 | a listed type whose payload is refused | `invalid` — kept as read, with the reason |
 | not an object, or no string `type`, or unreadable JSON | `skipped` — not an event at all |
 
-Line tolerance stops at the file: an absent journal reads as empty, because
-a run that has not written yet has none, but any other read failure
-(permissions, I/O, a directory in its place) throws. The journal is the only
-holder of the attempts and of `pipeline.child.started`, so a resume that read
-an unreadable journal as empty would restart the attempt numbering, and a
-parent would start a second child under the same identity. Appending stays
-best effort: the first failure is reported once on stderr and the run keeps
-going, with those facts lost for a later resume (see
-[Interruption windows](#interruption-windows) for what the snapshot still
-guarantees in that case).
+The file is read tolerantly too: an absent or unreadable journal reads as
+empty, since no decision depends on it. Appending is best effort: the first
+failure is reported once on stderr and the run keeps going with a shorter
+trace.
 
 `--inspect` prints one journal line for every run it lists, such as
 `journal: 110 events, ok (911 live-feed lines ignored)`: the `known` events, then
 `invalid` and `skipped` only when they are non-zero (`ok` when both are zero), and
 the `unknown` lines as ignored live feed, since they are expected and large. It
 names the refused types when there are any; a journal it cannot read is printed
-as `journal: unreadable` with the reason. `invalid` is the number that matters: on a `step.attempt.*` it means the attempt is missing
-from the projections a resume rebuilds. The concrete loss is accounting, not log
-paths — attempt numbering (`allocateAttempt`) also seeds from the step's `last_attempt`, so
-numbering does not silently restart at 1 — but a closed attempt is journaled
-*before* the snapshot is written, so a crash in that window leaves its price in
-the journal alone: an event refused whole reads as a free attempt, and the resume
-can then spend past `max_cost_usd`.
+as `journal: unreadable` with the reason. `invalid` points at a producer or schema mismatch; it shortens the timeline,
+never a resume.
 
-That is why an optional field of the wrong kind reads as **absent** instead of
-refusing the event, the same rule `pipeline-history/runs.jsonl` follows. Only the
+An optional field of the wrong kind reads as **absent** instead of refusing the
+event, the same rule `pipeline-history/runs.jsonl` follows. Only the
 fields a reader needs to act on decide validity: `stepId` and a positive integer
 `attempt` on the two attempt events, `parentNodeId` and `childRunId` on the
 composed-child events. A journal written by a later release, or one carrying a

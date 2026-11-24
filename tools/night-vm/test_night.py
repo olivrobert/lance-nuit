@@ -245,7 +245,8 @@ class NightTests(unittest.TestCase):
         running = {"runId": "r1", "ticket": "18", "name": "claude", "status": "RUNNING",
                    "updatedAt": "2026-11-14T21:40:00Z",
                    "steps": [{"id": "triage", "status": "done", "control": {"duration_ms": 38000}},
-                             {"id": "tests", "status": "running", "last_attempt": 2},
+                             {"id": "tests", "status": "running",
+                              "attempts": [{"attempt": 1, "status": "failed"}, {"attempt": 2, "status": "running"}]},
                              {"id": "commit", "status": "pending"}]}
         pulled = Path(self.fetched({"18": {"state": "running", "startedAt": "2026-11-14T21:36:00Z"}, "19": {"state": "pending"}},
                                    [running], name="vm", archive_name="live.tgz")) / "live.tgz"

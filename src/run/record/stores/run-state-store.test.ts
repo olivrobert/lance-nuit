@@ -112,7 +112,7 @@ function persistedRun(
   status: PersistedRun["status"] = "RUNNING",
 ): PersistedRun {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: "fixture-run",
     name: "fixture",
     pipeline: "fixture",
@@ -155,7 +155,7 @@ test("run-state-store: validates the integration contract", async () => {
   expect(store.calls.saveAt[0]).toMatchObject({
     runDir,
     snapshot: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: basename(runDir),
       name: "fixture",
       pipeline: "fixture",

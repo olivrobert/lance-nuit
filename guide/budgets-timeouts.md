@@ -355,10 +355,10 @@ Four facts move money, and each has its own entry point there:
 
 | Fact | Entry point | Written |
 |---|---|---|
-| An attempt closes (loop, signal handler, or a crash settled on resume) | `chargeClosedAttempt` | the attempt's own figures, and the step total that seeds the ledger on resume |
+| An attempt closes (loop, signal handler, or a crash settled when the run is opened) | `chargeClosedAttempt` | the attempt's own figures, and the step total that seeds the ledger on resume |
 | The same attempt reaches the run ledger | `chargeAttemptToLedger` | the cumulative total and the accounting latch derived from it |
 | A composed child reports an aggregated cost the parent never saw as attempts | `chargeChildReconciliation` | the orchestration node's total, the parent ledger, and one `pipeline.child.cost.reconciled` event |
-| A resume reads figures back from the snapshot and the journal, and an execution opens its ledger from them | `projectStepSpend`, `restoreAttemptSpend`, `restoreRunTotals`, `openRunLedger` | nothing new — a total already accounted for is rebuilt or restored, never charged again |
+| An execution opens its ledger from the snapshot's figures | `openRunLedger` | nothing new — a total already accounted for is read back, never charged again |
 
 `chargeAttemptToLedger` is purely arithmetic and performs no I/O: the attempt's
 settlement (`settleAttempt` in `src/run/record/attempt-lifecycle.ts`) calls it
@@ -368,11 +368,11 @@ what journals the stop. Nothing around the spawn (banner, allowance, session
 rotation) can skip the charge or absorb its failure. Summing two sets of figures is private to the
 module, so there is no way to add spend to a step, an attempt, or the ledger from
 outside it. A run's `total_control` and `total_usage` remain derived values,
-recomputed from the steps when a run is finalized or aborted, restored by a
-resume only from a terminal snapshot (`restoreRunTotals`), and dropped by every
-charge that reaches the run — an attempt to the ledger or a child
-reconciliation. Which record a resume believes for each concept is tabled in
-[persistence](persistence.md#which-record-is-authoritative).
+recomputed from the steps when a run is finalized or aborted, and dropped by
+every charge that reaches the run — an attempt to the ledger or a child
+reconciliation — before the snapshot that follows it, so the persisted totals
+always match the steps. `state.json` is the only record a resume reads
+([persistence](persistence.md#which-record-is-authoritative)).
 
 Every site about to spend asks one gate, `costGate`
 (`src/run/record/cost-stop-events.ts`): step admission, the re-ask of a refused

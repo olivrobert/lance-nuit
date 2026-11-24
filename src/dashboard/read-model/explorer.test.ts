@@ -278,7 +278,7 @@ test("tree: a `latest` link pointing out of the work item is reachable under `ru
   writeFileSync(
     join(outside, "state.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       name: "feature",
       pipeline: "feature",
       ticket: "DEMO-1",

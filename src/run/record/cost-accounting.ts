@@ -12,7 +12,7 @@
 // The four facts that move money:
 //
 //  - `chargeClosedAttempt` — an attempt ends (loop, signal handler, or crash
-//    settled on resume). Called only by `closeAttempt` (`run/record/attempt-closure.ts`),
+//    settled on opening). Called only by `closeAttempt` (`run/record/attempt-closure.ts`),
 //    which owns the rest of the attempt's ending.
 //  - `chargeAttemptToLedger` — the same attempt reaches the run ledger. Purely
 //    arithmetic and free of I/O: `settleAttempt` (`run/record/attempt-lifecycle.ts`)
@@ -20,19 +20,17 @@
 //    tracked attempt.
 //  - `chargeChildReconciliation` — a composed child run reports an aggregated cost
 //    the parent never saw pass as attempts.
-//  - `projectStepSpend` / `restoreAttemptSpend` / `restoreRunTotals` /
-//    `openRunLedger` — figures read back from the snapshot and the journal on
-//    resume, and the ledger seeded from them. Projections, not charges: the spend
-//    was accounted for when the attempt closed, and charging it again would
-//    double it.
+//  - `openRunLedger` — the ledger seeded from the snapshot's figures on resume.
+//    Not a charge: the spend was accounted for when the attempt closed, and
+//    charging it again would double it.
 //
 // `reserveAllowance` / `releaseAllowance` move no money: they hold part of what is
 // left of the ceiling for an attempt in flight. They live here because what an
 // attempt may spend is the other side of what the ledger says was spent.
 //
 // The run's `total_control` / `total_usage` are DERIVED: `finalizeRun` and
-// `abortRun` materialize them from the step totals, a resume trusts them only on
-// a terminal snapshot (`restoreRunTotals`), and every charge that reaches the run
+// `abortRun` materialize them from the step totals, the snapshot keeps them, and
+// every charge that reaches the run
 // (`chargeAttemptToLedger`, `chargeChildReconciliation`) drops them, so a reader
 // through `controlForRun` never prefers a previous generation's total over the
 // steps that have since spent more.
@@ -58,12 +56,12 @@
 // the budget decision, and every gate built on it read `isUnpricedSpend`.
 
 import type { StepControl, StepUsage } from "../../contracts/backends.js";
-import type { PersistedAttempt, PersistedRun, PersistedStepState } from "../persisted.js";
 import type { ChildRefView, DeepReadonly, RunStepView, RunView } from "../run.js";
 import type { Run } from "./run.js";
 import { writable } from "./run.js";
 import { type RunBudget, remainingBudget } from "./budget.js";
 import { appendRunEvent } from "./run-journal.js";
+import { saveRun } from "./run-repository.js";
 import { measuredTokens, usageDelta } from "./cost-figures.js";
 
 /** Anything that carries an attempt's or a step's settled figures. Structural on
@@ -576,13 +574,6 @@ export function chargeChildReconciliation(input: ChildReconciliation): number {
   // Same rule as an attempt reaching the ledger: the node total just moved, so a
   // total the parent materialized earlier no longer covers its steps.
   invalidateRunTotals(parent);
-  appendRunEvent(parent, "pipeline.child.cost.reconciled", {
-    parentNodeId: step.id,
-    childRunId: ref.runId ?? null,
-    childKey: ref.key,
-    accountedCostUsd: ref.accountedCostUsd,
-    deltaCostUsd: delta,
-  });
   budget.cumulative += delta;
   // Composed spend counts like an attempt of the parent: a subtree that could not
   // price itself makes the parent's ledger a lower bound too, whatever the delta
@@ -597,72 +588,13 @@ export function chargeChildReconciliation(input: ChildReconciliation): number {
     // reconciles the child by delta and re-derives nothing from its attempts.
     parent.cost_unaccounted = true;
   }
+  saveRun(parent);
+  appendRunEvent(parent, "pipeline.child.cost.reconciled", {
+    parentNodeId: step.id,
+    childRunId: ref.runId ?? null,
+    childKey: ref.key,
+    accountedCostUsd: ref.accountedCostUsd,
+    deltaCostUsd: delta,
+  });
   return delta;
-}
-
-// ---------------------------------------------------------------------------
-// Projections. Figures read back from the journal, never a new charge.
-// ---------------------------------------------------------------------------
-
-/**
- * Step spend to seed the budget ledger with: the snapshot total, unless the
- * journal knows of more.
- *
- * `settleAttempt` appends the finish event before it writes the snapshot. A hard
- * death in that window leaves an attempt priced in the journal but absent from
- * the step total, and the ledger — seeded from step totals — would then read that
- * attempt as free and let the resume spend past the ceiling. The journal is what
- * resume projects attempts from; when its cost sum exceeds the snapshot's, it is
- * the more complete record of what was spent, so the step total is rebuilt from it.
- *
- * A reprojection, not a charge: it rebuilds a total already accounted for and
- * returns it, so the caller decides what to do with it.
- */
-export function projectStepSpend(
-  state: PersistedStepState | undefined,
-  attempts: PersistedAttempt[] | undefined,
-): { control?: StepControl; usage?: StepUsage } {
-  if (!attempts?.length) return { control: state?.control, usage: state?.usage };
-  let control: StepControl | undefined;
-  let usage: StepUsage | undefined;
-  for (const attempt of attempts) {
-    control = attempt.control ? mergeControl(control, attempt.control) : control;
-    usage = mergeUsage(usage, attempt.usage);
-  }
-  if ((control?.total_cost_usd ?? 0) <= (state?.control?.total_cost_usd ?? 0)) {
-    return { control: state?.control, usage: state?.usage };
-  }
-  return { control, usage: usage ?? state?.usage };
-}
-
-/**
- * Put back the figures a closed attempt already carried, as its
- * `step.attempt.finished` event recorded them.
- *
- * A projection and not a charge: the spend reached the step total and the ledger
- * when the attempt closed, so nothing is merged and no total moves. It lives here
- * so that every write of a spend figure is in this one file.
- */
-export function restoreAttemptSpend(attempt: SpendFigures, control?: StepControl, usage?: StepUsage): void {
-  if (control) attempt.control = control;
-  if (usage) attempt.usage = usage;
-}
-
-/**
- * The run totals a resume may trust: those of a snapshot whose generation was
- * finalized and left nothing to execute (`terminal`). A live resume gets none and
- * derives them from the step totals through `controlForRun` / `runUsage`: a
- * crash between an attempt snapshot and `finalizeRun` would otherwise hide the
- * spend of that attempt behind a total written before it.
- *
- * A projection like the two above: it restores or drops, it charges nothing. The
- * `terminal` decision itself belongs to `run/record/run-opening.ts`, which knows whether the
- * definition leaves the snapshot executable work.
- */
-export function restoreRunTotals(
-  persisted: Pick<PersistedRun, "total_control" | "total_usage">,
-  terminal: boolean,
-): Pick<Run, "total_control" | "total_usage"> {
-  if (!terminal) return { total_control: undefined, total_usage: undefined };
-  return { total_control: persisted.total_control, total_usage: persisted.total_usage };
 }

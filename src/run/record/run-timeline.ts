@@ -47,16 +47,9 @@ export function stepLogPath(run: RunView, step: RunStepView): string {
   return attemptLogPath(run, step, nextAttemptNumber(step));
 }
 
-/** Next attempt number is max(existing)+1, not length+1: a journal with a lost
- *  head can leave holes (e.g. attempts [1, 3]), and length+1 would collide with
- *  an existing attempt directory and append into its log. */
+/** The highest attempt number plus one, so a number is never reused. */
 export function nextAttemptNumber(step: RunStepView): number {
-  const attempts = step.attempts ?? [];
-  let max = step.last_attempt ?? 0;
-  for (const entry of attempts) {
-    if (typeof entry.attempt === "number" && entry.attempt > max) max = entry.attempt;
-  }
-  return Math.max(max, attempts.length) + 1;
+  return step.attempts.reduce((max, entry) => Math.max(max, entry.attempt), 0) + 1;
 }
 
 /** Attempt path: each attempt has its own directory and cannot overwrite a

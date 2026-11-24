@@ -201,7 +201,7 @@ function storedRun(cwd: string, ticket: string, pipeline: string, state: Partial
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, "state.json"),
-    JSON.stringify({ schemaVersion: 1, name: pipeline, pipeline, ticket, steps: [], ...state }),
+    JSON.stringify({ schemaVersion: 2, name: pipeline, pipeline, ticket, steps: [], ...state }),
   );
   return dir;
 }

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readCoderSession, readSteps } from "./steps.ts";
+import { readSteps } from "./steps.ts";
 import {
   cleanupTempDirs,
   DEAD_PID,
@@ -9,7 +9,7 @@ import {
   makeTempDir,
   writeProjectsFile,
   writeRun,
-  writeRunEvents,
+  writeRunFeed,
   writeRunLock,
 } from "./test-harness.ts";
 
@@ -84,7 +84,7 @@ test("steps: the snapshot order is kept, with what each step carries", () => {
   ]);
 });
 
-test("steps: a running run also reports the last line of its journal", () => {
+test("steps: a running run also reports the last line of its feed", () => {
   const project = listedProject();
   const runDir = writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
@@ -93,7 +93,7 @@ test("steps: a running run also reports the last line of its journal", () => {
     steps: [{ id: "coder", status: "running", retries: 0 }],
   });
   writeRunLock(runDir, process.ppid);
-  writeRunEvents(runDir, [
+  writeRunFeed(runDir, [
     { ts: "2026-09-05T08:00:00.000Z", type: "run.started", runId: "r-1" },
     { ts: "2026-09-05T08:01:00.000Z", type: "step.attempt.started", runId: "r-1", stepId: "coder", attempt: 1 },
   ]);
@@ -111,12 +111,12 @@ test("steps: a finished run reports no event; the snapshot already told the end"
     updatedAt: "2026-09-05T08:00:00.000Z",
     steps: [{ id: "coder", status: "done", retries: 0 }],
   });
-  writeRunEvents(runDir, [{ ts: "2026-09-05T08:01:00.000Z", type: "run.finished", runId: "r-1" }]);
+  writeRunFeed(runDir, [{ ts: "2026-09-05T08:01:00.000Z", type: "run.finished", runId: "r-1" }]);
 
   expect(readSteps("demo-app", "DEMO-1")?.lastEvent).toBeUndefined();
 });
 
-test("steps: a truncated journal line never hides the events before it", () => {
+test("steps: a truncated feed line never hides the events before it", () => {
   const project = listedProject();
   const runDir = writeRun(project, "DEMO-1", "feature", {
     runId: "r-1",
@@ -126,7 +126,7 @@ test("steps: a truncated journal line never hides the events before it", () => {
   });
   writeRunLock(runDir, process.ppid);
   writeFileSync(
-    join(runDir, "events.jsonl"),
+    join(runDir, "feed.jsonl"),
     '{"ts":"2026-09-05T08:00:00.000Z","type":"run.started"}\n{"ts":"2026-09-05T08:0',
   );
 
@@ -161,7 +161,7 @@ test("steps: a run whose runner died reports no live event and its running step 
     ],
   });
   writeRunLock(runDir, DEAD_PID);
-  writeRunEvents(runDir, [
+  writeRunFeed(runDir, [
     { ts: "2026-09-05T08:00:00.000Z", type: "run.started", runId: "r-1" },
     { ts: "2026-09-05T08:01:00.000Z", type: "step.attempt.started", runId: "r-1", stepId: "coder", attempt: 1 },
   ]);
@@ -175,96 +175,4 @@ test("steps: a run whose runner died reports no live event and its running step 
     ["coder", "aborted"],
     ["review", "pending"],
   ]);
-});
-
-test("steps: a terminal journal status the snapshot of a dead runner missed is shown as the runner projects it", () => {
-  const project = listedProject();
-  const runDir = writeRun(project, "DEMO-1", "feature", {
-    runId: "r-1",
-    status: "RUNNING",
-    updatedAt: "2026-09-05T08:00:00.000Z",
-    steps: [
-      { id: "lint", status: "failed", retries: 0, errors: "lint failed" },
-      { id: "coder", status: "running", retries: 0 },
-      { id: "review", status: "pending", retries: 0 },
-    ],
-  });
-  // The runner died between the event and the snapshot: the journal is the
-  // later record of `coder`.
-  writeRunLock(runDir, DEAD_PID);
-  writeRunEvents(runDir, [
-    // The snapshot is written after the event: a terminal snapshot is the later
-    // record, so it wins over the journal.
-    { ts: "2026-09-05T08:01:00.000Z", type: "step.status.changed", runId: "r-1", stepId: "lint", status: "done" },
-    { ts: "2026-09-05T08:02:00.000Z", type: "step.status.changed", runId: "r-1", stepId: "coder", status: "done" },
-  ]);
-
-  const view = readSteps("demo-app", "DEMO-1");
-
-  expect(view?.status).toBe("ABORTED");
-  expect(view?.steps).toEqual([
-    { id: "lint", status: "failed", error: "lint failed" },
-    { id: "coder", status: "done", finishedAt: "2026-09-05T08:02:00.000Z" },
-    { id: "review", status: "pending" },
-  ]);
-
-  // A runner still alive is at most one write behind: its snapshot is read
-  // alone, and the journal is not parsed on every poll.
-  writeRunLock(runDir, process.ppid);
-  expect(readSteps("demo-app", "DEMO-1")?.steps.map((step) => step.status)).toEqual(["failed", "running", "pending"]);
-});
-
-test("coder session: the last coder step with a resumable session, in the run's directory", () => {
-  const project = listedProject();
-  const worktree = makeTempDir("read-model-worktree-");
-  const session = (id: string, resumable = true) => ({ provider: "claude", id, resumable });
-  writeRun(project, "DEMO-1", "feature", {
-    runId: "r-1",
-    status: "FAIL",
-    updatedAt: "2026-09-05T08:00:00.000Z",
-    worktree: true,
-    cwd: worktree,
-    steps: [
-      { id: "spec", status: "done", retries: 0, profile: "planner", session: session("s-spec") },
-      { id: "code-lot-1", status: "done", retries: 0, profile: "coder", session: session("s-lot-1") },
-      { id: "code-lot-2", status: "failed", retries: 1, profile: "coder", session: session("s-lot-2") },
-      // A session its provider cannot resume is not offered, even when it is the last.
-      { id: "code-lot-3", status: "failed", retries: 0, profile: "coder", session: session("s-lot-3", false) },
-      { id: "review", status: "pending", retries: 0, profile: "reviewer" },
-    ],
-  });
-
-  expect(readCoderSession("demo-app", "DEMO-1")).toEqual({
-    pipeline: "feature",
-    runId: "r-1",
-    status: "FAIL",
-    stepId: "code-lot-2",
-    provider: "claude",
-    sessionId: "s-lot-2",
-    cwd: worktree,
-    worktree: true,
-  });
-  expect(readSteps("demo-app", "DEMO-1")?.coderStep).toBe("code-lot-2");
-});
-
-test("coder session: none without a coder step, and none for an item without a run", () => {
-  const project = listedProject();
-  writeRun(project, "DEMO-1", "feature", {
-    runId: "r-1",
-    status: "PASS",
-    updatedAt: "2026-09-05T08:00:00.000Z",
-    steps: [
-      {
-        id: "spec",
-        status: "done",
-        retries: 0,
-        profile: "planner",
-        session: { provider: "claude", id: "s", resumable: true },
-      },
-    ],
-  });
-
-  expect(readCoderSession("demo-app", "DEMO-1")).toBeUndefined();
-  expect(readSteps("demo-app", "DEMO-1")).not.toHaveProperty("coderStep");
-  expect(readCoderSession("demo-app", "DEMO-404")).toBeUndefined();
 });

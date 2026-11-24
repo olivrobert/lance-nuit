@@ -193,27 +193,18 @@ test("R6: a ticket edited after a PASS replays every step downstream of it, bran
   expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: UP_TO_DATE }]);
 });
 
-test("R7: --run on a PASS run with --start-at replays the target and every later step in that run", () => {
+test("R7: --run on a PASS run with --start-at is refused and writes nothing", () => {
   const cwd = scratchRoute();
   const firstRun = passedRun(cwd);
   const before = mark(cwd);
 
   const replay = run(cwd, "--run", firstRun, "--start-at", "implement");
 
-  expect(replay.status).toBe(0);
+  expect(replay.status).not.toBe(0);
+  expect(replay.stderr).toContain(`Run ${firstRun} already passed and is never written again`);
   expect(latestRunId(cwd)).toBe(firstRun);
   expect(snapshot(cwd).status).toBe("PASS");
-  // Same trace as S7: --start-at outranks freshness from implement on.
-  expect(traceSince(cwd, before)).toEqual([
-    "context",
-    "prepare",
-    "implement",
-    "quality",
-    "commit",
-    "publish",
-    "report",
-  ]);
-  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: UP_TO_DATE }, ...upToDate("triage", "plan")]);
+  expect(traceSince(cwd, before)).toEqual([]);
 });
 
 test("--until after a PASS: the new run reaches the bound for free, and the rerun pays only CHEAP steps", () => {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { PipelineStep } from "../../definition/definition.ts";
 import type { Run, RunStep } from "./run.ts";
 import { makeRunStep, type StepStateInput } from "./run-step.ts";
-import { closeAttempt, settleAttemptStats } from "./attempt-closure.ts";
+import { closeAttempt, journalAttemptClosed, settleAttemptStats } from "./attempt-closure.ts";
 import { measuredAnything } from "./cost-figures.ts";
 import { readRunEvents } from "./run-journal.ts";
 import { allocateAttempt } from "./attempt-lifecycle.ts";
@@ -76,7 +76,7 @@ test("settleAttemptStats: a measured or successful attempt keeps its figures", (
   expect(succeeded.control.cost_unknown).toBeUndefined();
 });
 
-test("closeAttempt: closes a running attempt once, the second call is a no-op", () => {
+test("closeAttempt: closes a running attempt once in memory, the second call is a no-op", () => {
   const step = makeStep();
   const run = makeRun(step);
   allocateAttempt(run, step).logPath;
@@ -84,35 +84,36 @@ test("closeAttempt: closes a running attempt once, the second call is a no-op", 
 
   // An accepted closure hands back the figures it stored.
   expect(
-    closeAttempt(run, step, attempt, { status: "done", stats: { duration_ms: 10, total_cost_usd: 0.5 } }),
+    closeAttempt(step, attempt, { status: "done", stats: { duration_ms: 10, total_cost_usd: 0.5 } }),
   ).toMatchObject({ control: { duration_ms: 10, total_cost_usd: 0.5 } });
   expect(attempt.status).toBe("done");
   expect(attempt.finished_at).toBeDefined();
   expect(step.control?.total_cost_usd).toBe(0.5);
 
   expect(
-    closeAttempt(run, step, attempt, { status: "aborted", control: { duration_ms: 99, total_cost_usd: 9 } }),
+    closeAttempt(step, attempt, { status: "aborted", control: { duration_ms: 99, total_cost_usd: 9 } }),
   ).toBeUndefined();
   expect(attempt.status).toBe("done");
   expect(attempt.control?.total_cost_usd).toBe(0.5);
   expect(step.control?.total_cost_usd).toBe(0.5);
-  expect(finishedEvents(run)).toHaveLength(1);
+  expect(finishedEvents(run)).toHaveLength(0);
 });
 
-test("closeAttempt: writes the single finished payload", () => {
+test("journalAttemptClosed: writes the single finished payload of a closed attempt", () => {
   const step = makeStep(AGENT);
   const run = makeRun(step);
   allocateAttempt(run, step).logPath;
   const attempt = step.attempts[0]!;
   const session = { provider: "claude", id: "sess-1", resumable: true };
 
-  closeAttempt(run, step, attempt, {
+  closeAttempt(step, attempt, {
     status: "failed",
     stats: { duration_ms: 12, total_cost_usd: 0.3, model: "opus", input_tokens: 5, output_tokens: 2 },
     session,
     reason: "exit 1",
     logPath: "logs/verify-1.log",
   });
+  journalAttemptClosed(run, step, attempt);
 
   expect(attempt).toMatchObject({
     status: "failed",
@@ -142,12 +143,13 @@ test("closeAttempt: writes the single finished payload", () => {
   });
 });
 
-test("closeAttempt: omits optional payload fields it has no value for", () => {
+test("journalAttemptClosed: omits optional payload fields it has no value for", () => {
   const step = makeStep();
   const run = makeRun(step);
   allocateAttempt(run, step).logPath;
   const attempt = step.attempts[0]!;
-  closeAttempt(run, step, attempt, { status: "done", stats: { duration_ms: 1 } });
+  closeAttempt(step, attempt, { status: "done", stats: { duration_ms: 1 } });
+  journalAttemptClosed(run, step, attempt);
   const [event] = finishedEvents(run);
   expect(event).not.toHaveProperty("sessionId");
   expect(event).not.toHaveProperty("session");
@@ -165,12 +167,13 @@ test("closeAttempt: an explicit control wins over stats and still obeys the cost
   const run = makeRun(step);
   allocateAttempt(run, step).logPath;
   const attempt = step.attempts[0]!;
-  closeAttempt(run, step, attempt, {
+  closeAttempt(step, attempt, {
     status: "aborted",
     control: { duration_ms: 40, model: "opus", provider: "claude", cost_estimated: true },
     stats: { duration_ms: 1, total_cost_usd: 5 },
     reason: "SIGINT: run interrupted manually",
   });
+  journalAttemptClosed(run, step, attempt);
   expect(attempt.control).toEqual({
     duration_ms: 40,
     total_cost_usd: undefined,
@@ -193,7 +196,7 @@ test("closeAttempt: cost_unknown marks the total as estimated on every path", ()
     const run = makeRun(step);
     allocateAttempt(run, step, kind).logPath;
     const attempt = step.attempts[0]!;
-    closeAttempt(run, step, attempt, { status: "failed", control: attempt.control, reason: "crashed" });
+    closeAttempt(step, attempt, { status: "failed", control: attempt.control, reason: "crashed" });
     expect(attempt.control).toMatchObject({ duration_ms: 0, cost_unknown: true, cost_estimated: true });
     expect(step.control).toMatchObject({ cost_unknown: true, cost_estimated: true });
   }
@@ -201,7 +204,7 @@ test("closeAttempt: cost_unknown marks the total as estimated on every path", ()
   const step = makeStep();
   const run = makeRun(step);
   allocateAttempt(run, step).logPath;
-  closeAttempt(run, step, step.attempts[0]!, { status: "failed", reason: "crashed" });
+  closeAttempt(step, step.attempts[0]!, { status: "failed", reason: "crashed" });
   expect(step.control?.cost_unknown).toBeUndefined();
   expect(step.control?.cost_estimated).toBeUndefined();
 });
@@ -213,7 +216,7 @@ test("closeAttempt: merges into a step that already carries totals", () => {
   });
   const run = makeRun(step);
   allocateAttempt(run, step).logPath;
-  closeAttempt(run, step, step.attempts[0]!, {
+  closeAttempt(step, step.attempts[0]!, {
     status: "done",
     stats: { duration_ms: 50, total_cost_usd: 0.25, model: "opus", input_tokens: 5, tools_used: ["Edit"] },
   });
@@ -232,7 +235,7 @@ test("closeAttempt: leaves the step status and the run untouched", () => {
   const run = makeRun(step);
   run.status = "RUNNING";
   allocateAttempt(run, step).logPath;
-  closeAttempt(run, step, step.attempts[0]!, { status: "failed", reason: "exit 1" });
+  closeAttempt(step, step.attempts[0]!, { status: "failed", reason: "exit 1" });
   expect(step.status).toBe("running");
   expect(step.fail_kind).toBeUndefined();
   expect(step.errors).toBeUndefined();
@@ -248,7 +251,8 @@ test("closeAttempt: keeps the session, reason and log path already on the attemp
   attempt.session = { provider: "claude", id: "sess-0", resumable: true };
   attempt.errors = "earlier cause";
   const logPath = attempt.log_path;
-  closeAttempt(run, step, attempt, { status: "done", stats: { duration_ms: 1, total_cost_usd: 0.1 } });
+  closeAttempt(step, attempt, { status: "done", stats: { duration_ms: 1, total_cost_usd: 0.1 } });
+  journalAttemptClosed(run, step, attempt);
   expect(attempt.session?.id).toBe("sess-0");
   expect(attempt.errors).toBe("earlier cause");
   expect(attempt.log_path).toBe(logPath);
