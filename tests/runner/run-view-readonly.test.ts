@@ -481,7 +481,7 @@ const NOT_A_RUN: Record<string, string[]> = {
   "src/agents/backends/claude-code/result.ts": [
     "parsed.stats.duration_ms = raw.durationMs",
     "parsed.stats.duration_ms += raw.priorAttemptsDurationMs",
-    "parsed.stats.total_cost_usd = netCumulative(parsed.stats.total_cost_usd, baseline.costUsd)",
+    "parsed.stats.total_cost_usd = attemptCostUsd( { usd: parsed.stats.total_cost_usd, estimated: parsed.stats.cost_estimated === true }, baseline.costUsd, )",
     "parsed.stats.duration_api_ms = netCumulative(parsed.stats.duration_api_ms, baseline.apiDurationMs)",
     "parsed.stats.num_turns = parsed.turnsInProcess",
     "parsed.stats.total_cost_usd = settledSpend",

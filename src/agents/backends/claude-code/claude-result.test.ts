@@ -5,7 +5,7 @@ import type { RawClaudeExecutionResult } from "./types.js";
 
 /** Maps a spawn whose stream is read the way the live host reads it. */
 const map = (spawn: Omit<RawClaudeExecutionResult, "stream">, options?: ClaudeResultOptions) =>
-  mapClaudeExecutionResult({ ...spawn, stream: parseClaudeEvents(spawn.output, options?.model) }, options);
+  mapClaudeExecutionResult({ ...spawn, stream: parseClaudeEvents(spawn.output) }, options);
 
 const raw = (output: string) => ({ output, code: 0, durationMs: 1 });
 

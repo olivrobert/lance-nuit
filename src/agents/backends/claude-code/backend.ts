@@ -114,7 +114,6 @@ export class ClaudeBackend implements AgentBackend {
     );
     return mapClaudeExecutionResult(raw, {
       outputFormat: request.outputFormat,
-      model: options?.model,
       sessionId: requested?.id,
       resumeSessionId: resume?.id,
       log: this.host.log,

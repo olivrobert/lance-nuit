@@ -62,7 +62,7 @@ test.each([
   // A reported 0 over consumed tokens is the CLI failing to price the turn.
   ["a cost of 0", { total_cost_usd: 0 }],
 ])(
-  "executeClaude: the budget guard fires on the output tokens the result event settles, with %s reported",
+  "executeClaude: the live cost ends on the output tokens the result event settles, without killing the finished attempt, with %s reported",
   async (_label, reported) => {
     // An `assistant` event carries the usage its message STARTED with: 1 output
     // token for a message that then wrote 100k. Only `result` holds the real count.
@@ -77,14 +77,20 @@ test.each([
     const settled = parseClaudeEvents([...messages, result].join("\n"), MODEL).stats.total_cost_usd ?? 0;
     const budgetRemaining = (unsettled + settled) / 2;
 
+    const live: number[] = [];
+
     const raw = await executeClaude({
       bin: fakeClaude([...messages, result]),
       args: [],
       claudeOptions: { model: MODEL },
       budgetRemaining,
+      onLiveCost: (usd) => {
+        if (usd != null) live.push(usd);
+      },
     });
 
-    expect(raw.kill?.cause).toBe("budget");
+    expect(raw.kill).toBeUndefined();
+    expect(live.at(-1)).toBeCloseTo(settled, 12);
     expect(raw.stream.stats.total_cost_usd).toBeCloseTo(settled, 12);
   },
 );

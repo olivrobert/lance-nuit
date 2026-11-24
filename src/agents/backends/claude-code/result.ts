@@ -1,11 +1,10 @@
 import type { AgentResult } from "../../../contracts/index.js";
 import { agentSession, mapAgentResult, type VerdictOutcomeError } from "../result-helpers.js";
-import { netCumulative } from "./cost-state.js";
+import { attemptCostUsd, netCumulative } from "./cost-state.js";
 import { type ClaudeTransportError, isAuthFailure, isRateLimited } from "./events.js";
 import type { RawClaudeExecutionResult } from "./types.js";
 export interface ClaudeResultOptions {
   outputFormat?: "text" | "json";
-  model?: string;
   sessionId?: string;
   resumeSessionId?: string;
   log?: (message: string) => void;
@@ -46,10 +45,11 @@ export function mapClaudeExecutionResult(
   // orchestrator already applies to child runs — before anything else adds to it.
   const baseline = raw.resumeBaseline;
   if (baseline) {
-    // An estimated cost is computed from THIS process's tokens, so it carries no
-    // ancestor spend to net out.
-    if (parsed.stats.total_cost_usd != null && parsed.stats.cost_estimated !== true) {
-      parsed.stats.total_cost_usd = netCumulative(parsed.stats.total_cost_usd, baseline.costUsd);
+    if (parsed.stats.total_cost_usd != null) {
+      parsed.stats.total_cost_usd = attemptCostUsd(
+        { usd: parsed.stats.total_cost_usd, estimated: parsed.stats.cost_estimated === true },
+        baseline.costUsd,
+      );
     }
     if (parsed.stats.duration_api_ms != null && baseline.apiDurationMs != null) {
       parsed.stats.duration_api_ms = netCumulative(parsed.stats.duration_api_ms, baseline.apiDurationMs);

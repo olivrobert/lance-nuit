@@ -63,6 +63,9 @@ async function executeNode(
         // — so this backend can never prove a live attempt unpriceable. The budget
         // stays on this attempt alone: the transport already deducted the
         // discarded attempts from `budgetRemaining`.
+        // At the `result` event the work is done and paid for: a kill would only
+        // throw the verdict away. The ledger stops what comes next.
+        const limits = record.type === "result" ? { onLiveCost: options.onLiveCost } : options;
         guardLiveSpend(
           control,
           {
@@ -71,7 +74,7 @@ async function executeNode(
             model: reader.model(),
             source: cost.estimated ? "estimated" : "reported",
           },
-          options,
+          limits,
         );
       };
       const lines = lineSplitter((line) => {

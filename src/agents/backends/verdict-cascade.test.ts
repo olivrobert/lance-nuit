@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentResult } from "../../contracts/index.js";
+import { parseClaudeEvents } from "./claude-code/events.js";
 import { mapClaudeExecutionResult } from "./claude-code/result.js";
 import { mapCodexExecutionResult } from "./codex/result.js";
 import { mapOpencodeExecutionResult } from "./opencode/result.js";
@@ -16,7 +17,10 @@ const ANSWER = { success: true, reason: "done" };
 const lines = (...events: unknown[]) => events.map((event) => JSON.stringify(event)).join("\n");
 
 function claude(output: string, outputFormat: "text" | "json" = "json"): AgentResult {
-  return mapClaudeExecutionResult({ output, code: 0, durationMs: 1 }, { outputFormat });
+  return mapClaudeExecutionResult(
+    { output, code: 0, durationMs: 1, stream: parseClaudeEvents(output) },
+    { outputFormat },
+  );
 }
 
 function codex(output: string): AgentResult {
