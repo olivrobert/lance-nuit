@@ -51,7 +51,10 @@ export interface DispatchArgs {
   ticket?: string;
 }
 
-export interface DispatchStrategy {
+/** One dispatch's hooks. `Session` is the state a single dispatch carries from
+ *  discovery to its end: `open` creates it, and the loop hands it to every hook,
+ *  because a strategy object is shared by every dispatch of the process. */
+export interface DispatchStrategy<Session = unknown> {
   id: string;
   /** CLI flag that activates it. */
   flag: string;
@@ -61,8 +64,10 @@ export interface DispatchStrategy {
   /** Usage message when a positional ticket is given: the strategy discovers its
    *  tickets itself. */
   ticketError: string;
+  /** Start one dispatch; throw DispatchAbort when it cannot run at all. */
+  open(env: DispatchEnv): Session;
   /** Ticket set to process; throw DispatchAbort when its source is unreachable. */
-  tickets(env: DispatchEnv): string[] | Promise<string[]>;
+  tickets(env: DispatchEnv, session: Session): string[] | Promise<string[]>;
   /** Result when `tickets()` returns []: message and exit code. */
   onEmpty(env: DispatchEnv): { message: string; code: number };
   /** Args appended to each child's passthrough. */
@@ -73,15 +78,23 @@ export interface DispatchStrategy {
   skipMessage(ticket: string): string;
   /** Hook between tickets. It also runs after a skip so multi-ticket runs can
    * commit an already-complete child; returning false stops the loop. */
-  betweenTickets?(ticket: string, env: DispatchEnv, info: { skipped: boolean }): boolean | Promise<boolean>;
+  betweenTickets?(
+    ticket: string,
+    env: DispatchEnv,
+    info: { skipped: boolean },
+    session: Session,
+  ): boolean | Promise<boolean>;
   /** A ticket is about to be handed to a child. Not called for a ticket skipped
    *  on resume: nothing starts. */
-  onTicketStarted?(ticket: string, env: DispatchEnv): void | Promise<void>;
+  onTicketStarted?(ticket: string, env: DispatchEnv, session: Session): void | Promise<void>;
   /** A ticket is settled, skipped ones included. */
-  onTicketFinished?(outcome: DispatchOutcome, env: DispatchEnv): void | Promise<void>;
+  onTicketFinished?(outcome: DispatchOutcome, env: DispatchEnv, session: Session): void | Promise<void>;
   /** The loop stopped before processing every ticket because `betweenTickets`
    *  refused to continue. `reason` is what the loop knows; a strategy that knows
    *  more uses its own. */
-  onHalted?(reason: string, env: DispatchEnv): void | Promise<void>;
+  onHalted?(reason: string, env: DispatchEnv, session: Session): void | Promise<void>;
   report(outcomes: DispatchOutcome[], tickets: string[], env: DispatchEnv): void;
+  /** The dispatch reached its end: after `onEmpty`, or after `report`. Not called
+   *  when `open` or `tickets` aborts, nor when the loop throws. */
+  finish?(session: Session): void;
 }

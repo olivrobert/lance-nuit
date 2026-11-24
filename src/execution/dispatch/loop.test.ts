@@ -31,6 +31,7 @@ function strategy(overrides: Partial<DispatchStrategy> = {}): DispatchStrategy {
     isActive: () => false,
     desc: "test strategy",
     ticketError: "--fake does not accept a ticket.",
+    open: () => undefined,
     tickets: () => ["A", "B"],
     onEmpty: () => ({ message: "empty", code: 0 }),
     childArgs: () => [],
@@ -305,4 +306,98 @@ test("hooks: onHalted names the refusing hook's ticket, and the loop stops", asy
 test("hooks: a strategy declaring none of them still runs", async () => {
   const code = await runDispatch(strategy(), env(), deps());
   expect(code).toBe(0);
+});
+
+/* ------------------------------------------------------------------------- *
+ * Session
+ *
+ * The state one dispatch carries: `open` creates it, every hook receives that
+ * same object, and `finish` closes it once the dispatch reaches its end, on the
+ * empty path as after the report.
+ * ------------------------------------------------------------------------- */
+
+type TraceSession = { id: string };
+
+function sessionStrategy(
+  trace: string[],
+  overrides: Partial<DispatchStrategy<TraceSession>> = {},
+): DispatchStrategy<TraceSession> {
+  let opened = 0;
+  return {
+    ...strategy(),
+    open: () => ({ id: `s${++opened}` }),
+    tickets: (_env, session) => {
+      trace.push(`tickets:${session.id}`);
+      return ["A"];
+    },
+    onTicketStarted: (ticket, _env, session) => {
+      trace.push(`started:${ticket}:${session.id}`);
+    },
+    onTicketFinished: (outcome, _env, session) => {
+      trace.push(`finished:${outcome.ticket}:${session.id}`);
+    },
+    betweenTickets: (ticket, _env, _info, session) => {
+      trace.push(`between:${ticket}:${session.id}`);
+      return true;
+    },
+    report: () => {
+      trace.push("report");
+    },
+    finish: (session) => {
+      trace.push(`finish:${session.id}`);
+    },
+    ...overrides,
+  };
+}
+
+test("session: one per dispatch, handed to every hook, finished after the report", async () => {
+  const trace: string[] = [];
+  const shared = sessionStrategy(trace);
+  await runDispatch(shared, env(), deps());
+  await runDispatch(shared, env(), deps());
+
+  expect(trace).toEqual([
+    "tickets:s1",
+    "started:A:s1",
+    "finished:A:s1",
+    "between:A:s1",
+    "report",
+    "finish:s1",
+    "tickets:s2",
+    "started:A:s2",
+    "finished:A:s2",
+    "between:A:s2",
+    "report",
+    "finish:s2",
+  ]);
+});
+
+test("session: an empty dispatch is finished too", async () => {
+  const trace: string[] = [];
+  const code = await runDispatch(sessionStrategy(trace, { tickets: () => [] }), env(), deps());
+
+  expect(code).toBe(0);
+  expect(trace).toEqual(["finish:s1"]);
+});
+
+test("session: an aborted open or discovery, or a throwing loop, is never finished", async () => {
+  const trace: string[] = [];
+  const abort = () => {
+    throw new DispatchAbort(3);
+  };
+
+  expect(await runDispatch(sessionStrategy(trace, { open: abort }), env(), deps())).toBe(3);
+  expect(await runDispatch(sessionStrategy(trace, { tickets: abort }), env(), deps())).toBe(3);
+  const crash = runDispatch(
+    sessionStrategy(trace),
+    env(),
+    deps({
+      spawn: () => {
+        throw new Error("child spawn exploded");
+      },
+    }),
+  );
+  await expect(crash).rejects.toThrow("child spawn exploded");
+
+  expect(trace.filter((entry) => entry.startsWith("finish"))).toEqual([]);
 });

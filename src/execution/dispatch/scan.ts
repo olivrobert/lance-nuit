@@ -10,17 +10,18 @@
 // The loop itself lives in loop.ts; this file contains scan-specific behavior only.
 //
 // A scan is the only strategy that leaves a durable record
-// (`execution/dispatch/file-scan-store.ts`). The loop stays agnostic: it calls the
-// optional `onTicketStarted` / `onTicketFinished` / `onHalted` hooks, and the
-// writes happen here.
+// (`execution/dispatch/file-scan-store.ts`). Its writer lives in the `ScanSession`
+// that `open` creates for each scan and the loop hands to every hook; the loop
+// stays agnostic of what the session holds.
 
 import { runSupervisedCommand } from "../../shared/process/process-runner.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import { log } from "../../shared/runtime/logging.js";
 import { FileScanStore } from "./file-scan-store.js";
 import { DispatchAbort } from "./abort.js";
+import type { Pipeline } from "../../definition/index.js";
 import type { DispatchEnv, DispatchOutcome, DispatchStrategy } from "./dispatch-strategy.js";
-import { attachScanRecordWriter, ScanRecordWriter, scanRecordWriterOf } from "./scan-record-writer.js";
+import { ScanRecordWriter } from "./scan-record-writer.js";
 
 /** Resolve the scan ticket limit. `--limit` takes precedence over the work-item
  * source; two undefined values mean unlimited. Invalid pipeline values are
@@ -33,23 +34,56 @@ export function resolveScanLimit(cliLimit?: number, pipelineLimit?: number): num
   return undefined;
 }
 
-/** Open the durable record of this scan. The file store lands in the project's
- *  `pipeline-history/`, the same cross-run directory as `runs.jsonl`; tests
- *  inject their own store through `env.scanStore`. */
-function beginScanRecord(env: DispatchEnv, provider: string, queue: string, limit: number | null): ScanRecordWriter {
+type ScanSource = NonNullable<Pipeline["work_item_source"]>;
+
+/** What one scan carries from its validation to its end. */
+export interface ScanSession {
+  queue: ScanSource["queue"];
+  limit: number | undefined;
+  query: string | undefined;
+  record: ScanRecordWriter;
+}
+
+/** Check that this scan can run, then prepare its durable record without writing
+ *  it yet. Throws DispatchAbort before any tracker access when it cannot run. */
+export function openScanSession(env: DispatchEnv): ScanSession {
+  const source = env.def.work_item_source;
+  const scan = source?.scan;
+  if (!source || !scan) {
+    log.error(`Scan unavailable: pipeline "${env.def.name}" declares no scannable work-item source.`);
+    throw new DispatchAbort(1);
+  }
+
+  // Keep this check here rather than in the adapter: workItem.project is a
+  // provider-neutral required setting and scan is the last point where the user
+  // can act. A provider-specific refusal would not identify the file to edit, so
+  // fail before the first network call.
+  if (!env.ctx.config.workItem.project) {
+    log.error("Scan unavailable: workItem.project not found (.lance-nuit/config.json or $JIRA_PREFIX in CLAUDE.md).");
+    throw new DispatchAbort(1);
+  }
+
+  return sessionFor(env, source, scan);
+}
+
+/** The file store lands in the project's `pipeline-history/`, the same cross-run
+ *  directory as `runs.jsonl`; tests inject their own store through `env.scanStore`. */
+function sessionFor(env: DispatchEnv, source: ScanSource, scan: NonNullable<ScanSource["scan"]>): ScanSession {
+  // The queue is declared alongside the source step that materializes tickets.
+  // env.def was loaded once during boot; do not load it again here.
+  const queue = source.queue;
+  // Resolved before discovery: the limit is a pure function of the CLI flag and
+  // the source, and the record must carry it even if the tracker never answers.
+  const limit = resolveScanLimit(env.limit, scan.limit);
   const store = env.scanStore ?? new FileScanStore({ projRoot: env.ctx.cwd });
-  const writer = attachScanRecordWriter(
-    env,
-    new ScanRecordWriter(store, {
-      pipeline: env.def.name,
-      provider,
-      project: env.ctx.config.workItem.project,
-      queue,
-      limit,
-    }),
-  );
-  writer.begin();
-  return writer;
+  const record = new ScanRecordWriter(store, {
+    pipeline: env.def.name,
+    provider: env.ctx.workItem.provider,
+    project: env.ctx.config.workItem.project,
+    queue,
+    limit: limit ?? null,
+  });
+  return { queue, limit, query: scan.query, record };
 }
 
 /** The branch every ticket of this scan starts from: an explicit --base-branch,
@@ -59,57 +93,36 @@ function scanBaseBranch(env: DispatchEnv): string {
   return env.ctx.baseBranch ?? env.ctx.config.baseBranch;
 }
 
-export const scanStrategy: DispatchStrategy = {
+export const scanStrategy: DispatchStrategy<ScanSession> = {
   id: "scan",
   flag: "--scan",
   isActive: (args) => args.scan,
   desc: "Discover tickets in the tracker and process them sequentially (continue on failure).",
   ticketError: "--scan does not accept a ticket (it discovers tickets in the tracker).",
 
-  async tickets(env: DispatchEnv): Promise<string[]> {
-    const cfg = env.ctx.config;
-    const source = env.def.work_item_source;
-    const scan = source?.scan;
-    if (!source || !scan) {
-      log.error(`Scan unavailable: pipeline "${env.def.name}" declares no scannable work-item source.`);
-      throw new DispatchAbort(1);
-    }
+  open: openScanSession,
 
-    // Keep this check here rather than in the adapter: workItem.project is a
-    // provider-neutral required setting and scan is the last point where the user
-    // can act. A provider-specific refusal would not identify the file to edit, so
-    // fail before the first network call.
-    if (!cfg.workItem.project) {
-      log.error("Scan unavailable: workItem.project not found (.lance-nuit/config.json or $JIRA_PREFIX in CLAUDE.md).");
-      throw new DispatchAbort(1);
-    }
-
-    // The queue is declared alongside the source step that materializes tickets.
-    // env.def was loaded once during boot; do not load it again here.
-    const queue = source.queue;
-
-    // Resolved before discovery: the limit is a pure function of the CLI flag and
-    // the source, and the record must carry it even if the tracker never answers.
-    const limit = resolveScanLimit(env.limit, scan.limit);
+  async tickets(env: DispatchEnv, session: ScanSession): Promise<string[]> {
+    const { queue, limit, query, record } = session;
     const gateway = env.ctx.workItem;
     // First write, before any network call: an interrupted discovery still
     // leaves a record, with `discovered: null`.
-    const writer = beginScanRecord(env, gateway.provider, queue, limit ?? null);
+    record.begin();
 
     let all: string[];
     try {
       // Log engine-neutral terms rather than a provider-specific query or marker;
       // the next provider may use a different dialect.
-      log(`\n🔎 Scan ${gateway.provider} — project ${cfg.workItem.project}, queue ${queue}, state todo`);
+      log(`\n🔎 Scan ${gateway.provider} — project ${env.ctx.config.workItem.project}, queue ${queue}, state todo`);
       // A pipeline-owned query is the one exception: it is provider-specific by
       // design, so show it as written — it is what the author must debug.
-      if (scan.query) log(`   query: ${scan.query}`);
-      all = await gateway.findCandidates({ queue, state: "todo", ...(scan.query ? { query: scan.query } : {}) });
+      if (query) log(`   query: ${query}`);
+      all = await gateway.findCandidates({ queue, state: "todo", ...(query ? { query } : {}) });
     } catch (error) {
       // An unreachable tracker is not an empty scan. Treating it as empty would
       // report success with no tickets processed.
       const reason = errorMessage(error).trim();
-      writer.aborted("discovery", reason);
+      record.aborted("discovery", reason);
       log.error(`Scan aborted — ticket discovery failed: ${reason}`);
       throw new DispatchAbort(1);
     }
@@ -117,11 +130,7 @@ export const scanStrategy: DispatchStrategy = {
     // Apply the limit after discovery so the report can say how many tickets were
     // deferred; a silent query limit would look like there was nothing else to do.
     const tickets = limit == null ? all : all.slice(0, limit);
-    writer.discovered(all, tickets);
-    // An empty queue is a COMPLETE scan. The loop takes the `onEmpty` path and
-    // never calls `report()`, so close the record here: left open, every idle
-    // night would read as a scan interrupted mid-flight.
-    if (tickets.length === 0) writer.finished();
+    record.discovered(all, tickets);
     if (tickets.length > 0) log(`📋 ${tickets.length} ticket(s): ${tickets.join(", ")}`);
     if (all.length > tickets.length) {
       const dropped = all.slice(tickets.length);
@@ -152,7 +161,12 @@ export const scanStrategy: DispatchStrategy = {
 
   /** Return to the effective base branch before the next ticket. A skipped ticket ran no
    * work, so checking out again could unnecessarily fail on a dirty tree. */
-  async betweenTickets(_ticket: string, env: DispatchEnv, info: { skipped: boolean }): Promise<boolean> {
+  async betweenTickets(
+    _ticket: string,
+    env: DispatchEnv,
+    info: { skipped: boolean },
+    session: ScanSession,
+  ): Promise<boolean> {
     if (info.skipped) return true;
     const base = scanBaseBranch(env);
     const co = await runSupervisedCommand("git", ["checkout", base], {
@@ -165,25 +179,23 @@ export const scanStrategy: DispatchStrategy = {
     );
     log(`${co.stdout}${co.stderr}`.trim());
     // The loop only learns that the hook refused; keep the reason for `onHalted`.
-    scanRecordWriterOf(env)?.noteHaltDetail(`git checkout ${base} failed: ${`${co.stdout}${co.stderr}`.trim()}`);
+    session.record.noteHaltDetail(`git checkout ${base} failed: ${`${co.stdout}${co.stderr}`.trim()}`);
     return false;
   },
 
-  onTicketStarted(ticket: string, env: DispatchEnv): void {
-    scanRecordWriterOf(env)?.ticketStarted(ticket);
+  onTicketStarted(ticket: string, _env: DispatchEnv, session: ScanSession): void {
+    session.record.ticketStarted(ticket);
   },
 
-  onTicketFinished(outcome: DispatchOutcome, env: DispatchEnv): void {
-    scanRecordWriterOf(env)?.ticketFinished(outcome.ticket, outcome.outcome, outcome.runId ?? null);
+  onTicketFinished(outcome: DispatchOutcome, _env: DispatchEnv, session: ScanSession): void {
+    session.record.ticketFinished(outcome.ticket, outcome.outcome, outcome.runId ?? null);
   },
 
-  onHalted(reason: string, env: DispatchEnv): void {
-    scanRecordWriterOf(env)?.haltedBetweenTickets(reason);
+  onHalted(reason: string, _env: DispatchEnv, session: ScanSession): void {
+    session.record.haltedBetweenTickets(reason);
   },
 
   report(outcomes: DispatchOutcome[], tickets: string[], env: DispatchEnv): void {
-    scanRecordWriterOf(env)?.finished();
-
     const of = (kind: DispatchOutcome["outcome"]): DispatchOutcome[] => outcomes.filter((o) => o.outcome === kind);
     const line = (label: string, list: DispatchOutcome[]): string =>
       `${label} : ${list.length}${list.length ? ` → ${list.map((o) => o.ticket).join(", ")}` : ""}`;
@@ -195,5 +207,11 @@ export const scanStrategy: DispatchStrategy = {
     // Only a scan given --until has such tickets; elsewhere the line is noise.
     if (of("until").length > 0) log(line("Until    ", of("until")));
     log(line("Failed   ", of("failed")));
+  },
+
+  /** An empty queue is a COMPLETE scan too: left open, every idle night would
+   *  read as a scan interrupted mid-flight. */
+  finish(session: ScanSession): void {
+    session.record.finished();
   },
 };

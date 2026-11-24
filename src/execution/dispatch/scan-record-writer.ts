@@ -1,10 +1,6 @@
 //
-// Accumulates the durable scan record and publishes it at every transition.
-//
-// The record lives here rather than on `scanStrategy` because a strategy is a
-// module-level singleton with no per-scan state: the writer is attached to the
-// `DispatchEnv` of the scan that created it, which is the object the loop
-// already threads through every hook.
+// Accumulates the durable scan record and publishes it at every transition. One
+// writer per scan, held by its `ScanSession` (scan.ts).
 //
 // Publishing is best effort. A scan record is telemetry: a full disk must not
 // turn a working scan into a failed one, so a write failure is reported once and
@@ -12,7 +8,6 @@
 
 import type { DispatchOutcomeKind, ScanAbort, ScanRecord, ScanTicketState, ScanStore } from "../../run/index.js";
 import { log } from "../../shared/runtime/logging.js";
-import type { DispatchEnv } from "./dispatch-strategy.js";
 
 /** What a scan knows about itself before discovery answers. */
 export interface ScanRecordSeed {
@@ -125,18 +120,4 @@ export class ScanRecordWriter {
       log(`⚠ Scan record could not be written (the scan itself is unaffected): ${reason}`);
     }
   }
-}
-
-/** One writer per scan, keyed by the environment the loop threads through every
- *  hook. A `WeakMap` rather than a field on the strategy: strategies are shared
- *  singletons, and two scans must not see each other's record. */
-const writers = new WeakMap<DispatchEnv, ScanRecordWriter>();
-
-export function attachScanRecordWriter(env: DispatchEnv, writer: ScanRecordWriter): ScanRecordWriter {
-  writers.set(env, writer);
-  return writer;
-}
-
-export function scanRecordWriterOf(env: DispatchEnv): ScanRecordWriter | undefined {
-  return writers.get(env);
 }

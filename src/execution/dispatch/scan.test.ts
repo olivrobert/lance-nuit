@@ -113,6 +113,11 @@ async function captureLogs<T>(action: () => Promise<T>): Promise<{ result?: T; e
   }
 }
 
+/** Discovery alone, as the loop runs it: open the scan, then ask for its tickets. */
+async function discover(env: DispatchEnv): Promise<string[]> {
+  return scanStrategy.tickets(env, scanStrategy.open(env));
+}
+
 function deps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
   return {
     isTicketComplete: () => false,
@@ -133,7 +138,7 @@ test("discovery: declared bugTodo queue, todo state — other queues and states 
       ],
     },
   });
-  const { result } = await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  const { result } = await captureLogs(() => discover(env));
   expect(result).toEqual(["PROJ-1"]);
 });
 
@@ -147,7 +152,7 @@ test("discovery: featureTodo source changes the requested queue", async () => {
       ],
     },
   });
-  const { result } = await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  const { result } = await captureLogs(() => discover(env));
   expect(result).toEqual(["PROJ-2"]);
 });
 
@@ -161,14 +166,14 @@ test("discovery: gateway order is preserved exactly", async () => {
       ],
     },
   });
-  const { result } = await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  const { result } = await captureLogs(() => discover(env));
   // No sorting: a truncated scan must process the same tickets on each run.
   expect(result).toEqual(["PROJ-9", "PROJ-2", "PROJ-40"]);
 });
 
 test("discovery: log reports provider, queue, and state — no query or marker name", async () => {
   const { env } = scanEnv({ seed: { items: [{ ref: "PROJ-1", queues: ["bugTodo"] }], provider: "fake" } });
-  const { output } = await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  const { output } = await captureLogs(() => discover(env));
   expect(output).toContain("Scan fake");
   expect(output).toContain("PROJ");
   expect(output).toContain("bugTodo");
@@ -220,7 +225,7 @@ test("pipeline without scannable source: abort before any tracker access", async
     def: { name: "quality", steps: [] },
     seed: { items: [{ ref: "PROJ-1", queues: ["bugTodo"] }] },
   });
-  const { error, output } = await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  const { error, output } = await captureLogs(() => discover(env));
   expect(error).toBeInstanceOf(DispatchAbort);
   expect((error as DispatchAbort).code).toBe(1);
   expect(output).toContain("quality");
@@ -232,7 +237,7 @@ test("work-item source without scan: explicit abort", async () => {
   const { env, gateway } = scanEnv({
     def: { name: "manual", work_item_source: { step_id: "ticket", queue: "bugTodo" }, steps: [] },
   });
-  const { error } = await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  const { error } = await captureLogs(() => discover(env));
   expect(error).toBeInstanceOf(DispatchAbort);
   expect(gateway.calls).toEqual([]);
 });
@@ -249,7 +254,7 @@ test("truncation: excluded tickets are logged and named", async () => {
       ],
     },
   });
-  const { result, output } = await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  const { result, output } = await captureLogs(() => discover(env));
   expect(result).toEqual(["PROJ-1", "PROJ-2"]);
   expect(output).toContain("Limit 2 reached");
   expect(output).toContain("2 ticket(s) deferred: PROJ-3, PROJ-4");
@@ -290,7 +295,7 @@ test("--limit overrides the source limit end to end", async () => {
 test("unconfigured project: abort before any gateway call", async () => {
   const bare = mkdtempSync(join(tmpdir(), "dispatch-scan-bare-"));
   const { env, gateway } = scanEnv({ cwd: bare, seed: { items: [{ ref: "PROJ-1", queues: ["bugTodo"] }] } });
-  const { error, output } = await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  const { error, output } = await captureLogs(() => discover(env));
   expect(error).toBeInstanceOf(DispatchAbort);
   expect((error as DispatchAbort).code).toBe(1);
   expect(output).toContain("workItem.project not found");
@@ -443,7 +448,7 @@ test("without --base-branch, the checkout between tickets returns to the configu
 
 test("record: written before discovery, with discovered null", async () => {
   const { env, store } = scanEnv({ seed: bugTodoItems(1) });
-  await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  await captureLogs(() => discover(env));
 
   const first = store.writes[0];
   expect(first?.version).toBe(1);
@@ -462,7 +467,7 @@ test("record: tickets beyond the limit are deferred, not absent", async () => {
     def: { name: "bugfix", work_item_source: scanDefinition("bugTodo", 2), steps: [] },
     seed: bugTodoItems(4),
   });
-  await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  await captureLogs(() => discover(env));
 
   expect(store.last?.limit).toBe(2);
   expect(store.last?.discovered).toEqual(["PROJ-1", "PROJ-2", "PROJ-3", "PROJ-4"]);
@@ -478,7 +483,7 @@ test("record: a failed discovery aborts in the discovery phase and never finishe
   const { env, store } = scanEnv({
     seed: { failures: [{ op: "findCandidates", kind: "error", message: "fake: tracker unreachable (503)" }] },
   });
-  await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  await captureLogs(() => discover(env));
 
   expect(store.last?.abort).toEqual({ phase: "discovery", reason: "fake: tracker unreachable (503)" });
   expect(store.last?.discovered).toBeNull();
@@ -582,7 +587,7 @@ test("a pipeline-owned scan query reaches the gateway verbatim and is logged", a
     work_item_source: { step_id: "ticket", queue: "bugTodo", scan: { limit: 2, query } },
   };
   const { env, gateway } = scanEnv({ seed: bugTodoItems(3), def });
-  const { result, output } = await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  const { result, output } = await captureLogs(() => discover(env));
 
   expect(result).toEqual(["PROJ-1", "PROJ-2"]);
   expect(gateway.calls[0]).toEqual({ op: "findCandidates", query });
@@ -591,6 +596,6 @@ test("a pipeline-owned scan query reaches the gateway verbatim and is logged", a
 
 test("without a scan query the gateway request carries none", async () => {
   const { env, gateway } = scanEnv({ seed: bugTodoItems(1) });
-  await captureLogs(() => Promise.resolve(scanStrategy.tickets(env)));
+  await captureLogs(() => discover(env));
   expect(gateway.calls[0]).toEqual({ op: "findCandidates" });
 });

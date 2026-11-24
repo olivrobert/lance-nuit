@@ -62,14 +62,16 @@ function outcomeOf(ticket: string, classification: DispatchClassification): Disp
   };
 }
 
-export async function runDispatch(
-  strategy: DispatchStrategy,
+export async function runDispatch<Session>(
+  strategy: DispatchStrategy<Session>,
   env: DispatchEnv,
   deps: DispatchDeps = defaultDeps,
 ): Promise<number> {
+  let session: Session;
   let tickets: string[];
   try {
-    tickets = await strategy.tickets(env);
+    session = strategy.open(env);
+    tickets = await strategy.tickets(env, session);
   } catch (e) {
     if (e instanceof DispatchAbort) return e.code;
     throw e;
@@ -78,6 +80,7 @@ export async function runDispatch(
   if (tickets.length === 0) {
     const { message, code } = strategy.onEmpty(env);
     log(message);
+    strategy.finish?.(session);
     return code;
   }
 
@@ -94,23 +97,24 @@ export async function runDispatch(
       log(strategy.skipMessage(ticket));
       const outcome = outcomeOf(ticket, deps.classify(ticket, 0, env));
       outcomes.push(outcome);
-      await strategy.onTicketFinished?.(outcome, env);
+      await strategy.onTicketFinished?.(outcome, env, session);
     } else {
       // Before the spawn, so a strategy keeping a durable record shows this
       // ticket as started even if the process never comes back.
-      await strategy.onTicketStarted?.(ticket, env);
+      await strategy.onTicketStarted?.(ticket, env, session);
       const code = await deps.spawn([ticket, "--pipeline", env.pipelinePath, ...childArgs]);
       const outcome = outcomeOf(ticket, deps.classify(ticket, code, env));
       outcomes.push(outcome);
-      await strategy.onTicketFinished?.(outcome, env);
+      await strategy.onTicketFinished?.(outcome, env, session);
     }
 
-    if (strategy.betweenTickets && !(await strategy.betweenTickets(ticket, env, { skipped }))) {
-      await strategy.onHalted?.(`betweenTickets refused to continue after ${ticket}`, env);
+    if (strategy.betweenTickets && !(await strategy.betweenTickets(ticket, env, { skipped }, session))) {
+      await strategy.onHalted?.(`betweenTickets refused to continue after ${ticket}`, env, session);
       break;
     }
   }
 
   strategy.report(outcomes, tickets, env);
+  strategy.finish?.(session);
   return 0;
 }
