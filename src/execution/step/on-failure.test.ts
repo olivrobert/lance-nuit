@@ -104,7 +104,7 @@ test("on-failure: validates the integration contract", async () => {
   const out = await rerunHandler(ctx);
 
   expect(out.failed).toBe(false);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
   expect(step.retries).toBe(2);
   expect(calls.exec).toBe(2);
 });
@@ -131,7 +131,7 @@ test("on-failure: validates the integration contract", async () => {
   const out = await rerunHandler(ctx);
 
   expect(out.failed).toBe(false);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
   expect(step.errors).toBe("initial failure");
 });
 
@@ -214,7 +214,7 @@ test("on-failure: validates the integration contract", async () => {
   const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
 
   expect(out.failed).toBe(false);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
   expect(calls.exec).toBe(1);
   expect(calls.fix).toBe(0);
   expect(step.timeout_retries).toBe(1);
@@ -300,7 +300,7 @@ test("on-failure: validates the integration contract", async () => {
   const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
 
   expect(out.failed).toBe(false);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
   expect(calls.fix).toBe(0);
   expect(step.errors).toBeDefined();
 });

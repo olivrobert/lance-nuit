@@ -100,16 +100,43 @@ function usdOf(cost: ItemCost | undefined): number {
   return cost?.usd ?? 0;
 }
 
+/**
+ * Whether a step's attempts so far end on a pass that succeeded. A fix that
+ * `onFail` ran is followed by the step attempt it repaired; the fix after a
+ * review, and a review needing none, end their pass.
+ */
+function passSettled(attempts: readonly RunJourneyAttempt[]): boolean {
+  const last = attempts.at(-1);
+  if (last?.status !== "done") return false;
+  if (last.kind !== "fix") return true;
+  for (let i = attempts.length - 1; i >= 0 && attempts[i]?.kind !== "step"; i -= 1) {
+    if (attempts[i]?.kind === "review") return true;
+  }
+  return false;
+}
+
+/** The attempts that end a pass that succeeded. */
+function passCount(attempts: readonly RunJourneyAttempt[]): number {
+  let count = 0;
+  attempts.forEach((attempt, index) => {
+    const next = attempts[index + 1];
+    const upTo = attempts.slice(0, index + 1);
+    if (attempt.status === "done" && (next === undefined || (next.kind === "step" && passSettled(upTo)))) count += 1;
+  });
+  return count;
+}
+
 function toneOf(
   attempt: RunJourneyAttempt,
-  previous: RunJourneyAttempt | undefined,
+  previous: readonly RunJourneyAttempt[],
   live: boolean,
   main: string | undefined,
 ): AttemptTone {
   if (attempt.status === "running") return live ? "running" : "fail";
   if (attempt.status === "failed" || attempt.status === "aborted") return "fail";
-  // Running a step again after it passed is a resume replaying it, not a fix.
-  if (previous?.status === "done") return "replay";
+  // Running a step again after it passed is a resume replaying it; a review or a
+  // fix continues its pass.
+  if (attempt.kind === "step" && passSettled(previous)) return "replay";
   if (!isAgent(attempt)) return "command";
   return attempt.model && main && attempt.model !== main ? "other-model" : "agent";
 }
@@ -136,7 +163,7 @@ function stepOf(id: string, attempts: TimelineAttempt[], cost: ItemCost | undefi
     workMs: attempts.reduce((sum, entry) => sum + (entry.to - entry.from), 0),
     ...(cost ? { cost } : {}),
     ...(model ? { model } : {}),
-    passes: attempts.filter((entry) => entry.attempt.status === "done").length,
+    passes: passCount(attempts.map((entry) => entry.attempt)),
     fails: attempts.filter((entry) => entry.tone === "fail").length,
     running: attempts.some((entry) => entry.tone === "running"),
   };
@@ -172,7 +199,12 @@ export function buildTimeline(journey: RunJourney, recap: RunRecap | null, now: 
     const from = at(attempt.startedAt);
     if (from === undefined) continue;
     const list = byStep.get(attempt.stepId) ?? [];
-    const tone = toneOf(attempt, list.at(-1)?.attempt, live, main);
+    const tone = toneOf(
+      attempt,
+      list.map((entry) => entry.attempt),
+      live,
+      main,
+    );
     const end = at(attempt.finishedAt) ?? (tone === "running" ? now - startMs : from + (attempt.durationMs ?? 0));
     const to = Math.max(end, from);
     list.push({ attempt, from, to, tone });

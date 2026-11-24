@@ -1,6 +1,12 @@
 import { VERDICT_FIELD_NAMES } from "../../contracts/verdict.js";
 import { isLogicalSegment } from "../../shared/language/artifact-ports.js";
-import { type PipelineStep, stepsWithoutDeliverable, withoutDeliverableMessage } from "../definition.js";
+import {
+  type PipelineStep,
+  producerConflicts,
+  reviewDeclarationError,
+  stepsWithoutDeliverable,
+  withoutDeliverableMessage,
+} from "../definition.js";
 import { sourceDeclarationError } from "../../work-items/index.js";
 import type { PipelineValidationContext, PipelineValidationFinding, PipelineValidationRule } from "./types.js";
 
@@ -51,6 +57,7 @@ export class PipelineStructureValidator implements PipelineValidationRule {
 
     const unclassified = stepsWithoutDeliverable({ ...context.pipeline, steps: stepsOf(context) });
     if (unclassified.length > 0) fail(withoutDeliverableMessage(unclassified));
+    for (const conflict of producerConflicts({ steps: stepsOf(context) })) fail(conflict);
 
     const seenIds = new Set<string>();
     for (const step of stepsOf(context)) {
@@ -83,9 +90,11 @@ export class PipelineStructureValidator implements PipelineValidationRule {
       if (step.runner === "pipeline" && step.sources) {
         fail(`step "${id}": input is not supported by runner "pipeline"`);
       }
-      if (step.sources?.length && !step.outputs?.length) {
-        fail(`step "${id}": input requires output`);
+      if (step.sources?.length && step.rerun_on_resume) {
+        fail(`step "${id}": rerunOnResume cannot be combined with input`);
       }
+      const reviewError = reviewDeclarationError(step);
+      if (reviewError) fail(`step "${id}": ${reviewError}`);
       const sourceError = sourceDeclarationError(step);
       if (sourceError) fail(`step "${id}": ${sourceError}`);
       if (step.captures?.length && step.runner !== "agent") {

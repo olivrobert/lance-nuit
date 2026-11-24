@@ -30,8 +30,8 @@ const AFTER_PLAN = ["prepare", "implement", "quality", "commit", "publish", "rep
  *  guide/cli-options.md. A failure exits 1, a completed run 0. */
 const UNTIL_EXIT = 3;
 
-/** What admission says when a step's outputs match its inputs. */
-const UP_TO_DATE = "outputs up to date with declared inputs";
+/** What admission says when a step's stamp still holds. */
+const UP_TO_DATE = "up to date";
 
 function statusesOf(state: RunSnapshot): Record<string, string> {
   return Object.fromEntries(state.steps.map((step) => [step.id, step.status]));
@@ -73,7 +73,7 @@ test("U1: --until plan stops after plan with its own kind and exit code, and a p
   // rerunOnResume and replays on every resume.
   expect(traceSince(cwd, before)).toEqual(["context", ...AFTER_PLAN]);
   expect(skipsSince(cwd, before).map(({ stepId, reason }) => ({ stepId, reason }))).toEqual([
-    { stepId: "branch", reason: "outputs present" },
+    { stepId: "branch", reason: "up to date" },
     { stepId: "triage", reason: UP_TO_DATE },
     { stepId: "plan", reason: UP_TO_DATE },
   ]);

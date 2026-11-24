@@ -8,7 +8,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -45,28 +44,6 @@ export interface RouteOptions {
    * tree it reads; the tree is then dirty after its first pass.
    */
   source?: boolean | "failable" | "output" | "written";
-  /**
-   * Adds `review` after `plan`: it revises `plan.md` in place
-   * (`input: [notes, plan]`, `output: [plan]`), from `notes.md`, which the
-   * fixture writes. `"absorbed"`: `review` is `blocking: false`, so its failure
-   * is absorbed and the run goes on. `"retried"`: `review` declares
-   * `onFail: { retries: 1 }`, and `partialAt(cwd, "review")` applies to its
-   * first attempt only, so the retry revises the partial bytes and succeeds.
-   */
-  review?: boolean | "absorbed" | "retried";
-  /** `review` also reads `ticket.md` and `triage.md`: its pure inputs cover
-   *  every input of `plan`, the step that produced what it revises. */
-  reviewReadsAll?: boolean;
-  /** Adds `rbranch` after `branch`: it revises `branch.json` in place from
-   *  `notes.md` (`input: [notes, branch]`), so the output it revises comes
-   *  from a step without input. `"retried"`: as `review: "retried"`, for `rbranch`. */
-  branchReview?: boolean | "retried";
-  /** Id of the step producing `plan.md`, `plan` by default: a pipeline that
-   *  renamed it. */
-  planId?: string;
-  /** `plan` declares `plan.md` as input too: the step that produces the output
-   *  is also the one revising it, as a step amending its own deliverable does. */
-  planRevisesItself?: boolean;
 }
 
 export interface RunResult {
@@ -118,30 +95,6 @@ function treeDeclaration(source: RouteOptions["source"]): string {
 /** Source of `.lance-nuit/pipelines/route.ts`. */
 export function routeSource(options: RouteOptions = {}): string {
   const comment = options.unclassified ? `\n      step("comment", {}),` : "";
-  const reviewExtra =
-    options.review === "absorbed"
-      ? ", blocking: false"
-      : options.review === "retried"
-        ? ", onFail: { retries: 1 }"
-        : "";
-  const reviewInput = options.reviewReadsAll ? "[ticket, triage, notes, plan]" : "[notes, plan]";
-  const review = options.review
-    ? `\n      step("review", { input: ${reviewInput}, output: [plan]${reviewExtra} }, [plan]),`
-    : "";
-  const branchRetry = options.branchReview === "retried" ? ", onFail: { retries: 1 }" : "";
-  const branchReview = options.branchReview
-    ? `\n      step("rbranch", { input: [notes, branch], output: [branch]${branchRetry} }, [branch]),`
-    : "";
-  const planInput = options.planRevisesItself ? "[ticket, triage, plan]" : "[ticket, triage]";
-  const retried = [
-    ...(options.review === "retried" ? ["review"] : []),
-    ...(options.branchReview === "retried" ? ["rbranch"] : []),
-  ];
-  const partialOnce =
-    retried.length > 0
-      ? `\n        if (partial && ${JSON.stringify(retried)}.includes(id)) rmSync(join(ctx.cwd, "partial-" + id));`
-      : "";
-  const notes = options.review || options.branchReview;
   const implementInput = options.source ? "[plan, tree]" : "[plan]";
   const implementOutput = options.source === "output" ? "[impl, tree]" : "[impl]";
   const implementEdits =
@@ -150,9 +103,9 @@ export function routeSource(options: RouteOptions = {}): string {
       : "";
   const steps = `
       step("context", { rerunOnResume: true }),
-      step("branch", { output: [branch] }, [branch]),${branchReview}
+      step("branch", { output: [branch] }, [branch]),
       step("triage", { input: [ticket], output: [triage] }, [triage]),
-      step(${JSON.stringify(options.planId ?? "plan")}, { input: ${planInput}, output: [plan] }, [plan]),${review}
+      step("plan", { input: [ticket, triage], output: [plan] }, [plan]),
       step("prepare", { rerunOnResume: true }),
       step("implement", { input: ${implementInput}, output: ${implementOutput} }, [impl]),
       step("quality", { rerunOnResume: true }),
@@ -161,7 +114,7 @@ export function routeSource(options: RouteOptions = {}): string {
       step("report", { rerunOnResume: true }),
     `;
   const body = options.scan ? `.forEachWorkItem({ queue: "bugTodo", scan: {}, do: [${steps}] })` : `.add(${steps})`;
-  return `import { appendFileSync, existsSync${retried.length > 0 ? ", rmSync" : ""} } from "node:fs";
+  return `import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 export default ({ pipeline, actionStep, textArtifact${options.source ? ", source" : ""} }: any) => {
@@ -171,7 +124,7 @@ export default ({ pipeline, actionStep, textArtifact${options.source ? ", source
   const plan = textArtifact("plan.md");
   const impl = textArtifact("impl.md");
   const commit = textArtifact("commit.sha");
-  const mr = textArtifact("mr-url.txt");${notes ? `\n  const notes = textArtifact("notes.md");` : ""}${treeDeclaration(options.source)}
+  const mr = textArtifact("mr-url.txt");${treeDeclaration(options.source)}
 
   const step = (id: string, extra: object, produce: any[] = []) =>
     actionStep({
@@ -184,7 +137,7 @@ export default ({ pipeline, actionStep, textArtifact${options.source ? ", source
         const hang = existsSync(join(ctx.cwd, "hang-" + id));
         // Written before the trace line: killDuring kills as soon as it reads the
         // trace, and the partial outputs must already be on disk by then.
-        if (partial) for (const out of produce) await out.write(ctx, "partial " + id + "\\n");${partialOnce}
+        if (partial) for (const out of produce) await out.write(ctx, "partial " + id + "\\n");
         appendFileSync(join(ctx.cwd, "trace.log"), id + "\\n");
         if (partial && !hang) throw new Error(id + ": failed after a partial write");
         if (existsSync(join(ctx.cwd, "fail-" + id))) throw new Error(id + ": forced failure");
@@ -238,8 +191,6 @@ export function scratchRoute(options: RouteOptions = {}): string {
   writeFileSync(join(cwd, ".lance-nuit", "pipelines", `${PIPELINE}.ts`), routeSource(options));
   mkdirSync(dirname(ticketPath(cwd)), { recursive: true });
   writeFileSync(ticketPath(cwd), "# T-1\n\nRoute the request.\n");
-  if (options.review || options.branchReview)
-    writeFileSync(join(dirname(ticketPath(cwd)), "notes.md"), "Review the plan.\n");
   git(cwd, "init", "-q");
   if (options.scan) {
     // Between tickets, a scan checks out the configured base branch, `main` by default.
@@ -491,10 +442,20 @@ export function writePipelines(cwd: string, files: Record<string, string>): void
   git(cwd, "commit", "-qm", "replace pipelines");
 }
 
-/** The provenance record of artifact `name` of `T-1`: the input fingerprints it was produced from. */
-export function provenanceInputs(cwd: string, name: string): Record<string, string | null> {
-  const path = join(workItemDir(cwd), "artifacts", ".provenance", `${name}.json`);
-  return (JSON.parse(readFileSync(path, "utf8")) as { inputs: Record<string, string | null> }).inputs;
+/** The stamps of `T-1`'s freshness lock, keyed by step id; empty without a lock. */
+export function lockSteps(
+  cwd: string,
+): Record<string, { inputs: Record<string, string | null>; outputs: Record<string, string> }> {
+  const path = join(workItemDir(cwd), "artifacts", "lock.json");
+  if (!existsSync(path)) return {};
+  return (JSON.parse(readFileSync(path, "utf8")) as { steps: ReturnType<typeof lockSteps> }).steps;
+}
+
+/** The inputs step `stepId` of `T-1` was stamped with. */
+export function stampInputs(cwd: string, stepId: string): Record<string, string | null> {
+  const stamp = lockSteps(cwd)[stepId];
+  if (!stamp) throw new Error(`step "${stepId}" has no stamp`);
+  return stamp.inputs;
 }
 
 /** Content of artifact `name` of `T-1`. */
@@ -505,23 +466,6 @@ export function readArtifact(cwd: string, name: string): string {
 /** Writes artifact `name` of `T-1` by hand, as a step that died mid-write would have left it. */
 export function writeArtifact(cwd: string, name: string, content: string): void {
   writeFileSync(join(workItemDir(cwd), "artifacts", name), content);
-}
-
-/** Deletes the provenance record of artifact `name` of `T-1`, as an operator keeping a hand repair does. */
-export function removeProvenanceRecord(cwd: string, name: string): void {
-  rmSync(join(workItemDir(cwd), "artifacts", ".provenance", `${name}.json`));
-}
-
-/** Every provenance record of `T-1`, keyed by file name under `.provenance/`. */
-export function provenanceRecords(cwd: string): Record<string, Record<string, unknown>> {
-  const dir = join(workItemDir(cwd), "artifacts", ".provenance");
-  if (!existsSync(dir)) return {};
-  return Object.fromEntries(
-    readdirSync(dir)
-      .filter((name) => name.endsWith(".json"))
-      .sort()
-      .map((name) => [name, JSON.parse(readFileSync(join(dir, name), "utf8")) as Record<string, unknown>]),
-  );
 }
 
 /** Events of type `type` in the journal of the `latest` run since `since` (whole journal for a new run). */

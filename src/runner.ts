@@ -59,7 +59,8 @@ async function main() {
   const { run, context, resuming } = prepared;
 
   const outputs = wireRunOutputs(run, started.ready.args);
-  announceRun(run, started.ready.args);
+  const workItemSourceStepId = started.ready.pipelineDef.work_item_source?.step_id;
+  announceRun(run, started.ready.args, workItemSourceStepId);
 
   const outcome = await executeRunSteps(
     run,
@@ -71,6 +72,7 @@ async function main() {
       until: started.ready.args.until,
       stepFilter: started.ready.args.stepFilter,
       skipFilter: started.ready.args.skipFilter,
+      workItemSourceStepId,
     },
     stepLoopDeps(outputs.output),
     context,

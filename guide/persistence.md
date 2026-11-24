@@ -8,7 +8,7 @@ item normally looks like this:
 ├── artifacts/                 # durable business outputs (JSON, Markdown, inputs/…)
 │   ├── ticket.md              # tracker snapshot used as pipeline input
 │   ├── inputs/                # optional human-provided files
-│   └── .provenance/           # runner-owned record of each declared output
+│   └── lock.json              # runner-owned freshness lock: one stamp per step
 ├── reports/                   # disposable machine/human reports
 │   └── <LOT-ID>/              # isolated reports for a batch sub-run
 ├── decisions/                 # hash-locked approval and rejection records
@@ -64,8 +64,8 @@ The run record, `state.json` and `events.jsonl` in the run directory, is the
 run's journal and ledger: what each step did and how its last pass ended
 (done, failed, aborted, interrupted), its attempts and retries, the agent
 sessions it opened, and what it cost against the budget. The deliverables live
-beside it, in the work item: the artifacts in `artifacts/` and their records in
-`artifacts/.provenance/`. They outlive the run, so a new run, `--fresh`
+beside it, in the work item: the artifacts in `artifacts/` and the stamps that
+vouch for them in `artifacts/lock.json`. They outlive the run, so a new run, `--fresh`
 included, finds them as the last one left them. The code that owns the run
 record is the `src/run/record/` module; the rest of the runner reaches it
 through `run/record/index.ts` only.
@@ -75,8 +75,8 @@ The two answer different questions
 
 | Question | Answered by |
 | --- | --- |
-| Does a settled step run again? | its declared outputs: it runs when one is missing, `unknown`, stale or [unfinished](dsl.md#input-freshness); a `rerunOnResume` step without output always runs |
-| Did the last pass of the step in this run finish? | the run record: the [interruption guard](dsl.md#interrupted-steps) and the rerun a failed pass is owed read it |
+| Does a settled step run again? | its stamp in the [freshness lock](#freshness-lock): it runs when it has none or when its inputs or outputs changed ([input freshness](dsl.md#input-freshness)); a `rerunOnResume` step always runs |
+| Did the last pass of the step in this run finish? | the run record: the [interruption guard](dsl.md#interrupted-steps) reads it, and so does a `--steps`/`--skip` selection, which stops rather than leave out an unfinished pass |
 | What was spent, and may the run spend more? | the run record |
 | Does a `runPipeline` or `forEachPipeline` node, or the work-item source step, run again? | its status, even when the node declares `rerunOnResume` |
 
@@ -84,171 +84,94 @@ The two answer different questions
 before these answers.
 
 `state.json` does not decide what remains to do for a step that declares
-outputs, orchestration nodes aside: they keep the authority of their status. It
-still holds everything only the run can know: spend, attempts, sessions and the
-way a pass ended. Where an output's provenance record carries an in-flight mark,
-the mark answers whether the output can be adopted, whatever the status of the
-step that wrote it.
-Where none exists (an attempt of an older runner, a record deleted by hand),
-only the run's record of an unfinished pass keeps the output from being
-adopted, within that run.
+`input` or `output`, orchestration nodes aside: they keep the authority of their
+status. It still holds everything only the run can know: spend, attempts,
+sessions and the way a pass ended. A pass that did not settle `done` left no
+stamp, so its step runs again whatever the status of the step in any run.
 
-## Output provenance
+## Freshness lock
 
-`artifacts/.provenance/<name>.json` is the runner's record of one declared
-output: which step produced it, and from which bytes. Every attempt of a step
-declaring `output`, orchestration nodes aside, writes one per output, with the
-fingerprints of its pure inputs when the step declares `input` and none
-otherwise; `work-items/store/provenance.ts` is the only writer. The prefix is reserved:
-an artifact descriptor cannot claim a name inside it. A record binds one
-artifact to the bytes it came from:
+`artifacts/lock.json` is the runner's freshness lock: one stamp per step that
+last settled `done`, binding the hashes of the inputs it declares to the hashes
+of the outputs it declares. There is one per work item, shared by every run and
+every pipeline of that work item. `work-items/store/step-lock.ts` is its only
+reader and writer. Which steps are stamped, and how admission reads a stamp, is
+described in [input freshness](dsl.md#input-freshness). A run without a ticket
+has no work item, so no lock: its steps are never stamped and always run.
 
 ```json
 {
   "schemaVersion": 1,
-  "artifact": "artifacts/spec.md",
-  "producedBy": "spec",
-  "producedAt": "2026-09-03T12:00:00.000Z",
-  "inputs": { "artifacts/ticket.md": "<sha256>" }
-}
-```
-
-An input absent when the record was written is stored as `null`, so its
-reappearance invalidates the record instead of being silently adopted.
-
-Before every attempt of a step declaring `output`, with or without `input`, the
-runner writes a record for each output, carrying an `inFlight` mark: the attempt
-that is about to write the artifact. For an output the step produces from
-scratch, the mark lists no input.
-
-```json
-{
-  "schemaVersion": 1,
-  "artifact": "artifacts/impl.md",
-  "producedBy": "implement",
-  "producedAt": "2026-09-03T12:00:00.000Z",
-  "inputs": {},
-  "inFlight": {
-    "runId": "20260903T115900.000Z-ticket-a1b2c3",
-    "stepId": "implement",
-    "attempt": 2,
-    "startedAt": "2026-09-03T12:00:00.000Z"
-  }
-}
-```
-
-The mark outlives the run: whatever the attempt leaves is `unfinished` until an
-attempt declaring the output succeeds, and an unfinished output is
-never adopted (see [input freshness](dsl.md#input-freshness)). A failure, an
-interruption, the death of the runner and a failure absorbed by
-`blocking: false` all leave it in place. On success:
-
-- a step declaring `input` replaces the mark with its normal record;
-- a step without `input` replaces it with a record that lists no input
-  (`"inputs": {}`). It still names the step as the producer, which a later
-  revision of the output keeps; without it, a revising step would find the
-  output with no record, adopt it, and pass for its producer. `freshness()`
-  reports such an output `fresh`, and admission counts it as present.
-
-An output revised in place, declared as both `input` and `output` of the step,
-is marked too, but keeps its bytes. Its mark adds `inFlight.revision`: the
-SHA-256 of the bytes the attempt found, and in `previous` the producer, date and
-inputs of the record that vouched for them. Outside the mark, `producedBy` and
-`inputs` are those of that record, minus the revising step's own pure inputs.
-
-```json
-{
-  "schemaVersion": 1,
-  "artifact": "artifacts/plan.md",
-  "producedBy": "plan",
-  "producedAt": "2026-09-03T11:40:00.000Z",
-  "inputs": { "artifacts/ticket.md": "<sha256>" },
-  "inFlight": {
-    "runId": "20260903T115900.000Z-ticket-a1b2c3",
-    "stepId": "review",
-    "attempt": 1,
-    "startedAt": "2026-09-03T12:00:00.000Z",
-    "revision": {
-      "outputSha256": "<sha256 of plan.md when review started>",
-      "previous": {
-        "producedBy": "plan",
-        "producedAt": "2026-09-03T11:40:00.000Z",
-        "inputs": { "artifacts/ticket.md": "<sha256>" }
-      }
+  "steps": {
+    "plan": {
+      "pipeline": "ticket",
+      "runId": "20260903T115900.000Z-ticket-a1b2c3",
+      "stampedAt": "2026-09-03T12:10:00.000Z",
+      "inputs": { "artifacts/triage.json": "<sha256>", "source:tree": "<sha256>" },
+      "outputs": { "artifacts/plan.json": "<sha256>", "artifacts/audit.json": "<sha256>" }
+    },
+    "quality-check": {
+      "pipeline": "ticket",
+      "runId": "20260903T115900.000Z-ticket-a1b2c3",
+      "stampedAt": "2026-09-03T12:20:00.000Z",
+      "inputs": { "artifacts/summary.json": "<sha256>" },
+      "outputs": {},
+      "absorbed": true
     }
   }
 }
 ```
 
-While the artifact still holds those bytes, the revision changed nothing and
-`previous` stands for the record; once they differ, the output is `unfinished`.
-On success, the revision merges its fingerprints into `previous` and the mark
-goes. A repair without replay (`replayAfterFix: false`) that succeeds does the
-same once the output still reads: the step settles on that repair, so the
-revision it wrote stands as a successful attempt's would.
+- **Key.** The step id. When the run carries a lot, the key is
+  `<lot-id>/<step-id>`: lots share the artifacts of their work item. Two
+  pipelines of one work item that use the same step id share its stamp.
+- **`inputs`.** Every declared input and nothing else: an artifact under
+  `artifacts/<name>`, with the SHA-256 of its bytes, or `null` when it is
+  absent; a source under `source:<name>`, with the SHA-256 of its stdout, or
+  `null` when its command failed.
+- **`outputs`.** Every declared output, captures and the review capture
+  included, under `artifacts/<name>`; never `null`, since the step's `require`
+  already passed. The hash is the one a human decision records as
+  `artifactSha256`, so an approval and a stamp agree on the same bytes.
+- **`pipeline`, `runId`, `stampedAt`, `absorbed`.** Attribution and
+  diagnostics only: no admission rule reads them. `absorbed` marks a
+  `blocking: false` pass that absorbed its failure.
 
-When the bytes a revision finds are themselves `unfinished`, its mark carries no
-`revision` but `"unguaranteed": { "revisedBy": [] }`. A successful revision keeps
-the field in its record and adds itself to `revisedBy`; `producedBy` then names
-the step that last wrote the bytes:
+The pass of a step (`execution/step/step-pass.ts`) is the only place that
+changes a stamp:
 
-```json
-{
-  "schemaVersion": 1,
-  "artifact": "artifacts/plan.md",
-  "producedBy": "review",
-  "producedAt": "2026-09-03T12:05:00.000Z",
-  "inputs": { "artifacts/notes.md": "<sha256>" },
-  "unguaranteed": { "revisedBy": ["review"] }
-}
-```
+- it deletes the stamp before the first spawn of every pass; if that fails, the
+  step fails before any spawn;
+- it writes the stamp only once the pass settled `done`, and after that `done`
+  is saved in `state.json`. A runner that dies between the two leaves a `done`
+  step without a stamp, which only makes it run again; a stamp that cannot be
+  written is reported as a warning, with the same effect;
+- a pass that failed, was aborted, was interrupted or stopped writes nothing,
+  and neither does an admission refusal or an `up to date` skip;
+- a `blocking: false` pass that absorbed its failure is stamped with
+  `absorbed: true` and `"outputs": {}` only when the step declares no output;
+  with outputs, it gets no stamp.
 
-`unguaranteed` reads `unfinished` to every step declaring the artifact except
-those in `revisedBy`, which judge the record by its `inputs`. A revision of bytes
-already in doubt keeps the doubt and the inputs earlier revisers recorded, and
-adds itself; one that writes nothing leaves the doubt as it found it. Only a
-successful attempt producing the artifact from scratch lifts it, by writing the
-record anew. The rule never reads `producedBy`, which is attribution only: an
-adoption names whichever step adopted, and a step can be renamed. A step that
-revises an artifact it produces itself is listed once its revision succeeds, and
-the doubt then stays on its record without making it run again.
+Every write is one synchronous critical section under `artifacts/lock.json.lock`
+(pid, nonce and stale reclaim, as the run lock): read the file, apply one
+deletion or one stamp, write it atomically, release. Nothing awaits inside it,
+so two writers of one process (a parallel group, a parent and its child) never
+interleave, and a reader sees the old file or the new one. A lock held by
+another live process is retried every 25 ms for at most 10 s, then the write
+fails. Two live runs on one work item, `--worktree` runs for example, are not
+supported: they clear and stamp each other's steps. The names `lock.json` and
+`lock.json.*` are reserved: an artifact descriptor cannot claim them.
 
-The fields are optional and additive, so the schema version stays `1`. Presence
-decides: a record that carries an `inFlight` field reads `unfinished`, whatever
-that field holds and even when the rest of the record no longer validates —
-except a revision mark whose `revision` is intact and whose bytes have not
-moved. A record that carries `unguaranteed` but no longer validates, or whose
-`revisedBy` is not a list, exempts nobody: it reads `unfinished` to every step.
-Only a record that is no longer valid JSON reads as no record at all. Deleting
-the record by hand is how an operator keeps an output they repaired themselves;
-see [input freshness](dsl.md#input-freshness) for the procedure.
+An absent `lock.json` reads as empty. An unreadable one (invalid JSON, another
+`schemaVersion`) fails closed: admission fails the step and names the path, to
+fix or delete. A step whose stamp cannot be cleared before its pass fails too.
+Neither is absorbed by `blocking: false`: the lock is the runner's state, not
+the step's verdict. Deleting it makes every stamped step of the work item run once.
 
-### Mixing runner releases
-
-A runner that predates the mark reads it as an ordinary record:
-
-- for a step declaring `input`, the mark lists none of its inputs, so it is
-  `stale` and the step runs;
-- for a step without `input`, it only checks that the output
-  exists, so it counts a marked output as present, as it did before the mark;
-- for an output revised in place, the mark keeps the producer's inputs, so it
-  trusts the producer even when the revision wrote partial bytes, as before the
-  mark, and runs the revising step;
-- it ignores `unguaranteed`: the record lists only the revising steps' inputs,
-  so the producer is `stale` and runs, unless the revisions read every input of
-  the producer, or the producer declares no `input` and its pipeline declares
-  the `.reconcile()` that runner still accepted, where the output's presence
-  decides.
-  Merging into a record, it keeps the fields it does not know, so a newer
-  runner still reads them afterwards;
-- a step without `input` leaves the record it finds as it is, mark included, as
-  it did before the mark.
-
-Mixing the two on one work item has two effects. An attempt made by the older
-runner leaves no mark, so the newer runner may adopt what it left partial, as
-the older one would. And the older runner never removes the mark of a step
-without `input`, so the newer runner then sees `unfinished` and runs the steps
-declaring that output once more.
+The lock replaced the per-output records of `artifacts/.provenance/`, which the
+runner now ignores and which can be deleted. Upgrading therefore runs every
+stamped step of a work item in flight once: finish or close the work items
+awaiting a gate before upgrading.
 
 ## Run snapshots and resume
 
@@ -303,9 +226,8 @@ are run facts the next admission reads from it. The run then stops with
 `needs-decision` rather than pass into a new run that would lose them, unless an
 `--until` bound or another stop ended it first (a run holding an aborted step
 stays `ABORTED`). The outcome names the step that ended the invocation, never a
-failed one the selection set aside. Whether an output that pass wrote can be
-adopted is answered on every invocation by its in-flight mark in
-`.provenance/`; the kept status covers what no mark protects (see
+failed one the selection set aside. That pass left no stamp in any case, so
+its outputs never settle the step (see
 [the run record and the deliverables](#the-run-record-and-the-deliverables)).
 
 A step a dead runner left `running`, an orchestration node killed mid-child
@@ -482,7 +404,7 @@ The `step.attempt.finished` payload has one shape for every path:
 
 | Field | Presence | Content |
 | --- | --- | --- |
-| `stepId`, `attempt`, `kind` | always | step, attempt number, and `step` or `fix` |
+| `stepId`, `attempt`, `kind` | always | step, attempt number, and `step`, `fix` or `review` |
 | `status` | always | `done`, `failed`, or `aborted` |
 | `control` | always | normalized control data, including `cost_unknown` / `cost_estimated` |
 | `logPath` | always | attempt log, run-relative |
@@ -522,7 +444,6 @@ projection of spend already accounted for when the attempt closed.
 | Composed child identity (`pipeline.child.started`) | journal | — | The reference's `runId` alone is not proof the child started; the start fact lives in the journal only, which is why an unreadable journal fails the resume instead of reading as empty. |
 | Composed child spend (`accountedCostUsd`, `accountedDurationMs`, `accountedUsage`) | parent snapshot | the parent node's `control` and `usage`, the parent ledger | What the parent already charged for this child (`chargeChildReconciliation`). A resumed child re-reports its whole history and is charged by difference; a reference reloaded from a snapshot written before the last reconciliation is charged the missing difference again, never twice. |
 | Location (`worktree`, `cwd`) | snapshot | — | Rewritten by every resume with the invocation's own location. |
-| Absorbed inputs (`absorbed_inputs`) | snapshot | — | Written by `recordAbsorbedInputs` after a `blocking: false` step that declares `input` absorbed its failure in an attempt, cleared by `updateStep(running)`. The journal does not carry it. Missing — an older snapshot, or an interruption between the absorption and the record — leaves the decision to freshness, which re-runs the step. |
 | Selection (`replay`, skipped steps) | snapshot, then the current selectors | — | No exclusion is written or kept: the step loop applies `--steps`, `--skip`, and the steps before a `--start-at` target to this invocation only, and an `excluded` mark an older runner wrote is ignored. `--start-at X` requeues `X` and every later step, whatever their status, as `pending` with `replay`; `updateStep` clears `replay` when the step reaches `done` or `skipped`. |
 
 ### Interruption windows
@@ -628,9 +549,8 @@ kept and read on what it still says.
 | `run.budget.exceeded` | the ceiling stopped the run (see [budgets and timeouts](budgets-timeouts.md)) |
 | `run.cost.unaccounted` | a gate withheld work over spend nobody could price |
 | `run.unmetered.authorized` | a human authorized unpriceable spend with `--allow-unmetered` |
-| `step.skipped` | admission skipped a step, or this invocation's selection left it out (reason `operator selection`); carries `reason`, and the freshness summary when the freshness of declared inputs decided or when `when` refused a step declaring `input` |
-| `step.source.unavailable` | a source the step declares as input could not be read: its freshness is unknown and the step runs (see [external sources](dsl.md#external-sources)) |
-| `step.outputs.unfinished` | outputs the step declares carry the mark of an attempt that never succeeded: they are never adopted and the step runs; carries `outputs` (see [input freshness](dsl.md#input-freshness)) |
+| `step.skipped` | admission skipped a step, or this invocation's selection left it out (reason `operator selection`); carries `reason`, and `freshness: "fresh"` when the step's stamp decided (reason `up to date`) |
+| `step.source.unavailable` | a source the step declares as input could not be read: its stamp is stale and the step runs, or a pass that settled is stamped `null` for it (see [external sources](dsl.md#external-sources)) |
 | `step.status.changed` | a step changes status |
 | `step.attempt.started` | an attempt opens |
 | `step.attempt.finished` | an attempt closes (payload table above) |

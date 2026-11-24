@@ -1,9 +1,8 @@
-import { consumeRetry, costGate, refundRetry, updateStep } from "../../run/index.js";
+import { consumeRetry, costGate, refundRetry } from "../../run/index.js";
 import { EscalationLatch, escalationLadderFor } from "./escalation.js";
 import { performFixAttempt, runStepCommandFresh } from "./fix-loop-pass.js";
 import type { FixRun } from "./fix-loop-runtime.js";
 import { settleStepFailure } from "./non-blocking.js";
-import { recordRepairRevision } from "./step-attempt.js";
 import { headCommit, snapshotTree, type TreeSnapshot, treeChanges } from "./tree-snapshot.js";
 
 interface WorkState {
@@ -24,10 +23,12 @@ function workStateChanged(before: WorkState, after: WorkState, runDir: string): 
 
 /** Outcome of the repair loop. `blocked` is set, step left unsettled, when a replay
  * declared an obstacle outside the code: the outcome phase stops the run on it as
- * it does for a first attempt. */
+ * it does for a first attempt. `doneSuffix` is set on a repaired success, which
+ * the pass settles `done`. */
 export interface FixLoopOutcome {
   failed: boolean;
   blocked?: { failReason?: string };
+  doneSuffix?: string;
 }
 
 /** Repair pass then command replay, looping up to `max_retries`, with escalation. */
@@ -115,7 +116,7 @@ export async function runFixRetryLoop(
       banner: `fix ${label}`,
       agentOptions: fx.fixBackend.applyEscalation?.(fx.backendOptions, latch.axes()) ?? fx.backendOptions,
     });
-    if (!pass) return { failed: false };
+    if (!pass || fx.abort.isRunAborted(run)) return { failed: false };
 
     if (refundRetry(run, step, "retries", pass.fix)) {
       costStopped = true;
@@ -133,9 +134,6 @@ export async function runFixRetryLoop(
     if (failure.replay_after_fix === false) {
       fx.output.emit({ type: "runner.message", level: "info", message: `  Fix applied, command not replayed` });
       lastFailReason = `${lastFailReason ?? "failure"} (fix applied, not replayed)`;
-      for (const reason of await recordRepairRevision(fx.baseCtx, step)) {
-        fx.output.emit({ type: "runner.message", level: "warn", message: `  Fix output kept unfinished: ${reason}` });
-      }
       break;
     }
 
@@ -185,14 +183,11 @@ export async function runFixRetryLoop(
 
   if (fx.abort.isRunAborted(run)) return { failed: false };
   if (fixed) {
-    updateStep(run, step, "done");
-    fx.output.emit({
-      type: "step.done",
-      step,
-      suffix:
+    return {
+      failed: false,
+      doneSuffix:
         opts.resumeSession !== undefined ? ` (after ${step.retries} resumed fixes)` : ` (after ${step.retries} fixes)`,
-    });
-    return { failed: false };
+    };
   }
   return settleStepFailure(
     run,

@@ -89,7 +89,6 @@ export {
   clearLiveCost,
   finalizeRun,
   type RunOutcome,
-  recordAbsorbedInputs,
   recordStepVerdict,
   reportLiveCost,
   stopRun,
@@ -106,7 +105,6 @@ export {
   recordDecision,
   recordSkip,
   recordUnavailableSource,
-  recordUnfinishedOutputs,
   refundRetry,
 } from "./step-bookkeeping.js";
 

@@ -11,7 +11,7 @@ import type { StepFailure } from "../../definition/index.js";
 import type { RunStepView, RunView } from "../../run/index.js";
 import type { RunOutput } from "../run-output.js";
 import type { AbortScope } from "../abort.js";
-import { consumeRetry, costGate, type RetryQuota, type RunBudget, refundRetry, updateStep } from "../../run/index.js";
+import { consumeRetry, costGate, type RetryQuota, type RunBudget, refundRetry } from "../../run/index.js";
 import { type EscalationLadder, EscalationLatch, escalationLadderFor } from "./escalation.js";
 import type { FixLoopOutcome, runFixLoop } from "./fix-loop.js";
 import { settleStepFailure } from "./non-blocking.js";
@@ -51,6 +51,9 @@ export interface OnFailureOutcome {
   failed: boolean;
   /** A replay after a repair declared a block; the outcome phase settles it. */
   blocked?: FixLoopOutcome["blocked"];
+  /** Set on a success the policy reached: how ("after 2 reruns"). The pass
+   *  writes `done`, never the policy. */
+  doneSuffix?: string;
 }
 
 export type OnFailureHandler = (ctx: OnFailureContext) => Promise<OnFailureOutcome>;
@@ -201,11 +204,7 @@ export const rerunHandler: OnFailureHandler = async (ctx) => {
   });
 
   if (state.aborted) return { failed: false };
-  if (state.ok) {
-    updateStep(run, step, "done");
-    ctx.runOutput.emit({ type: "step.done", step, suffix: ` (after ${state.attempts} reruns)` });
-    return { failed: false };
-  }
+  if (state.ok) return { failed: false, doneSuffix: ` (after ${state.attempts} reruns)` };
   return settleStepFailure(
     run,
     step,
@@ -250,9 +249,7 @@ async function drainTimeouts(ctx: OnFailureContext): Promise<TimeoutDrainResult>
 
   if (state.aborted) return { outcome: { failed: false }, ...drained };
   if (state.ok) {
-    updateStep(run, step, "done", state.lastFailReason);
-    ctx.runOutput.emit({ type: "step.done", step, suffix: ` (after ${state.attempts} post-timeout reruns)` });
-    return { outcome: { failed: false }, ...drained };
+    return { outcome: { failed: false, doneSuffix: ` (after ${state.attempts} post-timeout reruns)` }, ...drained };
   }
 
   // Persistent timeout, retries, or budget exhaustion: fail without a fix pass;

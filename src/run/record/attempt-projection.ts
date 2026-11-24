@@ -31,7 +31,7 @@ function attemptNumber(value: unknown): number | undefined {
 }
 
 function attemptKind(value: unknown, fallback: PersistedAttempt["kind"] = "step"): PersistedAttempt["kind"] {
-  return value === "fix" || value === "step" ? value : fallback;
+  return value === "fix" || value === "step" || value === "review" ? value : fallback;
 }
 
 /** An unknown status means the producer died between the two events; treat the

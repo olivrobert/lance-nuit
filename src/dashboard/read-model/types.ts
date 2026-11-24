@@ -273,7 +273,7 @@ export type StepAttemptStatus = "running" | "done" | "failed" | "aborted";
 /** One attempt of a step: the first run of its command, or a fix pass. */
 export interface StepAttemptView {
   attempt: number;
-  kind: "step" | "fix";
+  kind: "step" | "fix" | "review";
   status: StepAttemptStatus;
   startedAt?: string;
   finishedAt?: string;

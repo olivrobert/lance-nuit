@@ -1,7 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { sha256Text } from "../../work-items/store/hash.ts";
 import { OUTPUT_EXCERPT_BYTES, readStepDetail, readStepSession } from "./step-detail.ts";
 import {
   cleanupTempDirs,
@@ -170,40 +169,39 @@ test("step detail: a long output is cut to its tail, a missing command is simply
   expect(detail?.attempts[0]?.status).toBe("running");
 });
 
-test("step detail: produced files are the artifacts whose provenance names the step", () => {
+test("step detail: produced files are the outputs the step's stamp in the freshness lock vouches for", () => {
   const project = listedProject();
   runWithAttempts(project);
-  const record = (artifact: string, producedBy: string) =>
-    JSON.stringify({ schemaVersion: 1, artifact, producedBy, producedAt: "2026-09-05T07:04:00.000Z", inputs: {} });
+  const stamp = (outputs: Record<string, string>) => ({
+    pipeline: "feature",
+    runId: "r-1",
+    stampedAt: "2026-09-05T07:04:00.000Z",
+    inputs: {},
+    outputs,
+  });
   writeWorkItemFile(
     project,
     "DEMO-1",
-    "artifacts/.provenance/audit.json.json",
-    record("artifacts/audit.json", "audit"),
+    "artifacts/lock.json",
+    JSON.stringify({
+      schemaVersion: 1,
+      steps: {
+        audit: stamp({ "artifacts/audit.json": "a".repeat(64), "../../etc/passwd": "b".repeat(64) }),
+        plan: stamp({ "artifacts/plan.md": "c".repeat(64) }),
+      },
+    }),
   );
-  writeWorkItemFile(project, "DEMO-1", "artifacts/.provenance/plan.md.json", record("artifacts/plan.md", "plan"));
-  writeWorkItemFile(project, "DEMO-1", "artifacts/.provenance/evil.json", record("../../etc/passwd", "audit"));
-  writeWorkItemFile(project, "DEMO-1", "artifacts/.provenance/broken.json", "{");
 
   expect(readStepDetail("demo-app", "DEMO-1", "audit", undefined)?.produced).toEqual(["artifacts/audit.json"]);
   expect(readStepDetail("demo-app", "DEMO-1", "tests", undefined)?.produced).toEqual([]);
 });
 
-test("step detail: an artifact an unfinished attempt wrote is not listed as produced", () => {
+test("step detail: an unreadable lock lists nothing as produced", () => {
   const project = listedProject();
   runWithAttempts(project);
-  const record = (artifact: string, extra: object = {}) =>
-    JSON.stringify({ schemaVersion: 1, artifact, producedBy: "audit", producedAt: "x", inputs: {}, ...extra });
-  const inFlight = { runId: "r-1", stepId: "audit", attempt: 2, startedAt: "2026-09-05T07:04:00.000Z" };
-  writeWorkItemFile(
-    project,
-    "DEMO-1",
-    "artifacts/.provenance/audit.json.json",
-    record("artifacts/audit.json", { inFlight }),
-  );
-  writeWorkItemFile(project, "DEMO-1", "artifacts/.provenance/plan.md.json", record("artifacts/plan.md"));
+  writeWorkItemFile(project, "DEMO-1", "artifacts/lock.json", "{");
 
-  expect(readStepDetail("demo-app", "DEMO-1", "audit", undefined)?.produced).toEqual(["artifacts/plan.md"]);
+  expect(readStepDetail("demo-app", "DEMO-1", "audit", undefined)?.produced).toEqual([]);
 });
 
 test("step detail: an unknown step, attempt-less step or unknown run answers without guessing", () => {
@@ -286,35 +284,4 @@ test("step session: an attempt's resumable session, where its run ran; none for 
   expect(readStepSession("demo-app", "DEMO-1", "other", 2)).toBeUndefined();
   const attempts = readStepDetail("demo-app", "DEMO-1", "triage", undefined)?.attempts;
   expect(attempts?.map((attempt) => attempt.hasSession ?? false)).toEqual([false, true, false]);
-});
-
-test("step detail: a revision that wrote nothing keeps the artifact under its producer; one over unfinished bytes does not", () => {
-  const project = listedProject();
-  runWithAttempts(project);
-  const record = (artifact: string, extra: object = {}) =>
-    JSON.stringify({ schemaVersion: 1, artifact, producedBy: "audit", producedAt: "x", inputs: {}, ...extra });
-  const attempt = { runId: "r-1", stepId: "review", attempt: 1, startedAt: "2026-09-05T07:04:00.000Z" };
-  const previous = { producedBy: "audit", producedAt: "x", inputs: {} };
-  writeWorkItemFile(project, "DEMO-1", "artifacts/audit.json", "{}");
-  writeWorkItemFile(
-    project,
-    "DEMO-1",
-    "artifacts/.provenance/audit.json.json",
-    record("artifacts/audit.json", {
-      inFlight: { ...attempt, revision: { outputSha256: sha256Text("{}"), previous } },
-    }),
-  );
-  writeWorkItemFile(project, "DEMO-1", "artifacts/plan.md", "revised over partial bytes");
-  writeWorkItemFile(
-    project,
-    "DEMO-1",
-    "artifacts/.provenance/plan.md.json",
-    record("artifacts/plan.md", { unguaranteed: { revisedBy: ["review"] } }),
-  );
-
-  expect(readStepDetail("demo-app", "DEMO-1", "audit", undefined)?.produced).toEqual(["artifacts/audit.json"]);
-
-  // The revision rewrote the bytes it found: until it succeeds they may be partial.
-  writeWorkItemFile(project, "DEMO-1", "artifacts/audit.json", '{"half":');
-  expect(readStepDetail("demo-app", "DEMO-1", "audit", undefined)?.produced).toEqual([]);
 });

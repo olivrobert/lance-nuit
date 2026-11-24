@@ -17,9 +17,6 @@ import { executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import { createAbortScope } from "../abort.js";
 import { NULL_RUN_OUTPUT, type RunOutput } from "../run-output.js";
-import { textArtifact } from "../../definition/dsl/artifact.ts";
-import type { ArtifactRef, WorkItemArtifactStore } from "../../shared/language/artifact-ports.ts";
-import { readRunEvents } from "../../run/record/run-journal.ts";
 
 /** Observable backend: the loop asks it for resumption, session size, and
  *  escalation translation. No spawn; `runWithAgent` remains stubbed separately. */
@@ -191,7 +188,7 @@ test("fix loop: validates the contract", async () => {
     abort: createAbortScope(),
   });
   expect(res.failed).toBe(false);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
   expect(step.retries).toBe(1);
   expect(calls.retry).toBe(1);
 });
@@ -276,7 +273,7 @@ test("a fix without replay settles the step on the original failure, marked unve
   expect(res.failed).toBe(false);
   expect(calls.fix.length).toBe(1);
   expect(calls.retry).toBe(0);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
   expect(step.errors).toBe("1 MUST violation (fix applied, not replayed)");
 });
 
@@ -561,7 +558,7 @@ test("fix loop non bloquant: validates the contract", async () => {
   });
 
   expect(res.failed).toBe(false);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
   // The retry loop keeps the last command failReason; a failed fix does not replace it.
   expect(step.errors).toBe("r0");
 });
@@ -581,7 +578,7 @@ test("single fix attempt non bloquant: validates the contract", async () => {
   });
 
   expect(res.failed).toBe(false);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
   expect(step.errors).toBe("constraints still failing");
 });
 
@@ -783,9 +780,9 @@ test("without stopIfUnchanged, a repair that changed nothing is still replayed",
     abort: createAbortScope(),
   });
 
-  expect(res).toEqual({ failed: false });
+  expect(res).toMatchObject({ failed: false });
   expect(calls.retry).toBe(1);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
 });
 
 for (const [change, effect] of [
@@ -805,9 +802,9 @@ for (const [change, effect] of [
       abort: createAbortScope(),
     });
 
-    expect(res).toEqual({ failed: false });
+    expect(res).toMatchObject({ failed: false });
     expect(calls.retry).toBe(1);
-    expect(step.status).toBe("done");
+    expect(step.status).toBe("running");
   });
 }
 
@@ -833,7 +830,7 @@ test("a resumed fix whose target recorded no session falls back to the default b
   });
 
   expect(res.failed).toBe(false);
-  expect(step.status).toBe("done");
+  expect(step.status).toBe("running");
   expect(calls.fix[0].spec.id).toBe("claude");
   expect(calls.retry).toBe(1);
 });
@@ -1033,7 +1030,7 @@ test("a repair killed by the live guard gives its quota back to the --budget res
   });
 
   expect(again.failed).toBe(false);
-  expect(step.status).toBe("done");
+  expect(again.doneSuffix).toBe(" (after 1 fixes)");
   expect(second.calls.fix.length).toBe(1);
   expect(messages().some((message) => message.includes("quota already consumed"))).toBe(false);
 });
@@ -1101,130 +1098,4 @@ test("a non-blocking step with a fix policy killed by the live guard replays and
   expect(resumedStep.status).toBe("done");
   expect(second.calls.fix.length).toBe(1);
   expect(messages().some((message) => message.includes("quota already consumed"))).toBe(false);
-});
-
-// --- A repair without replay revising an output in place ---------------------
-//
-// `plan-fix` revises `plan.md` in place: its command fails by construction and
-// its repair, resumed in the session of `plan`, rewrites the plan. Nothing
-// replays the command, yet the repair is the revision the author asked for.
-
-function memoryArtifacts(initial: Record<string, string>): { values: Map<string, string>; ctx: PipelineContext } {
-  const values = new Map<string, string>(Object.entries(initial));
-  const store: WorkItemArtifactStore = {
-    exists: async (ref: ArtifactRef) => values.has(ref.name),
-    readText: async (ref: ArtifactRef) => values.get(ref.name),
-    readJson: async <T>(ref: ArtifactRef, parse: (raw: unknown) => T) => {
-      const raw = values.get(ref.name);
-      return raw === undefined ? undefined : parse(JSON.parse(raw));
-    },
-    writeText: async (ref: ArtifactRef, next: string) => {
-      values.set(ref.name, next);
-    },
-    remove: async (ref: ArtifactRef) => {
-      values.delete(ref.name);
-    },
-  };
-  return {
-    values,
-    ctx: buildPipelineContext({ ...builtinRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
-  };
-}
-
-const ticketMd = textArtifact("ticket.md");
-const auditMd = textArtifact("audit.md");
-const planMd = textArtifact("plan.md");
-
-/** `plan` produces `plan.md`; `plan-fix` revises it through a repair without
- *  replay; `gate` fails the first invocation, as a human gate stops a run. */
-function revisedByRepairRun(): { run: Run; planFix: RunStep } {
-  const plan = makeRunStep({
-    id: "plan",
-    name: "Plan",
-    command: "plan",
-    runner: "bash",
-    sources: [ticketMd],
-    outputs: [planMd],
-  });
-  const planFix = makeRunStep({
-    id: "plan-fix",
-    name: "Plan fix",
-    command: "false",
-    runner: "bash",
-    sources: [auditMd, planMd],
-    outputs: [planMd],
-    blocking: false,
-    on_failure: { fix_prompt: "fix", max_retries: 1, replay_after_fix: false },
-  });
-  const gate = makeRunStep({ id: "gate", name: "Gate", command: "gate", runner: "bash" });
-  const run = makeRun(plan);
-  run.steps.push(planFix, gate);
-  return { run, planFix };
-}
-
-/** Step-loop wiring where `plan` writes v1, the repair writes `repaired` (or
- *  nothing when it is `undefined`), and `gate` passes only when `gateOk`. */
-function revisingDeps(
-  values: Map<string, string>,
-  ran: string[],
-  opts: { gateOk: boolean; repaired?: string; fixOk?: boolean },
-): StepLoopDeps {
-  const { deps: fixDeps } = fakes({ fix: [{ ok: opts.fixOk ?? true }] });
-  const repair = fixDeps.runWithAgent;
-  fixDeps.runWithAgent = async (...args) => {
-    if (opts.repaired !== undefined) values.set("plan.md", opts.repaired);
-    return repair(...args);
-  };
-  return {
-    executeStep: async (step) => {
-      ran.push(step.id);
-      if (step.id === "plan") values.set("plan.md", "plan v1");
-      const ok = step.id === "plan" || (step.id === "gate" && opts.gateOk);
-      return { output: "", ok, stats: { duration_ms: 1 }, ...(ok ? {} : { failReason: `${step.id} failed` }) };
-    },
-    extractErrors: async () => ({ hasErrors: true, errors: "1 defect" }),
-    runFixLoop: (r, s, command, output, c, budget, reason, o) =>
-      runFixLoop(r, s, command, output, c, budget, reason, { ...o, deps: fixDeps }),
-    output: NULL_RUN_OUTPUT,
-  };
-}
-
-test("resume: a repair without replay that revised an output in place does not make its producer run again", async () => {
-  const { values, ctx } = memoryArtifacts({ "ticket.md": "t", "audit.md": "1 defect" });
-  const { run, planFix } = revisedByRepairRun();
-  const ran: string[] = [];
-
-  await executeRunSteps(
-    run,
-    { resuming: false },
-    revisingDeps(values, ran, { gateOk: false, repaired: "plan v2" }),
-    ctx,
-  );
-  expect(ran).toEqual(["plan", "plan-fix", "gate"]);
-  expect(planFix.status).toBe("done");
-
-  ran.length = 0;
-  await executeRunSteps(run, { resuming: true }, revisingDeps(values, ran, { gateOk: true }), ctx);
-
-  expect(ran).toEqual(["gate"]);
-  expect(values.get("plan.md")).toBe("plan v2");
-  expect(readRunEvents(run.run_dir).filter((event) => event.type === "step.outputs.unfinished")).toEqual([]);
-});
-
-test("resume: a failed repair without replay leaves what it wrote unfinished for the producer", async () => {
-  const { values, ctx } = memoryArtifacts({ "ticket.md": "t", "audit.md": "1 defect" });
-  const { run } = revisedByRepairRun();
-  const ran: string[] = [];
-
-  await executeRunSteps(
-    run,
-    { resuming: false },
-    revisingDeps(values, ran, { gateOk: false, repaired: "plan half", fixOk: false }),
-    ctx,
-  );
-
-  ran.length = 0;
-  await executeRunSteps(run, { resuming: true }, revisingDeps(values, ran, { gateOk: true }), ctx);
-
-  expect(ran[0]).toBe("plan");
 });

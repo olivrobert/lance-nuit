@@ -15,10 +15,10 @@
 // reader gets the absolute path and opens the file on the disk instead.
 
 import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RunStopState } from "../../run/index.js";
 import { isFailure, runSnapshotFile } from "../../run/index.js";
-import { isValidSubjectToken, readDecisionIn } from "../../work-items/index.js";
+import { isReservedArtifactName, isValidSubjectToken, readDecisionIn, workItemLayout } from "../../work-items/index.js";
 import { isPathWithin } from "../../shared/lib/path-safety.js";
 import type { ReadModelOptions } from "./projects.js";
 import { resolveRun } from "./runs.js";
@@ -131,14 +131,21 @@ interface Budget {
   left: number;
 }
 
+/** The write lock of `artifacts/lock.json` and its temporary files: runner
+ *  scratch, unlike the lock itself, which is listed next to what it vouches for. */
+function isLockScratch(lockPath: string | undefined, dir: string, name: string): boolean {
+  if (!lockPath || dir !== dirname(lockPath)) return false;
+  return name !== basename(lockPath) && isReservedArtifactName(name);
+}
+
 /**
  * Children of one directory.
  *
  * Symbolic links are skipped whole: the only one the runner writes is
  * `runs/<pipeline>/latest`, whose target is already listed under its run id, and
  * following links is exactly how a tree walk leaves the directory it is meant to
- * describe. Dot entries are skipped too — `artifacts/.provenance/` is the
- * runner's own bookkeeping, not something a human reviews.
+ * describe. Dot entries are skipped too: tool bookkeeping, not something a
+ * human reviews.
  */
 function walk(root: string, dir: string, depth: number, budget: Budget, prefix = ""): TreeNode[] {
   if (depth > MAX_DEPTH || budget.left <= 0) return [];
@@ -151,8 +158,10 @@ function walk(root: string, dir: string, depth: number, budget: Budget, prefix =
     return [];
   }
 
+  const lockPath = prefix === "" ? workItemLayout(root).lockPath : undefined;
   const ordered = entries
     .filter((entry) => !entry.name.startsWith(".") && !entry.isSymbolicLink())
+    .filter((entry) => !isLockScratch(lockPath, dir, entry.name))
     .sort((a, b) => {
       if (depth === 0) {
         const rank = sectionRank(a.name) - sectionRank(b.name);
@@ -208,6 +217,7 @@ function isFile(path: string): boolean {
   try {
     return statSync(path).isFile();
   } catch {
+    // A path gone or unreadable is no file to open; the tree still renders.
     return false;
   }
 }

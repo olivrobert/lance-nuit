@@ -57,9 +57,9 @@ test("a failing step exits 1, and the next invocation resumes after the done ste
 
   // The resume header is what proves the snapshot was selected, not recreated.
   const second = runEntry(cwd, "FAIL-1");
-  // First declares an output: a resume re-checks it, and finds it present.
+  // First declares an output: a resume re-checks it, and finds its stamp holding.
   expect(second.out).toContain("Re-checked on resume: First");
-  expect(second.out).toContain("First — already completed: outputs present");
+  expect(second.out).toContain("First — already completed: up to date");
   expect(second.status).toBe(1);
 });
 

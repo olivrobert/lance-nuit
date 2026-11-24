@@ -72,7 +72,7 @@ the code answers. Each context declares the contexts it may import, and each is 
 | `agents` | How do we talk to each agent CLI? | the backend registry and the built-in backends | `shared` |
 | `definition` | What is a pipeline, and is it valid? | `dsl/` and `dsl.ts` (authoring primitives, internal authoring surface), `project/` (public DSL and project typechecking), `builtin-steps/`, `builtins/`, `validation/`, `extractors/`, `pipeline/` (context assembly and definition loading) | `work-items`, `shared` |
 | `run` | What happened during a run, and what did it cost? | `record/` (snapshot, journal, attempt logs, transitions, cost ledger and budget), `stats/` (the cross-run history), the persisted shapes and storage ports | `definition`, `shared` |
-| `work-items` | Which ticket, which artifacts, which provenance? | `store/` (artifacts, human decisions and provenance kept beside a ticket), `providers/` (tracker adapters) | `shared` |
+| `work-items` | Which ticket, which artifacts, which of them are up to date? | `store/` (artifacts, human decisions and the freshness lock kept beside a ticket), `providers/` (tracker adapters) | `shared` |
 | `shared` | Primitives and the language every context shares | `src/contracts/` (the published extension contracts), `lib/`, `language/`, `env/`, `process/`, `runtime/` | no other context |
 
 `execution` never imports `agents`: it reaches the backends through the registry
@@ -158,7 +158,7 @@ the files inside import each other freely.
 | --- | --- | --- |
 | `src/run/record/` | `index.ts` | A run: its snapshot (`state.json`), journal (`events.jsonl`), attempt logs and closure file; the meaning of a run status; every write to a run (transitions, named writes, opening and restoring); the cost ledger, budget and cost gate. Outside it a run is a read-only `RunView` (§7). |
 | `src/run/stats/` | `index.ts` | The cross-run history (`pipeline-history/runs.jsonl`): one summary per finished run, its readers, and the cost they estimate with the runner's rate lookup. |
-| `src/work-items/store/` | `index.ts` | What the runner keeps beside a ticket, outside any run: artifacts, the human decisions bound to them and the gate status they give, provenance and freshness, and the work-item layout. |
+| `src/work-items/store/` | `index.ts` | What the runner keeps beside a ticket, outside any run: artifacts, the human decisions bound to them and the gate status they give, the freshness lock (`artifacts/lock.json`), and the work-item layout. |
 | `src/work-items/providers/` | `registry.ts` | The tracker adapters (Jira, GitHub, …) behind the work-item contract. |
 | `src/execution/step/` | `step-loop.ts` | Loading the definition and selection a run opens with; executing a step: admission, attempts, retries, verdicts, repairs, composed children. |
 | `src/definition/extractors/` | `registry.ts` | Error extractors and their discovery. |
@@ -474,9 +474,9 @@ and each rule they read has one owner:
 | Decision | Owner |
 | --- | --- |
 | **Re-admission**: whether a settled step goes through admission again, and whether this invocation's `--steps`, `--skip` or `--start-at` leaves it out | `execution/step/step-loop.ts` (`executeRunSteps`, `leftOutBySelection`). `execution/step/load-or-create-run.ts` decides the only selection a resume applies to the snapshot, the requeue of the `--start-at` target and the steps after it, and `openRun` applies it |
-| **Admission**: budget, `when`, a pending rejection, the freshness or presence of the outputs, the interruption guard, then the environment guard | `execution/step/step-admission.ts` (`admitStep`; `answersToOutputs` says whether the outputs decide, `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished) |
-| **Standing of an output**: `missing`, `unfinished`, `unknown`, `stale`, `fresh` or adoptable, and the doubt `unguaranteed` carries | `work-items/store/provenance.ts`, the only writer of `artifacts/.provenance/`. `standingOf` is the one reading rule for a record: admission (`stepFreshness`), the public `freshness()` and the dashboard all read it there. The attempt (`execution/step/step-attempt.ts`) only chooses when to write: the in-flight mark before each attempt (`markInFlight`), the record after a success |
-| **Resume classification**: which steps a resume re-admits (those declaring `input`, `output` or `rerunOnResume`), the build error for a step declaring none, and the orchestration nodes and work-item source step that keep the authority of their status | `definition/definition.ts` (`deliversOutputs`, `rerunsOnResume`, `readmittedOnResume`, `stepsWithoutDeliverable`), shared by the build, the loader's validation (`definition/validation/structure.ts`), admission, the loop and the resume header |
+| **Admission**: budget, `when`, a pending rejection, the stamp of a stamped step (skipped `up to date` when `fresh`, unless a pending rejection or a `--start-at` replay forces it), the interruption guard, then the environment guard | `execution/step/step-admission.ts` (`admitStep`; `skipForOperatorSelection` settles a step the selection left out, or keeps the status of one whose last pass is unfinished). The reading admission makes travels with the `ready` admission to the pass |
+| **Freshness of a stamped step**: `none`, `fresh` or `stale` against its stamp | `work-items/store/step-lock.ts`, the only reader and writer of `artifacts/lock.json` (`stepFreshness`, `clearStamp`, `commitPass`, `readLock` for the dashboard). The pass (`execution/step/step-pass.ts`) is the only caller that writes: it clears the stamp before the first spawn, settles `done`, then writes the stamp |
+| **Resume classification**: which steps a resume re-admits (those declaring `input`, `output` or `rerunOnResume`), which of them are stamped, the build errors for a step declaring none and for two producers of one artifact, and the orchestration nodes and work-item source step that keep the authority of their status | `definition/definition.ts` (`isStamped`, `rerunsOnResume`, `readmittedOnResume`, `stepsWithoutDeliverable`, `producerConflicts`), shared by the build, the loader's validation (`definition/validation/structure.ts`), admission, the loop and the resume header |
 
 One run fact beside the decision is runtime-only and never persisted
 (`run/record/run.ts`): `Run.executing`, whose members `updateStep` alone decides
@@ -615,8 +615,7 @@ budget — is the `src/run/record/` module: code outside it imports
 Run and step transitions during execution have one owner, `run/record/run-transitions.ts`:
 the step status with its timestamps and reason (`updateStep`), the verdict an
 attempt established (`recordStepVerdict`), an absorbed non-blocking failure
-(`absorbStepFailure`) and the inputs it settled at (`recordAbsorbedInputs`),
-a clean stop (`stopRun`), a manual interruption
+(`absorbStepFailure`), a clean stop (`stopRun`), a manual interruption
 (`abortRun`), and the final verdict, outcome, totals and `run.finished` event
 (`finalizeRun`). Each operation writes the fields that must change together and
 the journal event that records them. What a status means has one owner too,
@@ -681,7 +680,7 @@ reads instead of deriving it again. `execution/step/load-or-create-run.ts` keeps
 the definition a snapshot runs against and the selection, which `openRun`
 calls at the point where each applies; it reads the steps and says which to
 exclude or requeue, and `openRun` writes them. Admission journals its skips and the
-unfinished outputs it found through `recordSkip` and `recordUnfinishedOutputs`
+sources it could not read through `recordSkip` and `recordUnavailableSource`
 (`run/record/step-bookkeeping.ts`), so nothing outside the module saves the run
 or appends to its journal: neither `saveRun` nor `appendRunEvent` is exported. Which of the snapshot and
 the journal is believed for each concept, and what each crash window leaves behind, is tabled in

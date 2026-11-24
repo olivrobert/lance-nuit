@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import { artifact, source, textArtifact } from "../../definition/dsl/artifact.ts";
+import { dirname, join } from "node:path";
+import { artifact, textArtifact } from "../../definition/dsl/artifact.ts";
 import type { AgentSession } from "../../contracts/backends.ts";
 import type { executeStep, runWithAgent } from "../runners.ts";
 import type { ArtifactRef, WorkItemArtifactStore } from "../../shared/language/artifact-ports.ts";
@@ -12,13 +12,6 @@ import { buildPipelineContext } from "../../definition/pipeline/context.ts";
 import { settleAttemptStats } from "../../run/record/attempt-closure.ts";
 import type { RunBudget } from "../../run/record/budget.ts";
 import { chargeAttemptToLedger } from "../../run/record/cost-accounting.ts";
-import { sha256Text } from "../../work-items/store/hash.ts";
-import {
-  outputFreshness,
-  PROVENANCE_PREFIX,
-  readProvenance,
-  writeProvenance,
-} from "../../work-items/store/provenance.ts";
 import { readRunEvents } from "../../run/record/run-journal.ts";
 import { readRunSnapshot } from "../../run/record/run-snapshot.ts";
 import { attemptLogPath } from "../../run/record/run-timeline.ts";
@@ -42,21 +35,19 @@ const FIX_SPEC = { id: "claude" } as const;
 
 const baseCtx = buildPipelineContext({ ...builtinRegistries(), cwd: ".", runnerBin: "", runnerDir: "" });
 
-/** One-artifact store. Provenance records are dropped: they would overwrite the
- *  single value, and the tests using it are about the artifact alone. */
+/** One-artifact store: the tests using it are about the artifact alone. */
 function artifactFixture(initial?: unknown) {
   let value = initial === undefined ? undefined : JSON.stringify(initial);
-  const isRecord = (ref: ArtifactRef) => ref.name.startsWith(PROVENANCE_PREFIX);
   const store: WorkItemArtifactStore = {
-    exists: async (ref) => !isRecord(ref) && value !== undefined,
-    readText: async (ref) => (isRecord(ref) ? undefined : value),
-    readJson: async <T>(ref: ArtifactRef, parse: (raw: unknown) => T) =>
-      isRecord(ref) || value === undefined ? undefined : parse(JSON.parse(value)),
-    writeText: async (ref, next) => {
-      if (!isRecord(ref)) value = next;
+    exists: async () => value !== undefined,
+    readText: async () => value,
+    readJson: async <T>(_ref: ArtifactRef, parse: (raw: unknown) => T) =>
+      value === undefined ? undefined : parse(JSON.parse(value)),
+    writeText: async (_ref, next) => {
+      value = next;
     },
-    remove: async (ref) => {
-      if (!isRecord(ref)) value = undefined;
+    remove: async () => {
+      value = undefined;
     },
   };
   return {
@@ -979,188 +970,64 @@ function multiArtifactFixture(initial: Record<string, string> = {}) {
   };
 }
 
-test("runAttempt: fingerprints are recorded only once the outputs are verified", async () => {
+const reviewArtifact = textArtifact("audit.md");
+
+/** A step whose `review` captures `audit.md`, which joins its outputs. */
+function reviewedStep(): RunStep {
+  return makeStep({
+    sources: [ticketArtifact],
+    outputs: [specArtifact, reviewArtifact],
+    review: {
+      command: "review",
+      backend: { id: "claude" },
+      profile: "reviewer",
+      capture: { field: "audit", artifact: reviewArtifact, schema: { type: "string" }, text: true },
+      fix: () => undefined,
+      retries: 0,
+    },
+  });
+}
+
+test("runAttempt: every declared output, the review capture included, is erased before spawn", async () => {
+  const { values, ctx } = multiArtifactFixture({ "ticket.md": "one", "spec.md": "old", "audit.md": "old audit" });
+  const step = reviewedStep();
+  const seen: (string | undefined)[] = [];
+
+  await runAttempt(makeRun(step, 10), step, {
+    command: "write the spec",
+    context: ctx,
+    budget: { cumulative: 0 },
+    executeStep: async () => {
+      seen.push(values.get("spec.md"), values.get("audit.md"));
+      values.set("spec.md", "new");
+      return { output: "", ok: true, stats: { duration_ms: 1 } };
+    },
+  });
+
+  expect(seen).toEqual([undefined, undefined]);
+  expect(values.get("ticket.md")).toBe("one");
+});
+
+test("runAttempt: the produce phase requires its outputs, never the review capture", async () => {
   const { values, ctx } = multiArtifactFixture({ "ticket.md": "one" });
-  const step = makeStep({ sources: [ticketArtifact], outputs: [specArtifact] });
-  const run = makeRun(step, 10);
-
-  // The command succeeds but writes nothing: `require` fails, so no fingerprint is
-  // recorded; the in-flight mark written before the spawn stays.
-  const failing = await runAttempt(run, step, {
-    command: "write the spec",
-    context: ctx,
-    budget: { cumulative: 0 },
-    executeStep: async () => ({ output: "", ok: true, stats: { duration_ms: 1 } }),
-  });
-  expect(failing.ok).toBe(false);
-  const marked = await readProvenance(ctx, specArtifact);
-  expect(marked?.inputs).toEqual({});
-  expect(marked?.inFlight).toMatchObject({ stepId: "verify", attempt: 1 });
-
-  const ok = await runAttempt(run, step, {
-    command: "write the spec",
-    context: ctx,
-    budget: { cumulative: 0 },
-    executeStep: async () => {
-      values.set("spec.md", "written");
-      return { output: "", ok: true, stats: { duration_ms: 1 } };
-    },
-  });
-
-  expect(ok.ok).toBe(true);
-  const record = await readProvenance(ctx, specArtifact);
-  expect(record?.producedBy).toBe("verify");
-  expect(record?.inputs).toEqual({ "artifacts/ticket.md": sha256Text("one") });
-  expect(record).not.toHaveProperty("inFlight");
-});
-
-test("runAttempt: artifacts are recorded as given, sources as the successful attempt left them", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "attempt-source-"));
-  try {
-    const tree = join(dir, "tree.txt");
-    writeFileSync(tree, "before");
-    const { values, ctx } = multiArtifactFixture({ "ticket.md": "one" });
-    const step = makeStep({
-      sources: [ticketArtifact, source("tree", { command: `cat ${JSON.stringify(tree)}` })],
-      outputs: [specArtifact],
-    });
-
-    const ok = await runAttempt(makeRun(step, 10), step, {
-      command: "implement",
+  const step = reviewedStep();
+  const attempt = (write: boolean) =>
+    runAttempt(makeRun(step, 10), step, {
+      command: "write the spec",
       context: ctx,
       budget: { cumulative: 0 },
       executeStep: async () => {
-        // An implementation edits the tree it reads; nothing should edit the ticket, but if it did...
-        writeFileSync(tree, "after");
-        values.set("ticket.md", "two");
-        values.set("spec.md", "written");
+        if (write) values.set("spec.md", "new");
         return { output: "", ok: true, stats: { duration_ms: 1 } };
       },
     });
 
-    expect(ok.ok).toBe(true);
-    expect((await readProvenance(ctx, specArtifact))?.inputs).toEqual({
-      "artifacts/ticket.md": sha256Text("one"),
-      "source:tree": sha256Text("after"),
-    });
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  expect((await attempt(false)).ok).toBe(false);
+  expect((await attempt(true)).ok).toBe(true);
+  expect(values.has("audit.md")).toBe(false);
 });
 
-test("runAttempt: a source unreadable after the attempt is recorded as null and journaled", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "attempt-source-"));
-  try {
-    const tree = join(dir, "tree.txt");
-    writeFileSync(tree, "before");
-    const { values, ctx } = multiArtifactFixture({ "ticket.md": "one" });
-    const step = makeStep({
-      sources: [ticketArtifact, source("tree", { command: `cat ${JSON.stringify(tree)}` })],
-      outputs: [specArtifact],
-    });
-    const run = makeRun(step, 10);
-
-    const ok = await runAttempt(run, step, {
-      command: "implement",
-      context: ctx,
-      budget: { cumulative: 0 },
-      executeStep: async () => {
-        rmSync(tree);
-        values.set("spec.md", "written");
-        return { output: "", ok: true, stats: { duration_ms: 1 } };
-      },
-    });
-
-    expect(ok.ok).toBe(true);
-    expect((await readProvenance(ctx, specArtifact))?.inputs).toEqual({
-      "artifacts/ticket.md": sha256Text("one"),
-      "source:tree": null,
-    });
-    const unavailable = readRunEvents(run.run_dir).filter((event) => event.type === "step.source.unavailable");
-    expect(unavailable).toHaveLength(1);
-    expect(unavailable[0]).toMatchObject({ stepId: "verify", source: "tree" });
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("runAttempt: an output declared as input is revised in place, not erased", async () => {
-  const { values, ctx } = multiArtifactFixture({ "ticket.md": "answered", "spec.md": "previous draft" });
-  const step = makeStep({ sources: [ticketArtifact, specArtifact], outputs: [specArtifact] });
-  const run = makeRun(step, 10);
-  await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
-
-  let seenBeforeSpawn: string | undefined;
-  await runAttempt(run, step, {
-    command: "amend the spec",
-    context: ctx,
-    budget: { cumulative: 0 },
-    executeStep: async () => {
-      seenBeforeSpawn = values.get("spec.md");
-      values.set("spec.md", "amended draft");
-      return { output: "", ok: true, stats: { duration_ms: 1 } };
-    },
-  });
-
-  // The agent amends what is already there instead of rewriting it from nothing.
-  expect(seenBeforeSpawn).toBe("previous draft");
-  const record = await readProvenance(ctx, specArtifact);
-  // The first producer survives the revision; only the fingerprints move on.
-  expect(record?.producedBy).toBe("spec");
-  expect(record?.inputs).toEqual({ "artifacts/ticket.md": sha256Text("answered") });
-});
-
-test("runAttempt: erasing an output replaces the record that vouched for it with an in-flight mark", async () => {
-  const { values, ctx } = multiArtifactFixture({ "ticket.md": "one", "spec.md": "stale" });
-  const step = makeStep({ sources: [ticketArtifact], outputs: [specArtifact] });
-  const run = makeRun(step, 10);
-  await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("gone") });
-
-  let recordDuringSpawn: string | undefined;
-  await runAttempt(run, step, {
-    command: "write the spec",
-    context: ctx,
-    budget: { cumulative: 0 },
-    executeStep: async () => {
-      recordDuringSpawn = values.get(`${PROVENANCE_PREFIX}spec.md.json`);
-      values.set("spec.md", "fresh");
-      return { output: "", ok: true, stats: { duration_ms: 1 } };
-    },
-  });
-
-  // Nothing vouches for the output while the attempt runs: the mark names the attempt instead.
-  const mark = JSON.parse(recordDuringSpawn ?? "{}");
-  expect(mark.inputs).toEqual({});
-  expect(mark.inFlight).toMatchObject({ runId: basename(run.run_dir), stepId: "verify", attempt: 1 });
-  const record = await readProvenance(ctx, specArtifact);
-  expect(record?.inputs).toEqual({ "artifacts/ticket.md": sha256Text("one") });
-  expect(record).not.toHaveProperty("inFlight");
-});
-
-test("runAttempt: a step without declared inputs erases its output before spawn and records itself as producer", async () => {
-  const { values, ctx } = multiArtifactFixture({ "spec.md": "stale" });
-  const step = makeStep({ outputs: [specArtifact] });
-  const run = makeRun(step, 10);
-
-  let seenBeforeSpawn: string | undefined;
-  await runAttempt(run, step, {
-    command: "write the spec",
-    context: ctx,
-    budget: { cumulative: 0 },
-    executeStep: async () => {
-      seenBeforeSpawn = values.get("spec.md");
-      values.set("spec.md", "fresh");
-      return { output: "", ok: true, stats: { duration_ms: 1 } };
-    },
-  });
-
-  expect(seenBeforeSpawn).toBeUndefined();
-  const record = await readProvenance(ctx, specArtifact);
-  expect(record).toMatchObject({ producedBy: step.id, inputs: {} });
-  expect(record).not.toHaveProperty("inFlight");
-});
-
-test("runAttempt: a failed attempt of a step without input leaves its output marked in flight", async () => {
+test("runAttempt: a failed attempt leaves what it wrote; nothing vouches for it", async () => {
   const { values, ctx } = multiArtifactFixture();
   const step = makeStep({ outputs: [specArtifact] });
 
@@ -1175,36 +1042,7 @@ test("runAttempt: a failed attempt of a step without input leaves its output mar
   });
 
   expect(failed.ok).toBe(false);
-  expect(values.get("spec.md")).toBe("partial");
-  expect((await readProvenance(ctx, specArtifact))?.inFlight).toMatchObject({ stepId: "verify", attempt: 1 });
-});
-
-test("runAttempt: a failed revision in place keeps the bytes it found, and leaves them unfinished once it wrote", async () => {
-  const { values, ctx } = multiArtifactFixture({ "ticket.md": "answered", "spec.md": "previous draft" });
-  const step = makeStep({ sources: [ticketArtifact, specArtifact], outputs: [specArtifact] });
-  const produced = await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
-  const amend = (write: boolean) =>
-    runAttempt(makeRun(step, 10), step, {
-      command: "amend the spec",
-      context: ctx,
-      budget: { cumulative: 0 },
-      executeStep: async () => {
-        if (write) values.set("spec.md", "half amended");
-        return { output: "", ok: false, failReason: "crashed", stats: { duration_ms: 1 } };
-      },
-    });
-
-  expect((await amend(false)).ok).toBe(false);
-  // Nothing written: the record of the step that produced the bytes still stands.
-  expect(values.get("spec.md")).toBe("previous draft");
-  expect(await outputFreshness(ctx, specArtifact, { "artifacts/ticket.md": sha256Text("one") }, "spec")).toBe("fresh");
-
-  expect((await amend(true)).ok).toBe(false);
-  expect(values.get("spec.md")).toBe("half amended");
-  expect((await readProvenance(ctx, specArtifact))?.producedBy).toBe(produced.producedBy);
-  expect(await outputFreshness(ctx, specArtifact, { "artifacts/ticket.md": sha256Text("one") }, "spec")).toBe(
-    "unfinished",
-  );
+  expect([...values.keys()]).toEqual(["spec.md"]);
 });
 
 /* ------------------------------------------------------------------------- *
@@ -1356,9 +1194,8 @@ test("capture: a write error is not a refusal — the agent's object was accepte
     exists: async () => false,
     readText: async () => undefined,
     readJson: async () => undefined,
-    // The disk fills after the spawn: the in-flight mark written before it landed.
-    writeText: async (ref: ArtifactRef) => {
-      if (!ref.name.startsWith(PROVENANCE_PREFIX)) throw new Error("disk full");
+    writeText: async () => {
+      throw new Error("disk full");
     },
     remove: async () => {},
   };
@@ -1418,26 +1255,6 @@ test("capture: a failed attempt keeps its own reason and writes nothing", async 
   });
   expect(attempt).toMatchObject({ ok: false, failReason: "tests failed", failKind: "verdict" });
   expect(values.has("commit-message.md")).toBe(false);
-});
-
-test("capture: provenance is recorded after the capture, on the captured artifact", async () => {
-  const { ctx } = multiArtifactFixture({ "ticket.md": "one" });
-  const step = captureStep([textCapture], { sources: [ticketArtifact] });
-  const attempt = await runAttempt(makeRun(step), step, {
-    command: "write",
-    context: ctx,
-    budget: { cumulative: 0 },
-    executeStep: async () => ({
-      output: "",
-      ok: true,
-      stats: { duration_ms: 1 },
-      structuredOutput: { success: true, commit: "feat: x" },
-    }),
-  });
-  expect(attempt.ok).toBe(true);
-  const record = await readProvenance(ctx, commitMessage);
-  expect(record?.producedBy).toBe("verify");
-  expect(record?.inputs).toEqual({ "artifacts/ticket.md": sha256Text("one") });
 });
 
 test("capture: a fix pass touches no captured artifact", async () => {

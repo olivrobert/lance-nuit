@@ -1,6 +1,7 @@
 //
-// Step admission before any spawn: budget, inputs, and preflight. This module does
-// not know sessions or on_failure strategies; it decides whether execution may run.
+// Step admission before any spawn: budget, `when`, the freshness lock, the
+// interruption guard and preflight. This module does not know sessions or
+// on_failure strategies; it decides whether execution may run.
 
 import type { InputAction, InputDecision, StepInputCondition } from "../../definition/index.js";
 import { runBashAsync, stripStderrMarker } from "../../shared/process/bash-runner.js";
@@ -8,8 +9,8 @@ import { errorMessage } from "../../shared/lib/errors.js";
 import { truncate } from "../../shared/lib/truncate.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import { resolveTemplateAsync } from "../../shared/language/context.js";
-import { deliversOutputs } from "../../definition/index.js";
-import type { RunStopState, RunStepView, RunView, StepDefinition } from "../../run/index.js";
+import { isStamped } from "../../definition/index.js";
+import type { RunStopState, RunStepView, RunView } from "../../run/index.js";
 import type { RunOutput } from "../run-output.js";
 import {
   costGate,
@@ -18,32 +19,21 @@ import {
   type RunBudget,
   recordSkip,
   recordUnavailableSource,
-  recordUnfinishedOutputs,
   stopRun,
   updateStep,
   stepLogDir,
 } from "../../run/index.js";
 import {
-  adoptOutputs,
-  inputsUnchanged,
+  type Freshness,
   pendingRejection,
+  stampKey,
   stepFreshness,
   type UnavailableSource,
 } from "../../work-items/index.js";
-import { absorbNonBlocking } from "./non-blocking.js";
+import { failStep, refuseStep } from "./non-blocking.js";
 
-/** Reason logged when declared inputs still match every produced output. */
-const SKIP_UP_TO_DATE = "outputs up to date with declared inputs";
-
-/** Reason logged when a step without declared input finds
- *  every output it declares: nothing it reads can have made them stale. */
-const SKIP_OUTPUTS_PRESENT = "outputs present";
-
-/** Reason logged when an absorbed failure's inputs still match those it settled at. */
-const SKIP_ABSORBED_UNCHANGED = "failure absorbed, inputs unchanged since";
-
-/** Reason logged when a rework step already ran and nobody rejected its output since. */
-const SKIP_NO_REJECTION = "no pending rejection";
+/** Reason logged when a step's stamp still matches its inputs and outputs. */
+const SKIP_UP_TO_DATE = "up to date";
 
 /** Reason logged when this invocation's `--steps`, `--skip` or
  *  `--start-at` leaves the step out. */
@@ -59,7 +49,9 @@ export type StepAdmission =
   | { kind: "skip" }
   | { kind: "stopped"; reason: string }
   | { kind: "failed"; reason: string }
-  | { kind: "ready"; command: string; stepLogDir: string };
+  /** `freshness` is the reading of a stamped step, which its pass records
+   *  instead of hashing its artifact inputs again; absent for an unstamped one. */
+  | { kind: "ready"; command: string; stepLogDir: string; freshness?: Freshness };
 
 /** Evaluate `when` admissions in declaration order. */
 export async function checkInputs(
@@ -140,10 +132,9 @@ export type OperatorSelectionSkip = "settled" | "unfinished";
  * A step whose last pass is unfinished keeps its status (`unfinished`), and the
  * loop stops the run for a decision rather than pass over it. Those are run
  * facts, and the next invocation's admission reads them: settled, an interrupted
- * pass would replay without anyone authorizing it, and a failed one would lose
- * the rerun its run owes it (`passLeftUnfinished`). Whether its outputs can be
- * adopted is not decided here: the in-flight mark answers that on every
- * invocation, whatever the status (`work-items/store/provenance.ts`).
+ * pass would replay without anyone authorizing it, and a failed one would read
+ * as settled (`passLeftUnfinished`). Whether its outputs still hold is not decided
+ * here: its stamp was cleared when that pass started.
  */
 export function skipForOperatorSelection(run: RunView, step: RunStepView, output: RunOutput): OperatorSelectionSkip {
   if (passLeftUnfinished(step) || lastPassInterrupted(step)) {
@@ -172,14 +163,8 @@ export interface AdmitStepInput {
    *  is persisted until the step settles and would authorize a replay nobody
    *  asked for on a later resume. */
   startAt?: string;
-}
-
-/** Whether the step's outputs decide if it still owes work: when it declares
- *  input, or as soon as it delivers an output — their presence then proves the
- *  work done, since nothing it reads can stale them. An orchestration node
- *  never does: its children decide (D3). */
-export function answersToOutputs(def: StepDefinition): boolean {
-  return (def.sources?.length ?? 0) > 0 || deliversOutputs(def);
+  /** The pipeline's `work_item_source.step_id`, never stamped. */
+  workItemSourceStepId?: string;
 }
 
 /** A source that could not be read makes the step run without anyone seeing
@@ -191,37 +176,18 @@ function reportUnavailableSources(input: AdmitStepInput, unavailable: readonly U
     input.output.emit({
       type: "runner.message",
       level: "warn",
-      message: `${step.def.name} — source "${source}" unavailable, freshness unknown, running: ${reason}`,
+      message: `${step.def.name} — source "${source}" unavailable, inputs stale, running: ${reason}`,
     });
   }
 }
 
-/** Outputs left by an attempt that never succeeded make the step run whatever
- *  the run remembers of that attempt: the journal says which, for a diagnosis. */
-function reportUnfinishedOutputs(input: AdmitStepInput, outputs: readonly string[]): void {
-  if (outputs.length === 0) return;
-  const { run, step } = input;
-  recordUnfinishedOutputs(run, step, outputs);
-  input.output.emit({
-    type: "runner.message",
-    level: "info",
-    message: `↻ ${step.def.name} — running: ${outputs.join(", ")} left by an attempt that did not succeed`,
-  });
-}
-
-/** Persist a guard rejection with the same blocking/non-blocking semantics. */
+/** Persist a guard rejection with the same blocking/non-blocking semantics. An
+ *  admission absorbed by `blocking: false` is not a pass: it never touches the lock. */
 function rejectAdmission(
   input: AdmitStepInput,
   reason: string,
 ): Exclude<StepAdmission, { kind: "ready" } | { kind: "budget-exceeded" } | { kind: "cost-unaccounted" }> {
-  const { run, step } = input;
-  if (step.def.blocking === false) {
-    absorbNonBlocking(run, step, input.output, reason);
-    return { kind: "skip" };
-  }
-  updateStep(run, step, "failed", reason);
-  input.output.emit({ type: "step.failed", step, suffix: ` (${reason})` });
-  return { kind: "failed", reason };
+  return refuseStep(input.run, input.step, input.output, reason).failed ? { kind: "failed", reason } : { kind: "skip" };
 }
 
 /** A materialized orchestration freezes its admission decision in the snapshot.
@@ -239,10 +205,9 @@ function admissionsToEvaluate(step: RunStepView): readonly StepInputCondition[] 
   return conditions.filter((condition) => !condition.frozenOnStart);
 }
 
-/** The last pass of this run started and did not complete: the run owes it a
- *  rerun, whatever freshness would say of the outputs it left. A run fact, lost
- *  once the step settles or is requeued; the in-flight mark is what keeps a
- *  partial output from being adopted beyond that (`work-items/store/provenance.ts`). */
+/** The last pass of this run started and did not complete. Its stamp was cleared
+ *  when it started, so admission runs it again; the operator's selection reads it
+ *  to stop rather than leave it out. */
 function passLeftUnfinished(step: RunStepView): boolean {
   return step.status !== "pending" && owesWork(step.status);
 }
@@ -330,69 +295,44 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
     return { kind: "budget-exceeded" };
   }
 
-  const declaresInput = (step.def.sources?.length ?? 0) > 0;
-  const decidedByOutputs = answersToOutputs(step.def);
   const admissions = admissionsToEvaluate(step);
   if (admissions.length > 0) {
     const decision = await checkInputs(step, baseCtx, admissions);
     if (decision.action !== "pass") {
-      // `when` decides first; freshness only annotates the outcome. A step whose
-      // author guard refuses while its inputs moved is a fact worth reading in the
-      // journal: the outputs on disk no longer match what they came from.
-      const report = declaresInput ? await stepFreshness(baseCtx, step.def) : undefined;
-      const reason = report?.stale ? `${decision.reason} (inputs changed, outputs kept)` : decision.reason;
-      return applyInputDecision(run, step, input.output, decision.action, reason, report?.summary, decision.stop);
+      return applyInputDecision(run, step, input.output, decision.action, decision.reason, undefined, decision.stop);
     }
   }
 
   // A rejection is the reason a rework step runs, not one of its inputs: a
-  // pending one overrides the freshness verdict, and `when` above still outranks
-  // it. Without one, a step declaring input still answers to its freshness. The
+  // pending one overrides the stamp, and `when` above still outranks it. The
   // command is resolved below, before attempt erases the outputs, so the prompt
   // still sees the rejected artifact through `pendingRejection`.
   const reworks = step.def.rework_for ?? [];
   const rejected = reworks.length > 0 && (await anyPendingRejection(baseCtx, reworks));
-  // Only a `done` step produced what a missing rejection lets it keep: a failed or
-  // interrupted one also carries spend in `control`, yet produced nothing.
-  if (reworks.length > 0 && !rejected && !declaresInput && step.status === "done") {
-    return applyInputDecision(run, step, input.output, "skip", SKIP_NO_REJECTION);
-  }
 
-  // A `--start-at` replay skips the freshness check too: it does not track the
-  // repository tree, which is what an operator fixes before replaying. So does a
-  // pass left unfinished in this run, which the in-flight mark cannot replace:
-  // it covers the outputs an attempt produces from scratch, not one revised in
-  // place, one an orchestration node's children write, or one an attempt of an
-  // older runner left, and freshness would adopt those.
-  if (decidedByOutputs && !rejected && step.replay !== true && !passLeftUnfinished(step)) {
-    // An absorbed failure wrote no outputs, so freshness would read them missing
-    // and re-run the check on every resume. Its own fix may also have rewritten
-    // its inputs; the record was taken after that fix, so only a change from
-    // elsewhere re-admits it. Nothing to adopt: there are no outputs.
-    if (
-      step.status === "done" &&
-      step.absorbed_inputs &&
-      (await inputsUnchanged(baseCtx, step.def, step.absorbed_inputs))
-    ) {
-      return applyInputDecision(run, step, input.output, "skip", SKIP_ABSORBED_UNCHANGED);
+  // The class rule: only the stamp of a stamped step decides whether it owes work.
+  // A failed, aborted or interrupted pass left no stamp, so it runs. A `--start-at`
+  // replay is forced: it does not track the repository tree, which is what an
+  // operator fixes before replaying.
+  // A run without a ticket has no lock: its steps always run.
+  let freshness: Freshness | undefined;
+  if (isStamped(step.def, input.workItemSourceStepId) && baseCtx.paths.workItemDir) {
+    try {
+      freshness = await stepFreshness(baseCtx, step.def, stampKey(step.id, baseCtx.lot));
+    } catch (error) {
+      // Not routed through `blocking: false`: a lock nobody can read decides
+      // nothing, and an absorbed refusal would settle the step `done` on it.
+      const reason = `freshness lock: ${truncate(errorMessage(error), 500)}`;
+      failStep(run, step, input.output, reason);
+      return { kind: "failed", reason };
     }
-    // Without input, freshness reduces to presence: no fingerprint can differ.
-    // An output an unfinished attempt left is not present work: it makes the step run.
-    const report = await stepFreshness(baseCtx, step.def);
-    reportUnavailableSources(input, report.unavailable);
-    reportUnfinishedOutputs(input, report.unfinished);
-    if (!report.mustRun && !declaresInput) {
-      return applyInputDecision(run, step, input.output, "skip", SKIP_OUTPUTS_PRESENT);
-    }
-    if (!report.mustRun) {
-      // Adopt before skipping: an output produced before this record existed keeps
-      // its content and gains the fingerprints it is being trusted against.
-      await adoptOutputs(baseCtx, step.id, report);
-      return applyInputDecision(run, step, input.output, "skip", SKIP_UP_TO_DATE, report.summary);
+    reportUnavailableSources(input, freshness.unavailable);
+    if (freshness.value === "fresh" && !rejected && step.replay !== true) {
+      return applyInputDecision(run, step, input.output, "skip", SKIP_UP_TO_DATE, freshness.value);
     }
   }
 
-  // Checked last among the guards: a step that `when` or freshness now skips
+  // Checked last among the guards: a step that `when` or its stamp now skips
   // replays nothing, so there is nothing to authorize.
   if (lastPassInterrupted(step)) {
     const authorization = interruptedReplayAuthorization(input);
@@ -424,5 +364,10 @@ async function admit(input: AdmitStepInput): Promise<StepAdmission> {
     }
   }
 
-  return { kind: "ready", command, stepLogDir: stepLogDir(run.run_dir, step.id) };
+  return {
+    kind: "ready",
+    command,
+    stepLogDir: stepLogDir(run.run_dir, step.id),
+    ...(freshness ? { freshness } : {}),
+  };
 }

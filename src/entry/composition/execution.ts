@@ -188,7 +188,7 @@ export function wireRunOutputs(run: RunView, args: RunnerArgs): WiredOutputs {
 }
 
 /** Header printed before the first step: what runs, and what a resume skipped. */
-export function announceRun(run: RunView, args: RunnerArgs): void {
+export function announceRun(run: RunView, args: RunnerArgs, workItemSourceStepId?: string): void {
   log(`\nPipeline: ${run.name}`);
   if (args.ticket) log(`Ticket: ${args.ticket}`);
   if (run.max_cost_usd) log(`Budget: $${run.max_cost_usd}`);
@@ -200,7 +200,8 @@ export function announceRun(run: RunView, args: RunnerArgs): void {
   // replays unconditionally, while a step declaring `input` or reworking a gated
   // artifact is only re-examined and costs nothing when its sources have not moved
   // and no rejection is pending.
-  const reexamined = (s: RunStepView) => readmittedOnResume(s.def) || (s.def.rework_for?.length ?? 0) > 0;
+  const reexamined = (s: RunStepView) =>
+    readmittedOnResume(s.def, workItemSourceStepId) || (s.def.rework_for?.length ?? 0) > 0;
   const reruns = (s: RunStepView) => rerunsOnResume(s.def);
   const rerun = done.filter(reruns);
   const rechecked = done.filter((s) => !reruns(s) && reexamined(s));

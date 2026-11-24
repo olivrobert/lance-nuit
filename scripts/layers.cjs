@@ -54,7 +54,7 @@ const CONTEXTS = [
     name: "work-items",
     path: "^src/work-items/",
     mayImport: ["shared"],
-    comment: "Which ticket, which artifacts, which provenance.",
+    comment: "Which ticket, which artifacts, which freshness lock.",
   },
   {
     name: "shared",

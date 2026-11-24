@@ -114,14 +114,29 @@ test("tree: a missing section is simply absent, and the `latest` link is never l
   expect(filePaths(tree?.children ?? [])).toEqual(["runs/feature/r-1/state.json"]);
 });
 
-test("tree: the runner's own bookkeeping stays out of the reader's way", () => {
+test("tree: dot entries stay out of the reader's way", () => {
   const project = listedProject();
   stoppedWorkItem(project, "DEMO-1", "plan");
-  writeWorkItemFile(project, "DEMO-1", join("artifacts", ".provenance", "plan.md.json"), "{}\n");
+  writeWorkItemFile(project, "DEMO-1", join("artifacts", ".cache", "plan.md.json"), "{}\n");
 
   const tree = readTree("demo-app", "DEMO-1");
 
-  expect(filePaths(tree?.children ?? [])).not.toContain("artifacts/.provenance/plan.md.json");
+  expect(filePaths(tree?.children ?? [])).not.toContain("artifacts/.cache/plan.md.json");
+});
+
+test("tree: lock.json is listed, its write lock and temporary files are not", () => {
+  const project = listedProject();
+  stoppedWorkItem(project, "DEMO-1", "plan");
+  writeWorkItemFile(project, "DEMO-1", join("artifacts", "lock.json"), '{"schemaVersion":1,"steps":{}}\n');
+  writeWorkItemFile(project, "DEMO-1", join("artifacts", "lock.json.lock"), '{"pid":1}\n');
+  writeWorkItemFile(project, "DEMO-1", join("artifacts", "lock.json.lock.reclaim"), '{"pid":1}\n');
+  writeWorkItemFile(project, "DEMO-1", join("artifacts", "lock.json.123.abcd1234.tmp"), "{}\n");
+  writeWorkItemFile(project, "DEMO-1", join("reports", "lock.json.lock"), "kept\n");
+
+  const paths = filePaths(readTree("demo-app", "DEMO-1")?.children ?? []);
+
+  expect(paths.filter((path) => path.startsWith("artifacts/"))).toEqual(["artifacts/lock.json", "artifacts/plan.md"]);
+  expect(paths).toContain("reports/lock.json.lock");
 });
 
 test("tree: the gate artifact is flagged and opened by default", () => {

@@ -15,7 +15,8 @@ pipeline("release")
 ```
 
 `.maxCost(usd)` applies to a simple pipeline. The runner accounts for steps,
-retries, fixes, and composed child runs. Once the cumulative cost reaches the
+retries, fixes, the review and fix attempts of a
+[`review`](dsl.md#review-of-an-agent-step), and composed child runs. Once the cumulative cost reaches the
 ceiling, the run is marked as budget-exceeded and does not start further work.
 The ceiling is enforced on the spend the runner could price, and a run whose
 spend stops being priceable stops too: see
@@ -253,7 +254,8 @@ its attempts consumed something, and does not when they measured nothing.
 
 The rules around that stop:
 
-- It applies to ordinary steps, reruns, fix passes, and composed child runs, and
+- It applies to ordinary steps, reruns, fix passes, review and review-fix
+  attempts, and composed child runs, and
   a `blocking: false` step does not absorb it: it is a run-level accounting fact,
   not a step failure to repair.
 - Every composed launch passes the same gate as a step admission: each child of a
@@ -296,7 +298,7 @@ budget ones, and prints the command that lifts the stop:
 ```
 
 That headline belongs to the runs the stop actually ended — one where a gate
-withheld the next step, retry, fix pass, child, or callback. A run whose step
+withheld the next step, retry, fix pass, review, review fix, child, or callback. A run whose step
 failed for its own reason keeps its own headline (`FAILURE`, or `QUALITY CHECK`
 for a verdict) even when its ledger is a lower bound: the reason an operator has
 to act on is the failure, and `--allow-unmetered` would not touch it. A reached
@@ -374,7 +376,10 @@ reconciliation. Which record a resume believes for each concept is tabled in
 
 Every site about to spend asks one gate, `costGate`
 (`src/run/record/cost-stop-events.ts`): step admission, the re-ask of a refused
-capture, a rerun, a repair pass, the replay after a repair, and a composed launch.
+capture, a rerun, a repair pass, the replay after a repair, each review attempt
+and the fix of a review, and a composed launch. A review or review fix is an
+attempt of its step (`kind: "review"` or `"fix"`), charged to the step and the
+run ledger like a retry.
 It decides from the ledger and records the stop, so the same ledger gives the
 same `run.budget.exceeded` or `run.cost.unaccounted` whichever site observed it.
 

@@ -16,13 +16,14 @@ If you are new to the project, follow this path:
 
 ### Authoring pipelines
 
-- [DSL](dsl.md) — project and shared pipeline definitions, builders, and
-  composition.
+- [DSL](dsl.md) — project and shared pipeline definitions, builders,
+  composition, and the [review](dsl.md#review-of-an-agent-step) of an agent
+  step's outputs.
 - Resume and reruns — what a rerun replays:
   [input freshness](dsl.md#input-freshness),
   [interrupted steps](dsl.md#interrupted-steps), and
-  [admission of settled steps](dsl.md#admission-of-settled-steps), where
-  declared outputs, not the run's status, decide what remains to do.
+  [admission of settled steps](dsl.md#admission-of-settled-steps), where the
+  work item's freshness lock, not the run's status, decides what remains to do.
 - [Project DSL and typechecking](dsl-typecheck.md) — generated declarations and
   `lancenuit typecheck`.
 - [Prompt files](prompts.md) — reusable prompts for built-in and project
@@ -63,7 +64,7 @@ provider-specific backend options: [generated DSL API](../docs/DSL-API.md).
   own dashboards and scripts, and its CORS allowlist.
 - [Where kit files live](kit-paths.md) — project/user kit resolution and config
   precedence.
-- [Persistence](persistence.md) — snapshots, artifacts and their provenance,
+- [Persistence](persistence.md) — snapshots, artifacts and the freshness lock,
   reports, and machine telemetry; what the run record decides, and what the
   deliverables decide.
 - [Architecture](architecture.md) — boot, dispatch, steps, backends, and state.

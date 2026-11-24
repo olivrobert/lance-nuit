@@ -7,6 +7,7 @@ import {
   bashStep,
   type LlmStepOptions,
   llmStep,
+  parallelize,
   pipeline,
   runPipeline,
   source as externalSource,
@@ -325,9 +326,232 @@ test("input: two sources of the same name would share one fingerprint and are re
   ).toThrow('Step "derive": source "tree" is declared twice in input');
 });
 
-test("input: a step without output has nothing to compare its inputs against", () => {
-  expect(() => bashStep({ id: "derive", name: "Derive", command, input: [source] }).build()).toThrow(
-    /input requires output/,
+test("input: a step without output is accepted, its stamp records its inputs alone", () => {
+  expect(bashStep({ id: "derive", name: "Derive", command, input: [source] }).build().sources).toEqual([source]);
+});
+
+/* ------------------------------------------------------------------------- *
+ * What the freshness lock needs of a pipeline (L12).
+ * ------------------------------------------------------------------------- */
+
+test("lock: rerunOnResume with input is refused, at build and at validation", () => {
+  expect(() =>
+    bashStep({ id: "derive", name: "Derive", command, input: [source], rerunOnResume: true }).build(),
+  ).toThrow('Step "derive": rerunOnResume cannot be combined with input');
+  const findings = new PipelineStructureValidator().validate({
+    source: "test.ts",
+    pipeline: {
+      name: "p",
+      steps: [
+        { id: "derive", name: "Derive", command: "true", runner: "bash", sources: [source], rerun_on_resume: true },
+      ],
+    },
+    profileOverrides: {},
+    stepOverrides: {},
+  });
+  expect(findings.map((finding) => finding.message)).toContain(
+    'step "derive": rerunOnResume cannot be combined with input',
+  );
+});
+
+const TWO_PRODUCERS = 'artifact "result.json" is an output of both "a" and "b": one producer per artifact';
+
+test("lock: two producers of one artifact are refused, at build and at validation", () => {
+  expect(() =>
+    pipeline("p")
+      .add(
+        bashStep({ id: "a", name: "A", command, output: [result] }),
+        bashStep({ id: "b", name: "B", command, output: [result] }),
+      )
+      .build(),
+  ).toThrow(TWO_PRODUCERS);
+  expect(
+    structureFindings({
+      steps: [
+        { id: "a", name: "A", command: "true", runner: "bash", outputs: [result] },
+        { id: "b", name: "B", command: "true", runner: "bash", outputs: [result] },
+      ],
+    }),
+  ).toContain(TWO_PRODUCERS);
+});
+
+test("lock: two members of one parallel group producing one artifact are refused", () => {
+  const member = (id: string) =>
+    llmStep({ id, name: id.toUpperCase(), profile: "coder", backend: "claude", command, output: [result] }, REGISTRY);
+  expect(() =>
+    pipeline("p")
+      .add(...parallelize({ id: "group", name: "Group", steps: [member("a"), member("b")] }))
+      .build(),
+  ).toThrow(TWO_PRODUCERS);
+});
+
+test("lock: a capture and a review capture count as outputs for the one-producer rule", () => {
+  const capturing = llmStep(
+    { id: "a", name: "A", profile: "coder", backend: "claude", command, capture: { commit: commitMessage } },
+    REGISTRY,
+  );
+  expect(() =>
+    pipeline("p")
+      .add(capturing, bashStep({ id: "b", name: "B", command, output: [commitMessage] }))
+      .build(),
+  ).toThrow('artifact "commit-message.md" is an output of both "a" and "b"');
+
+  const reviewed = llmStep(
+    { id: "a", name: "A", profile: "planner", backend: "claude", command, output: [result], review: reviewSpec },
+    REGISTRY,
+  );
+  expect(() =>
+    pipeline("p")
+      .add(reviewed, bashStep({ id: "b", name: "B", command, output: [auditArtifact] }))
+      .build(),
+  ).toThrow('artifact "audit.md" is an output of both "a" and "b"');
+});
+
+test("lock: a malformed output or input entry is a validation finding, not a crash", () => {
+  const findings = structureFindings({
+    steps: [
+      { id: "a", name: "A", command: "true", runner: "bash", outputs: [null] },
+      { id: "b", name: "B", command: "true", runner: "bash", sources: [undefined], outputs: [result] },
+    ],
+  });
+  expect(findings).toContain('step "a": every output must be named');
+  expect(findings).toContain('step "b": every input must be named');
+});
+
+test("lock: an artifact in both the input and the output of one step is refused", () => {
+  expect(() =>
+    pipeline("p")
+      .add(bashStep({ id: "revise", name: "Revise", command, input: [result], output: [result] }))
+      .build(),
+  ).toThrow('step "revise": artifact "result.json" is both its input and its output');
+  const findings = new PipelineStructureValidator().validate({
+    source: "test.ts",
+    pipeline: {
+      name: "p",
+      steps: [{ id: "revise", name: "Revise", command: "true", runner: "bash", sources: [result], outputs: [result] }],
+    },
+    profileOverrides: {},
+    stepOverrides: {},
+  });
+  expect(findings.map((finding) => finding.message)).toContain(
+    'step "revise": artifact "result.json" is both its input and its output',
+  );
+});
+
+test("lock: an artifact named lock.json, or after its write lock, is refused", () => {
+  expect(() => textArtifact("lock.json")).toThrow(/reserved by the runner/);
+  expect(() => artifact("lock.json.lock", (value) => value)).toThrow(/reserved by the runner/);
+  expect(textArtifact("sub/lock.json").name).toBe("sub/lock.json");
+});
+
+test("lock: replayAfterFix: false is refused on a step declaring an output", () => {
+  expect(() =>
+    bashStep({
+      id: "audit",
+      name: "Audit",
+      command,
+      output: [result],
+      blocking: false,
+      onFail: { fix: fixPrompt, retries: 1, replayAfterFix: false },
+    }).build(),
+  ).toThrow(/replayAfterFix: false requires a step without output/);
+});
+
+/* ------------------------------------------------------------------------- *
+ * `review`: declared on an llmStep, checked at build time (L12).
+ * ------------------------------------------------------------------------- */
+
+const auditArtifact = textArtifact("audit.md");
+const reviewSpec = {
+  profile: "reviewer" as const,
+  backend: "claude" as const,
+  command: "review",
+  capture: { field: "audit", artifact: auditArtifact, schema: { type: "string" } },
+  fix: (review: string) => (review ? `fix ${review}` : undefined),
+};
+
+function reviewedStep(extra: { blocking?: boolean; review?: typeof reviewSpec } = {}) {
+  return llmStep(
+    {
+      id: "plan",
+      name: "Plan",
+      profile: "planner",
+      backend: "claude",
+      command,
+      output: [result],
+      review: reviewSpec,
+      ...extra,
+    },
+    REGISTRY,
+  ).build();
+}
+
+test("review: the capture joins the outputs, defaults apply", () => {
+  const step = reviewedStep();
+  expect(step.outputs?.map((output) => output.name)).toEqual(["result.json", "audit.md"]);
+  expect(step.review).toMatchObject({
+    profile: "reviewer",
+    backend: { id: "claude" },
+    capture: { field: "audit", artifact: auditArtifact, text: true },
+    retries: 0,
+  });
+  expect(step.review?.fix_profile).toBeUndefined();
+});
+
+test("review: refused with blocking: false", () => {
+  expect(() => reviewedStep({ blocking: false })).toThrow(/review cannot be combined with blocking: false/);
+});
+
+test("review: a capture named after a verdict field is refused", () => {
+  expect(() =>
+    reviewedStep({ review: { ...reviewSpec, capture: { ...reviewSpec.capture, field: "success" } } }),
+  ).toThrow(/reserved by the verdict contract/);
+});
+
+test("review: refused on a step whose backend cannot resume a session", () => {
+  const registry = createDefaultAgentBackendRegistry();
+  const resolve = registry.resolve.bind(registry);
+  registry.resolve = (spec) => {
+    const backend = resolve(spec);
+    return { ...backend, capabilities: { ...backend.capabilities, resume: false } };
+  };
+  expect(() =>
+    llmStep(
+      {
+        id: "plan",
+        name: "Plan",
+        profile: "planner",
+        backend: "claude",
+        command,
+        output: [result],
+        review: reviewSpec,
+      },
+      registry,
+    ).build(),
+  ).toThrow(/review needs a backend that resumes sessions/);
+});
+
+test("review: refused on a non-agent step at validation", () => {
+  const findings = new PipelineStructureValidator().validate({
+    source: "test.ts",
+    pipeline: {
+      name: "p",
+      steps: [
+        {
+          id: "plan",
+          name: "Plan",
+          command: "true",
+          runner: "bash",
+          outputs: [result],
+          review: { ...reviewedStep().review! },
+        },
+      ],
+    },
+    profileOverrides: {},
+    stepOverrides: {},
+  });
+  expect(findings.map((finding) => finding.message)).toContain(
+    'step "plan": review applies only to an agent step (llmStep)',
   );
 });
 

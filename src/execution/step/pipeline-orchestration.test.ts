@@ -1998,7 +1998,7 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   }
 });
 
-test("pipeline-orchestration: a resumed child re-admits its done steps, and their outputs decide", async () => {
+test("pipeline-orchestration: a resumed child re-admits its done steps, and their stamps decide", async () => {
   const root = mkdtempSync(join(tmpdir(), "pipeline-compose-reconcile-"));
   try {
     writePipeline(
@@ -2042,9 +2042,9 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
     const childRun = resumed.run.steps[0]!.orchestration!.children[0]!;
     const childCtx = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
     const childEvents = readRunEvents(join(pipelineRunsDir("child", "P", childCtx), childRun.runId!));
-    // A done step without input is re-admitted: its present output, not its status, skips it.
+    // A done step is re-admitted: its stamp, not its status, skips it.
     expect(childEvents.filter((event) => event.type === "step.skipped")).toEqual([
-      expect.objectContaining({ stepId: "produce", reason: "outputs present" }),
+      expect.objectContaining({ stepId: "produce", reason: "up to date" }),
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });

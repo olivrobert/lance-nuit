@@ -53,9 +53,11 @@ interface FixPolicyBase {
   /** `false`: a successful repair ends the step without replaying its command; the
    *  original failure is absorbed with a note that the fix was not verified. For a
    *  check whose second verdict would change nothing but its own cost (an advisory
-   *  review), where later steps still exercise the repaired code. Requires
-   *  `blocking: false` — an unverified repair must never open a blocking gate —
-   *  and a single repair (`retries: 1`). Default `true`. */
+   *  check), where later steps still exercise the repaired code. Requires
+   *  `blocking: false` — an unverified repair must never open a blocking gate —,
+   *  a single repair (`retries: 1`) and no `output`: nothing would vouch for
+   *  outputs the repair rewrote. To have an agent step's outputs reviewed and
+   *  fixed once, use `llmStep({ review })`. Default `true`. */
   replayAfterFix?: boolean;
   /** `true`: a successful repair that changed nothing in the git tree — no edited,
    *  added or deleted file outside `.gitignore`, no new commit — is not followed by
@@ -80,13 +82,15 @@ export interface StepOptionsBase {
   name: string;
   when?: When | readonly When[];
   require?: AsyncTemplated<PipelineContext>;
-  /** Artifacts and external sources (`source()`) this step reads. Opt-in:
-   *  declaring it makes the runner skip the step while every `output` is up to
-   *  date with the fingerprints of these inputs, and re-admit it on resume when
-   *  one of them changed. An artifact listed in both `input` and `output` is
-   *  revised in place: it is never erased before the attempt and never
-   *  fingerprinted. A source can never be an `output`. */
+  /** Artifacts and external sources (`source()`) this step reads. Once the step
+   *  succeeded, its stamp in `artifacts/lock.json` binds the hashes of these
+   *  inputs to those of its `output`; the step is skipped while both still match,
+   *  and runs again when one of them changed. An artifact absent then and now is
+   *  unchanged. A step may not read what it writes, and a source can never be an
+   *  `output`. Refused with `rerunOnResume`. */
   input?: readonly StepInput[];
+  /** Artifacts the step produces, erased before each attempt and required after
+   *  it. One producer per artifact in a pipeline. */
   output?: readonly Artifact<unknown>[];
   report?: string | readonly string[];
   errorExtractor?: string;
@@ -109,6 +113,32 @@ export type BackendOptionsFor<B extends string> = B extends keyof BackendAuthorO
   ? BackendAuthorOptions[B]
   : unknown;
 
+/** Review of an `llmStep`'s outputs once its produce phase succeeded: a review
+ *  attempt in a fresh session returns `capture`, then `fix` decides whether one
+ *  fix attempt runs in the producing session. There is no review after the fix. */
+export interface ReviewOptions<
+  T = unknown,
+  P extends StepProfileName = StepProfileName,
+  B extends BackendFor<P> = BackendFor<P>,
+> {
+  profile: P;
+  backend: B;
+  options?: BackendOptionsFor<B>;
+  /** Review prompt, sent to a fresh session. */
+  command: AsyncTemplated<PipelineContext>;
+  /** The verdict field the review returns, written to `artifact` (which joins
+   *  the step's `output`). Its schema must be strict-mode compatible. */
+  capture: { field: string; artifact: Artifact<T>; schema: JsonSchema };
+  /** Prompt sent to the producing session, or `undefined`: no fix. Called once,
+   *  with the captured review. */
+  fix: (review: T, ctx: PipelineContext) => string | undefined | Promise<string | undefined>;
+  /** Role of the fix attempt on the step's backend. Default: the step's profile. */
+  fixProfile?: StepProfileName;
+  /** Plain reruns of a review attempt that failed or returned a refused capture.
+   *  Default 0. */
+  retries?: number;
+}
+
 /** One captured output of an `llmStep`. Short form: a text artifact, the field is
  *  a string. Long form: any artifact with the JSON schema of the field, which
  *  must be strict-mode compatible (every property required, no additional
@@ -127,6 +157,10 @@ export type LlmStepOptions<
    *  artifacts, keyed by field name. Each artifact joins `output` implicitly. The
    *  names `success`, `reason`, and `blocked` are the verdict's own. */
   capture?: Readonly<Record<string, CaptureSpec>>;
+  /** Review of the step's outputs, then at most one fix in its session. Refused
+   *  with `blocking: false` and on a backend that cannot resume a session. */
+  // biome-ignore lint/suspicious/noExplicitAny: each review declares its own capture type
+  review?: ReviewOptions<any>;
 } & ({ prompt: string; command?: never } | { command: AsyncTemplated<PipelineContext>; prompt?: never });
 
 export type BashStepOptions = StepOptionsBase & {

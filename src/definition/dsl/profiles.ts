@@ -137,7 +137,30 @@ export function applyProfileOverrides(
     // manually in options; the fix regime, on the other hand, writes them.
     applyStepProfile(step, overrides, imposedForStep(step), registry);
     applyFixProfile(step, overrides, registry);
+    applyReviewProfile(step, overrides, registry);
   }
+}
+
+/** Regime of a review session: its own role on its own backend, resolved like a
+ *  step's. The fix after it borrows `fix_profile` at runtime, on the step's
+ *  backend (`fixProfileOptions`). */
+function applyReviewProfile(step: PipelineStep, overrides: ProfileOverrides, registry: AgentBackendRegistry): void {
+  const review = step.review;
+  if (!review) return;
+  const forbiddenAxes = backendOptionAxes(review.backend.options);
+  if (forbiddenAxes.length > 0) {
+    throw new Error(
+      `Step "${step.id}": review ${forbiddenAxes.join("/")} must come from ` +
+        `profiles.${review.profile}.backends.${review.backend.id}, never from backend options`,
+    );
+  }
+  const applied = fixProfileOptions(review.profile, review.backend, review.backend.options, overrides, registry);
+  if (!applied) {
+    throw new Error(
+      `Step "${step.id}": review profile "${review.profile}" is not defined for backend "${review.backend.id}"`,
+    );
+  }
+  review.backend = { ...review.backend, options: applied.options };
 }
 
 /** Keep only axes that a backend can actually translate. */

@@ -79,7 +79,7 @@ function TipBody({ timeline, tip }: { timeline: RunTimeline; tip: Tip }): JSX.El
   const { attempt, from, to, tone } = tip.entry;
   const cost = attempt.cost ? fmtCost(attempt.cost) : "";
   const figures = [fmtDuration(to - from), cost, attempt.model ? fmtModel(attempt.model) : ""].filter(Boolean);
-  const kind = attempt.kind === "fix" ? ", fix pass" : "";
+  const kind = attempt.kind === "fix" ? ", fix pass" : attempt.kind === "review" ? ", review" : "";
   return (
     <>
       <b>{`${tip.stepId} · attempt ${attempt.attempt}${kind}`}</b>

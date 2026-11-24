@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { source, textArtifact } from "../../definition/dsl/artifact.js";
 import { skipIf, skipUnlessCommand } from "../../definition/dsl/input.js";
 import type { ArtifactRef, WorkItemArtifactStore } from "../../shared/language/artifact-ports.js";
@@ -11,7 +11,7 @@ import type { Run, RunStep } from "../../run/record/run.js";
 import { buildPipelineContext } from "../../definition/pipeline/context.js";
 import { NULL_RUN_OUTPUT } from "../run-output.js";
 import { pendingRejection, recordRejection } from "../../work-items/store/decisions.js";
-import { fingerprintInputs, markInFlight, writeProvenance } from "../../work-items/store/provenance.js";
+import { commitPass, readInputs } from "../../work-items/store/step-lock.js";
 import { readRunEvents } from "../../run/record/run-journal.js";
 import { makeRunStep } from "../../run/record/run-step.js";
 import { admitStep, checkInputs } from "./step-admission.js";
@@ -74,6 +74,14 @@ function reworkStep(
   );
 }
 
+/** Stamp `def` as a pass settled `done` now would: its inputs and outputs as
+ *  they read at this moment. */
+async function stampAsIs(ctx: PipelineContext, def: PipelineStep): Promise<void> {
+  const inputs = (await readInputs(ctx, def.sources ?? [])).fingerprints;
+  const outputs = (await readInputs(ctx, def.outputs ?? [])).fingerprints as Record<string, string>;
+  commitPass(ctx, def.id, { pipeline: "p", runId: "r", stampedAt: "2026-01-01T00:00:00.000Z", inputs, outputs }, []);
+}
+
 async function admitRework(step: RunStep, ctx: PipelineContext) {
   const run = { name: "p", pipeline: "p", pipeline_path: "p.ts", run_dir: ctx.cwd, steps: [step] } as Run;
   const admission = await admitStep({ run, step, baseCtx: ctx, budget: { cumulative: 0 }, output: NULL_RUN_OUTPUT });
@@ -100,35 +108,27 @@ test("rework: a rework interrupted after its outputs were erased is ready again,
   expect(admission.kind).toBe("ready");
 });
 
-test("rework: without a pending rejection a done step stays done", async () => {
-  const { values, ctx } = reworkContext({ "plan.md": "v1" });
-  await recordRejection(ctx, "plan", planArtifact, "split step 2", 3);
-  values.set("plan.md", "v2");
+test("rework: a pending rejection runs the step although its stamp holds", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
   const step = reworkStep();
+  await stampAsIs(ctx, step.def);
+  await recordRejection(ctx, "plan", planArtifact, "split step 2", 3);
 
-  const { admission, events } = await admitRework(step, ctx);
-  expect(admission.kind).toBe("skip");
-  expect(step.status).toBe("done");
-  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({
-    stepId: "plan",
-    reason: "no pending rejection",
-  });
+  expect((await admitRework(step, ctx)).admission.kind).toBe("ready");
 });
 
-test("rework: without a pending rejection a step declaring input still answers to its freshness", async () => {
+test("rework: without a pending rejection a done step answers to its stamp", async () => {
   const { values, ctx } = reworkContext({ "plan.md": "v1", "spec.md": "s" });
   await recordRejection(ctx, "plan", planArtifact, "split step 2", 3);
   values.set("plan.md", "v2");
   const step = reworkStep({ sources: [textArtifact("spec.md")] });
-  // The first admission adopts the outputs against the current spec.
-  const adopted = await admitRework(step, ctx);
-  expect(adopted.admission.kind).toBe("skip");
-  expect(adopted.events.find((event) => event.type === "step.skipped")).toMatchObject({
-    reason: "outputs up to date with declared inputs",
-  });
+  await stampAsIs(ctx, step.def);
+  const skipped = await admitRework(step, ctx);
+  expect(skipped.admission.kind).toBe("skip");
+  expect(step.status).toBe("done");
+  expect(skipped.events.find((event) => event.type === "step.skipped")).toMatchObject({ reason: "up to date" });
 
   values.set("spec.md", "s2");
-  step.status = "done";
   expect((await admitRework(step, ctx)).admission.kind).toBe("ready");
 });
 
@@ -249,14 +249,14 @@ test("interrupted: the --start-at target of this invocation is ready without aut
   expect(run.outcome).toMatchObject({ phase: "later", resumable: true, stop: { kind: "needs-decision" } });
 });
 
-// ── Reconcile mode: outputs without input ────────────────────────────────────
+// ── The freshness lock decides a stamped step ───────────────────────────────
 
 /** A step producing `plan.md` from nothing it declares, like a branch creation. */
 function deliverableStep(state: Parameters<typeof makeRunStep>[1], def: Partial<PipelineStep> = {}): RunStep {
   return reworkStep({ rework_for: undefined, ...def }, state);
 }
 
-async function admitReconciled(step: RunStep, ctx: PipelineContext, extra: { startAt?: string } = {}) {
+async function admitStamped(step: RunStep, ctx: PipelineContext, extra: { startAt?: string } = {}) {
   const run = { name: "p", pipeline: "p", pipeline_path: "p.ts", run_dir: ctx.cwd, steps: [step] } as Run;
   const admission = await admitStep({
     run,
@@ -269,121 +269,111 @@ async function admitReconciled(step: RunStep, ctx: PipelineContext, extra: { sta
   return { admission, events: readRunEvents(run.run_dir) };
 }
 
-test("reconcile: a done step whose outputs are all present is skipped, stays done, and adopts nothing", async () => {
-  const { values, ctx } = reworkContext({ "plan.md": "v1" });
+test("lock: a done step whose stamp holds is skipped up to date, stays done, and costs no attempt (L8)", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
   const step = deliverableStep({ status: "done", control: { duration_ms: 1, total_cost_usd: 0.4 } });
+  await stampAsIs(ctx, step.def);
 
-  const { admission, events } = await admitReconciled(step, ctx);
+  const { admission, events } = await admitStamped(step, ctx);
 
   expect(admission.kind).toBe("skip");
   expect(step.status).toBe("done");
-  // The spend of the pass that produced the outputs is kept: the ledger seeds from it.
+  expect(step.attempts ?? []).toEqual([]);
   expect(step.control?.total_cost_usd).toBe(0.4);
   expect(events.find((event) => event.type === "step.skipped")).toMatchObject({
     stepId: "plan",
-    reason: "outputs present",
+    reason: "up to date",
+    freshness: "fresh",
   });
-  // No input, nothing to bind an output to: no provenance record is written.
-  expect([...values.keys()]).toEqual(["plan.md"]);
 });
 
-test("reconcile: a pending step of a new run whose outputs are present is skipped, not run", async () => {
+test("lock: a pending step of a new run whose stamp holds is skipped, not run", async () => {
   const { ctx } = reworkContext({ "plan.md": "v1" });
   const step = deliverableStep({ status: "pending" });
+  await stampAsIs(ctx, step.def);
 
-  const { admission } = await admitReconciled(step, ctx);
+  const { admission } = await admitStamped(step, ctx);
 
   expect(admission.kind).toBe("skip");
   expect(step.status).toBe("skipped");
 });
 
-test("reconcile: a step missing one of its outputs runs", async () => {
-  const { ctx } = reworkContext({ "plan.md": "v1" });
-  const step = deliverableStep(
-    { status: "done", control: { duration_ms: 1 } },
-    {
-      outputs: [planArtifact, textArtifact("plan-audit.json")],
-    },
-  );
+test("lock: outputs present without a stamp run, and the reading travels with the admission", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1", "ticket.md": "t" });
+  const step = deliverableStep({ status: "done" }, { sources: [textArtifact("ticket.md")] });
 
-  expect((await admitReconciled(step, ctx)).admission.kind).toBe("ready");
+  const { admission } = await admitStamped(step, ctx);
+
+  expect(admission.kind).toBe("ready");
+  expect(admission.kind === "ready" && admission.freshness).toMatchObject({
+    value: "none",
+    inputs: { "artifacts/ticket.md": expect.stringMatching(/^[a-f0-9]{64}$/) },
+  });
 });
 
-test("reconcile: a step requeued by --start-at runs although its outputs are present", async () => {
+test("lock: a step requeued by --start-at runs although its stamp holds", async () => {
   const { ctx } = reworkContext({ "plan.md": "v1" });
   const step = deliverableStep({ status: "pending", replay: true, control: { duration_ms: 1 } });
+  await stampAsIs(ctx, step.def);
 
-  expect((await admitReconciled(step, ctx)).admission.kind).toBe("ready");
+  expect((await admitStamped(step, ctx)).admission.kind).toBe("ready");
 });
 
-test("reconcile: when decides before the outputs", async () => {
+test("lock: when decides before the stamp", async () => {
   const { ctx } = reworkContext({});
   const step = deliverableStep(
     { status: "done", control: { duration_ms: 1 } },
-    {
-      inputs: [skipIf(() => true, "not this time")],
-    },
+    { inputs: [skipIf(() => true, "not this time")] },
   );
 
-  const { admission, events } = await admitReconciled(step, ctx);
+  const { admission, events } = await admitStamped(step, ctx);
   expect(admission.kind).toBe("skip");
   expect(events.find((event) => event.type === "step.skipped")).toMatchObject({ reason: "not this time" });
 });
 
-test("reconcile: a step declaring no output but rerunOnResume runs", async () => {
-  const { ctx } = reworkContext({});
-  const step = deliverableStep(
-    { status: "done", control: { duration_ms: 1 } },
-    {
-      outputs: undefined,
-      rerun_on_resume: true,
-    },
-  );
+test("lock: a rerunOnResume step runs and carries no reading", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const step = deliverableStep({ status: "done", control: { duration_ms: 1 } }, { rerun_on_resume: true });
+  await stampAsIs(ctx, step.def);
 
-  expect((await admitReconciled(step, ctx)).admission.kind).toBe("ready");
+  const { admission } = await admitStamped(step, ctx);
+  expect(admission.kind).toBe("ready");
+  expect(admission.kind === "ready" && admission.freshness).toBeUndefined();
 });
 
-test("reconcile: an absorbed failure without input is not re-run while its record holds", async () => {
-  const { ctx } = reworkContext({});
-  const step = deliverableStep({
-    status: "done",
-    control: { duration_ms: 1 },
-    errors: "audit failed",
-    absorbed_inputs: {},
-  });
+test("lock: a step with input and no output is skipped while fresh, and runs once an input changed (L9)", async () => {
+  const { values, ctx } = reworkContext({ "summary.md": "s1" });
+  const step = deliverableStep({ status: "done" }, { outputs: undefined, sources: [textArtifact("summary.md")] });
+  await stampAsIs(ctx, step.def);
 
-  const { admission, events } = await admitReconciled(step, ctx);
-
-  expect(admission.kind).toBe("skip");
-  expect(step.status).toBe("done");
-  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({
-    reason: "failure absorbed, inputs unchanged since",
-  });
+  expect((await admitStamped(step, ctx)).admission.kind).toBe("skip");
+  values.set("summary.md", "s2");
+  expect((await admitStamped(step, ctx)).admission.kind).toBe("ready");
 });
 
 for (const state of UNFINISHED_PASSES) {
-  test(`reconcile: a step left ${state.status} without input does not adopt the outputs its pass left`, async () => {
+  test(`lock: a step left ${state.status} without a stamp runs whatever its outputs`, async () => {
     const { ctx } = reworkContext({ "plan.md": "partial" });
     const step = deliverableStep({ ...state });
 
-    const { admission, events } = await admitReconciled(step, ctx);
+    const { admission, events } = await admitStamped(step, ctx);
     expect(admission.kind).toBe("ready");
     expect(events.some((event) => event.type === "step.skipped")).toBe(false);
   });
 }
 
-test("reconcile: a step the runner died in is not settled by the outputs it left, the guard asks first", async () => {
+test("lock: a step the runner died in has no stamp, so the interruption guard asks first", async () => {
   const { ctx } = reworkContext({ "plan.md": "partial" });
   const died = interruptedStep("plan");
   const step = makeRunStep({ ...died.def, outputs: [planArtifact] }, { ...died });
 
-  const { admission, events } = await admitReconciled(step, ctx);
+  const { admission, events } = await admitStamped(step, ctx);
 
   expect(admission.kind).toBe("stopped");
   expect(events.some((event) => event.type === "step.skipped")).toBe(false);
 });
 
-test("reconcile: an orchestration node declaring a present output still runs, its children decide", async () => {
+test("lock: an orchestration node declaring an output is not stamped, its children decide", async () => {
   const { ctx } = reworkContext({ "plan.md": "v1" });
   const node = makeRunStep(
     {
@@ -396,73 +386,51 @@ test("reconcile: an orchestration node declaring a present output still runs, it
     },
     { status: "pending" },
   );
+  await stampAsIs(ctx, node.def);
 
-  const { admission, events } = await admitReconciled(node, ctx);
-
-  expect(admission.kind).toBe("ready");
-  expect(events.some((event) => event.type === "step.skipped")).toBe(false);
-});
-
-// ── Outputs left by an attempt that never succeeded ──────────────────────────
-
-const ticketArtifact = textArtifact("ticket.md");
-
-const IN_FLIGHT = { runId: "earlier-run", stepId: "plan", attempt: 1, startedAt: "2026-01-01T09:00:00.000Z" };
-
-test("unfinished: a pending step of a new run whose output an unfinished attempt left runs, and says why", async () => {
-  const { ctx } = reworkContext({ "ticket.md": "t", "plan.md": "partial" });
-  const step = reworkStep({ rework_for: undefined, sources: [ticketArtifact] }, { status: "pending" });
-  await markInFlight(ctx, step.def, IN_FLIGHT);
-
-  const { admission, events } = await admitRework(step, ctx);
-
-  // Nothing about the run says the earlier pass failed: only the mark does.
-  expect(admission.kind).toBe("ready");
-  expect(events.some((event) => event.type === "step.skipped")).toBe(false);
-  expect(events.filter((event) => event.type === "step.outputs.unfinished")).toEqual([
-    expect.objectContaining({ stepId: "plan", outputs: ["plan.md"] }),
-  ]);
-});
-
-test("unfinished: in reconcile mode, a marked output without input is not `outputs present`", async () => {
-  const { ctx } = reworkContext({ "plan.md": "partial" });
-  const step = deliverableStep({ status: "pending" });
-  await markInFlight(ctx, step.def, IN_FLIGHT);
-
-  const { admission, events } = await admitReconciled(step, ctx);
+  const { admission, events } = await admitStamped(node, ctx);
 
   expect(admission.kind).toBe("ready");
   expect(events.some((event) => event.type === "step.skipped")).toBe(false);
 });
 
-test("unfinished: an absorbed failure keeps its mark and is still skipped while its inputs hold", async () => {
-  const { ctx } = reworkContext({ "ticket.md": "t", "plan.md": "partial" });
-  const step = reworkStep(
-    { rework_for: undefined, sources: [ticketArtifact], blocking: false },
-    {
-      status: "done",
-      control: { duration_ms: 1 },
-      errors: "audit failed",
-      absorbed_inputs: await fingerprintInputs(ctx, [ticketArtifact]),
-    },
-  );
-  await markInFlight(ctx, step.def, IN_FLIGHT);
+test("lock: an unreadable lock.json fails the admission closed, naming its path, before any spawn (L14)", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const lockPath = join(ctx.paths.workItemDir!, "artifacts", "lock.json");
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeFileSync(lockPath, "{ not json");
+  const step = deliverableStep({ status: "done" });
 
-  const { admission, events } = await admitRework(step, ctx);
+  const { admission } = await admitStamped(step, ctx);
 
-  expect(admission.kind).toBe("skip");
-  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({
-    reason: "failure absorbed, inputs unchanged since",
-  });
-  expect(events.some((event) => event.type === "step.outputs.unfinished")).toBe(false);
+  expect(admission.kind).toBe("failed");
+  expect(admission.kind === "failed" && admission.reason).toContain(lockPath);
+  expect(step.status).toBe("failed");
+  expect(step.attempts ?? []).toEqual([]);
+});
+
+test("lock: blocking: false does not absorb an unreadable lock.json, the step fails (L14)", async () => {
+  const { ctx } = reworkContext({ "plan.md": "v1" });
+  const lockPath = join(ctx.paths.workItemDir!, "artifacts", "lock.json");
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeFileSync(lockPath, JSON.stringify({ schemaVersion: 2, steps: {} }));
+  const step = deliverableStep({ status: "done" }, { blocking: false });
+
+  const { admission } = await admitStamped(step, ctx);
+
+  expect(admission.kind).toBe("failed");
+  expect(admission.kind === "failed" && admission.reason).toContain(lockPath);
+  expect(step.status).toBe("failed");
+  expect(step.attempts ?? []).toEqual([]);
 });
 
 // ── External sources ─────────────────────────────────────────────────────────
 
-test("source: a done step whose source cannot be read runs, and the journal says which source and why", async () => {
+test("source: a source that cannot be read makes the step stale, and the journal says which source and why", async () => {
   const { ctx } = reworkContext({ "plan.md": "v1" });
   const tree = source("tree", { command: "echo 'fatal: not a git repository' >&2; exit 128" });
   const step = reworkStep({ rework_for: undefined, sources: [tree] });
+  await stampAsIs(ctx, step.def);
 
   const { admission, events } = await admitRework(step, ctx);
 
@@ -474,18 +442,15 @@ test("source: a done step whose source cannot be read runs, and the journal says
   expect(String((unavailable[0] as { reason?: unknown }).reason)).toContain("fatal: not a git repository");
 });
 
-test("source: a done step whose source reads the bytes it was produced from is skipped as up to date", async () => {
+test("source: a done step whose source reads the bytes it was stamped with is skipped as up to date", async () => {
   const { ctx } = reworkContext({ "plan.md": "v1" });
   const tree = source("tree", { command: "echo stable" });
   const step = reworkStep({ rework_for: undefined, sources: [tree] });
-  await writeProvenance(ctx, planArtifact, "plan", await fingerprintInputs(ctx, [tree]));
+  await stampAsIs(ctx, step.def);
 
   const { admission, events } = await admitRework(step, ctx);
 
   expect(admission.kind).toBe("skip");
   expect(events.some((event) => event.type === "step.source.unavailable")).toBe(false);
-  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({
-    stepId: "plan",
-    reason: "outputs up to date with declared inputs",
-  });
+  expect(events.find((event) => event.type === "step.skipped")).toMatchObject({ stepId: "plan", reason: "up to date" });
 });

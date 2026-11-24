@@ -18,7 +18,7 @@ import {
   mark,
   PIPELINE,
   partialAt,
-  provenanceRecords,
+  lockSteps,
   readArtifact,
   type RunSnapshot,
   removeArtifact,
@@ -47,8 +47,7 @@ const UNTIL_EXIT = 3;
 
 /** What the journal says of a step this invocation's selectors left out. */
 const SELECTION = "operator selection";
-const UP_TO_DATE = "outputs up to date with declared inputs";
-const PRESENT = "outputs present";
+const UP_TO_DATE = "up to date";
 
 /** A mark naming no run: `skipsSince` then reads the whole journal of the `latest` run. */
 const WHOLE_RUN: Mark = { traceLength: 0, journalLength: 0 };
@@ -122,7 +121,7 @@ test("K1: --skip on a first run sets the step aside for that run only, and the n
   // Same trace as R2: quality runs again because it is rerunOnResume, not because it owes anything.
   expect(traceSince(cwd, beforeRerun)).toEqual(CHEAP);
   expect(reasons(cwd, beforeRerun)).toEqual([
-    { stepId: "branch", reason: PRESENT },
+    { stepId: "branch", reason: UP_TO_DATE },
     ...upToDate("triage", "plan", "implement", "commit", "publish"),
   ]);
   expect(rerun.stderr).not.toContain("set aside");
@@ -151,7 +150,7 @@ test("K1: a step set aside on a run left unfinished is re-admitted by the next i
   expect(snapshot(cwd).status).toBe("PASS");
   expect(traceSince(cwd, before)).toEqual(AFTER_IMPLEMENT);
   expect(reasons(cwd, before)).toEqual([
-    { stepId: "branch", reason: PRESENT },
+    { stepId: "branch", reason: UP_TO_DATE },
     ...upToDate("triage", "plan", "implement"),
   ]);
   expectNoExclusion(snapshot(cwd));
@@ -222,7 +221,7 @@ test("K2: --steps runs a step that owes its deliverable, and the next run reconc
   expect(snapshot(cwd).status).toBe("PASS");
   expect(traceSince(cwd, beforeRerun)).toEqual(["context", "prepare", "quality", "commit", "publish", "report"]);
   expect(reasons(cwd, beforeRerun)).toEqual([
-    { stepId: "branch", reason: PRESENT },
+    { stepId: "branch", reason: UP_TO_DATE },
     ...upToDate("triage", "plan", "implement"),
   ]);
 });
@@ -498,13 +497,13 @@ test("the interruption guard's stop is kept when the selection also left an unfi
 // The third FAIL of L3. `--start-at` requeues the failed step as `pending`, so its
 // status no longer says that its last pass failed, and `--skip` then settles it:
 // a requeued step whose last attempt failed without the runner dying owes no
-// decision, and the run passes. The relaunch still never adopts what the failed
-// pass left, because the mark posted before that attempt is still beside it.
+// decision, and the run passes. The relaunch still never keeps what the failed
+// pass left, because that pass cleared the stamp of its step before its attempt.
 
-/** The partial output is still there, beside the mark of the attempt that failed. */
+/** The partial output is still there, and no stamp vouches for it. */
 function expectMarkedPartial(cwd: string, content: string): void {
   expect(readArtifact(cwd, "impl.md")).toBe(content);
-  expect(provenanceRecords(cwd)["impl.md.json"]?.inFlight).toMatchObject({ stepId: "implement" });
+  expect(lockSteps(cwd).implement).toBeUndefined();
 }
 
 /** Steps 3 to 5 of the repro: requeue, set aside (the run passes), relaunch (implement runs). */
@@ -543,9 +542,6 @@ function requeueSetAsideRelaunch(cwd: string, partial: string): void {
     "report",
   ]);
   expect(skipsSince(cwd, before).filter(({ stepId }) => stepId === "implement")).toEqual([]);
-  expect(eventsSince(cwd, before, "step.outputs.unfinished")).toEqual([
-    expect.objectContaining({ stepId: "implement", outputs: ["impl.md"] }),
-  ]);
   expect(readArtifact(cwd, "impl.md")).toStartWith("implement ");
 }
 

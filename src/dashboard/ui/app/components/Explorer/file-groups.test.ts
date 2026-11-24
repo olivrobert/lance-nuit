@@ -30,11 +30,11 @@ describe("groupFiles", () => {
     expect(names(groups.machine)).toEqual(["coherence.json", "inputs.sha"]);
   });
 
-  test("runs/, .provenance/ and the detached run/ root are machine directories", () => {
-    const groups = groupFiles([dir("artifacts"), dir("runs"), dir(".provenance"), dir("run"), file("ticket.md")]);
+  test("runs/ and the detached run/ root are machine directories", () => {
+    const groups = groupFiles([dir("artifacts"), dir("runs"), dir("run"), file("ticket.md")]);
     expect(names(groups.documents)).toEqual(["ticket.md"]);
     expect(names(groups.others)).toEqual(["artifacts"]);
-    expect(names(groups.machine)).toEqual(["runs", ".provenance", "run"]);
+    expect(names(groups.machine)).toEqual(["runs", "run"]);
   });
 
   test("a nested directory named run is not the detached run root", () => {

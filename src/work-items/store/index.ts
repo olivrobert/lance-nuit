@@ -1,36 +1,27 @@
 //
 // Entry of the work-item store: what the runner keeps next to a ticket, outside
-// any run — the artifacts, the human decisions bound to them, and the provenance
-// that says whether an output still answers to its inputs. Code outside this
+// any run — the artifacts, the human decisions bound to them, and the freshness
+// lock that says whether a step's outputs still answer to its inputs. Code outside this
 // folder imports this file only (`module-work-item-store-entry-only` in
 // `.dependency-cruiser.cjs`); the other files are internals.
 
-// Freshness and provenance.
+// The freshness lock.
 export {
-  type ArtifactFreshness,
-  adoptOutputs,
-  fingerprintInputs,
-  freshness,
-  type InputFingerprint,
-  inputsReadAfterAttempt,
-  inputsReadBeforeAttempt,
-  inputsUnchanged,
-  isInFlight,
-  markInFlight,
-  mergeProvenance,
-  PROVENANCE_PREFIX,
-  pureInputsOf,
+  clearStamp,
+  commitPass,
+  type Fingerprint,
+  type Freshness,
   readInputs,
+  readLock,
   readSource,
-  revisedInPlace,
-  standingOf,
+  stampKey,
+  type StepStamp,
   stepFreshness,
   type UnavailableSource,
-  writeProvenance,
-} from "./provenance.js";
+} from "./step-lock.js";
 
-// Layout: where a work item keeps artifacts, decisions and provenance.
-export { artifactKey, isValidSubjectToken, workItemLayout } from "./layout.js";
+// Layout: where a work item keeps artifacts, decisions and the lock.
+export { artifactKey, isReservedArtifactName, isValidSubjectToken, workItemLayout } from "./layout.js";
 
 // Decisions and approvals.
 export {

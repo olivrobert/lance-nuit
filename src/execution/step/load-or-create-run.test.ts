@@ -28,6 +28,8 @@ import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import { NULL_RUN_OUTPUT } from "../run-output.js";
 import { executeRunSteps, type StepLoopDeps } from "./step-loop.js";
 import { writable } from "../../run/record/run.js";
+import { sha256Text } from "../../work-items/store/hash.js";
+import { commitPass } from "../../work-items/store/step-lock.js";
 
 function pipelineFile(root: string): string {
   const path = join(root, "p.ts");
@@ -42,12 +44,15 @@ function pipelineFile(root: string): string {
   return path;
 }
 
-/** Leave the outputs the fixture steps declare, as their passes would have. */
+/** Leave the outputs the fixture steps declare and their stamps, as their passes
+ *  would have. */
 function writeOutputs(ctx: PipelineContext, ...ids: string[]): void {
   for (const id of ids) {
     const path = ctx.paths.artifact(`${id}.txt`);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, id);
+    const stamp = { pipeline: "p", runId: "r", stampedAt: "2026-01-01T00:00:00.000Z", inputs: {} };
+    commitPass(ctx, id, { ...stamp, outputs: { [`artifacts/${id}.txt`]: sha256Text(id) } }, []);
   }
 }
 
@@ -471,12 +476,14 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
   });
   const { deps } = countingDeps(ctx, []);
   const spawn = deps.executeStep;
-  let onDisk: { state: string; events: string } | undefined;
+  const lockPath = join(ctx.paths.artifactsDir!, "lock.json");
+  let onDisk: { state: string; events: string; lock: string } | undefined;
   deps.executeStep = async (...args) => {
     if (args[0].id === "b") {
       onDisk = {
         state: readFileSync(join(dir, "state.json"), "utf8"),
         events: readFileSync(join(dir, "events.jsonl"), "utf8"),
+        lock: readFileSync(lockPath, "utf8"),
       };
     }
     return spawn(...args);
@@ -486,6 +493,7 @@ test("resume: an attempt the loop opened is read back and settled after a crash 
   // The runner dies while b's process runs: the disk keeps what it held then.
   writeFileSync(join(dir, "state.json"), onDisk.state);
   writeFileSync(join(dir, "events.jsonl"), onDisk.events);
+  writeFileSync(lockPath, onDisk.lock);
 
   const snapshot = readRunSnapshot(join(dir, "state.json"));
   expect(snapshot?.steps.map((step) => [step.id, step.status, step.last_attempt])).toEqual([

@@ -70,8 +70,8 @@ export function bindSession(runView: RunView, stepView: RunStepView, session: Ag
   saveRun(run);
 }
 
-/** A source the step declares and could not read: its freshness is unknown and
- *  the step runs, and the journal is where a diagnosis learns why. */
+/** A source the step declares and could not read: the step is stale and runs,
+ *  and the journal is where a diagnosis learns why. */
 export function recordUnavailableSource(
   run: RunView,
   step: RunStepView,
@@ -89,12 +89,6 @@ export function recordUnavailableSource(
  *  line is transient, and a later diagnosis reads the journal. */
 export function recordSkip(run: RunView, step: RunStepView, skip: { reason: string; freshness?: string }): void {
   appendRunEvent(run, "step.skipped", { stepId: step.id, reason: skip.reason, freshness: skip.freshness });
-}
-
-/** Outputs an attempt that never succeeded left behind, which make the step run
- *  whatever the run remembers of that attempt: the journal says which. */
-export function recordUnfinishedOutputs(run: RunView, step: RunStepView, outputs: readonly string[]): void {
-  appendRunEvent(run, "step.outputs.unfinished", { stepId: step.id, outputs: [...outputs] });
 }
 
 /** A human decision `--approve` or `--reject` recorded before the run started. */

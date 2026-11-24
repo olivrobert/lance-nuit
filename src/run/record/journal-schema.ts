@@ -61,7 +61,7 @@ const optionalString = tolerant(z.string());
 const optionalNullableString = tolerant(z.string().nullable());
 const optionalNumber = tolerant(z.number());
 const optionalNullableNumber = tolerant(z.number().nullable());
-const attemptKind = tolerant(z.enum(["step", "fix"]));
+const attemptKind = tolerant(z.enum(["step", "fix", "review"]));
 const attemptStatus = tolerant(z.enum(["running", "done", "failed", "aborted"]));
 const runStatus = z.enum(RUN_STATUSES);
 const stepStatus = z.enum(STEP_STATUSES);
@@ -131,12 +131,6 @@ const EVENT_SCHEMAS = {
     stepId,
     source: z.string(),
     reason: z.string(),
-  }),
-  "step.outputs.unfinished": z.looseObject({
-    ...base,
-    type: z.literal("step.outputs.unfinished"),
-    stepId,
-    outputs: z.array(z.string()),
   }),
   "step.status.changed": z.looseObject({
     ...base,

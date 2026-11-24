@@ -41,7 +41,7 @@ export interface OpenedAttempt {
  * The number is set on `last_attempt` before the log is allocated, so a store
  * that refuses the allocation still burns the number rather than reusing it.
  */
-export function allocateAttempt(run: Run, step: RunStep, kind: "step" | "fix" = "step"): OpenedAttempt {
+export function allocateAttempt(run: Run, step: RunStep, kind: PersistedAttempt["kind"] = "step"): OpenedAttempt {
   const number = nextAttemptNumber(step);
   step.last_attempt = number;
   const logPath = attemptLogPath(run, step, number);
@@ -58,7 +58,7 @@ export function allocateAttempt(run: Run, step: RunStep, kind: "step" | "fix" = 
 }
 
 export interface AttemptOpening {
-  kind: "step" | "fix";
+  kind: PersistedAttempt["kind"];
   /** Resolved step command or repair prompt, kept next to the log. */
   command: string;
   /** The session the attempt runs in or resumes, as the start event names it. */

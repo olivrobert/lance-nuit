@@ -12,14 +12,14 @@ export interface FileGroups {
   documents: TreeNode[];
   /** Every other file and directory, in the read model's order. */
   others: TreeNode[];
-  /** `*.json`, `*.sha`, `.provenance/`, `runs/` and the detached `run/` root:
+  /** `*.json` (`artifacts/lock.json` included), `*.sha`, `runs/` and the detached `run/` root:
    *  the runner's bookkeeping, shown folded under "Machine files". */
   machine: TreeNode[];
 }
 
 /** Directories that only hold run telemetry. `run` is the reserved root the
  *  read model gives a run directory living outside the work item. */
-const MACHINE_DIRECTORIES: readonly string[] = [".provenance", "runs"];
+const MACHINE_DIRECTORIES: readonly string[] = ["runs"];
 const DETACHED_RUN_PATH = "run";
 const MACHINE_EXTENSIONS: readonly string[] = [".json", ".sha"];
 

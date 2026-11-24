@@ -8,7 +8,9 @@ import { absorbStepFailure, updateStep } from "../../run/index.js";
 
 /**
  * Absorb a non-blocking step failure: keep the reason visible in JSON and the
- * timeline, mark the step `done`, and continue the run.
+ * timeline, and let the run continue. The step is not settled here: inside a pass
+ * the caller returns `"succeeded"` and the pass writes `done`
+ * (`step-pass.ts`); before any pass, `refuseStep` writes it.
  *
  * If `reason` is absent, preserve the reason already on the step (typically written
  * by the fix loop); use the generic label only as a last resort.
@@ -34,6 +36,31 @@ export function absorbNonBlocking(
     level: "warn",
     message: `${step.def.name} — non-blocking warning${detail ? ` ${detail}` : ""}: ${kept}`,
   });
+}
+
+/**
+ * Fail a step before any spawn whatever `blocking` says. For a fault of the
+ * runner's own state (the freshness lock), not a verdict on the step: absorbed as
+ * `done`, the step would settle without anyone knowing whether its work holds.
+ */
+export function failStep(run: RunView, step: RunStepView, output: RunOutput, reason: string): void {
+  updateStep(run, step, "failed", reason);
+  output.emit({ type: "step.failed", step, suffix: ` (${reason})` });
+}
+
+/**
+ * Refuse a step before any spawn, with the blocking rule applied: a non-blocking
+ * step absorbs the refusal and settles `done` here, since no pass will; a
+ * blocking one fails. Used by admission guards.
+ */
+export function refuseStep(run: RunView, step: RunStepView, output: RunOutput, reason: string): { failed: boolean } {
+  if (step.def.blocking === false) {
+    absorbNonBlocking(run, step, output, reason);
+    updateStep(run, step, "done");
+    return { failed: false };
+  }
+  failStep(run, step, output, reason);
+  return { failed: true };
 }
 
 /**

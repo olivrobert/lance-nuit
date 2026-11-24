@@ -129,9 +129,9 @@ input that changes the next run.
 
 "Answer and rerun" therefore holds on a resume, not only on a fresh run: a step
 that declares `input` is re-admitted when the run is resumed, and it replays as
-soon as one of its declared inputs no longer matches the fingerprints its outputs
-were produced from. A step that declares nothing keeps the old behavior and stays
-settled. See [`dsl.md`](dsl.md#input-freshness).
+soon as one of its declared inputs no longer matches the hash its stamp in
+`artifacts/lock.json` recorded when it last succeeded; the steps that read what
+it rewrites follow for the same reason. See [`dsl.md`](dsl.md#input-freshness).
 
 The gate, the escalation and the branch abandonment `humanReview` builds
 declare `rerunOnResume`. A completed gate therefore checks its approval again on
@@ -281,9 +281,11 @@ The loop:
    the artifact is absent or still has the rejected bytes. It replays whatever its
    declared inputs say, and `pendingRejection(ctx, subject)` hands its prompt the
    reason and round. An author `when` still wins: a step it skips is not
-   reworked. Without a pending rejection, a rework step that already completed is
-   skipped with `no pending rejection`, unless it declares `input`: its
-   [freshness](dsl.md#input-freshness) then decides, as for any other step.
+   reworked. The rework erases the rejected artifact before its attempt, like
+   any output, and writes a new stamp once it succeeds. Without a pending
+   rejection, its stamp in the [freshness lock](dsl.md#input-freshness)
+   decides, as for any other step: a rework step that already completed and
+   whose inputs and outputs are unchanged is skipped with `up to date`.
 3. The gate stops again on any rejected subject, whatever `blocked` says: with
    `the rework did not change the artifact rejected in round N` when the rework
    left it untouched, and with a request for a new decision once it changed. The

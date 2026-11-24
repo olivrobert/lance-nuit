@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { artifact, textArtifact } from "../../definition/dsl/artifact.ts";
+import { basename, join } from "node:path";
+import { artifact, source, textArtifact } from "../../definition/dsl/artifact.ts";
 import {
   failIf,
   failUnlessCommand,
@@ -19,16 +19,15 @@ import { CODEX_MODEL } from "../../agents/backends/codex/types.ts";
 import { extractErrors } from "../report-extraction.ts";
 import { executeStep, type StepResult } from "../runners.ts";
 import type { ArtifactRef, WorkItemArtifactStore } from "../../shared/language/artifact-ports.ts";
-import type { PipelineContext } from "../../shared/language/context.ts";
+import type { PipelineContext, PipelineLot } from "../../shared/language/context.ts";
 import type { PipelineStep } from "../../definition/definition.ts";
 import type { Run, RunStep } from "../../run/record/run.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
 import { sha256Text } from "../../work-items/store/hash.ts";
-import { writeProvenance } from "../../work-items/store/provenance.ts";
+import { commitPass, readInputs, readLock } from "../../work-items/store/step-lock.ts";
 import { runSpend } from "../../run/record/cost-accounting.ts";
 import { readRunEvents } from "../../run/record/run-journal.ts";
 import { finalizeRun } from "../../run/record/run-transitions.ts";
-import { settleStepFailure } from "./non-blocking.ts";
 import { isPersistedRunResumable, pendingSteps } from "../../run/record/run-predicates.ts";
 import { readRunSnapshot } from "../../run/record/run-snapshot.ts";
 import { makeRunStep, type StepStateInput } from "../../run/record/run-step.ts";
@@ -41,7 +40,7 @@ import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 import { createAbortScope } from "../abort.js";
 import { humanReview } from "../../definition/builtin-steps/lib/human-review.js";
 import { createInternalWorkItemSourceStep, bashStep as dslBashStep, pipeline } from "../../definition/dsl.js";
-import { pendingRejection, recordApproval, recordRejection } from "../../work-items/store/decisions.js";
+import { pendingRejection, readDecision, recordApproval, recordRejection } from "../../work-items/store/decisions.js";
 import { NULL_RUN_OUTPUT } from "../run-output.js";
 
 function makeRun(steps: RunStep[], maxCost?: number): Run {
@@ -582,7 +581,7 @@ test("resolveOutcome: validates the contract", async () => {
     deps,
   });
 
-  expect(outcome).toBe("stopped");
+  expect(outcome.action).toBe("stopped");
   expect(fixCalled).toBe(false);
   expect(run.stopped_reason).toBe("app unavailable");
   // An obstacle outside the code is a stop kind of its own: no subject approves
@@ -615,7 +614,7 @@ test("resolveOutcome: a BLOCKED: prefix without the cause no longer stops the ru
 
   // A result that reaches the loop with a prefix and no cause never came through
   // a backend: every production path normalizes it at `invokeBackend`.
-  expect(outcome).toBe("continue");
+  expect(outcome.action).toBe("succeeded");
   expect(fixCalled).toBe(true);
   expect(run.outcome?.stop).toBeUndefined();
 });
@@ -638,7 +637,7 @@ test("resolveOutcome: a blocked cause without a reason still gets a readable sto
     deps,
   });
 
-  expect(outcome).toBe("stopped");
+  expect(outcome.action).toBe("stopped");
   expect(run.outcome?.stop?.kind).toBe("blocked");
   expect(run.outcome?.stop?.detail).toBe("blocked by an obstacle outside the code");
 });
@@ -1227,8 +1226,12 @@ const agentContext = () => buildPipelineContext({ ...builtinRegistries(), cwd: "
 const ticketArtifact = textArtifact("ticket.md");
 const specArtifact = textArtifact("spec.md");
 
-/** Map-keyed artifact store: freshness compares several artifacts at once. */
-function artifactContext(initial: Record<string, string> = {}): {
+/** Map-keyed artifact store over a scratch work item: the freshness lock lives on
+ *  disk under its `artifacts/`, the artifacts in memory. */
+function artifactContext(
+  initial: Record<string, string> = {},
+  extra: Partial<Parameters<typeof buildPipelineContext>[0]> = {},
+): {
   values: Map<string, string>;
   ctx: PipelineContext;
 } {
@@ -1249,212 +1252,270 @@ function artifactContext(initial: Record<string, string> = {}): {
   };
   return {
     values,
-    ctx: buildPipelineContext({ ...builtinRegistries(), cwd: ".", ticket: "PROJ-1", artifacts: store }),
+    ctx: buildPipelineContext({
+      ...builtinRegistries(),
+      cwd: mkdtempSync(join(tmpdir(), "steploop-item-")),
+      ticket: "PROJ-1",
+      artifacts: store,
+      ...extra,
+    }),
   };
 }
 
-const derivedStep = (state: StepStateInput = {}): RunStep =>
-  bashStep("spec", "cmd", { sources: [ticketArtifact], outputs: [specArtifact] }, state);
+/** The attempt erases declared outputs before spawn: the fake writes them back. */
+function writing(
+  deps: StepLoopDeps,
+  values: Map<string, string>,
+  written: Record<string, [string, string][]>,
+): StepLoopDeps {
+  const execute = deps.executeStep;
+  return {
+    ...deps,
+    executeStep: async (step, command, budget, context) => {
+      for (const [name, content] of written[step.id] ?? []) values.set(name, content);
+      return execute(step, command, budget, context);
+    },
+  };
+}
 
-test("resume: a done step with fresh declared inputs is re-admitted at zero cost", async () => {
-  const { ctx } = artifactContext({ "ticket.md": "one", "spec.md": "written" });
-  const step = derivedStep({ status: "done", control: { duration_ms: 1 } });
+const lockOf = (ctx: PipelineContext) => readLock(ctx.paths.workItemDir!);
+
+/** Stamp `def` as a pass settled `done` now would. */
+async function stampAsIs(ctx: PipelineContext, def: PipelineStep): Promise<void> {
+  const inputs = (await readInputs(ctx, def.sources ?? [])).fingerprints;
+  const outputs = (await readInputs(ctx, def.outputs ?? [])).fingerprints as Record<string, string>;
+  commitPass(ctx, def.id, { pipeline: "p", runId: "r", stampedAt: "2026-01-01T00:00:00.000Z", inputs, outputs }, []);
+}
+
+const derivedStep = (state: StepStateInput = {}, def: Partial<PipelineStep> = {}): RunStep =>
+  bashStep("spec", "cmd", { sources: [ticketArtifact], outputs: [specArtifact], ...def }, state);
+
+/** A first invocation that produces `spec.md` from the ticket and stamps it. */
+async function producedOnce(ctx: PipelineContext, values: Map<string, string>, step: RunStep): Promise<Run> {
   const run = makeRun([step]);
-  await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
+  const { deps } = fakeDeps();
+  await executeRunSteps(run, { resuming: false }, writing(deps, values, { spec: [["spec.md", "written"]] }), ctx);
+  expect(lockOf(ctx).steps.spec).toBeDefined();
+  return run;
+}
+
+test("lock: a pass settled done writes one stamp, artifact inputs as admitted, sources and outputs after the done (L6, L15)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "steploop-tree-"));
+  const tree = join(dir, "tree.txt");
+  writeFileSync(tree, "before");
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  const step = derivedStep(
+    {},
+    { sources: [ticketArtifact, source("tree", { command: `cat ${JSON.stringify(tree)}` })] },
+  );
+  const run = makeRun([step]);
+  const { deps } = fakeDeps();
+  deps.executeStep = async () => {
+    // An implementation edits the tree it reads; a concurrent edit of an artifact
+    // input is not what the step was given.
+    writeFileSync(tree, "after");
+    values.set("ticket.md", "two");
+    values.set("spec.md", "written");
+    return { output: "", ok: true, stats: { duration_ms: 1 } };
+  };
+
+  await executeRunSteps(run, { resuming: false }, deps, ctx);
+
+  expect(step.status).toBe("done");
+  expect(lockOf(ctx).steps.spec).toMatchObject({
+    pipeline: "p",
+    runId: basename(run.run_dir),
+    inputs: { "artifacts/ticket.md": sha256Text("one"), "source:tree": sha256Text("after") },
+    outputs: { "artifacts/spec.md": sha256Text("written") },
+  });
+  expect(lockOf(ctx).steps.spec).not.toHaveProperty("absorbed");
+});
+
+test("lock: a stamped step's key is absent from lock.json at the first spawn of its pass (L3)", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  const step = derivedStep();
+  await producedOnce(ctx, values, step);
+  values.set("ticket.md", "two");
+  const seen: boolean[] = [];
+  const { deps } = fakeDeps();
+  const resumed = writing(deps, values, { spec: [["spec.md", "rewritten"]] });
+  const execute = resumed.executeStep;
+  resumed.executeStep = async (...args) => {
+    seen.push("spec" in lockOf(ctx).steps);
+    return execute(...args);
+  };
+
+  await executeRunSteps(makeRun([derivedStep({ status: "done" })]), { resuming: true }, resumed, ctx);
+
+  expect(seen).toEqual([false]);
+  expect(lockOf(ctx).steps.spec?.inputs["artifacts/ticket.md"]).toBe(sha256Text("two"));
+});
+
+test("lock: a stamp that cannot be cleared fails the step before any spawn (L3)", async () => {
+  const { ctx } = artifactContext({ "ticket.md": "one" });
+  mkdirSync(join(ctx.paths.workItemDir!, "artifacts", "lock.json.lock"), { recursive: true });
+  const step = derivedStep();
+  const { deps, calls } = fakeDeps();
+
+  const outcome = await executeRunSteps(makeRun([step]), { resuming: false }, deps, ctx);
+
+  expect(calls.exec).toBe(0);
+  expect(outcome.failed).toBe(true);
+  expect(step.status).toBe("failed");
+  expect(step.errors).toContain("freshness lock");
+});
+
+test("lock: blocking: false does not absorb a stamp that cannot be cleared (L3)", async () => {
+  const { ctx } = artifactContext({ "ticket.md": "one" });
+  mkdirSync(join(ctx.paths.workItemDir!, "artifacts", "lock.json.lock"), { recursive: true });
+  const step = derivedStep({}, { blocking: false });
+  const { deps, calls } = fakeDeps();
+
+  const outcome = await executeRunSteps(makeRun([step]), { resuming: false }, deps, ctx);
+
+  expect(calls.exec).toBe(0);
+  expect(outcome.failed).toBe(true);
+  expect(step.status).toBe("failed");
+});
+
+test("lock: a failed pass clears the stamp; a fresh skip, a when refusal, a stop and an admission refusal leave it (L4)", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  await producedOnce(ctx, values, derivedStep());
+  const stamp = JSON.stringify(lockOf(ctx).steps.spec);
+  const resume = async (step: RunStep, results: Array<Partial<StepResult>> = []) => {
+    const { deps, calls } = fakeDeps(results);
+    await executeRunSteps(makeRun([step]), { resuming: true }, deps, ctx);
+    return calls.exec;
+  };
+
+  expect(await resume(derivedStep({ status: "done" }))).toBe(0);
+  expect(JSON.stringify(lockOf(ctx).steps.spec)).toBe(stamp);
+
+  values.set("ticket.md", "two");
+  expect(await resume(derivedStep({ status: "done" }, { inputs: [skipIf(() => true, "not now")] }))).toBe(0);
+  expect(await resume(derivedStep({ status: "done" }, { inputs: [stopIf(() => true, "wait")] }))).toBe(0);
+  expect(await resume(derivedStep({ status: "done" }, { preflight: "false" }))).toBe(0);
+  expect(await resume(derivedStep({ status: "done" }, { preflight: "false", blocking: false }))).toBe(0);
+  expect(JSON.stringify(lockOf(ctx).steps.spec)).toBe(stamp);
+
+  expect(await resume(derivedStep({ status: "done" }), [{ ok: false, failReason: "broken" }])).toBe(1);
+  expect(lockOf(ctx).steps.spec).toBeUndefined();
+});
+
+test("lock: an interrupted pass leaves no stamp, and the next invocation runs the step (L4)", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  await producedOnce(ctx, values, derivedStep());
+  values.set("ticket.md", "two");
+  const abort = createAbortScope();
+  const step = derivedStep({ status: "done" });
+  const { deps } = fakeDeps();
+  deps.executeStep = async () => {
+    values.set("spec.md", "half");
+    abort.requestAbort("SIGINT");
+    return { output: "", ok: true, stats: { duration_ms: 1 } };
+  };
+
+  await executeRunSteps(makeRun([step]), { resuming: true, abort }, deps, ctx);
+
+  expect(lockOf(ctx).steps.spec).toBeUndefined();
+});
+
+test("lock: an absorbed failure is stamped absorbed, outputs {}, if and only if the step declares no output (L5)", async () => {
+  const { ctx } = artifactContext({ "ticket.md": "one" });
+  const withOutput = bashStep("with-output", "cmd", {
+    sources: [ticketArtifact],
+    outputs: [specArtifact],
+    blocking: false,
+  });
+  const withoutOutput = bashStep("without-output", "cmd", { sources: [ticketArtifact], blocking: false });
+  const run = makeRun([withOutput, withoutOutput]);
+  const { deps } = fakeDeps([
+    { ok: false, failReason: "audit failed" },
+    { ok: false, failReason: "audit failed" },
+  ]);
+
+  await executeRunSteps(run, { resuming: false }, deps, ctx);
+
+  expect([withOutput.status, withoutOutput.status]).toEqual(["done", "done"]);
+  expect(withOutput.errors).toBe("audit failed");
+  expect(lockOf(ctx).steps["with-output"]).toBeUndefined();
+  expect(lockOf(ctx).steps["without-output"]).toMatchObject({
+    inputs: { "artifacts/ticket.md": sha256Text("one") },
+    outputs: {},
+    absorbed: true,
+  });
+});
+
+test("lock: a step with input and no output is stamped outputs {}, skipped while fresh, run once its input changed (L9)", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  const check = () => bashStep("check", "cmd", { sources: [ticketArtifact] }, { status: "done" });
+  const first = fakeDeps();
+  await executeRunSteps(
+    makeRun([bashStep("check", "cmd", { sources: [ticketArtifact] })]),
+    { resuming: false },
+    first.deps,
+    ctx,
+  );
+  expect(lockOf(ctx).steps.check).toMatchObject({ outputs: {} });
+
+  const fresh = fakeDeps();
+  await executeRunSteps(makeRun([check()]), { resuming: true }, fresh.deps, ctx);
+  expect(fresh.calls.exec).toBe(0);
+
+  values.set("ticket.md", "two");
+  const stale = fakeDeps();
+  await executeRunSteps(makeRun([check()]), { resuming: true }, stale.deps, ctx);
+  expect(stale.calls.ids).toEqual(["check"]);
+});
+
+test("lock: a fresh stamped step costs no attempt and stays done (L8)", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  await producedOnce(ctx, values, derivedStep());
+  const step = derivedStep({ status: "done", control: { duration_ms: 1, total_cost_usd: 0.4 } });
+  const run = makeRun([step]);
 
   const { deps, calls } = fakeDeps();
   await executeRunSteps(run, { resuming: true }, deps, ctx);
 
   expect(calls.exec).toBe(0);
   expect(step.status).toBe("done");
-  const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
-  expect(skipped).toMatchObject({ stepId: "spec", reason: "outputs up to date with declared inputs" });
+  expect(step.attempts ?? []).toEqual([]);
+  expect(runSpend(run).usd).toBe(0.4);
+  expect(readRunEvents(run.run_dir).find((event) => event.type === "step.skipped")).toMatchObject({
+    stepId: "spec",
+    reason: "up to date",
+  });
 });
 
-test("resume: a step requeued by --start-at runs even when its declared outputs are fresh", async () => {
-  // Freshness does not track the repository tree: after a manual fix, outputs
-  // matching their inputs say nothing about whether the step still holds.
-  const { ctx } = artifactContext({ "ticket.md": "one", "spec.md": "written" });
-  const step = derivedStep({ status: "pending", replay: true, control: { duration_ms: 1 } });
-  const run = makeRun([step]);
-  await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
+test("lock: a stamp's output hash is the artifactSha256 an approval records on the same bytes (L13)", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  await producedOnce(ctx, values, derivedStep());
+
+  await recordApproval(ctx, "spec", specArtifact);
+
+  expect(readDecision(ctx, "spec")?.artifactSha256).toBe(lockOf(ctx).steps.spec?.outputs["artifacts/spec.md"]);
+});
+
+test("lock: a run carrying a lot stamps its steps under <lot.id>/<stepId>", async () => {
+  const lot = { id: "LOT-1", title: "Lot", risk: 1 } as PipelineLot;
+  const { values, ctx } = artifactContext({ "ticket.md": "one" }, { lot });
+  const run = makeRun([derivedStep()]);
+  const { deps } = fakeDeps();
+
+  await executeRunSteps(run, { resuming: false }, writing(deps, values, { spec: [["spec.md", "written"]] }), ctx);
+
+  expect(Object.keys(lockOf(ctx).steps)).toEqual(["LOT-1/spec"]);
+});
+
+test("resume: a step requeued by --start-at runs even when its stamp holds", async () => {
+  const { values, ctx } = artifactContext({ "ticket.md": "one" });
+  await producedOnce(ctx, values, derivedStep());
+  const run = makeRun([derivedStep({ status: "pending", replay: true, control: { duration_ms: 1 } })]);
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, { resuming: true }, deps, ctx);
+  await executeRunSteps(run, { resuming: true }, writing(deps, values, { spec: [["spec.md", "again"]] }), ctx);
 
   expect(calls.ids).toEqual(["spec"]);
-});
-
-test("resume: a done step whose declared input changed is replayed", async () => {
-  const { ctx } = artifactContext({ "ticket.md": "answered", "spec.md": "written" });
-  const step = derivedStep({ status: "done", control: { duration_ms: 1 } });
-  const run = makeRun([step]);
-  await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
-
-  const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, { resuming: true }, deps, ctx);
-
-  expect(calls.ids).toEqual(["spec"]);
-});
-
-// --- Absorbed non-blocking step on resume ------------------------------------
-//
-// A `blocking: false` step whose failure was absorbed is `done` without its
-// outputs. Without a record of the inputs it was absorbed at, every resume would
-// read those outputs as missing and pay the check again.
-
-const SKIP_ABSORBED = "failure absorbed, inputs unchanged since";
-
-/** Non-blocking check over `ticket.md` producing `spec.md`, then a gate. */
-function absorbedRun(check: Partial<PipelineStep> = {}): { run: Run; check: RunStep; gate: RunStep } {
-  const checkStep = bashStep("check", "cmd", {
-    sources: [ticketArtifact],
-    outputs: [specArtifact],
-    blocking: false,
-    ...check,
-  });
-  const gate = bashStep("gate", "test -f ok");
-  return { run: makeRun([checkStep, gate]), check: checkStep, gate };
-}
-
-/** First invocation: the check fails and is absorbed, the gate fails the run. */
-async function absorbThenFailGate(run: Run, ctx: PipelineContext, deps?: StepLoopDeps): Promise<void> {
-  const first = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
-  await executeRunSteps(run, { resuming: false }, deps ?? first.deps, ctx);
-}
-
-test("executeRunSteps: an absorbed step records its inputs as its fix left them", async () => {
-  const { ctx, values } = artifactContext({ "ticket.md": "v1" });
-  const { run, check } = absorbedRun({
-    on_failure: { fix_prompt: "fix", max_retries: 1, replay_after_fix: false },
-  });
-  const { deps } = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
-  deps.runFixLoop = async (r, step, _command, _output, _ctx, _budget, reason, opts) => {
-    // `replayAfterFix: false`: the fix rewrites the input it audits, then settles.
-    values.set("ticket.md", "fixed by the audit");
-    return settleStepFailure(r, step, opts.output, reason, { failSuffix: "" });
-  };
-
-  await absorbThenFailGate(run, ctx, deps);
-
-  expect(check.status).toBe("done");
-  expect(check.errors).toBe("audit failed");
-  expect(check.absorbed_inputs).toEqual({ "artifacts/ticket.md": sha256Text("fixed by the audit") });
-  const saved = readRunSnapshot(join(run.run_dir, "state.json"));
-  expect(saved?.steps[0]?.absorbed_inputs).toEqual({ "artifacts/ticket.md": sha256Text("fixed by the audit") });
-});
-
-test("resume: an absorbed step whose inputs did not move is not re-run", async () => {
-  const { ctx } = artifactContext({ "ticket.md": "v1" });
-  const { run, check, gate } = absorbedRun();
-  await absorbThenFailGate(run, ctx);
-  expect(gate.status).toBe("failed");
-
-  const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, { resuming: true }, deps, ctx);
-
-  expect(calls.ids).toEqual(["gate"]);
-  expect(check.status).toBe("done");
-  expect(check.errors).toBe("audit failed");
-  const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
-  expect(skipped).toMatchObject({ stepId: "check", reason: SKIP_ABSORBED });
-});
-
-test("resume: an absorbed step whose fix rewrote its input is not re-run", async () => {
-  const { ctx, values } = artifactContext({ "ticket.md": "v1" });
-  const { run, check } = absorbedRun({
-    on_failure: { fix_prompt: "fix", max_retries: 1, replay_after_fix: false },
-  });
-  const first = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
-  first.deps.runFixLoop = async (r, step, _command, _output, _ctx, _budget, reason, opts) => {
-    values.set("ticket.md", "fixed by the audit");
-    return settleStepFailure(r, step, opts.output, reason, { failSuffix: "" });
-  };
-  await absorbThenFailGate(run, ctx, first.deps);
-
-  const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, { resuming: true }, deps, ctx);
-
-  expect(calls.ids).toEqual(["gate"]);
-  expect(check.status).toBe("done");
-  expect(check.errors).toBe("audit failed");
-});
-
-test("resume: an absorbed step whose input an earlier step rewrote runs again", async () => {
-  const { ctx, values } = artifactContext({ "ticket.md": "v1" });
-  const producer = bashStep("make", "cmd", { rerun_on_resume: true });
-  const check = bashStep("check", "cmd", { sources: [ticketArtifact], outputs: [specArtifact], blocking: false });
-  const gate = bashStep("gate", "test -f ok");
-  const run = makeRun([producer, check, gate]);
-  /** The attempt erases declared outputs before spawn: the fake writes them back. */
-  const writing = (deps: StepLoopDeps, written: Record<string, [string, string]>): StepLoopDeps => {
-    const execute = deps.executeStep;
-    return {
-      ...deps,
-      executeStep: async (step, command, budget, context) => {
-        const output = written[step.id];
-        if (output) values.set(output[0], output[1]);
-        return execute(step, command, budget, context);
-      },
-    };
-  };
-  const first = fakeDeps([{ ok: true }, { ok: false, failReason: "audit failed" }, { ok: false }]);
-  await executeRunSteps(run, { resuming: false }, writing(first.deps, { make: ["ticket.md", "v1"] }), ctx);
-  expect(check.absorbed_inputs).toEqual({ "artifacts/ticket.md": sha256Text("v1") });
-
-  const { deps, calls } = fakeDeps();
-  await executeRunSteps(
-    run,
-    { resuming: true },
-    writing(deps, { make: ["ticket.md", "v2"], check: ["spec.md", "checked"] }),
-    ctx,
-  );
-
-  expect(calls.ids).toEqual(["make", "check", "gate"]);
-  // The new pass succeeded: nothing absorbed is left to vouch for.
-  expect(check.errors).toBeUndefined();
-  expect(check.absorbed_inputs).toBeUndefined();
-});
-
-test("resume: an absorbed step requeued by --start-at runs", async () => {
-  const { ctx } = artifactContext({ "ticket.md": "v1" });
-  const { run, check } = absorbedRun();
-  await absorbThenFailGate(run, ctx);
-  check.status = "pending";
-  check.replay = true;
-
-  const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, { resuming: true }, deps, ctx);
-
-  expect(calls.ids).toEqual(["check", "gate"]);
-});
-
-test("resume: an absorbed step without recorded inputs runs as before", async () => {
-  // A snapshot written before the record existed, or an interruption between the
-  // absorption and the record: the freshness path decides, and outputs are missing.
-  const { ctx } = artifactContext({ "ticket.md": "v1" });
-  const { run, check } = absorbedRun();
-  await absorbThenFailGate(run, ctx);
-  delete check.absorbed_inputs;
-
-  const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, { resuming: true }, deps, ctx);
-
-  expect(calls.ids).toEqual(["check", "gate"]);
-});
-
-test("a step revising an output another step produced is not adopted on its extra input", async () => {
-  const planArtifact = textArtifact("plan.md");
-  const planAudit = textArtifact("plan-audit.json");
-  const { ctx } = artifactContext({ "spec.md": "s", "plan.md": "p", "plan-audit.json": "{}" });
-  await writeProvenance(ctx, planArtifact, "plan", { "artifacts/spec.md": sha256Text("s") });
-  const revise = bashStep("plan-revise", "cmd", { sources: [planArtifact, planAudit], outputs: [planArtifact] });
-  const run = makeRun([revise]);
-
-  const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, { resuming: false }, deps, ctx);
-
-  expect(calls.ids).toEqual(["plan-revise"]);
 });
 
 test("resume: a step skipped by its own admission is re-admitted", async () => {
@@ -1464,31 +1525,8 @@ test("resume: a step skipped by its own admission is re-admitted", async () => {
   const { deps, calls } = fakeDeps();
   await executeRunSteps(run, { resuming: true }, deps, ctx);
 
-  // The outputs are missing, so the re-admitted step runs.
+  // No stamp, so the re-admitted step runs.
   expect(calls.ids).toEqual(["spec"]);
-});
-
-test("resume: a when refusal over stale inputs says the outputs were kept", async () => {
-  const { ctx } = artifactContext({ "ticket.md": "answered", "spec.md": "written" });
-  const step = bashStep(
-    "spec",
-    "cmd",
-    { sources: [ticketArtifact], outputs: [specArtifact], inputs: [skipIf(() => true, "already committed")] },
-    { status: "done", control: { duration_ms: 1 } },
-  );
-  const run = makeRun([step]);
-  await writeProvenance(ctx, specArtifact, "spec", { "artifacts/ticket.md": sha256Text("one") });
-
-  const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, { resuming: true }, deps, ctx);
-
-  expect(calls.exec).toBe(0);
-  const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
-  expect(skipped).toMatchObject({
-    stepId: "spec",
-    reason: "already committed (inputs changed, outputs kept)",
-    freshness: "stale",
-  });
 });
 
 // --- Agent step timeout, end to end ----------------------------------------
@@ -1763,16 +1801,7 @@ function reworkRun(writerState: StepStateInput): Run {
 }
 
 function reworkContext(initial: Record<string, string>) {
-  const { values, ctx } = artifactContext(initial);
-  return {
-    values,
-    ctx: buildPipelineContext({
-      ...builtinRegistries(),
-      cwd: mkdtempSync(join(tmpdir(), "rework-")),
-      ticket: "PROJ-1",
-      artifacts: ctx.artifacts,
-    }),
-  };
+  return artifactContext(initial);
 }
 
 test("resume: a rejected artifact replays its rework step with the reason, then the gate asks again", async () => {
@@ -1820,7 +1849,7 @@ test("resume: a rework interrupted after its outputs were erased replays, and th
 // --- Reconcile mode ------------------------------------------------------------
 //
 // The status a previous invocation recorded no longer stands for the work: every
-// settled step is re-admitted, and its declared outputs decide.
+// settled step is re-admitted, and its stamp decides.
 
 const branchArtifact = textArtifact("branch.json");
 
@@ -1828,10 +1857,17 @@ const branchArtifact = textArtifact("branch.json");
 const branchStep = (state: StepStateInput = {}, def: Partial<PipelineStep> = {}): RunStep =>
   bashStep("branch", "cmd", { outputs: [branchArtifact], ...def }, state);
 
-test("reconcile: a done step whose deliverable is present is not paid twice, and its spend still counts", async () => {
-  const { ctx } = artifactContext({ "branch.json": "{}" });
+test("reconcile: a done step whose stamp holds is not paid twice, and its spend still counts", async () => {
+  const { ctx, values } = artifactContext();
+  const first = fakeDeps();
+  await executeRunSteps(
+    makeRun([branchStep()]),
+    { resuming: false },
+    writing(first.deps, values, { branch: [["branch.json", "{}"]] }),
+    ctx,
+  );
   const step = branchStep({ status: "done", control: { duration_ms: 1, total_cost_usd: 0.4 } });
-  const later = bashStep("later", "cmd");
+  const later = bashStep("later", "cmd", { rerun_on_resume: true });
   const run = makeRun([step, later]);
 
   const { deps, calls } = fakeDeps();
@@ -1839,79 +1875,63 @@ test("reconcile: a done step whose deliverable is present is not paid twice, and
 
   expect(calls.ids).toEqual(["later"]);
   expect(step.status).toBe("done");
-  expect(step.control?.total_cost_usd).toBe(0.4);
   expect(runSpend(run).usd).toBe(0.4);
-  const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
-  expect(skipped).toMatchObject({ stepId: "branch", reason: "outputs present" });
 });
 
-test("reconcile: a new run does not pay a step whose deliverable is already present", async () => {
-  const { ctx } = artifactContext({ "branch.json": "{}" });
+test("reconcile: a deliverable present without a stamp is produced again", async () => {
+  const { ctx, values } = artifactContext({ "branch.json": "{}" });
   const step = branchStep();
-  const run = makeRun([step]);
 
   const { deps, calls } = fakeDeps();
-  await executeRunSteps(run, { resuming: false }, deps, ctx);
-
-  expect(calls.exec).toBe(0);
-  expect(step.status).toBe("skipped");
-});
-
-test("reconcile: a done step whose deliverable was deleted runs again", async () => {
-  const { ctx, values } = artifactContext();
-  const step = branchStep({ status: "done", control: { duration_ms: 1 } });
-  const { deps, calls } = fakeDeps();
-  const writing: StepLoopDeps = {
-    ...deps,
-    executeStep: async (s, command, budget, context) => {
-      values.set("branch.json", "{}");
-      return deps.executeStep(s, command, budget, context);
-    },
-  };
-  await executeRunSteps(makeRun([step]), { resuming: true }, writing, ctx);
+  await executeRunSteps(
+    makeRun([step]),
+    { resuming: false },
+    writing(deps, values, { branch: [["branch.json", "{}"]] }),
+    ctx,
+  );
 
   expect(calls.ids).toEqual(["branch"]);
   expect(step.status).toBe("done");
 });
 
-test("reconcile: a step skipped by its own admission is re-admitted", async () => {
+test("reconcile: a done step whose deliverable was deleted runs again", async () => {
   const { ctx, values } = artifactContext();
-  const admitted = branchStep({ status: "skipped" });
-  const run = makeRun([admitted]);
+  const first = fakeDeps();
+  await executeRunSteps(
+    makeRun([branchStep()]),
+    { resuming: false },
+    writing(first.deps, values, { branch: [["branch.json", "{}"]] }),
+    ctx,
+  );
+  values.delete("branch.json");
+  const step = branchStep({ status: "done", control: { duration_ms: 1 } });
 
   const { deps, calls } = fakeDeps();
-  // The attempt checks its outputs: branch writes its own.
-  const writing: StepLoopDeps = {
-    ...deps,
-    executeStep: async (s, command, budget, context) => {
-      values.set("branch.json", "{}");
-      return deps.executeStep(s, command, budget, context);
-    },
-  };
-  await executeRunSteps(run, { resuming: true }, writing, ctx);
+  await executeRunSteps(
+    makeRun([step]),
+    { resuming: true },
+    writing(deps, values, { branch: [["branch.json", "{}"]] }),
+    ctx,
+  );
 
   expect(calls.ids).toEqual(["branch"]);
-  expect(admitted.status).toBe("done");
+  expect(step.status).toBe("done");
 });
 
-test("reconcile: an absorbed failure without input does not run again on every resume", async () => {
+test("reconcile: an absorbed failure with outputs has no stamp, so it runs again", async () => {
   const { ctx } = artifactContext();
   const check = branchStep({}, { blocking: false });
-  const gate = bashStep("gate", "test -f ok");
+  const gate = bashStep("gate", "test -f ok", { rerun_on_resume: true });
   const run = makeRun([check, gate]);
   const first = fakeDeps([{ ok: false, failReason: "audit failed" }, { ok: false }]);
   await executeRunSteps(run, { resuming: false }, first.deps, ctx);
   expect(check.status).toBe("done");
   expect(check.errors).toBe("audit failed");
-  // No input to fingerprint: the record is empty, and still vouches for the absorption.
-  expect(check.absorbed_inputs).toEqual({});
 
-  const { deps, calls } = fakeDeps();
+  const { deps, calls } = fakeDeps([{ ok: false, failReason: "audit failed" }]);
   await executeRunSteps(run, { resuming: true }, deps, ctx);
 
-  expect(calls.ids).toEqual(["gate"]);
-  const skipped = readRunEvents(run.run_dir).find((event) => event.type === "step.skipped");
-  expect(skipped).toMatchObject({ stepId: "branch", reason: SKIP_ABSORBED });
+  expect(calls.ids).toEqual(["branch", "gate"]);
 });
 
 test("reconcile: a materialized orchestration node keeps the authority of its status", async () => {
@@ -1959,6 +1979,43 @@ test("D3: a done work-item source step keeps the authority of its status on resu
 
   expect(calls.ids).toEqual(["work"]);
   expect(run.steps[0]!.status).toBe("done");
+});
+
+test("D3: a work-item source step declaring an output is never stamped nor re-admitted", async () => {
+  const { values, ctx } = artifactContext();
+  const built = pipeline("p")
+    .add(
+      createInternalWorkItemSourceStep({ dir: () => "/tmp/work-items", queue: "featureTodo" }).output(ticketArtifact),
+    )
+    .build();
+  const sourceStepId = built.work_item_source!.step_id;
+  const { deps, calls } = fakeDeps();
+  const written = writing(deps, values, { [sourceStepId]: [["ticket.md", "# ticket"]] });
+
+  const run = makeRun(built.steps.map((def) => makeRunStep(def)));
+  await executeRunSteps(run, { resuming: false, workItemSourceStepId: sourceStepId }, written, ctx);
+  expect(run.steps[0]!.status).toBe("done");
+  expect(lockOf(ctx).steps).toEqual({});
+
+  const resumed = makeRun(built.steps.map((def) => makeRunStep(def, { status: "done", control: { duration_ms: 1 } })));
+  await executeRunSteps(resumed, { resuming: true, workItemSourceStepId: sourceStepId }, written, ctx);
+  expect(calls.ids).toEqual([sourceStepId]);
+  expect(lockOf(ctx).steps).toEqual({});
+});
+
+test("lock: a run without a ticket stamps nothing, so a step declaring a source runs on every invocation", async () => {
+  const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: mkdtempSync(join(tmpdir(), "steploop-noticket-")) });
+  expect(ctx.paths.workItemDir).toBeUndefined();
+  const step = bashStep("lint", "lint", { sources: [source("tree", { command: "echo stable" })] });
+  const { deps, calls } = fakeDeps();
+
+  const first = await executeRunSteps(makeRun([step]), { resuming: false }, deps, ctx);
+  const again = await executeRunSteps(makeRun([step]), { resuming: true }, deps, ctx);
+
+  expect(first.failed).toBe(false);
+  expect(again.failed).toBe(false);
+  expect(calls.ids).toEqual(["lint", "lint"]);
+  expect(step.status).toBe("done");
 });
 
 test("reconcile: a skipped orchestration node declaring rerunOnResume stays skipped", async () => {
@@ -2036,6 +2093,7 @@ test("reconcile: a done humanReview gate checks its approval again on every invo
     .build();
   const run = makeRun(built.steps.map((def) => makeRunStep(def, { status: "done", control: { duration_ms: 1 } })));
   const gate = run.steps.find((step) => step.id === "plan-gate")!;
+  await stampAsIs(ctx, run.steps.find((step) => step.id === "write")!.def);
 
   const approved = await executeRunSteps(run, { resuming: true }, fakeDeps().deps, ctx);
   expect(approved.stopped).toBe(false);
@@ -2045,6 +2103,7 @@ test("reconcile: a done humanReview gate checks its approval again on every invo
 
   // The plan changed after its approval: the done gate must not wave it through.
   values.set("plan.md", "v2");
+  await stampAsIs(ctx, run.steps.find((step) => step.id === "write")!.def);
   const stale = await executeRunSteps(run, { resuming: true }, fakeDeps().deps, ctx);
   expect(stale.stopped).toBe(true);
   expect(run.outcome?.phase).toBe("plan-gate");
@@ -2438,9 +2497,10 @@ test("executeRunSteps: an abort requested while the verdict is read does not rep
   expect(outcome.stopped).toBe(false);
 });
 
-test("executeRunSteps: an absorbed failure interrupted while its verdict is read records no inputs", async () => {
+test("executeRunSteps: an absorbed failure interrupted while its verdict is read is not stamped", async () => {
   const { ctx } = artifactContext({ "ticket.md": "v1" });
-  const { run, check } = absorbedRun({ error_extractor: "x" });
+  const check = bashStep("check", "cmd", { sources: [ticketArtifact], blocking: false, error_extractor: "x" });
+  const run = makeRun([check]);
   const abort = createAbortScope();
   const { deps, calls } = fakeDeps([{ ok: false, failReason: "audit failed" }]);
   deps.extractErrors = async () => {
@@ -2451,8 +2511,7 @@ test("executeRunSteps: an absorbed failure interrupted while its verdict is read
   await executeRunSteps(run, { resuming: false, abort }, deps, ctx);
 
   expect(calls.ids).toEqual(["check"]);
-  expect(check.status).toBe("done");
-  expect(check.absorbed_inputs).toBeUndefined();
+  expect(lockOf(ctx).steps.check).toBeUndefined();
 });
 
 test("executeRunSteps: announces each step with its place in the pipeline", async () => {

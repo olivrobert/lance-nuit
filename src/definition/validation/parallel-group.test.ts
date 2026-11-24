@@ -19,7 +19,8 @@ type LlmOptions = LlmStepOptions<"coder", "claude">;
 
 function member(id: string, options: Partial<StepOptionsBase> & Pick<LlmOptions, "capture"> = {}): AgentStepBuilder {
   return llmStep(
-    { id, name: id, profile: "coder", backend: "claude", command: "read", rerunOnResume: true, ...options },
+    // A step reading an input has a stamp to answer to, never `rerunOnResume`.
+    { id, name: id, profile: "coder", backend: "claude", command: "read", rerunOnResume: !options.input, ...options },
     REGISTRY,
   );
 }
@@ -53,11 +54,15 @@ function problems(built: Pipeline): string {
 }
 
 function problemsOf(...steps: AgentStepBuilder[]): string {
-  return problems(
-    pipeline("p")
-      .add(group(...steps))
-      .build(),
-  );
+  try {
+    return problems(
+      pipeline("p")
+        .add(group(...steps))
+        .build(),
+    );
+  } catch (error) {
+    return (error as Error).message;
+  }
 }
 
 test("a valid group stays flat in the pipeline, each step marked with its group", () => {
@@ -181,7 +186,7 @@ test("two members cannot share an output, captured or declared", () => {
 
   expect(
     problemsOf(member("audits.a", { capture: { report: shared } }), member("audits.b", { output: [shared] })),
-  ).toContain('parallel group "audits": steps "audits.a" and "audits.b" share output "shared.md"');
+  ).toContain('artifact "shared.md" is an output of both "audits.a" and "audits.b": one producer per artifact');
 });
 
 test("two members cannot share a report", () => {
@@ -202,10 +207,12 @@ test("a member cannot read the output of a sibling, whichever is declared first"
   expect(problemsOf(writer(), reader())).toContain(message);
 });
 
-test("a member may revise its own output", () => {
+test("a member may not revise its own output, as no step may", () => {
   const revised = textArtifact("revised.md");
 
-  expect(problemsOf(member("audits.a", { input: [revised], output: [revised] }), member("audits.b"))).toBe("");
+  expect(problemsOf(member("audits.a", { input: [revised], output: [revised] }), member("audits.b"))).toContain(
+    'step "audits.a": artifact "revised.md" is both its input and its output',
+  );
 });
 
 test("an external source named like a sibling's output is not that output", () => {

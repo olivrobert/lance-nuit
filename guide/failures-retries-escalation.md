@@ -13,7 +13,10 @@ For each step the runner:
 2. evaluates `require` as an environment guard, before spawning anything;
 3. executes one attempt;
 4. validates its exit status/verdict and declared outputs;
-5. applies `onFail`, if the attempt failed.
+5. applies `onFail`, if the attempt failed;
+6. once the step succeeded, runs its [`review`](dsl.md#review-of-an-agent-step),
+   if it declares one: review attempts rerun `review.retries` times, then at
+   most one fix, and a review or fix that fails fails the step.
 
 An extractor can enrich a fix prompt, but it never turns a non-zero command into a
 successful step.
@@ -286,6 +289,7 @@ llmStep({
   backend: "claude",
   profile: "reviewer",
   command: "/review",
+  input: [summary],
   blocking: false,
   onFail: { fix: (ctx) => `Fix these violations:\n${ctx.errors}`, resumeSession: "implement", retries: 1, replayAfterFix: false },
 });
@@ -296,21 +300,19 @@ suffixed with `(fix applied, not replayed)`: nothing re-checked the code, so
 reports never read the repair as a verified success. A failed repair keeps the
 original reason unchanged.
 
-A repair that rewrites an output its step revises in place (declared as both
-`input` and `output`, like a plan the fix corrects in the session of the step
-that wrote it) is recorded as a successful revision of that output: the step
-that produced the output stays fresh and does not replay on the next resume.
-See [persistence.md](persistence.md#output-provenance).
-
-The single check and its single repair also hold across resumes: the runner
-records the step's inputs as the repair left them, so a later resume — a raised
-budget, an interruption, a failure further down — does not check again unless
-an earlier step changed those inputs. See
+The single check and its single repair also hold across resumes: the pass is
+stamped as an absorbed failure in the [freshness lock](persistence.md#freshness-lock),
+so a later invocation — a raised budget, an interruption, a failure further
+down — does not check again unless one of the step's inputs changed. See
 [dsl.md](dsl.md#input-freshness) (**Absorbed failure**).
 
 The option is refused at load time on a blocking step — an unverified repair
-must never open a gate — and with `retries` other than `1`, since a second
-repair would have no new failure to work from.
+must never open a gate —, with `retries` other than `1`, since a second
+repair would have no new failure to work from, and on a step declaring
+`output`: nothing would vouch for outputs the repair rewrote, and the pass of a
+step with outputs that absorbed its failure gets no stamp. To have an agent
+step's outputs checked and corrected once, in the session that wrote them,
+declare [`review`](dsl.md#review-of-an-agent-step) on it.
 
 ## Stop when a repair changed nothing
 
@@ -396,8 +398,8 @@ spawned and the run reports `BUDGET EXCEEDED`. A work-item loop uses
 `maxCostPerWorkItemUsd`; a simple pipeline uses `maxCost`.
 
 A cost stop is never a step's own failure, so `blocking: false` does not absorb
-it: a step whose attempt the live guard killed, or whose retry or fix pass a cost
-gate withheld, stays `failed` and the run stops resumable. A resume with
+it: a step whose attempt the live guard killed, or whose retry, fix pass, review
+or review fix a cost gate withheld, stays `failed` and the run stops resumable. A resume with
 `--budget` (or `--allow-unmetered`) replays that step. The guard's kill does not
 start the step's `onFail` policy, and a retry or fix pass the guard cut short does
 not count against `retries`: the resume that approves the spend can still run it.

@@ -77,6 +77,7 @@ export type {
   PipelineEntry,
   PipelineFactory,
   PipelineOrchestrationStepBuilder,
+  ReviewOptions,
   RunPipelineOptions,
   StepCapture,
   StepInputCondition,

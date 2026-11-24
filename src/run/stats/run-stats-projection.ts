@@ -51,7 +51,7 @@ export function mergeMeasurementStatus(current: UsageStatus | undefined, next: U
 }
 
 function isAttemptKind(value: unknown): value is AttemptFact["kind"] {
-  return value === "step" || value === "fix";
+  return value === "step" || value === "fix" || value === "review";
 }
 
 function isAttemptStatus(value: unknown): value is AttemptFact["status"] {
@@ -163,6 +163,47 @@ function addModelUsage(
   addTokens(models[model], tokensOf(usage));
 }
 
+function addProfileUsage(
+  aggregate: ProjectionAccumulator,
+  name: string,
+  tokens: TokenCounts,
+  costUsd: number | undefined,
+): void {
+  const profile = aggregate.profiles[name] ?? { steps: 0, tokens: zeroTokens() };
+  aggregate.profiles[name] = profile;
+  profile.steps += 1;
+  addTokens(profile.tokens, tokens);
+  if (costUsd != null) profile.costUsd = (profile.costUsd ?? 0) + costUsd;
+}
+
+/** A step's spend goes to its profile, except its review attempts, which ran on
+ *  the review's profile. Its fixes, the review's included, stay with the step. */
+function projectProfiles(step: RunStepView, tokens: TokenCounts, aggregate: ProjectionAccumulator): void {
+  const total = step.control?.total_cost_usd;
+  const reviewProfile = step.def.review?.profile;
+  const reviews =
+    reviewProfile && reviewProfile !== step.profile
+      ? (step.attempts ?? []).filter((attempt) => attempt.kind === "review")
+      : [];
+  const reviewTokens = zeroTokens();
+  let reviewCost: number | undefined;
+  for (const attempt of reviews) {
+    addTokens(reviewTokens, tokensOf(attempt.usage));
+    const cost = attempt.control?.total_cost_usd;
+    if (cost != null) reviewCost = (reviewCost ?? 0) + cost;
+  }
+  if (step.profile) {
+    const own: TokenCounts = {
+      in: Math.max(tokens.in - reviewTokens.in, 0),
+      out: Math.max(tokens.out - reviewTokens.out, 0),
+      cacheRead: Math.max(tokens.cacheRead - reviewTokens.cacheRead, 0),
+      cacheWrite: Math.max(tokens.cacheWrite - reviewTokens.cacheWrite, 0),
+    };
+    addProfileUsage(aggregate, step.profile, own, total == null ? undefined : Math.max(total - (reviewCost ?? 0), 0));
+  }
+  if (reviewProfile && reviews.length > 0) addProfileUsage(aggregate, reviewProfile, reviewTokens, reviewCost);
+}
+
 /** Projects one step into phase, model, profile and total aggregates. */
 export function projectStepStats(
   run: RunView,
@@ -201,13 +242,7 @@ export function projectStepStats(
   if (phaseCostStatus) aggregate.costStatus = mergeMeasurementStatus(aggregate.costStatus, phaseCostStatus);
   addTokens(aggregate.totals, tokens);
 
-  if (step.profile) {
-    const profile = aggregate.profiles[step.profile] ?? { steps: 0, tokens: zeroTokens() };
-    aggregate.profiles[step.profile] = profile;
-    profile.steps += 1;
-    addTokens(profile.tokens, tokens);
-    if (step.control?.total_cost_usd != null) profile.costUsd = (profile.costUsd ?? 0) + step.control.total_cost_usd;
-  }
+  projectProfiles(step, tokens, aggregate);
 
   const attemptsWithModel = (step.attempts ?? []).filter((attempt) => !!attempt.control?.model);
   if (step.orchestration) {

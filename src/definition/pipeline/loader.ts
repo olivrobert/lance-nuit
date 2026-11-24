@@ -42,7 +42,7 @@ import { CONFIG_FILE_LABEL } from "../../shared/env/kit-paths.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../../shared/language/context.js";
 import type { Pipeline } from "../definition.js";
 import type { StepOverride } from "../../shared/language/profiles.js";
-import { decisionMatchesArtifact, freshness, pendingRejection } from "../../work-items/index.js";
+import { decisionMatchesArtifact, pendingRejection } from "../../work-items/index.js";
 import { applyStepOverrides, imposedAxes } from "../validation/step-overrides.js";
 import { AgentBackendValidator } from "../validation/backend.js";
 import { PipelineValidationChain, PipelineValidationError } from "../validation/chain.js";
@@ -111,7 +111,6 @@ export function createProjectDsl(context: PipelineContext, pipelineDir: string):
     reject,
     decisionMatchesArtifact,
     pendingRejection,
-    freshness,
   };
 }
 

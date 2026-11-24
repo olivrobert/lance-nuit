@@ -26,7 +26,8 @@ function runRunner(cwd: string, ...args: string[]) {
 }
 
 /** The reproduction of issue #9: `check` fails and is absorbed, `gate` fails
- *  until `ok` exists. */
+ *  until `ok` exists. `check` declares no output, so its absorbed pass is stamped
+ *  and holds while its input does. */
 function scratchProject() {
   const cwd = mkdtempSync(join(tmpdir(), "absorbed-resume-cli-"));
   scratchRoots.push(cwd);
@@ -39,11 +40,10 @@ function scratchProject() {
     join(cwd, ".lance-nuit", "pipelines", "absorbed.ts"),
     `export default ({ pipeline, bashStep, textArtifact }: any) => {
   const source = textArtifact("source.txt");
-  const report = textArtifact("report.txt");
   return pipeline("absorbed")
     .add(bashStep({ id: "make", name: "make", output: [source],
       command: (ctx: any) => \`mkdir -p "$(dirname '\${ctx.paths.artifact("source.txt")}')" && echo v1 > '\${ctx.paths.artifact("source.txt")}'\` }))
-    .add(bashStep({ id: "check", name: "check", input: [source], output: [report], blocking: false,
+    .add(bashStep({ id: "check", name: "check", input: [source], blocking: false,
       command: "echo check >> trace.log && exit 1" }))
     .add(bashStep({ id: "gate", name: "gate", command: "test -f ok", rerunOnResume: true }))
     .build();

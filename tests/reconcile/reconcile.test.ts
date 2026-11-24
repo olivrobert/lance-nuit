@@ -31,10 +31,8 @@ const CHEAP = ["context", "prepare", "quality", "report"];
 /** Exit code of a run `--until` stopped with work left (guide/cli-options.md). */
 const UNTIL_EXIT = 3;
 
-/** What admission says when a step's outputs match its inputs. */
-const UP_TO_DATE = "outputs up to date with declared inputs";
-/** What admission says when a step without input finds every output it declares. */
-const PRESENT = "outputs present";
+/** What admission says when a step's stamp still holds. */
+const UP_TO_DATE = "up to date";
 
 function statusesOf(state: RunSnapshot): Record<string, string> {
   return Object.fromEntries(state.steps.map((step) => [step.id, step.status]));
@@ -85,7 +83,7 @@ test("R2: a run after a PASS starts a new run that skips branch too, its output 
   expect(state.status).toBe("PASS");
   expect(traceSince(cwd, before)).toEqual(CHEAP);
   expect(reasons(cwd, before)).toEqual([
-    { stepId: "branch", reason: PRESENT },
+    { stepId: "branch", reason: UP_TO_DATE },
     ...upToDate("triage", "plan", "implement", "commit", "publish"),
   ]);
   expect(statusesOf(state).branch).toBe("skipped");
@@ -120,7 +118,7 @@ test("R3: a failure healed and resumed continues the same run from the failed st
     "report",
   ]);
   // branch is re-admitted rather than trusted on its status, and stays done.
-  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: PRESENT }, ...upToDate("triage", "plan")]);
+  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: UP_TO_DATE }, ...upToDate("triage", "plan")]);
   expect(statusesOf(state).branch).toBe("done");
   // The resume header tells the same story: branch is re-checked, nothing is trusted as done.
   const header = resumed.stdout + resumed.stderr;
@@ -141,7 +139,7 @@ test("R4: a receipt deleted by hand after a PASS replays its step and what depen
   expect(traceSince(cwd, before)).toEqual(["context", "prepare", "quality", "commit", "publish", "report"]);
   // implement is fresh; publish is not skipped: the new commit.sha it reads moved.
   expect(reasons(cwd, before)).toEqual([
-    { stepId: "branch", reason: PRESENT },
+    { stepId: "branch", reason: UP_TO_DATE },
     ...upToDate("triage", "plan", "implement"),
   ]);
 });
@@ -167,7 +165,7 @@ test("R5: a runner killed during publish stops the resume until the replay is au
   expect(traceSince(cwd, beforeStop)).toEqual(["context", "prepare", "quality"]);
   // The interrupted publish is not among the skips: freshness never vouches for a pass left unfinished.
   expect(reasons(cwd, beforeStop)).toEqual([
-    { stepId: "branch", reason: PRESENT },
+    { stepId: "branch", reason: UP_TO_DATE },
     ...upToDate("triage", "plan", "implement", "commit"),
   ]);
   const beforeReplay = mark(cwd);
@@ -192,7 +190,7 @@ test("R6: a ticket edited after a PASS replays every step downstream of it, bran
   expect(latestRunId(cwd)).not.toBe(firstRun);
   expect(snapshot(cwd).status).toBe("PASS");
   expect(traceSince(cwd, before)).toEqual(FULL.filter((id) => id !== "branch"));
-  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: PRESENT }]);
+  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: UP_TO_DATE }]);
 });
 
 test("R7: --run on a PASS run with --start-at replays the target and every later step in that run", () => {
@@ -215,7 +213,7 @@ test("R7: --run on a PASS run with --start-at replays the target and every later
     "publish",
     "report",
   ]);
-  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: PRESENT }, ...upToDate("triage", "plan")]);
+  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: UP_TO_DATE }, ...upToDate("triage", "plan")]);
 });
 
 test("--until after a PASS: the new run reaches the bound for free, and the rerun pays only CHEAP steps", () => {
@@ -248,7 +246,7 @@ test("--until after a PASS: the new run reaches the bound for free, and the reru
   expect(traceSince(cwd, beforeEnd)).toEqual(CHEAP);
   // Skipped steps are re-admitted too: their outputs, not their status, decide.
   expect(reasons(cwd, beforeEnd)).toEqual([
-    { stepId: "branch", reason: PRESENT },
+    { stepId: "branch", reason: UP_TO_DATE },
     ...upToDate("triage", "plan", "implement", "commit", "publish"),
   ]);
 });

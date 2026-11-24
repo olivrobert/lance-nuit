@@ -314,8 +314,8 @@ dashboard never reads a status out of the markdown reports, which stay in
 Files.
 
 The **Files** tab lists each directory with the markdown documents first, then
-the other files, then the runner's own files (`*.json`, `*.sha`,
-`.provenance/`, `runs/`) folded under **Machine files**. **Run details**, below
+the other files, then the runner's own files (`*.json`, `lock.json` included,
+`*.sha`, `runs/`) folded under **Machine files**. **Run details**, below
 the tab content, holds what the header does not show: the project directory
 and provider, the full run id, the worktree and branch, the last launch, the
 approval, and the assumptions.
@@ -347,10 +347,10 @@ The **Run** tab shows where the time and the money went:
   and clicking a step's name opens its last attempt: each attempt with its
   status, duration, cost, model and failure reason (the error the extractor
   or the verdict returned), the tail of the chosen attempt's output, the
-  prompt or command it was given, and the artifacts whose provenance names the
-  step, each opening in the Files tab. Attempts run before the runner kept
-  `command.txt` show no prompt; a step that declares no `input` lists no
-  artifact. An attempt that left a resumable agent session has an **Open**
+  prompt or command it was given, and the artifacts the step's stamp in the
+  freshness lock vouches for, each opening in the Files tab. Attempts run
+  before the runner kept `command.txt` show no prompt; a step that declares no
+  `output`, or whose last pass did not succeed, lists no artifact. An attempt that left a resumable agent session has an **Open**
   link in its Session column, which reopens that conversation in a terminal
   (see [Reopen an agent session](#reopen-an-agent-session)), even while the
   run goes on;
@@ -654,8 +654,9 @@ lancenuit run PROJ-28 --worktree
   work are set aside for this invocation. It is exclusive with the other
   selectors.
   - Replayed steps keep their attempts, spend and fix quota: the budget still
-    counts what they cost before. A replayed step runs even when its declared
-    outputs are fresh, since freshness does not see a manual fix in the tree.
+    counts what they cost before. A replayed step runs even when its stamp in
+    the freshness lock is up to date, since the lock does not see a manual fix
+    in the tree.
   - The requeue is durable: a later invocation without `--start-at` still runs
     the steps the replay has not finished.
   - `--run <id> --start-at X` replays inside that run even when it already
@@ -677,7 +678,7 @@ lancenuit run PROJ-28 --worktree
   pending step they leave out becomes `skipped`, so once no step remains the run
   finalizes as `PASS` and counts as complete — `--scan` will not pick the work
   item up again. `--fresh` starts a new run instead, which still skips a step
-  whose outputs are present and up to date with its declared inputs
+  whose stamp in the freshness lock is up to date
   ([input freshness](dsl.md#input-freshness)); `--start-at` forces them.
 - `--scan` discovers work items, and `--limit` caps the number discovered.
   `--steps` and `--skip` apply to each scanned ticket, so a ticket whose

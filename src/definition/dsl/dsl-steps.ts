@@ -6,7 +6,13 @@ import { backendForFix, type JsonSchema } from "../../contracts/backends.js";
 import { VERDICT_FIELD_NAMES } from "../../contracts/verdict.js";
 import { isLogicalSegment } from "../../shared/language/artifact-ports.js";
 import type { AsyncTemplated, PipelineContext, StepAction, Templated } from "../../shared/language/context.js";
-import type { ParallelGroup, PipelineStep, StepCapture, StepFailure } from "../definition.js";
+import {
+  type ParallelGroup,
+  type PipelineStep,
+  reviewDeclarationError,
+  type StepCapture,
+  type StepFailure,
+} from "../definition.js";
 import { sourceDeclarationError, type StepInput } from "../../work-items/index.js";
 import type { Artifact } from "./artifact.js";
 import type {
@@ -16,11 +22,12 @@ import type {
   Escalate,
   LlmStepOptions,
   OnFail,
+  ReviewOptions,
   StepOptionsBase,
 } from "./dsl-types.js";
 import { requiredText } from "./dsl-utils.js";
 import { normalizeWhen, type StepInputCondition } from "./input.js";
-import { type BackendFor, isEffort, type StepProfileName } from "./profiles.js";
+import { type BackendFor, isEffort, isStepProfileName, type StepProfileName } from "./profiles.js";
 
 export type {
   ActionStepOptions,
@@ -31,6 +38,7 @@ export type {
   Escalate,
   LlmStepOptions,
   OnFail,
+  ReviewOptions,
   StepOptionsBase,
 } from "./dsl-types.js";
 export type { BackendFor, StepProfileName } from "./profiles.js";
@@ -134,6 +142,7 @@ function createLlmStepFromOptions(
   normalizeStepOptions(builder, options);
   // After `output`: a captured artifact already listed there is not added twice.
   if (options.capture !== undefined) builder.capture(options.capture);
+  if (options.review !== undefined) builder.review(options.review);
   return builder;
 }
 
@@ -279,6 +288,15 @@ export abstract class StepBuilder {
       }
     }
     validatePipelineStep(this.step);
+    // The fix of a review resumes the producing session: a backend that cannot
+    // resume would always fix blind. The review's own session is never resumed.
+    if (this.step.review && this.step.backend && this.registry) {
+      if (!this.registry.resolve(this.step.backend).capabilities.resume) {
+        throw new Error(
+          `Step "${this.step.id}": review needs a backend that resumes sessions; "${this.step.backend.id}" cannot`,
+        );
+      }
+    }
     return this.step;
   }
 }
@@ -330,15 +348,20 @@ function validatePipelineStep(step: PipelineStep): void {
     if (step.on_failure.stop_if_unchanged) {
       throw new Error(`Step "${step.id}": stopIfUnchanged cannot be combined with replayAfterFix: false`);
     }
+    // A pass that settles on an unverified repair is never stamped over outputs.
+    if (step.outputs?.length) {
+      throw new Error(`Step "${step.id}": replayAfterFix: false requires a step without output; use llmStep review`);
+    }
   }
   if (step.runner === "pipeline" && !step.orchestration) {
     throw new Error(`Step "${step.id}": orchestration definition is missing`);
   }
-  // Freshness is decided on the outputs: without one, `input` would declare a
-  // dependency the runner has nothing to compare it against.
-  if (step.sources?.length && !step.outputs?.length) {
-    throw new Error(`Step "${step.id}": input requires output`);
+  // A step replayed on every invocation has no stamp to compare its inputs to.
+  if (step.sources?.length && step.rerun_on_resume) {
+    throw new Error(`Step "${step.id}": rerunOnResume cannot be combined with input`);
   }
+  const reviewError = reviewDeclarationError(step);
+  if (reviewError) throw new Error(`Step "${step.id}": ${reviewError}`);
   const sourceError = sourceDeclarationError(step);
   if (sourceError) throw new Error(`Step "${step.id}": ${sourceError}`);
   // A capture reads the agent's structured output; only an agent step has one.
@@ -453,7 +476,7 @@ export class AgentStepBuilder extends StepBuilder {
    * persists as artifacts. Short form (`field: textArtifact`) for text; long form
    * (`field: { artifact, schema }`) for anything else, JSON artifacts included,
    * whose schema must be strict-mode compatible. Every captured artifact is added
-   * to `outputs` — once — so it inherits erase-before-spawn, `require`, provenance,
+   * to `outputs` — once — so it inherits erase-before-spawn, `require`, the stamp,
    * and the lint report.
    */
   capture(spec: Readonly<Record<string, CaptureSpec>>): this {
@@ -488,6 +511,58 @@ export class AgentStepBuilder extends StepBuilder {
         this.output(capture.artifact);
       }
     }
+    return this;
+  }
+
+  /**
+   * Declare the review of the step's outputs. The review capture joins `outputs`,
+   * so it is erased with them before each `step` attempt and covered by the one
+   * stamp of the pass; it is required only after the review attempt.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: each review declares its own capture type
+  review(spec: ReviewOptions<any>): this {
+    const id = this.step.id;
+    if (!spec || typeof spec !== "object") throw new Error(`Step "${id}": review expects an options object`);
+    if (typeof spec.fix !== "function") throw new Error(`Step "${id}": review.fix must be a function`);
+    if (!isStepProfileName(spec.profile)) throw new Error(`Step "${id}": review.profile is not a known profile`);
+    if (spec.fixProfile !== undefined && !isStepProfileName(spec.fixProfile)) {
+      throw new Error(`Step "${id}": review.fixProfile is not a known profile`);
+    }
+    const retries = spec.retries ?? 0;
+    if (!Number.isInteger(retries) || retries < 0) {
+      throw new Error(`Step "${id}": review.retries must be a non-negative integer`);
+    }
+    const capture = spec.capture;
+    const where = `Step "${id}": review capture`;
+    if (!capture || typeof capture !== "object" || !requiredText(capture.field, "review.capture.field")) {
+      throw new Error(`${where}: expected { field, artifact, schema }`);
+    }
+    if (!isArtifactDescriptor(capture.artifact as CaptureSpec)) throw new Error(`${where}: artifact is required`);
+    if (!capture.schema || typeof capture.schema !== "object") throw new Error(`${where}: schema is required`);
+    assertStrictSchema(capture.schema, `${where}.schema`);
+    if (this.step.captures?.some((other) => other.field === capture.field)) {
+      throw new Error(`${where} "${capture.field}" is already a capture of the step`);
+    }
+    if (this.step.outputs?.some((output) => output.name === capture.artifact.name)) {
+      throw new Error(`${where}: artifact "${capture.artifact.name}" is already an output of the step`);
+    }
+    const commandMissing = typeof spec.command === "string" ? !spec.command.trim() : typeof spec.command !== "function";
+    if (commandMissing) throw new Error(`Step "${id}": review.command is required`);
+    this.step.review = {
+      command: spec.command,
+      backend: withBackend(requiredText(spec.backend, "review.backend"), spec.options, this.registry!),
+      profile: spec.profile,
+      capture: {
+        field: capture.field,
+        artifact: capture.artifact,
+        schema: capture.schema,
+        text: capture.artifact.kind === "text",
+      },
+      fix: spec.fix,
+      ...(spec.fixProfile !== undefined ? { fix_profile: spec.fixProfile } : {}),
+      retries,
+    };
+    this.output(capture.artifact);
     return this;
   }
 }

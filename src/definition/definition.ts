@@ -2,8 +2,9 @@
  *  policy, orchestration) and the context their functions receive. Persisted and
  *  runtime shapes live in `run/persisted.ts` and `run/run.ts`. */
 import type { BackendSpec, EffortLevel, JsonSchema } from "../contracts/backends.js";
+import { VERDICT_FIELD_NAMES } from "../contracts/verdict.js";
 import type { WorkQueue } from "../contracts/work-items.js";
-import type { Artifact, StepInput } from "../work-items/index.js";
+import { type Artifact, isSource, type StepInput } from "../work-items/index.js";
 import type {
   AsyncTemplated,
   FixContext,
@@ -49,7 +50,8 @@ export interface StepFailure {
    *  still repaired from the raw output. */
   fix_only_when_extracted?: boolean;
   /** Opt-out: `false` settles the step right after a successful repair instead of
-   *  replaying its command. Only on a non-blocking step with a single repair. */
+   *  replaying its command. Only on a non-blocking step with a single repair and
+   *  no output: nothing would vouch for outputs the repair rewrote. */
   replay_after_fix?: boolean;
   /** Opt-in: a successful repair that changed neither the git tree nor `HEAD`
    *  stops the step as blocked instead of replaying its command. Requires
@@ -96,6 +98,25 @@ export interface StepCapture {
   text: boolean;
 }
 
+/** Review of an agent step's outputs, run once its produce phase succeeded: a
+ *  fresh session judges them, then at most one fix in the producing session.
+ *  Built by `llmStep({ review })`. */
+export interface StepReview {
+  command: AsyncTemplated<PipelineContext>;
+  /** Backend of the review session, never resumed. */
+  backend: BackendSpec;
+  profile: StepProfileName;
+  /** The review's verdict field, persisted as an artifact; it is also in the
+   *  step's `outputs`. */
+  capture: StepCapture;
+  /** Prompt sent to the producing session, or `undefined`: no fix. */
+  fix: (review: unknown, ctx: PipelineContext) => string | undefined | Promise<string | undefined>;
+  /** Role of the fix pass on the step's backend; absent: the step's profile. */
+  fix_profile?: StepProfileName;
+  /** Plain reruns of a failed review attempt. */
+  retries: number;
+}
+
 /** Steps declared together by `parallelize`. */
 export interface ParallelGroup {
   id: string;
@@ -123,7 +144,8 @@ export interface PipelineStep {
    *  their own policy. */
   preflight?: AsyncTemplated<PipelineContext>;
   output_format?: "text" | "json";
-  /** Artifacts a successful attempt must produce in a fresh run. */
+  /** Artifacts a successful pass must produce; erased before every `step`
+   *  attempt. Includes the captures and the review capture. */
   outputs?: Artifact<unknown>[];
   /** Fields of the agent's structured output the runner writes as artifacts,
    *  before `outputs` are verified. Each captured artifact is also in `outputs`.
@@ -131,8 +153,7 @@ export interface PipelineStep {
   captures?: StepCapture[];
   /** Artifacts and external sources this step reads, declared through `input`.
    *  `inputs` above is already taken by admission conditions, hence the
-   *  distinct name. Present only on steps that opted into input-freshness
-   *  skipping. */
+   *  distinct name. */
   sources?: StepInput[];
   error_extractor?: string;
   /** Machine reports written by the command (project-defined format).
@@ -160,6 +181,8 @@ export interface PipelineStep {
   /** Group this step runs in, side by side with the other steps carrying it. Kept on
    *  the definition only: the run stays a flat list, and a snapshot does not change. */
   parallel_group?: ParallelGroup;
+  /** Agent steps only. */
+  review?: StepReview;
 }
 
 /** Discovery configuration carried by a pipeline work-item source.
@@ -221,15 +244,19 @@ export interface Pipeline {
  * How a resume classifies a step (decisions D2 and D3), owned here so the
  * build, the validation, the admission and the loop share one answer.
  *
- * An orchestration node is out of scope whatever it declares: it keeps the
- * authority of its status, so neither its outputs nor its `rerun_on_resume`
- * make a resume re-admit it.
+ * An orchestration node and the work-item source step (`sourceStepId`, the
+ * pipeline's `work_item_source.step_id`) are out of scope whatever they declare:
+ * they keep the authority of their status, so neither outputs nor
+ * `rerun_on_resume` make a resume re-admit them.
  */
-type ClassifiedStep = Pick<PipelineStep, "runner" | "outputs" | "sources" | "rerun_on_resume">;
+type ClassifiedStep = Pick<PipelineStep, "id" | "runner" | "outputs" | "sources" | "rerun_on_resume">;
 
-/** The presence of the step's outputs proves its work done. */
-export function deliversOutputs(step: ClassifiedStep): boolean {
-  return step.runner !== "pipeline" && (step.outputs?.length ?? 0) > 0;
+function declaresIo(step: ClassifiedStep): boolean {
+  return (step.sources?.length ?? 0) > 0 || (step.outputs?.length ?? 0) > 0;
+}
+
+function keepsStatusAuthority(step: ClassifiedStep, sourceStepId: string | undefined): boolean {
+  return step.runner === "pipeline" || step.id === sourceStepId;
 }
 
 /** Whether the author's `rerun_on_resume` replays this settled step on resume. */
@@ -237,11 +264,17 @@ export function rerunsOnResume(step: ClassifiedStep): boolean {
   return step.rerun_on_resume === true && step.runner !== "pipeline";
 }
 
-/** A settled step a resume admits again: it declares inputs or outputs to
- *  check, or a replay it vouches for. */
-export function readmittedOnResume(step: ClassifiedStep): boolean {
-  if (step.runner === "pipeline") return false;
-  return deliversOutputs(step) || (step.sources?.length ?? 0) > 0 || rerunsOnResume(step);
+/** A step the freshness lock decides: it declares what it reads or delivers, and
+ *  neither replays on every invocation nor keeps the authority of its status. */
+export function isStamped(step: ClassifiedStep, sourceStepId: string | undefined): boolean {
+  return !keepsStatusAuthority(step, sourceStepId) && step.rerun_on_resume !== true && declaresIo(step);
+}
+
+/** A settled step a resume admits again: its stamp decides, or it vouches for
+ *  its replay. */
+export function readmittedOnResume(step: ClassifiedStep, sourceStepId: string | undefined): boolean {
+  if (keepsStatusAuthority(step, sourceStepId)) return false;
+  return declaresIo(step) || rerunsOnResume(step);
 }
 
 /**
@@ -253,8 +286,9 @@ export function readmittedOnResume(step: ClassifiedStep): boolean {
  * is the author's to classify.
  */
 export function stepsWithoutDeliverable(pipeline: Pick<Pipeline, "steps" | "work_item_source">): PipelineStep[] {
+  const sourceStepId = pipeline.work_item_source?.step_id;
   return pipeline.steps.filter(
-    (step) => step.runner !== "pipeline" && step.id !== pipeline.work_item_source?.step_id && !readmittedOnResume(step),
+    (step) => !keepsStatusAuthority(step, sourceStepId) && !readmittedOnResume(step, sourceStepId),
   );
 }
 
@@ -267,4 +301,58 @@ export function withoutDeliverableMessage(steps: readonly PipelineStep[]): strin
     `Declare the artifact a step produces, or a receipt of its side effect, as output; ` +
     `or set rerunOnResume: true if replaying it on every invocation is idempotent.`
   );
+}
+
+/** Why a step's `review` is declared wrong, or `undefined`. Shared with the
+ *  structure validator, which sees raw definitions. */
+export function reviewDeclarationError(step: PipelineStep): string | undefined {
+  const review = step.review;
+  if (!review) return undefined;
+  if (step.runner !== "agent") return "review applies only to an agent step (llmStep)";
+  // An absorbed failure would settle a step whose review never ran.
+  if (step.blocking === false) return "review cannot be combined with blocking: false";
+  const field = review.capture?.field;
+  if ((VERDICT_FIELD_NAMES as readonly string[]).includes(field)) {
+    return `review capture "${field}" is reserved by the verdict contract (${VERDICT_FIELD_NAMES.join(", ")})`;
+  }
+  return undefined;
+}
+
+/**
+ * Why the stamps of a pipeline could not vouch for its artifacts: each artifact
+ * has one producer, and no step reads what it writes. Two producers would make
+ * each other stale in turn, and a step reading its own output would never be
+ * fresh. Checked within one pipeline only.
+ */
+export function producerConflicts(pipeline: Pick<Pipeline, "steps">): string[] {
+  const errors: string[] = [];
+  const producers = new Map<string, string>();
+  // The structure validator hands raw definitions over: a malformed entry is a
+  // finding, not a crash.
+  const named = <T extends { name: string }>(entries: readonly T[] | undefined, what: string, id: string): T[] => {
+    if (entries === undefined) return [];
+    const list = Array.isArray(entries) ? entries : [];
+    const valid = list.filter((entry) => typeof entry?.name === "string");
+    if (!Array.isArray(entries) || valid.length < list.length) errors.push(`step "${id}": every ${what} must be named`);
+    return valid;
+  };
+  for (const step of pipeline.steps) {
+    const written = new Set<string>();
+    for (const output of named(step.outputs, "output", step.id)) {
+      written.add(output.name);
+      const first = producers.get(output.name);
+      if (first === undefined) producers.set(output.name, step.id);
+      else if (first !== step.id) {
+        errors.push(
+          `artifact "${output.name}" is an output of both "${first}" and "${step.id}": one producer per artifact`,
+        );
+      }
+    }
+    for (const input of named(step.sources, "input", step.id)) {
+      if (!isSource(input) && written.has(input.name)) {
+        errors.push(`step "${step.id}": artifact "${input.name}" is both its input and its output`);
+      }
+    }
+  }
+  return errors;
 }

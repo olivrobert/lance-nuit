@@ -12,11 +12,16 @@ export type DecisionSubject = string;
 
 const SUBJECT_CHARSET = /^[\w-]+$/;
 
-/** Directory of provenance records inside `artifacts/`: it is reserved to the
- *  runner, which writes it through the artifact store like any artifact. */
-export const PROVENANCE_DIRNAME = ".provenance";
+/** The freshness lock inside `artifacts/`, next to the artifacts it vouches for. */
+const LOCK_FILENAME = "lock.json";
 
-/** The reference a decision, a provenance record or a gate stop persists for an
+/** Whether an artifact name would collide with the freshness lock, its write lock
+ *  or their temporary files: those belong to the runner. */
+export function isReservedArtifactName(name: string): boolean {
+  return name === LOCK_FILENAME || name.startsWith(`${LOCK_FILENAME}.`);
+}
+
+/** The reference a decision, a lock stamp or a gate stop persists for an
  *  artifact: relative to the work item, so the same record reads from any clone
  *  or worktree. A persisted format, not a path to open. */
 export function artifactKey(name: string): string {
@@ -37,8 +42,8 @@ export interface WorkItemLayout {
   /** What steps report beside the artifacts; a batch sub-run gets its own
    *  subdirectory, which the run context adds. */
   readonly reportsDir: string;
-  /** One record per produced artifact: the inputs it was produced from. */
-  readonly provenanceDir: string;
+  /** The freshness lock: one stamp per step that last succeeded. */
+  readonly lockPath: string;
   /** File of the decision on `subject`. Throws on a subject outside the charset. */
   decisionPath(subject: DecisionSubject): string;
 }
@@ -51,7 +56,7 @@ export function workItemLayout(workItemDir: string): WorkItemLayout {
     artifactsDir,
     decisionsDir,
     reportsDir: join(workItemDir, "reports"),
-    provenanceDir: join(artifactsDir, PROVENANCE_DIRNAME),
+    lockPath: join(artifactsDir, LOCK_FILENAME),
     decisionPath: (subject) => {
       if (!isValidSubjectToken(subject)) throw new Error(`invalid decision subject "${subject}" (charset [\\w-])`);
       return join(decisionsDir, `${subject}.json`);

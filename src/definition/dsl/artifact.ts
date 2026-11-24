@@ -1,17 +1,16 @@
 import type { Artifact, ArtifactParser, Source } from "../../work-items/index.js";
 import { createArtifactRef } from "../../shared/language/artifact-ports.js";
 import type { AsyncTemplated, PipelineContext } from "../../shared/language/context.js";
-import { PROVENANCE_PREFIX, readSource } from "../../work-items/index.js";
+import { isReservedArtifactName, readSource } from "../../work-items/index.js";
 
 export type { Artifact, ArtifactParser } from "../../work-items/index.js";
 export type { Source } from "../../work-items/index.js";
 
-/** `.provenance/` is owned by the runner: it stores the input fingerprints of
- *  every artifact. A descriptor pointing there would let a pipeline overwrite the
- *  record that decides its own freshness. */
+/** `lock.json` is owned by the runner: a descriptor naming it would let a
+ *  pipeline overwrite the stamps that decide its own freshness. */
 function rejectReservedName(factory: string, name: string): void {
-  if (name.startsWith(PROVENANCE_PREFIX)) {
-    throw new Error(`${factory}: "${PROVENANCE_PREFIX}" is reserved by the runner`);
+  if (isReservedArtifactName(name)) {
+    throw new Error(`${factory}: "${name}" is reserved by the runner (lock.json and lock.json.*)`);
   }
 }
 
@@ -96,13 +95,12 @@ export interface SourceOptions {
 
 /**
  * State outside the work-item that a step reads, declared through `input` so
- * its freshness covers it: the step is re-admitted when the raw stdout of
- * `command` changes. The fingerprint recorded is read again once the attempt
- * succeeded, so a step that changes its own source is not stale because of it.
- * A source is read, never written: declaring it as `output` is a build error.
- * A command that fails leaves the freshness unknown, so the step runs. Adding a
- * source to a step that already produced its outputs replays it once: their
- * record does not list the new input.
+ * its freshness covers it: the step runs again when the raw stdout of `command`
+ * changes. The hash a step's stamp records is read once the step succeeded, so a
+ * step that changes its own source is not stale because of it. A source is read,
+ * never written: declaring it as `output` is a build error. A command that fails
+ * makes the step stale, so it runs. Adding a source to a step replays it once:
+ * its stamp does not list the new input.
  */
 export function source(name: string, options: SourceOptions): Source {
   if (!name.trim()) throw new Error("source(): name must be a non-empty string");

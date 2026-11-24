@@ -62,6 +62,9 @@ export interface ExecuteRunStepsOptions {
   stepFilter?: readonly string[];
   /** `--skip` of this invocation; see `stepFilter`. */
   skipFilter?: readonly string[];
+  /** The pipeline's `work_item_source.step_id`: that step keeps the authority of
+   *  its status, whatever it declares. */
+  workItemSourceStepId?: string;
 }
 
 /**
@@ -173,9 +176,8 @@ export async function executeRunSteps(
         // human may have rejected. A re-admitted step with nothing to redo costs
         // zero. Orchestration nodes (`runPipeline`, `forEachPipeline`) keep the
         // authority of their status whatever they declare (D3), and so does the
-        // runner's work-item source step, the only other step the build lets
-        // declare none of them.
-        const readmitted = readmittedOnResume(step.def);
+        // runner's work-item source step.
+        const readmitted = readmittedOnResume(step.def, opts.workItemSourceStepId);
         const reconsider = resuming && (readmitted || (step.def.rework_for?.length ?? 0) > 0);
         if (step.status === "skipped" && !(reconsider && readmitted)) continue;
         // Skip a done step on resume unless it is reconsidered. This idempotently
@@ -191,6 +193,7 @@ export async function executeRunSteps(
           output: deps.output,
           replayInterrupted: opts.replayInterrupted,
           startAt: opts.startAt,
+          workItemSourceStepId: opts.workItemSourceStepId,
         });
         if (isAborted()) break units;
         if (admission.kind === "skip") continue;

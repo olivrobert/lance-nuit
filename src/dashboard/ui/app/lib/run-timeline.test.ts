@@ -79,6 +79,37 @@ describe("buildTimeline", () => {
     expect(step).toMatchObject({ fails: 1, passes: 1 });
   });
 
+  test("the review and the fix of a reviewed pass continue it; a later step attempt replays it", () => {
+    const opus = { model: "opus", cost: { usd: 1, estimated: false } };
+    const journey = journeyOf(
+      [
+        attempt("plan", 0, 2, opus),
+        attempt("plan", 2, 3, { ...opus, attempt: 2, kind: "review" }),
+        attempt("plan", 3, 4, { ...opus, attempt: 3, kind: "fix" }),
+        attempt("plan", 10, 12, { ...opus, attempt: 4 }),
+      ],
+      { mainModel: "opus" },
+    );
+    const timeline = buildTimeline(journey, null, 0);
+    const [step] = timeline.steps;
+
+    expect(step?.attempts.map((entry) => entry.tone)).toEqual(["agent", "agent", "agent", "replay"]);
+    expect(step?.passes).toBe(2);
+    expect(takeaways(timeline, undefined)).toContainEqual({ kind: "replayed", workMs: 2 * MIN, stepIds: ["plan"] });
+  });
+
+  test("a step attempt after the fix onFail ran is the repaired step, not a replay", () => {
+    const journey = journeyOf([
+      attempt("tests", 0, 2, { status: "failed", reason: "1 fail" }),
+      attempt("tests", 2, 5, { attempt: 2, kind: "fix", model: "opus", cost: { usd: 1, estimated: false } }),
+      attempt("tests", 5, 6, { attempt: 3 }),
+    ]);
+    const [step] = buildTimeline(journey, null, 0).steps;
+
+    expect(step?.attempts.map((entry) => entry.tone)).toEqual(["fail", "agent", "command"]);
+    expect(step?.passes).toBe(1);
+  });
+
   test("a live run ends now, its open attempt running up to it", () => {
     const journey = journeyOf([attempt("tests", 0, 0, { status: "running", finishedAt: undefined })], {
       status: "RUNNING",

@@ -57,6 +57,8 @@ export interface LlmStepOptions extends StepOptionsBase {
   readonly command?: unknown;
   /** Captured verdict fields, persisted as artifacts by the runner. */
   readonly capture?: Readonly<Record<string, unknown>>;
+  /** Review of the outputs in a fresh session, then at most one fix. */
+  readonly review?: unknown;
 }
 
 export interface BashStepOptions extends StepOptionsBase {

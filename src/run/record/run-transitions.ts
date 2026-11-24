@@ -12,10 +12,8 @@
 //                         status/outcome a failure implies;
 // - `recordStepVerdict`   what the latest attempt established about the step
 //                         (`fail_kind`, `fail_cause`), before its status moves;
-// - `absorbStepFailure`   a `blocking: false` failure kept as the reason of a
-//                         `done` step;
-// - `recordAbsorbedInputs` the inputs that absorbed failure settled at, which
-//                         a resume compares before checking the step again;
+// - `absorbStepFailure`   a `blocking: false` failure kept as the reason of
+//                         the step, which its pass then settles `done`;
 // - `stopRun`             a clean stop that preserves the work left to do;
 // - `reportLiveCost`      the live estimate of a step's attempt in flight, which
 //                         `abortRun` charges; runtime-only, so nothing is saved;
@@ -91,8 +89,6 @@ export function updateStep(runView: RunView, stepView: RunStepView, status: RunS
     // A resume/retry must not retain an earlier terminal timestamp.
     delete step.finished_at;
     clearStepFailure(step);
-    // And for the inputs an absorbed failure settled at: a new pass decides anew.
-    delete step.absorbed_inputs;
   } else {
     step.finished_at = new Date().toISOString();
   }
@@ -162,35 +158,17 @@ export function recordStepVerdict(runView: RunView, stepView: RunStepView, verdi
 }
 
 /**
- * Settle a `blocking: false` step whose failure the run absorbs: the step is
- * `done`, and the reason stays visible in the snapshot, the timeline and the
- * stats. `reason` is the caller's decision — typically the failure reason, or
- * the one the fix loop already wrote on the step.
+ * Keep the failure a `blocking: false` step absorbs as its reason: it stays
+ * visible in the snapshot, the timeline and the stats once the step is `done`.
+ * Not a transition: whoever settles the step persists it with its `done`.
+ * `reason` is the caller's decision — typically the failure reason, or the one
+ * the fix loop already wrote on the step.
  */
 export function absorbStepFailure(runView: RunView, stepView: RunStepView, reason: string): void {
   const run = writable(runView);
   const step = writable(stepView);
   if (run.aborted) return;
   step.errors = reason;
-  updateStep(run, step, "done");
-}
-
-/**
- * Record the fingerprints of the pure inputs an absorbed failure settled at. A
- * resume skips the step while they still match, so a check whose failure was
- * absorbed — its own fix included — is not paid again for outputs it never
- * wrote. Only a `done` step carries the record; `updateStep(running)` drops it.
- */
-export function recordAbsorbedInputs(
-  runView: RunView,
-  stepView: RunStepView,
-  fingerprints: Record<string, string | null>,
-): void {
-  const run = writable(runView);
-  const step = writable(stepView);
-  if (run.aborted || step.status !== "done") return;
-  step.absorbed_inputs = { ...fingerprints };
-  saveRun(run);
 }
 
 /** Publish the running estimate of the attempt `step` has in flight. A step this

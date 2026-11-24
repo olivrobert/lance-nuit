@@ -63,6 +63,7 @@ const SECTIONS: Section[] = [
       "OnFail",
       "BackendOptionsFor",
       "LlmStepOptions",
+      "ReviewOptions",
       "CaptureSpec",
       "JsonSchema",
       "StepCapture",
@@ -270,8 +271,8 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Injected-only helpers",
-    file: ["definition/dsl/preconditions.d.ts", "work-items/store/decisions.d.ts", "work-items/store/provenance.d.ts"],
-    names: ["reject", "decisionMatchesArtifact", "pendingRejection", "ArtifactFreshness", "freshness"],
+    file: ["definition/dsl/preconditions.d.ts", "work-items/store/decisions.d.ts"],
+    names: ["reject", "decisionMatchesArtifact", "pendingRejection"],
     note: "These helpers are available on `Dsl` but are not importable from `@lance-nuit/dsl`.",
   },
 ];

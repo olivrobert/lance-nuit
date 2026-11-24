@@ -95,7 +95,7 @@ function Attempts({ item, detail }: { item: Item; detail: StepDetail }): JSX.Ele
                 {String(attempt.attempt)}
               </button>
             </td>
-            <td>{attempt.kind === "fix" ? "fix pass" : "run"}</td>
+            <td>{attempt.kind === "fix" ? "fix pass" : attempt.kind === "review" ? "review" : "run"}</td>
             <td className={styles[attempt.status]}>{attempt.status}</td>
             <td className={styles.num}>{fmtDuration(attempt.durationMs)}</td>
             <td className={styles.num}>{attemptCost(attempt)}</td>
@@ -159,7 +159,7 @@ function Body({ item, detail }: { item: Item; detail: StepDetail }): JSX.Element
       <section>
         {detail.command ? (
           <details>
-            <summary>{selected?.model || selected?.kind === "fix" ? "Prompt" : "Command"}</summary>
+            <summary>{selected?.model || (selected && selected.kind !== "step") ? "Prompt" : "Command"}</summary>
             <Excerpt title="As the runner rendered it" excerpt={detail.command} from="head" />
           </details>
         ) : (

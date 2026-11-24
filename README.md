@@ -16,9 +16,10 @@ and what needs your attention.
 work, go to sleep, review in the morning.
 
 - **Resume after interruption.** Re-run the same command to continue from the
-  interrupted step, keeping recorded spend. Each step declares what it delivers,
-  and the deliverables on disk, not the run's status, decide what remains to do
-  ([admission](guide/dsl.md#admission)).
+  interrupted step, keeping recorded spend. Each step declares what it reads
+  and delivers, and the work item's freshness lock, not the run's status,
+  decides what remains to do
+  ([admission](guide/dsl.md#admission-of-settled-steps)).
 - **Give failures a recovery plan.** Retry, ask an agent to repair the cause,
   escalate to a stronger model, or hand the work to a human.
 - **Control agent spending.** Set a budget for the run, including repairs and
@@ -201,7 +202,9 @@ lancenuit run PROJ-42 --pipeline nightly
 A fresh run refuses to start on a dirty Git tree.
 
 If the process is interrupted or a step fails, run the same command again. It
-resumes. Add `--fresh` only when you want a brand-new run.
+resumes. Add `--fresh` only when you want a brand-new run. Either way, a step that
+already succeeded is skipped while the inputs and outputs it declares are
+unchanged ([input freshness](guide/dsl.md#input-freshness)).
 
 ### Templates
 

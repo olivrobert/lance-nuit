@@ -2,7 +2,7 @@
 // External source: state outside the work-item (the repository tree, a lock
 // file, a remote revision) that a step declares as input so its freshness covers
 // it. The factory lives in `definition/dsl/artifact.ts`; reading and fingerprinting it is
-// owned by `work-items/store/provenance.ts`.
+// owned by `work-items/store/step-lock.ts`.
 
 import type { Artifact } from "./artifact.js";
 import type { AsyncTemplated, PipelineContext } from "../shared/language/context.js";

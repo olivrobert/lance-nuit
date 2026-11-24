@@ -50,8 +50,6 @@ export interface Dsl {
     decisionMatchesArtifact: typeof decisionMatchesArtifact;
     /** Reason and round of a rejection the rework has not answered yet, for its prompt. */
     pendingRejection: typeof pendingRejection;
-    /** Freshness of an artifact against the inputs recorded when it was produced. */
-    freshness: typeof freshness;
 }
 
 export type PipelineFactory = (dsl: Dsl, context: PipelineContext) => Pipeline;
@@ -165,13 +163,15 @@ export interface StepOptionsBase {
     name: string;
     when?: When | readonly When[];
     require?: AsyncTemplated<PipelineContext>;
-    /** Artifacts and external sources (`source()`) this step reads. Opt-in:
-     *  declaring it makes the runner skip the step while every `output` is up to
-     *  date with the fingerprints of these inputs, and re-admit it on resume when
-     *  one of them changed. An artifact listed in both `input` and `output` is
-     *  revised in place: it is never erased before the attempt and never
-     *  fingerprinted. A source can never be an `output`. */
+    /** Artifacts and external sources (`source()`) this step reads. Once the step
+     *  succeeded, its stamp in `artifacts/lock.json` binds the hashes of these
+     *  inputs to those of its `output`; the step is skipped while both still match,
+     *  and runs again when one of them changed. An artifact absent then and now is
+     *  unchanged. A step may not read what it writes, and a source can never be an
+     *  `output`. Refused with `rerunOnResume`. */
     input?: readonly StepInput[];
+    /** Artifacts the step produces, erased before each attempt and required after
+     *  it. One producer per artifact in a pipeline. */
     output?: readonly Artifact<unknown>[];
     report?: string | readonly string[];
     errorExtractor?: string;
@@ -216,6 +216,9 @@ export type LlmStepOptions<P extends StepProfileName = StepProfileName, B extend
      *  artifacts, keyed by field name. Each artifact joins `output` implicitly. The
      *  names `success`, `reason`, and `blocked` are the verdict's own. */
     capture?: Readonly<Record<string, CaptureSpec>>;
+    /** Review of the step's outputs, then at most one fix in its session. Refused
+     *  with `blocking: false` and on a backend that cannot resume a session. */
+    review?: ReviewOptions<any>;
 } & ({
     prompt: string;
     command?: never;
@@ -223,6 +226,32 @@ export type LlmStepOptions<P extends StepProfileName = StepProfileName, B extend
     command: AsyncTemplated<PipelineContext>;
     prompt?: never;
 });
+
+/** Review of an `llmStep`'s outputs once its produce phase succeeded: a review
+ *  attempt in a fresh session returns `capture`, then `fix` decides whether one
+ *  fix attempt runs in the producing session. There is no review after the fix. */
+export interface ReviewOptions<T = unknown, P extends StepProfileName = StepProfileName, B extends BackendFor<P> = BackendFor<P>> {
+    profile: P;
+    backend: B;
+    options?: BackendOptionsFor<B>;
+    /** Review prompt, sent to a fresh session. */
+    command: AsyncTemplated<PipelineContext>;
+    /** The verdict field the review returns, written to `artifact` (which joins
+     *  the step's `output`). Its schema must be strict-mode compatible. */
+    capture: {
+        field: string;
+        artifact: Artifact<T>;
+        schema: JsonSchema;
+    };
+    /** Prompt sent to the producing session, or `undefined`: no fix. Called once,
+     *  with the captured review. */
+    fix: (review: T, ctx: PipelineContext) => string | undefined | Promise<string | undefined>;
+    /** Role of the fix attempt on the step's backend. Default: the step's profile. */
+    fixProfile?: StepProfileName;
+    /** Plain reruns of a review attempt that failed or returned a refused capture.
+     *  Default 0. */
+    retries?: number;
+}
 
 /** One captured output of an `llmStep`. Short form: a text artifact, the field is
  *  a string. Long form: any artifact with the JSON schema of the field, which
@@ -701,13 +730,12 @@ export interface SourceOptions {
 
 /**
  * State outside the work-item that a step reads, declared through `input` so
- * its freshness covers it: the step is re-admitted when the raw stdout of
- * `command` changes. The fingerprint recorded is read again once the attempt
- * succeeded, so a step that changes its own source is not stale because of it.
- * A source is read, never written: declaring it as `output` is a build error.
- * A command that fails leaves the freshness unknown, so the step runs. Adding a
- * source to a step that already produced its outputs replays it once: their
- * record does not list the new input.
+ * its freshness covers it: the step runs again when the raw stdout of `command`
+ * changes. The hash a step's stamp records is read once the step succeeded, so a
+ * step that changes its own source is not stale because of it. A source is read,
+ * never written: declaring it as `output` is a build error. A command that fails
+ * makes the step stale, so it runs. Adding a source to a step replays it once:
+ * its stamp does not list the new input.
  */
 export declare function source(name: string, options: SourceOptions): Source;
 ```
@@ -1158,6 +1186,8 @@ export interface ProviderNeutralLlmStepOptions extends StepOptionsBase {
     readonly command?: unknown;
     /** Captured verdict fields, persisted as artifacts by the runner. */
     readonly capture?: Readonly<Record<string, unknown>>;
+    /** Review of the outputs in a fresh session, then at most one fix. */
+    readonly review?: unknown;
 }
 
 export type OnFailPolicy = {
@@ -1205,15 +1235,4 @@ export declare function pendingRejection(ctx: PipelineContext, subject: Decision
     decidedBy: string;
     decidedAt: string;
 } | undefined>;
-
-/** Freshness reported by the public `freshness()` helper. `adoptable` and
- *  `unfinished` are internal admission states and never leave the runner: an
- *  unfinished artifact is reported `stale`. */
-export type ArtifactFreshness = Exclude<OutputFreshness, "adoptable" | "unfinished">;
-
-/** Public freshness of one artifact, read from its own record. A pipeline uses it
- *  to branch on "the source moved" without owning fingerprints itself. A record
- *  bound to an external source reads `unknown` unless an artifact input already
- *  made it `stale`: the record keeps the source's fingerprint, not its command. */
-export declare function freshness(ctx: PipelineContext, artifact: Artifact<unknown>): Promise<ArtifactFreshness>;
 ```

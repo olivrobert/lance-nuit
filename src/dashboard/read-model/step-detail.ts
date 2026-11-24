@@ -11,12 +11,12 @@
 // whole journal is parsed, and a few hundred kilobytes per item per poll would be
 // paid for a panel nobody opened.
 
-import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PersistedAttempt } from "../../run/index.js";
 import { attemptCommandPath, figuresSpend, readRunHistory } from "../../run/index.js";
 import { reportedCost } from "./cost.js";
-import { isInFlight, standingOf, workItemLayout } from "../../work-items/index.js";
+import { readLock, stampKey } from "../../work-items/index.js";
 import { isPathWithin } from "../../shared/lib/path-safety.js";
 import { isSafeRelativePath, runTreePath } from "./explorer.js";
 import type { ReadModelOptions } from "./projects.js";
@@ -57,7 +57,7 @@ export function attemptView(attempt: PersistedAttempt, treePathOf: (inRun: strin
   const cost = reportedCost(figuresSpend(control));
   return {
     attempt: attempt.attempt,
-    kind: attempt.kind === "fix" ? "fix" : "step",
+    kind: attempt.kind,
     status: statusOf(attempt.status),
     ...(attempt.started_at ? { startedAt: attempt.started_at } : {}),
     ...(attempt.finished_at ? { finishedAt: attempt.finished_at } : {}),
@@ -96,51 +96,20 @@ function excerpt(path: string, limit: number, from: "head" | "tail"): { text: st
   }
 }
 
-/** Artifacts whose provenance record names `stepId` as their producer. A step
- *  that wrote files without declaring them as output keeps no record, so the list
- *  may miss them. An artifact whose bytes the record does not vouch for is left
- *  out — an attempt that wrote it has not succeeded, or a revision rewrote bytes
- *  no finished attempt vouched for: they may be partial. The rule is the
- *  runner's own (`standingOf`). */
-function producedBy(workItemDir: string, stepId: string): string[] {
-  const layout = workItemLayout(workItemDir);
-  const dir = layout.provenanceDir;
-  let names: string[];
+/** Artifacts the step's stamp in the freshness lock vouches for: the outputs of
+ *  its last pass that settled `done`. A step that wrote files without declaring
+ *  them as output, or whose last pass did not succeed, lists none. */
+function producedBy(workItemDir: string, stepKey: string): string[] {
+  let outputs: Record<string, string> | undefined;
   try {
-    names = readdirSync(dir).filter((name) => name.endsWith(".json"));
+    outputs = readLock(workItemDir).steps[stepKey]?.outputs;
   } catch {
-    // No provenance directory: no step of this work item declared output yet.
+    // An unreadable lock vouches for nothing; the run that reads it next fails on it.
     return [];
   }
-  const produced: string[] = [];
-  for (const name of names.sort()) {
-    const artifactName = name.slice(0, -".json".length);
-    if (!isSafeRelativePath(artifactName)) continue;
-    const stored = readJson(join(dir, name));
-    const text = isInFlight(stored) ? readText(join(layout.artifactsDir, artifactName)) : undefined;
-    const standing = standingOf(stored, artifactName, text);
-    const record = standing.kind === "vouched" ? standing.record : undefined;
-    if (record?.producedBy === stepId && isSafeRelativePath(record.artifact)) produced.push(record.artifact);
-  }
-  return produced;
-}
-
-function readJson(path: string): unknown {
-  try {
-    return JSON.parse(readFileSync(path, "utf-8"));
-  } catch {
-    // A record being rewritten or edited by hand names no producer.
-    return undefined;
-  }
-}
-
-function readText(path: string): string | undefined {
-  try {
-    return readFileSync(path, "utf-8");
-  } catch {
-    // An artifact removed since its record was written: its mark vouches for nothing.
-    return undefined;
-  }
+  return Object.keys(outputs ?? {})
+    .filter(isSafeRelativePath)
+    .sort();
 }
 
 /** The attempts of step `stepId` in `resolved`, or `undefined` when the run has
@@ -185,7 +154,7 @@ export function readStepDetail(
     attempts: attempts.map((attempt) => attemptView(attempt, treePathOf)),
     ...(selected ? { attempt: selected.attempt } : {}),
     ...(logPath ? fileExcerpts(runDir, logPath, treePathOf) : {}),
-    produced: producedBy(resolved.workItemDir, stepId),
+    produced: producedBy(resolved.workItemDir, stampKey(stepId, state.lot)),
     ...(firstLog ? { stepDir: treePathOf(dirname(dirname(firstLog))) } : {}),
   };
 }

@@ -43,7 +43,7 @@ test("workItemLayout derives every work-item directory from the work-item direct
   expect(layout.artifactsDir).toBe("/w/PROJ-1/artifacts");
   expect(layout.decisionsDir).toBe("/w/PROJ-1/decisions");
   expect(layout.reportsDir).toBe("/w/PROJ-1/reports");
-  expect(layout.provenanceDir).toBe("/w/PROJ-1/artifacts/.provenance");
+  expect(layout.lockPath).toBe("/w/PROJ-1/artifacts/lock.json");
   expect(layout.decisionPath("plan")).toBe("/w/PROJ-1/decisions/plan.json");
   expect(() => layout.decisionPath("../plan")).toThrow(/invalid decision subject/);
   expect(isValidSubjectToken("../plan")).toBe(false);

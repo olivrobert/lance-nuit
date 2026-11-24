@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_MODEL } from "../../agents/backends/codex/types.js";
+import { textArtifact } from "../../definition/dsl/artifact.js";
 import type { Run } from "../record/run.js";
 import { createLogRef, type RunLogStore } from "../storage-ports.js";
 import { makeRunStep } from "../record/run-step.js";
@@ -214,6 +215,54 @@ test("buildRunStatsEntry: an unpriced step marks the run cost as a lower bound",
   expect(entry.costStatus).toBe("unavailable");
   expect(entry.phases[unpriced!.id]).toMatchObject({ costUnknown: true, costStatus: "unavailable" });
   expect(entry.phases[priced!.id]?.costUnknown).toBeUndefined();
+});
+
+test("buildRunStatsEntry: review attempts go to the review's profile, the fix stays with the step's", () => {
+  const attempt = (n: number, kind: "step" | "fix" | "review", usd: number, out: number) => ({
+    attempt: n,
+    kind,
+    status: "done" as const,
+    started_at: "2026-07-11T09:00:10.000Z",
+    log_path: `logs/plan/${n}.log`,
+    control: { duration_ms: 1, total_cost_usd: usd },
+    usage: { input_tokens: 1, output_tokens: out },
+  });
+  const plan = makeRunStep(
+    {
+      id: "plan",
+      name: "Plan",
+      command: "x",
+      runner: "agent",
+      profile: "planner",
+      review: {
+        command: "review",
+        backend: { id: "claude" },
+        profile: "reviewer",
+        capture: { field: "audit", artifact: textArtifact("audit.md"), schema: { type: "string" }, text: true },
+        fix: () => undefined,
+        retries: 0,
+      },
+    },
+    {
+      status: "done",
+      control: { duration_ms: 3, total_cost_usd: 1.75 },
+      usage: { input_tokens: 3, output_tokens: 700 },
+      attempts: [attempt(1, "step", 1, 400), attempt(2, "review", 0.5, 200), attempt(3, "fix", 0.25, 100)],
+    },
+  );
+
+  const entry = buildRunStatsEntry(fakeRun({ steps: [plan] }));
+
+  expect(entry.profiles.planner).toEqual({
+    steps: 1,
+    tokens: { in: 2, out: 500, cacheRead: 0, cacheWrite: 0 },
+    costUsd: 1.25,
+  });
+  expect(entry.profiles.reviewer).toEqual({
+    steps: 1,
+    tokens: { in: 1, out: 200, cacheRead: 0, cacheWrite: 0 },
+    costUsd: 0.5,
+  });
 });
 
 test("emitRunStats: validates the contract", () => {

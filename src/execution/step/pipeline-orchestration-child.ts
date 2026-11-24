@@ -188,6 +188,7 @@ export async function executeChild(
         resuming: childResumed,
         abort,
         replayInterrupted: input.replayInterrupted,
+        workItemSourceStepId: childDefinition.work_item_source?.step_id,
       },
       stepLoopDeps(input.output),
       childCtx,

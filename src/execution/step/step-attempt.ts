@@ -11,7 +11,6 @@
 // rotates the step session (`spawnAttempt`).
 
 import { appendFileSync } from "node:fs";
-import { basename } from "node:path";
 import type {
   AgentBackend,
   AgentBackendRegistry,
@@ -25,9 +24,8 @@ import type {
 } from "../../contracts/backends.js";
 import type { executeStep, runWithAgent, StepResult } from "../runners.js";
 import { errorMessage } from "../../shared/lib/errors.js";
-import type { PipelineContext } from "../../shared/language/context.js";
 import type { PipelineStep } from "../../definition/index.js";
-import type { RunAttemptView, RunStepView, RunView } from "../../run/index.js";
+import type { PersistedAttempt, RunAttemptView, RunStepView, RunView } from "../../run/index.js";
 import { log } from "../../shared/runtime/logging.js";
 import {
   type AttemptResult,
@@ -36,7 +34,6 @@ import {
   type CostWarning,
   type OpenedAttempt,
   openAttempt,
-  recordUnavailableSource,
   releaseAllowance,
   reportLiveCost,
   reserveAllowance,
@@ -44,18 +41,7 @@ import {
   settleAttempt,
   strictCostAccountingFor,
 } from "../../run/index.js";
-import {
-  fingerprintInputs,
-  type InputFingerprint,
-  inputsReadAfterAttempt,
-  inputsReadBeforeAttempt,
-  markInFlight,
-  mergeProvenance,
-  pureInputsOf,
-  readInputs,
-  revisedInPlace,
-  writeProvenance,
-} from "../../work-items/index.js";
+import type { PipelineContext } from "../../shared/language/context.js";
 
 /** Common subset of executeStep's StepResult and runWithAgent's result: everything
  * the lifecycle reads from a completed attempt. It omits the heavy `output`. */
@@ -82,9 +68,9 @@ interface AttemptContext {
    * handler) already closed it. */
   readonly attempt: RunAttemptView;
   /** `step` replays the step command (initial, rerun, or retry after a fix);
-   * `fix` is a backend repair pass, which has no step session and is never a
-   * coder-resume source. */
-  readonly kind: "step" | "fix";
+   * `fix` is a backend repair pass and `review` a judgement of the outputs in a
+   * fresh session: neither has the step session, nor is a coder-resume source. */
+  readonly kind: AttemptKind;
   /** Resolved step command or fix prompt. */
   readonly command: string;
   /** Attempt banner in the step log (`rerun 2/3`). Absent for the initial attempt,
@@ -99,6 +85,8 @@ interface AttemptContext {
 }
 
 type AttemptHandler<R extends AttemptRecord> = (ctx: AttemptContext) => Promise<R>;
+
+type AttemptKind = PersistedAttempt["kind"];
 
 /** Say ONCE per attempt that spend was left at an unknown price, as the
  * settlement reported it. Silence here would read as a free attempt: the ledger
@@ -179,7 +167,7 @@ interface AttemptOptionsBase {
 export interface RunTrackedAttemptOptions<R extends AttemptRecord> extends AttemptOptionsBase {
   run: RunView;
   step: RunStepView;
-  kind: "step" | "fix";
+  kind: AttemptKind;
   /** Resolved step command or repair prompt. */
   command: string;
   /** Common spawn options; the invocation may extend them. */
@@ -219,9 +207,9 @@ function finishAttempt(
 
 /** The session an attempt runs in, as its start event names it: a step attempt
  *  runs in the session it was given or resumes, a repair pass only in a session it
- *  resumes — a fresh fix session is not the step's. */
-function attemptSession(kind: "step" | "fix", spawn: SpawnOptions | undefined): AgentSession | undefined {
-  return kind === "step" ? (spawn?.session ?? spawn?.resumeSession) : spawn?.resumeSession;
+ *  resumes — a fresh fix session is not the step's — and a review in its own. */
+function attemptSession(kind: AttemptKind, spawn: SpawnOptions | undefined): AgentSession | undefined {
+  return kind === "fix" ? spawn?.resumeSession : (spawn?.session ?? spawn?.resumeSession);
 }
 
 /**
@@ -291,30 +279,10 @@ export async function runAttempt(run: RunView, step: RunStepView, options: RunAt
     budget: options.budget,
     spawn: options.spawn,
     invoke: async (ctx) => {
-      const declaresInput = (ctx.step.def.sources?.length ?? 0) > 0;
-      const revised = declaresInput ? revisedInPlace(ctx.step.def) : new Set<string>();
-      // Read the artifacts BEFORE the attempt: the fingerprints must describe
-      // what the step was given, not what a later step may have rewritten.
-      const given = declaresInput
-        ? await fingerprintInputs(options.context, inputsReadBeforeAttempt(ctx.step.def))
-        : undefined;
-
-      // Marked before anything is erased or spawned: whatever this attempt leaves
-      // of an output it produces from scratch stays `unfinished` until it
-      // succeeds, whichever run reads it next.
-      await markInFlight(options.context, ctx.step.def, {
-        // A run's directory is named after its id; an old snapshot may lack the field.
-        runId: ctx.run.runId ?? basename(ctx.run.run_dir),
-        stepId: ctx.step.id,
-        attempt: ctx.attempt.attempt,
-        startedAt: ctx.attempt.started_at,
-      });
       // A declared output proves this attempt completed; its previous version was
-      // removed before spawn, like report_paths. An output the step also declares
-      // as input is revised in place, so it survives the erasure.
-      for (const output of ctx.step.def.outputs ?? []) {
-        if (!revised.has(output.name)) await output.remove(options.context);
-      }
+      // removed before spawn, like report_paths. The review capture goes with the
+      // others: it judged outputs this attempt replaces.
+      for (const output of ctx.step.def.outputs ?? []) await output.remove(options.context);
 
       const result = await options.executeStep(
         ctx.step,
@@ -338,7 +306,7 @@ export async function runAttempt(run: RunView, step: RunStepView, options: RunAt
       // (nothing to re-ask for) and from a write error (nothing the agent can fix).
       let captured: CapturedValue[];
       try {
-        captured = readCaptures(ctx.step.def, result.structuredOutput);
+        captured = readCaptures(ctx.step.def.captures ?? [], result.structuredOutput);
       } catch (error) {
         const failReason = errorMessage(error);
         // The step log only carries the assistant's prose; the structured output
@@ -351,62 +319,26 @@ export async function runAttempt(run: RunView, step: RunStepView, options: RunAt
         // Captured fields are written BEFORE the outputs are verified: a captured
         // artifact is an output, and `require` below is what proves it landed.
         for (const { capture, value } of captured) await capture.artifact.write(options.context, value);
-        for (const output of ctx.step.def.outputs ?? []) await output.require(options.context);
+        for (const output of produceOutputs(ctx.step.def)) await output.require(options.context);
       } catch (error) {
         const failReason = errorMessage(error);
         return { ...result, ok: false, failReason };
-      }
-      // Only here is "command succeeded and outputs verified" true, so only here
-      // may a fingerprint be recorded.
-      let fingerprints: Record<string, InputFingerprint> = {};
-      if (given) {
-        const after = await readInputs(options.context, inputsReadAfterAttempt(ctx.step.def));
-        // The record then says `null`, which re-runs the step next time; the
-        // journal is where a diagnosis learns why.
-        for (const unavailable of after.unavailable) recordUnavailableSource(ctx.run, ctx.step, unavailable);
-        fingerprints = { ...given, ...after.fingerprints };
-      }
-      // A step without input records an empty fingerprint: the record still names
-      // it as the producer, which a later revision of the output keeps.
-      for (const output of ctx.step.def.outputs ?? []) {
-        const record = revised.has(output.name) ? mergeProvenance : writeProvenance;
-        await record(options.context, output, ctx.step.id, fingerprints);
       }
       return result;
     },
   });
 }
 
-/**
- * Record, for the outputs `step` revises in place, the revision a successful
- * repair without replay (`replayAfterFix: false`) made of them. The author
- * settles the step on that repair, so it vouches for its revision as a succeeded
- * attempt would; without this, the mark of the failed command would outlive it,
- * and the steps producing those outputs would replay on every later admission.
- * An output produced from scratch keeps its mark: only the command produces it.
- * Returns why each revised output the repair left unreadable stays marked.
- */
-export async function recordRepairRevision(context: PipelineContext, step: RunStepView): Promise<string[]> {
-  const revised = revisedInPlace(step.def);
-  if (revised.size === 0) return [];
-  const fingerprints = await fingerprintInputs(context, pureInputsOf(step.def));
-  const unreadable: string[] = [];
-  for (const output of step.def.outputs ?? []) {
-    if (!revised.has(output.name)) continue;
-    try {
-      await output.require(context);
-    } catch (error) {
-      unreadable.push(`${output.name}: ${errorMessage(error)}`);
-      continue;
-    }
-    await mergeProvenance(context, output, step.id, fingerprints);
-  }
-  return unreadable;
+/** What the produce phase must deliver: every output but the review capture,
+ *  which only the review attempt writes. */
+export function produceOutputs(def: PipelineStep): NonNullable<PipelineStep["outputs"]> {
+  const review = def.review?.capture.artifact.name;
+  return (def.outputs ?? []).filter((output) => output.name !== review);
 }
 
 /** One `capture` of a step and the value the agent returned for it, accepted by
  * the artifact's parser and ready to be written. */
-interface CapturedValue {
+export interface CapturedValue {
   capture: NonNullable<PipelineStep["captures"]>[number];
   value: unknown;
 }
@@ -425,8 +357,10 @@ interface CapturedValue {
  * bytes `write` will produce, so a value the artifact refuses fails here with
  * nothing on disk. Throws on the first refusal; the caller writes what it returns.
  */
-function readCaptures(def: PipelineStep, structuredOutput: unknown): CapturedValue[] {
-  const captures = def.captures ?? [];
+export function readCaptures(
+  captures: readonly NonNullable<PipelineStep["captures"]>[number][],
+  structuredOutput: unknown,
+): CapturedValue[] {
   if (captures.length === 0) return [];
   const source =
     structuredOutput !== null && typeof structuredOutput === "object" && !Array.isArray(structuredOutput)
@@ -458,7 +392,7 @@ function readCaptures(def: PipelineStep, structuredOutput: unknown): CapturedVal
 /** Step-log entry for a refused structured output: the reason, then the object
  * as the backend parsed it, so the refusal can be read after the fact. Formatted
  * like an attempt banner, which is the only other separator the log carries. */
-function refusedCaptureEntry(failReason: string, structuredOutput: unknown): string {
+export function refusedCaptureEntry(failReason: string, structuredOutput: unknown): string {
   const payload =
     structuredOutput === undefined
       ? "(no structured output)"

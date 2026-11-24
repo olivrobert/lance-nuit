@@ -33,11 +33,11 @@ import { measuredAnything, splitAttemptStats } from "./cost-figures.js";
  */
 export function settleAttemptStats(
   step: RunStep,
-  kind: "step" | "fix",
+  kind: PersistedAttempt["kind"],
   ok: boolean,
   stats?: AttemptStats,
 ): { control: StepControl; usage?: StepUsage } {
-  const metered = kind === "fix" || isAgentStep(step.def);
+  const metered = kind !== "step" || isAgentStep(step.def);
   if (!ok && metered && !measuredAnything(stats)) {
     return splitAttemptStats({ ...(stats ?? { duration_ms: 0 }), cost_unknown: true });
   }

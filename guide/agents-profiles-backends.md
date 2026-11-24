@@ -139,7 +139,9 @@ specific. Only `model` and `effort` are accepted. The override applies after the
 pipeline is built and before the first spawn; it is validated against the loaded
 pipeline. Targeting a missing step, a Bash/action step, or an axis imposed by a
 capability is an error. A key for a different pipeline is ignored during a run
-but reported by the lint command.
+but reported by the lint command. A `steps` key cannot target the
+[`review`](dsl.md#review-of-an-agent-step) of a step: the review's model and
+effort come from its profile (for example `profiles.reviewer`).
 
 Check all reachable pipelines with the low-level command:
 

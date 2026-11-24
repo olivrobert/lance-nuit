@@ -291,6 +291,8 @@ context types. The structural primitives are:
 - `llmStep({ capture: { field: artifact | { artifact, schema } } })` to have the
   runner persist a field of the agent's verdict as an artifact — see
   [Captured outputs](#captured-outputs).
+- `llmStep({ review: { ... } })` to have an agent step's outputs reviewed and
+  fixed once — see [Review of an agent step](#review-of-an-agent-step).
 
 The `--scan` capability is provided by `forEachWorkItem({ scan: { limit?, query? }, ... })`.
 Declare the queue with `queue: "bugTodo" | "featureTodo"`. By default discovery
@@ -356,8 +358,9 @@ dropped from the report and the dashboard.
 
 ### Admission of settled steps
 
-The declared deliverables, not the status a previous invocation recorded,
-decide what remains to do. The run record still holds what only the run
+The declared inputs and deliverables, through the work item's
+[freshness lock](#input-freshness), not the status a previous invocation
+recorded, decide what remains to do. The run record still holds what only the run
 knows — spend, attempts, sessions, how each pass ended; see
 [the run record and the deliverables](persistence.md#the-run-record-and-the-deliverables).
 
@@ -392,25 +395,21 @@ The rules:
   again, `done` or `skipped`.
 - **Admission.** `when` decides first, then a pending rejection of a
   [rework](human-control.md#reject-and-rework) step, then the declarations:
-  - `input` and `output`: [input freshness](#input-freshness);
-  - `output` without `input`: the step is skipped with `outputs present` when
-    every output it declares exists, and runs when one is missing or
-    [unfinished](#input-freshness);
-  - `rerunOnResume` without `output`: the step runs.
+  - `input` or `output`: the step's stamp in the
+    [freshness lock](#input-freshness) decides; it is skipped with `up to date`
+    while the stamp still matches, and runs otherwise;
+  - `rerunOnResume`: the step runs, and the lock is neither read nor written,
+    even when it declares `output`.
 
   The [interruption guard](#interrupted-steps) still comes last.
 - **New runs.** A run after a `PASS` applies the same rules, so relaunching a
   completed pipeline pays only for the `rerunOnResume` steps and for the
-  deliverables that are missing or stale. A step skipped this way is `skipped`
+  steps whose stamp no longer matches. A step skipped this way is `skipped`
   in the new run, which also reaches an `--until` bound set on it.
-- **Guarantees.** A step requeued by `--start-at` runs even when its outputs
-  are there. What a pass that failed or was interrupted left is never adopted:
-  the step runs again (or asks first, if the runner died in it). A skipped
-  step keeps the spend of its earlier passes in the run's totals and budget. A
-  `blocking: false` step declaring `output` without `input` whose failure was
-  absorbed gets an empty record of its inputs, and is skipped with
-  `failure absorbed, inputs unchanged since` instead of failing again on every
-  invocation.
+- **Guarantees.** A step requeued by `--start-at` runs even when its stamp
+  matches. A pass that failed, was aborted or was interrupted leaves no stamp,
+  so the step runs again (or asks first, if the runner died in it). A skipped
+  step keeps the spend of its earlier passes in the run's totals and budget.
 - **Composition nodes.** `runPipeline` and `forEachPipeline` nodes keep the
   authority of their status: they are neither re-admitted nor required to
   declare anything, and an output or a `rerunOnResume` they declare has no
@@ -427,9 +426,9 @@ The rules:
   then stops with `needs-decision` instead of passing (a run holding an aborted
   step stays `ABORTED`), unless an `--until` bound or another stop ended it
   first. A step that `--start-at` requeued after a failed or aborted attempt is
-  `pending`, and settles like any other. What an unfinished pass wrote is never
-  adopted in any case: its outputs stay [unfinished](#input-freshness) until an
-  attempt succeeds, whatever the status says. Nothing is persisted as an
+  `pending`, and settles like any other. An unfinished pass never settles the
+  step in any case: it left no [stamp](#input-freshness), whatever the status
+  says. Nothing is persisted as an
   exclusion, and the next invocation admits those steps again, except the nodes
   and the work-item source step above, which keep the status the selection left
   them: `done`, or `skipped` for one that was pending (see
@@ -473,9 +472,9 @@ effects — a push, a merge request, a tracker comment — may already have
 happened, so the resumed run does not replay it silently: admission stops the
 run as `STOPPED` (resumable) before the step runs again, naming the step and the
 two ways to authorize the replay. The check comes after `when`, freshness and
-rework, so a step those guards now skip replays nothing and asks nothing. The
-outputs an interrupted pass left never settle it, so the guard still asks
-before the replay.
+rework, so a step those guards now skip replays nothing and asks nothing. An
+interrupted pass leaves no stamp, so the outputs it left never settle the step,
+and the guard still asks before the replay.
 
 The replay is authorized when any of these holds:
 
@@ -511,127 +510,90 @@ bashStep({
 
 The rules:
 
-- **Outputs decide.** A step declaring `input` without `output` is rejected at
-  build time: freshness is decided on the outputs. A step declaring `output`
-  without `input` answers to its outputs too, by their presence
-  ([admission of settled steps](#admission-of-settled-steps)).
-- **Pure inputs** are `input` minus `output`. An artifact listed in both is
-  **revised in place**: it is not erased before the attempt, it is not part of the
-  fingerprint, and it is still required afterwards.
-- **Fingerprint.** SHA-256 of the raw bytes of every pure input, read at the start
-  of the attempt and recorded on success, after the outputs are verified, in one
-  provenance record per produced artifact. An external source is the exception:
-  it is read once the attempt succeeded (see below).
-- **Freshness of an output** at admission time: absent is `missing`; left by an
-  attempt that never succeeded is `unfinished` (see below); a pure input absent
-  is `unknown` (a safe bias); no record at all is `adoptable`; a fingerprint that
-  differs, or a declared input the record does not list, is `stale`; otherwise
-  `fresh`. A record written by another step producing the same artifact from
-  other inputs is therefore `stale` for this step, which runs.
-- **Decision.** The step runs when an output is `missing`, `unfinished`,
-  `unknown`, or `stale`. Otherwise it is skipped with
-  `outputs up to date with declared inputs`.
-- **Unfinished attempts.** Before every attempt, the runner marks each output
-  the step declares as being written by that attempt, in the output's
-  provenance record ([persistence](persistence.md#output-provenance)); only
-  the success of that attempt clears the mark, and a step without `input` then
-  keeps a record with no fingerprint that names it as the producer. An output
-  found with the mark is `unfinished`: the attempt that wrote it failed, was
-  killed, or had its failure absorbed by `blocking: false`, so its bytes may be
-  partial. An unfinished output is never adopted and never counts as present:
-  every step declaring it as output runs. The mark lives in the work item, not
-  in the run, so it holds across a new run, `--fresh`, `--start-at`, and
-  `--steps`/`--skip`. It ranks with `missing` in the summary. This applies to a
-  step without `input` as well. Whenever admission reads the freshness of such a step, the journal
-  says why it runs with `step.outputs.unfinished` (`stepId`, `outputs`); a
-  step that runs without that reading (a resume of its failed pass,
-  `--start-at`) gets no event.
-- **Outputs revised in place.** The mark of a revision keeps the bytes it
-  found and the record that vouched for them. A revision that failed or was
-  killed without writing leaves the output as it was: the step that produced
-  it stays fresh and does not pay again, and an absorbed `blocking: false`
-  revision that never writes costs only itself on every run. A revision that
-  wrote, then failed or was killed, leaves the output `unfinished`: the step
-  that produced it runs again. A revision that succeeds over `unfinished`
-  bytes — after `--skip` of their producer, or on a retry after a partial
-  write — vouches only for itself: the record says so explicitly
-  (`unguaranteed`) and lists the revising steps it exempts. To every other
-  step declaring the output, it stays `unfinished` until a step producing it
-  from scratch succeeds. The producer therefore runs on the next run whatever
-  inputs the revision read, and whatever the producer is named by then; a
-  listed reviser is judged by its inputs as usual, since running it again
-  would vouch for nothing more. A step that revises an output it produces
-  itself (its `input` and `output` both list it) is listed once its own
-  revision succeeds, so it does not replay itself on every run. A successful
-  repair without replay (`replayAfterFix: false`) counts as a successful
-  revision of the outputs its step revises in place: the step settles on it,
-  so the producer stays fresh. An output that step produces from scratch keeps
-  the mark of the failed command.
-- **Adoption.** An output that exists without any record adopts the inputs
-  present now and is skipped. Without this, the feature would regenerate the
-  deliverables of every work item already waiting for a human decision.
-- **Repairing an output by hand.** No command adopts an output you fixed
-  yourself after a failed attempt: the mark makes the step run again. To keep
-  your version, delete its record, `artifacts/.provenance/<name>.json`, then
-  start a new run (`--fresh`): the output is `adoptable` and adopts the current
-  inputs. Resuming the failed run instead replays the step over your repair,
-  because its last pass failed. A step without `input` never adopts anything:
-  once its record is gone, its output counts as present. To have the step
-  rewrite the output instead, replay it with `--start-at`. A revising step
-  that finds an output without any record adopts it as its own.
-- **Order.** `when` first, freshness second. When `when` refuses while an output
-  is stale, the reason reads `... (inputs changed, outputs kept)`.
-- **Resume.** A `done` step declaring `input` is re-admitted, and so is a
-  `skipped` one ([admission of settled steps](#admission-of-settled-steps)).
-  A re-admitted step whose outputs are all fresh costs nothing. A step requeued
-  by `--start-at` is the exception: it runs even when its outputs are fresh,
-  because freshness does not track the repository tree an operator fixed. So
-  does a step whose last pass failed or was interrupted: what that pass wrote
-  is never adopted, in this run or a later one (see *Unfinished attempts*). A
-  pass the runner died in needs an authorization before it is replayed; see
-  [Interrupted steps](#interrupted-steps). A run stopped by
-  `--until` resumes the same way: the bound is never persisted, so the next
-  invocation re-checks the settled steps as above and runs what follows it.
-- **Absorbed failure.** A `blocking: false` step whose failure was absorbed is
-  `done` without its outputs, so freshness alone would re-run it on every
-  resume. Once the failure is absorbed — after its fix, `replayAfterFix: false`
-  included — the runner records the fingerprints of its pure inputs. A resume
-  skips the step with `failure absorbed, inputs unchanged since` while they
-  still match, even when its own fix rewrote one of them. It runs again when an
-  earlier step changed an input, when the definition gained or lost one, under
-  `--start-at`, or when no record exists (a snapshot written before it, an
-  interruption right after the absorption). A failure absorbed at admission
-  (preflight, throwing admission) records nothing: it never ran, and is
-  re-examined on every resume. The record lives in the run snapshot, so a new
-  run of the same work item checks the step again.
+- **The freshness lock.** When a pass of the step settles `done`, the runner
+  writes the step's stamp in `artifacts/lock.json`: the SHA-256 of every input
+  it declares and of every output it declares, captures included. There is one
+  lock per work item, shared by every run and every pipeline of that work item;
+  see [persistence](persistence.md#freshness-lock) for its format.
+- **Stamped steps.** A step declaring `input` or `output` is stamped, unless it
+  declares `rerunOnResume`, is a `runPipeline`/`forEachPipeline` node, or is the
+  step `forEachWorkItem` adds to read the ticket, whatever that step declares.
+  In a run without a ticket there is no lock: no step is stamped, so every step
+  runs on every invocation. A step declaring `input`
+  without `output` is accepted: its stamp records no output, and it is skipped
+  while its inputs are unchanged. `rerunOnResume` together with `input` is a
+  build error: the step would run on every invocation whatever its inputs say.
+- **Decision.** At admission, a stamped step is skipped with `up to date`, at no
+  cost, when it has a stamp and:
+  - the stamp lists exactly the inputs and outputs the step declares now;
+  - no declared source fails to read, now or when the stamp was written;
+  - every input, artifact or source, hashes as recorded (an optional input absent then and
+    still absent now is unchanged);
+  - every declared output exists and hashes as recorded.
+
+  Otherwise it runs. A skipped step that was `done` stays `done`; any other
+  status becomes `skipped`. Adding or removing an input or an output therefore
+  replays the step once, and an output edited by hand makes its producer run
+  again and rewrite it.
+- **When the stamp changes.** The stamp is deleted before the first spawn of
+  every pass, and written only once the pass settled `done`, after that status
+  is saved. A pass that failed, was aborted, was interrupted or stopped leaves
+  no stamp, so the step runs again on the next invocation, in this run or a new
+  one (`--fresh` included), whatever its status. A runner that dies between the
+  `done` and the stamp leaves the step to run once more. An admission refusal,
+  a stop or an `up to date` skip leaves the stamp as it was.
+- **What a stamp records.** Artifact inputs as admission read them, once per
+  pass; sources and outputs as they are once the pass settled `done` (see
+  [external sources](#external-sources)).
+- **Outputs are erased.** Every declared output, captures and the
+  [review](#review-of-an-agent-step) capture included, is erased before every
+  `step` attempt, the first and each retry, and required after it. No output is
+  revised in place.
+- **One producer per artifact.** The build refuses an artifact in the `output`
+  of two steps of a pipeline (captures, review captures and parallel members
+  included), and an artifact in both the `input` and the `output` of one step:
+  two producers would make each other stale in turn, and a step reading what it
+  writes would never be up to date. To have an agent step's output reviewed and
+  corrected, declare [`review`](#review-of-an-agent-step) on it.
+- **Order.** `when` first, then a pending rejection, then the stamp.
+- **Resume.** A `done` step declaring `input` or `output` is re-admitted, and so
+  is a `skipped` one ([admission of settled steps](#admission-of-settled-steps)).
+  A re-admitted step whose stamp matches costs nothing. A step requeued by
+  `--start-at` is the exception: it runs even when its stamp matches, because
+  the lock does not track the repository tree an operator fixed. So does a step
+  whose last pass failed or was interrupted: that pass left no stamp. A pass
+  the runner died in needs an authorization before it is replayed; see
+  [Interrupted steps](#interrupted-steps). A run stopped by `--until` resumes
+  the same way: the bound is never persisted, so the next invocation re-checks
+  the settled steps as above and runs what follows it.
+- **Absorbed failure.** A `blocking: false` pass whose failure was absorbed
+  settles `done`. A step declaring no `output` is then stamped, marked
+  `absorbed`, and skipped with `up to date` while its inputs are unchanged,
+  even after a repair without replay (`replayAfterFix: false`). A step declaring
+  an `output` gets no stamp: the bytes a failed attempt left behind are never
+  vouched for, so the step runs again on every invocation. A failure absorbed
+  at admission (preflight, throwing admission) is not a pass: it never touches
+  the lock, and the step is examined again on every invocation.
 - **Rework.** A step named as a gate's `rework` replays while a rejection of
-  that gate is pending, independently of its inputs; without one, its inputs
-  decide as above. See [human-control.md](human-control.md#reject-and-rework).
-- **Provenance is merged, not replaced.** A step that revises an artifact updates
-  its record, so `plan-audit` (`input: [spec, plan]`, `output: [planAudit, plan]`)
-  does not break the provenance of `plan`.
+  that gate is pending, whatever its stamp; without one, its stamp decides as
+  above. See [human-control.md](human-control.md#reject-and-rework).
+- **Upgrade.** The lock replaced the per-output records of
+  `artifacts/.provenance/`, which are ignored: every stamped step of a work item
+  in flight runs once after the upgrade
+  ([persistence](persistence.md#freshness-lock)).
 
 A step declaring `input` should drop any "skip when the deliverable exists" guard
 of its own: `when` is evaluated first, so such a guard would refuse the step
 before freshness is ever consulted.
 
-`freshness(ctx, artifact)` exposes the same records to a pipeline, returning
-`fresh`, `stale`, `missing`, or `unknown` for one artifact against its own record.
-An unfinished artifact is reported `stale`: the public helper has no
-`unfinished` value, and either way the artifact must be produced again. So is
-an artifact in doubt (`unguaranteed`), until a step producing it from scratch
-writes it: for an output a step only ever revises itself, that is final after a
-partial attempt. A `when` requiring `fresh` would then stay closed, and the
-dashboard no longer lists the output under its step. The helper is what an
-author branches on to run an amendment step rather than a full regeneration. A
-record bound to an external source reads `unknown` unless an
-artifact input already makes it `stale`: the record keeps the source's
-fingerprint, not its command.
-
 Known limits: writes that no `output` declares are not tracked; a `PASS` run is
 never resumed, so a new run starts with everything `pending` (freshness still
-applies); a `PASS` child pipeline is not re-entered; and a `when` with `stop`
-re-evaluated on resume can stop on a step that already completed.
+applies); a `PASS` child pipeline is not re-entered; a `when` with `stop`
+re-evaluated on resume can stop on a step that already completed; the single
+producer is not checked across pipelines, so a child pipeline that reuses a
+step id or an output of its parent on the same work item makes them stale in
+turn; and two live runs on one work item (two `--worktree` runs, for example)
+clear and stamp each other's steps.
 
 #### External sources
 
@@ -654,36 +616,35 @@ and `implement` — an agent step — is stale and paid again on every rerun.
 - **Fingerprint.** SHA-256 of the command's raw stdout bytes, before any
   decoding, so a diff of a non-UTF-8 file still fingerprints each edit apart;
   stderr is not part of it.
-  It is recorded under `source:<name>` in the provenance record, beside the
+  It is recorded under `source:<name>` in the step's stamp, beside the
   `artifacts/<name>` keys, so a source never shares a fingerprint with an artifact
   of the same name. The rules above apply unchanged: a stdout that moved makes
-  the outputs `stale`, and the step runs again with everything downstream of what
+  the stamp stale, and the step runs again with everything downstream of what
   it rewrites.
 - **Execution.** The command runs in the pipeline's working directory (the
   repository root, or the worktree under `--worktree`), with the environment of a
   step: the runner's internal `RUNNER_*` variables are removed. It is bounded to
   30 s, like a `when` command. `command` may also be a function of the
   pipeline context. The runner reads a source at admission and again once the
-  attempt succeeded, so the command must be safe to repeat.
-- **Read after the attempt.** The fingerprint recorded is the one the source
-  gives after a successful attempt, not before it: a step that changes what it
+  pass settled `done`, so the command must be safe to repeat.
+- **Read after the pass.** The fingerprint recorded is the one the source
+  gives once the pass settled `done`, not before it: a step that changes what it
   reads — an implementation editing the tree — is not stale because of its own
   change, only because of a later one. A change someone else makes during the
-  attempt is absorbed into the record. This does not cover a change made by a
+  pass is absorbed into the stamp. This does not cover a change made by a
   *later* step: see the command choice above.
 - **Deterministic command.** A stdout that is empty or constant never makes the
   step stale; one that varies on every call (a timestamp, an unordered listing)
   makes it run every time. The stdout is held in memory whole, with no size
   bound.
-- **Adding a source** to a step that already produced its outputs replays it
-  once: their record does not list the new input, so they are `stale`.
+- **Adding a source** to a step that already has a stamp replays it once: the
+  stamp does not list the new input, so it is stale.
 - **Failure.** A command that exits non-zero, times out, or resolves to an empty
-  string leaves the freshness `unknown`, so the step runs, as for an absent
-  input. The reason is journaled as `step.source.unavailable` (`stepId`,
-  `source`, `reason`) and printed once. The same event is journaled when the
-  reading after a successful attempt fails. An output produced while its source
-  was unreadable is recorded against `null`: it is `stale` once the source
-  reads again.
+  string makes the stamp stale, so the step runs. The reason is journaled as
+  `step.source.unavailable` (`stepId`, `source`, `reason`) and printed once. The
+  same event is journaled when the reading after the pass fails. A pass that
+  settles while its source is unreadable is stamped with `null` for it, which is
+  never up to date: the step runs again on the next invocation.
 - **Read, never written.** A source in `output`, or two sources of the same name
   in one step's `input`, is a build error. `source.read(ctx)` returns the
   stdout, for an action step that needs the same bytes.
@@ -728,6 +689,72 @@ Add `fixBackend` to the policy to repair on another provider in a fresh session
 Provider-specific options live in `options`. Nominal `model` and `effort` come from
 `profiles.<role>.backends.<backend>` (or a project override), not from step options.
 The JSON verdict (`success`, `reason?`) is implicit for every agent step.
+
+A repair without replay (`onFail: { fix, retries: 1, replayAfterFix: false }`)
+ends the step on its repair, unverified. It requires `blocking: false` and a
+step without `output`: nothing would vouch for outputs the repair rewrote. To
+have an agent step's outputs checked and corrected once, declare `review`
+instead.
+
+### Review of an agent step
+
+`review` on an `llmStep` has its outputs reviewed by another agent once the
+step succeeded, then corrected once in the session that produced them:
+
+```ts
+llmStep({
+  id: "plan",
+  name: "Plan",
+  profile: "planner",
+  backend: "claude",
+  input: [triage],
+  output: [plan],
+  command: (ctx) => planPrompt(ctx),
+  onFail: { retries: 1 },
+  review: {
+    profile: "reviewer",
+    backend: "claude",
+    retries: 1,
+    command: (ctx) => auditPrompt(ctx),
+    capture: { field: "audit", artifact: audit, schema: AUDIT_SCHEMA },
+    fix: (audit) => (audit.defects.length ? `Fix these defects:\n${audit.defects.join("\n")}` : undefined),
+  },
+})
+```
+
+Once the step's own attempts succeeded, `onFail` included:
+
+1. **Review.** A `review` attempt runs `command` in a fresh session, on
+   `review.backend` and `review.profile` (with `options`), and returns
+   `capture.field` with its verdict; the runner writes it to `capture.artifact`.
+   A failed attempt, a refused capture or `success: false` is rerun
+   `review.retries` times (default `0`), then the step fails.
+2. **Fix.** `fix(review, ctx)` receives the captured review and returns the
+   prompt of the fix, or `undefined` for none. A prompt runs exactly one `fix`
+   attempt resuming the step's own session, whatever its size, with
+   `fixProfile` (default: the step's profile); the session it forks becomes the
+   step's session, so a later `resumeSession` sees the fix. Every output of the
+   step must still pass `require` afterwards. There is no second review and no
+   replay of the command; a fix that fails fails the step. The fix always
+   resumes the producing session: when that session can no longer be resumed
+   (its session file is gone), the step fails, with no fallback to a fresh
+   session.
+3. **Done.** The step settles `done` and gets one [stamp](#input-freshness),
+   covering its outputs and the review capture.
+
+The review capture joins the step's `output`: it is erased with the other
+outputs before each `step` attempt, required only after the review, and has one
+producer like any output. A failure or an interruption in any phase leaves no
+stamp, so the next invocation replays the whole step from its command. Review
+and fix attempts are attempts of the step (`kind: "review"` and `"fix"`),
+charged to it and to the run, and pass the same cost gate as a retry; see
+[budgets](budgets-timeouts.md). The review session is kept on its attempt
+only.
+
+The build refuses `review` on a step that is not an `llmStep`, with
+`blocking: false`, on a step whose backend cannot resume a session (the
+review's own backend is never resumed), and with a capture field among the
+verdict's own (`success`, `reason`, `blocked`).
 
 ## Public surface
 
@@ -833,7 +860,7 @@ The rules, all checked when the step is built:
   field in the schema sent to the provider.
 - Every captured artifact joins `output` (once, if it is already listed), so it
   inherits everything an output has: erased before the spawn, proven by `require`
-  after it, fingerprinted for [input freshness](#input-freshness), and listed in the
+  after it, hashed in the step's [stamp](#input-freshness), and listed in the
   `OUTPUTS` column of `lancenuit lint-pipeline`.
 - The short form is reserved to `textArtifact`. A JSON `artifact` needs the long
   form with a `schema`, and that schema must be **strict-mode compatible**: on every

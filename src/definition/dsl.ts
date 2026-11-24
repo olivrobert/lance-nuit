@@ -29,7 +29,7 @@ import type {
 import type { reject } from "./dsl/preconditions.js";
 import type { FixContext, PipelineContext } from "../shared/language/context.js";
 import type { Pipeline } from "./definition.js";
-import type { decisionMatchesArtifact, freshness, pendingRejection } from "../work-items/index.js";
+import type { decisionMatchesArtifact, pendingRejection } from "../work-items/index.js";
 
 export type {
   HumanReviewOptions,
@@ -76,6 +76,7 @@ export type {
   ParallelizeOptions,
   PipelineAfterOptions,
   PipelineEntry,
+  ReviewOptions,
   RunPipelineOptions,
   StepOptionsBase,
 } from "./dsl/dsl-types.js";
@@ -111,8 +112,6 @@ export type { CodexBackendOptions, CodexModel, CodexSandbox } from "../contracts
 export { CODEX_MODEL, CODEX_SANDBOX } from "../contracts/backends/codex.js";
 export type { AsyncTemplated, FixContext, PipelineContext, Templated } from "../shared/language/context.js";
 export type { Pipeline, StepCapture } from "./definition.js";
-export type { ArtifactFreshness } from "../work-items/index.js";
-export { freshness } from "../work-items/index.js";
 
 /**
  * Failure policy for a mechanical fix. The restricted Claude tool set and
@@ -174,8 +173,6 @@ export interface Dsl {
   decisionMatchesArtifact: typeof decisionMatchesArtifact;
   /** Reason and round of a rejection the rework has not answered yet, for its prompt. */
   pendingRejection: typeof pendingRejection;
-  /** Freshness of an artifact against the inputs recorded when it was produced. */
-  freshness: typeof freshness;
 }
 
 export type PipelineFactory = (dsl: Dsl, context: PipelineContext) => Pipeline;

@@ -74,14 +74,12 @@ export {
   readRun,
   readRunHistory,
   readRunJournal,
-  recordAbsorbedInputs,
   recordChildStarted,
   recordDecision,
   recordSkip,
   recordStepVerdict,
   reportLiveCost,
   recordUnavailableSource,
-  recordUnfinishedOutputs,
   refundRetry,
   releaseAllowance,
   removeClosureAt,
@@ -127,7 +125,6 @@ export type {
   RunAttemptView,
   RunStepView,
   RunView,
-  StepDefinition,
 } from "./run.js";
 export type { DispatchOutcomeKind, ScanAbort, ScanRecord, ScanTicketState } from "./scan-record.js";
 export {

@@ -12,7 +12,7 @@ import {
   heal,
   latestRunId,
   mark,
-  provenanceInputs,
+  stampInputs,
   run,
   scratchRoute,
   skipsSince,
@@ -30,12 +30,10 @@ const CHEAP = ["context", "prepare", "quality", "report"];
 /** What a moved source replays: `implement` and every step reading what it rewrote, around the CHEAP steps. */
 const FROM_IMPLEMENT = ["context", "prepare", "implement", "quality", "commit", "publish", "report"];
 
-/** What admission says when a step's outputs match its inputs. */
-const UP_TO_DATE = "outputs up to date with declared inputs";
-/** What admission says when a step without input finds every output it declares. */
-const PRESENT = "outputs present";
+/** What admission says when a step's stamp still holds. */
+const UP_TO_DATE = "up to date";
 
-/** Provenance key of the `tree` source, beside the `artifacts/<name>` keys. */
+/** Lock key of the `tree` source, beside the `artifacts/<name>` keys. */
 const TREE_KEY = "source:tree";
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -64,7 +62,7 @@ function expectFreeRelaunch(cwd: string, ...args: string[]): void {
   expect(snapshot(cwd).status).toBe("PASS");
   expect(traceSince(cwd, before)).toEqual(CHEAP);
   expect(reasons(cwd, before)).toEqual([
-    { stepId: "branch", reason: PRESENT },
+    { stepId: "branch", reason: UP_TO_DATE },
     ...upToDate("triage", "plan", "implement", "commit", "publish"),
   ]);
 }
@@ -72,7 +70,7 @@ function expectFreeRelaunch(cwd: string, ...args: string[]): void {
 test("X1: a committed change replays implement and what follows it, not triage or plan", () => {
   const cwd = scratchRoute({ source: true });
   passedRun(cwd);
-  const recorded = provenanceInputs(cwd, "impl.md");
+  const recorded = stampInputs(cwd, "implement");
   // Keyed apart from the artifacts: a source named like an artifact cannot shadow it.
   expect(Object.keys(recorded).sort()).toEqual(["artifacts/plan.md", TREE_KEY]);
   expect(recorded[TREE_KEY]).toMatch(SHA256);
@@ -87,8 +85,8 @@ test("X1: a committed change replays implement and what follows it, not triage o
   expect(latestRunId(cwd)).not.toBe(firstRun);
   expect(snapshot(cwd).status).toBe("PASS");
   expect(traceSince(cwd, before)).toEqual(FROM_IMPLEMENT);
-  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: PRESENT }, ...upToDate("triage", "plan")]);
-  const rerecorded = provenanceInputs(cwd, "impl.md");
+  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: UP_TO_DATE }, ...upToDate("triage", "plan")]);
+  const rerecorded = stampInputs(cwd, "implement");
   expect(rerecorded[TREE_KEY]).toMatch(SHA256);
   expect(rerecorded[TREE_KEY]).not.toBe(recorded[TREE_KEY]);
   expect(rerecorded["artifacts/plan.md"]).toBe(recorded["artifacts/plan.md"]);
@@ -111,7 +109,7 @@ test("X1: an uncommitted change replays implement too, once --allow-dirty admits
   expect(second.status).toBe(0);
   expect(snapshot(cwd).status).toBe("PASS");
   expect(traceSince(cwd, before)).toEqual(FROM_IMPLEMENT);
-  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: PRESENT }, ...upToDate("triage", "plan")]);
+  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: UP_TO_DATE }, ...upToDate("triage", "plan")]);
   // The diff did not move since: the same dirty tree is fresh.
   expectFreeRelaunch(cwd, "--allow-dirty");
 });
@@ -133,7 +131,7 @@ test("X1: a change made while a run is failed re-admits implement on the resume 
   expect(latestRunId(cwd)).toBe(failedRun);
   expect(snapshot(cwd).status).toBe("PASS");
   expect(traceSince(cwd, before)).toEqual(FROM_IMPLEMENT);
-  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: PRESENT }, ...upToDate("triage", "plan")]);
+  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: UP_TO_DATE }, ...upToDate("triage", "plan")]);
 });
 
 test("X1: a step that changes its own source is not stale because of it, only because of someone else's change", () => {
@@ -165,7 +163,7 @@ test("X2: a source whose command fails leaves freshness unknown: the step runs a
   expect(snapshot(cwd).status).toBe("PASS");
   // Nothing moved but the source cannot vouch for it: the safe bias is to run.
   expect(traceSince(cwd, before)).toEqual(FROM_IMPLEMENT);
-  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: PRESENT }, ...upToDate("triage", "plan")]);
+  expect(reasons(cwd, before)).toEqual([{ stepId: "branch", reason: UP_TO_DATE }, ...upToDate("triage", "plan")]);
   const unavailable = eventsSince(cwd, before, "step.source.unavailable");
   // Once at admission, once when the successful attempt reads it again to record it.
   expect(unavailable).toHaveLength(2);
@@ -175,7 +173,7 @@ test("X2: a source whose command fails leaves freshness unknown: the step runs a
   }
   expect(second.stdout + second.stderr).toContain(`source "tree" unavailable`);
   // What implement was produced from is recorded as unknown, never as a fingerprint.
-  expect(provenanceInputs(cwd, "impl.md")[TREE_KEY]).toBeNull();
+  expect(stampInputs(cwd, "implement")[TREE_KEY]).toBeNull();
   heal(cwd, "tree");
   const beforeHeal = mark(cwd);
 
@@ -185,7 +183,7 @@ test("X2: a source whose command fails leaves freshness unknown: the step runs a
   expect(healed.status).toBe(0);
   expect(traceSince(cwd, beforeHeal)).toEqual(FROM_IMPLEMENT);
   expect(eventsSince(cwd, beforeHeal, "step.source.unavailable")).toEqual([]);
-  expect(provenanceInputs(cwd, "impl.md")[TREE_KEY]).toMatch(SHA256);
+  expect(stampInputs(cwd, "implement")[TREE_KEY]).toMatch(SHA256);
   expectFreeRelaunch(cwd);
 });
 

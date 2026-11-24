@@ -10,24 +10,21 @@ pipeline may keep one plan split into batches (for example in
 │   ├── ticket.md            # fetched source content, written by the work-item loop
 │   ├── inputs/              # optional human-provided files
 │   ├── report.json          # optional delivery report shown by the dashboard
-│   └── .provenance/         # <name>.json: inputs each output was produced from
+│   └── lock.json            # freshness lock: one stamp per step that last succeeded
 ├── reports/                 # timestamped reports (e2e, retrospective, ...)
 ├── decisions/               # human decisions (--approve)
 └── runs/                    # per-run state and logs
 ```
 
 The three families (`artifacts/`, `reports/`, `runs/`) are described in the
-architecture guide. `artifacts/.provenance/` is owned by the runner: it holds one
-`{ artifact, producedBy, producedAt, inputs: { "artifacts/<name>": "<sha256>" } }`
-record per declared output (without fingerprint for a step without `input`),
-which is what makes a rerun replay only what its sources changed, and
-([admission](dsl.md#admission-of-settled-steps)) which of the deliverables on disk an
-unfinished attempt left and must not count as done. A record with an
-`inFlight` mark names the attempt still writing that output, or the one that
-failed while writing it: an output that attempt may have left partial is never
-adopted. A record marked `unguaranteed` says revisions rewrote bytes no
-finished attempt vouched for: the steps producing that output run again. See
-[`persistence.md`](persistence.md#output-provenance) for the record shape and
+architecture guide. `artifacts/lock.json` is owned by the runner: it holds one
+stamp per step whose last pass settled `done`, with the SHA-256 of the inputs
+and outputs that step declares. That is what makes a rerun replay only what its
+sources changed ([admission](dsl.md#admission-of-settled-steps)): a step whose
+stamp still matches is skipped, and a pass that failed, was aborted or was
+interrupted left no stamp, so the deliverables it left on disk never count as
+done. Every run and every pipeline of the work item share it. See
+[`persistence.md`](persistence.md#freshness-lock) for the file and
 [`dsl.md`](dsl.md#input-freshness) for the freshness rules.
 
 Tickets in **arbitrary work-item subdirectories** are supported by passing the
@@ -41,7 +38,7 @@ the original identifier. `ctx.paths.artifactsDir`, `reportsDir`, and
 `ctx.artifacts` instead of assembling artifact paths manually. Inside the
 runner, `workItemLayout` (`src/work-items/store/layout.ts`) is the one place these
 names are spelled: the context and the dashboard both derive them from it. The
-relative reference a decision, a provenance record or a gate stop persists for
+relative reference a decision, a lock stamp or a gate stop persists for
 an artifact (`artifacts/<name>`) is spelled once too, by `artifactKey` beside it.
 
 The resolver also supports explicit nested identifiers such as
