@@ -6,7 +6,7 @@
 // through `runner.ts` for real.
 
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -74,6 +74,49 @@ test("a usage error is reported and exits 1 without booting", () => {
     expect(result.status).toBe(1);
   }
 });
+
+/** The run's `state.json`, or `undefined` before the runner wrote it. */
+function runState(cwd: string): Record<string, any> | undefined {
+  const file = readdirSync(cwd, { recursive: true, encoding: "utf8" }).find(
+    (entry) => entry.endsWith("state.json") && entry.includes("/runs/") && !entry.includes("/latest/"),
+  );
+  return file ? JSON.parse(readFileSync(join(cwd, file), "utf8")) : undefined;
+}
+
+test("a runner killed while its attempt runs leaves it running; the resume closes it as crashed before replaying", async () => {
+  const cwd = projectWith(`export default ({ pipeline, bashStep }: any) =>
+  pipeline("entry-crash")
+    .add(bashStep({ id: "work", name: "Work", command: "test -f done.flag || sleep 30", rerunOnResume: true }))
+    .build();
+`);
+  const runner = spawn(process.execPath, [runnerEntry, "CRASH-1"], { cwd, detached: true, stdio: "ignore" });
+  try {
+    const deadline = Date.now() + 20_000;
+    while (runState(cwd)?.steps?.[0]?.attempts?.[0]?.status !== "running") {
+      if (Date.now() > deadline) throw new Error("the attempt never reached running");
+      await Bun.sleep(50);
+    }
+  } finally {
+    process.kill(-runner.pid!, "SIGKILL");
+  }
+  await new Promise((done) => runner.once("exit", done));
+  expect(runState(cwd)?.steps[0].attempts).toMatchObject([{ attempt: 1, status: "running" }]);
+  expect(runState(cwd)?.steps[0].attempts[0].finished_at).toBeUndefined();
+
+  writeFileSync(join(cwd, "done.flag"), "");
+  const resumed = runEntry(cwd, "CRASH-1");
+
+  expect(resumed.status).toBe(0);
+  const [crashed, replayed] = runState(cwd)?.steps[0].attempts;
+  expect(crashed).toMatchObject({
+    attempt: 1,
+    status: "failed",
+    interrupted: true,
+    errors: "runner died before the attempt reported its result (crash, OOM, or SIGKILL)",
+  });
+  expect(crashed.finished_at).toBeString();
+  expect(replayed).toMatchObject({ attempt: 2, status: "done" });
+}, 30_000);
 
 /** A non-blocking step that fails: the step loop absorbs it and warns, which is
  *  the shortest real path from `absorbNonBlocking` to an operator's terminal. */

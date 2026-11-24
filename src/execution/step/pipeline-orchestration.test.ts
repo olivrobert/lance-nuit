@@ -1663,12 +1663,17 @@ test("pipeline-orchestration: a child already finished is settled without runnin
   updateStep(first.run, firstStep, "failed", "crash before settlement");
   writable(first.run).status = "RUNNING";
   saveRun(writable(first.run));
+  const childState = join(pipelineRunsDir("child", "P", context), ref.runId!, "state.json");
+  const childBytes = readFileSync(childState, "utf8");
+  expect(readRunSnapshot(childState)?.status).toBe("PASS");
 
   // A second launch of the child would hit this trap and fail the run.
   costCalls.push({ ok: false, cost: 5 });
   const resumed = await executeParent(parentPath, root, "P", runDir, false, context);
   costCalls.length = 0;
 
+  // S10: the parent settles its ref from the PASS child without writing it.
+  expect(readFileSync(childState, "utf8")).toBe(childBytes);
   expect(resumed.run.status).toBe("PASS");
   expect(runSpend(resumed.run).usd).toBeCloseTo(1, 10);
   const step = resumed.run.steps[0]!;
