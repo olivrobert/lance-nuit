@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AgentCapabilities, AgentRequest } from "../../contracts/backends.js";
@@ -1468,8 +1468,8 @@ test("pipeline-orchestration: a composed child cannot authorize itself past a st
 }, 30_000);
 
 /** Parent whose orchestration node already names a child run, as the parent
- *  persists it before booting the child. `started` also journals the durable
- *  `pipeline.child.started` fact for that identity. */
+ *  persists it before booting the child. `started` marks the ref `startedAt`
+ *  in the snapshot alone, without any journal event. */
 async function parentWithNamedChild(root: string, started: boolean) {
   const childPath = writePipeline(root, "child", actionPipelineSource("child", "child"));
   const parentPath = writePipeline(
@@ -1516,14 +1516,6 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
     ],
   };
   saveRun(parent);
-  if (started) {
-    appendRunEvent(parent, "pipeline.child.started", {
-      parentNodeId: parentStep.id,
-      childRunId,
-      childPipeline: "child",
-      childTicket: "P-01",
-    });
-  }
   const childContext = buildPipelineContext({ cwd: root, ticket: "P-01", agentBackendRegistry: REGISTRY });
   const childRunDir = join(pipelineRunsDir("child", "P-01", childContext), childRunId);
   return { parentPath, parentRunDir, childRunDir };
@@ -1535,6 +1527,7 @@ export default ({ pipeline, forEachPipeline }) => pipeline("parent")
 test("invariant: a started child with a lost child snapshot never starts a second child under that identity", async () => {
   const root = mkdtempSync(join(tmpdir(), "pipeline-invariant-child-identity-"));
   const { parentPath, parentRunDir, childRunDir } = await parentWithNamedChild(root, true);
+  rmSync(join(parentRunDir, "events.jsonl"), { force: true });
 
   const { run, outcome } = await executeParent(parentPath, root, "P", parentRunDir, false);
 
@@ -1567,6 +1560,45 @@ test("invariant: a child bound but never started is retried under the same ident
     "named-child",
   ]);
   expect(events.filter((event) => event.type === "pipeline.child.finished")).toHaveLength(1);
+});
+
+// Invariant (S6, S2): with the parent's journal gone, the ref's `startedAt` alone
+// binds the re-entered node to the child it already started; no second child runs.
+test("invariant: without the parent's journal, a started child ref is re-entered without starting a second child", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pipeline-invariant-child-no-journal-"));
+  const childPath = writePipeline(root, "child", actionPipelineSource("child", "child"));
+  const parentPath = writePipeline(
+    root,
+    "parent",
+    `
+export default ({ pipeline, runPipeline }) => pipeline("parent")
+  .add(runPipeline({ id: "child", name: "child", pipeline: "./${childPath.slice(root.length + 1)}" }))
+  .build();
+`,
+  );
+  const runDir = join(root, "parent-run");
+  const first = await executeParent(parentPath, root, "P", runDir, true);
+  expect(first.run.status).toBe("PASS");
+  const firstStep = writable(first.run.steps[0]!);
+  const ref = firstStep.orchestration!.children[0]!;
+  expect(ref.startedAt).toBeString();
+  const { runId, startedAt } = ref;
+
+  ref.status = "running";
+  updateStep(first.run, firstStep, "failed", "crash before settlement");
+  writable(first.run).status = "RUNNING";
+  saveRun(writable(first.run));
+  rmSync(join(runDir, "events.jsonl"));
+
+  const resumed = await executeParent(parentPath, root, "P", runDir, false);
+
+  expect(resumed.run.status).toBe("PASS");
+  expect(resumed.run.steps[0]!.orchestration!.children[0]).toMatchObject({ status: "done", runId, startedAt });
+  expect(readFileSync(join(root, "trace.log"), "utf8").trim().split("\n")).toEqual(["child:P"]);
+  const childContext = buildPipelineContext({ cwd: root, ticket: "P", agentBackendRegistry: REGISTRY });
+  expect(readdirSync(pipelineRunsDir("child", "P", childContext))).toEqual([runId]);
+  const started = readRunEvents(runDir).filter((event) => event.type === "pipeline.child.started");
+  expect(started.map((event) => event.childRunId)).toEqual([runId]);
 });
 
 /** A `runPipeline` parent over a one-step priced child, with the profile the cost
