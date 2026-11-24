@@ -69,6 +69,16 @@ function scratchProject() {
   return cwd;
 }
 
+/** The freshness lock belongs to the work item, so a `--fresh` run skips the step whose output is still stamped. */
+function expectFreshRunSkippedCountAndReachedStop(runsRoot: string, runId: string, output: string) {
+  expect(output).toContain("Count once — skipped: up to date");
+  const state = JSON.parse(readFileSync(join(runsRoot, runId, "state.json"), "utf8"));
+  expect(state.steps).toMatchObject([
+    { id: "count", status: "skipped", attempts: [] },
+    { id: "stop", status: "failed", attempts: [{ attempt: 1, status: "failed" }] },
+  ]);
+}
+
 test("damaged latest fails before replay, while --fresh preserves the old run", () => {
   const cwd = scratchProject();
   const runsRoot = join(cwd, ".lance-nuit", "work-items", "STRICT-1", "runs", "strict-resume");
@@ -98,9 +108,10 @@ test("damaged latest fails before replay, while --fresh preserves the old run", 
 
   const fresh = runRunner(cwd, "STRICT-1", "--fresh");
   expect(fresh.status).toBe(1);
-  expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("2\n");
   const freshRunId = readlinkSync(latest);
   expect(freshRunId).not.toBe(oldRunId);
+  expectFreshRunSkippedCountAndReachedStop(runsRoot, freshRunId, `${fresh.stdout}${fresh.stderr}`);
+  expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("1\n");
   expect(readFileSync(state, "utf8")).toBe("{\n");
   expect(readFileSync(join(oldRun, "events.jsonl"), "utf8")).toBe(oldEvents);
 });
@@ -118,17 +129,19 @@ test("explicit --run rejects damaged state without changing another latest run",
   const oldLockBefore = existsSync(oldLock) ? readFileSync(oldLock, "utf8") : undefined;
   const damaged = "{\n";
 
-  expect(runRunner(cwd, "STRICT-1", "--fresh").status).toBe(1);
+  const fresh = runRunner(cwd, "STRICT-1", "--fresh");
+  expect(fresh.status).toBe(1);
   const currentRunId = readlinkSync(latest);
   expect(currentRunId).not.toBe(oldRunId);
-  expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("2\n");
+  expectFreshRunSkippedCountAndReachedStop(runsRoot, currentRunId, `${fresh.stdout}${fresh.stderr}`);
+  expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("1\n");
   writeFileSync(oldState, damaged);
 
   const explicit = runRunner(cwd, "STRICT-1", "--run", oldRunId);
   expect(explicit.status).toBe(1);
   expect(`${explicit.stdout}${explicit.stderr}`).toContain(oldState);
   expect(readlinkSync(latest)).toBe(currentRunId);
-  expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("2\n");
+  expect(readFileSync(join(cwd, ".counter"), "utf8")).toBe("1\n");
   expect(readFileSync(oldState, "utf8")).toBe(damaged);
   expect(existsSync(oldLock) ? readFileSync(oldLock, "utf8") : undefined).toBe(oldLockBefore);
 });
