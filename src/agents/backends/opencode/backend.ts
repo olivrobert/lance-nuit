@@ -6,6 +6,7 @@ import type {
   AgentResult,
   AgentSession,
 } from "../../../contracts/index.js";
+import { isStepProfileName, type StepProfileName } from "../../../shared/language/profiles.js";
 import { buildOpencodeArgs, buildOpencodeEnv } from "./args.js";
 import { ensureOpencodeConfig } from "./config.js";
 import { executeOpencode } from "./execution.js";
@@ -35,16 +36,20 @@ export const DEFAULT_FIRST_EVENT_TIMEOUT_MS = 120_000;
  * text-to-JSON roles get the toolless one (184 input tokens against ~6556).
  * opencode has no per-invocation permission flag: the agent IS the permission.
  */
-const AGENT_FOR_ROLE: Readonly<Record<string, OpencodeAgent>> = {
+const AGENT_FOR_ROLE: Readonly<Record<StepProfileName, OpencodeAgent>> = {
   extractor: OPENCODE_AGENT.BARE,
   triage: OPENCODE_AGENT.BARE,
   relay: OPENCODE_AGENT.BARE,
   reviewer: OPENCODE_AGENT.READ_ONLY,
   planner: OPENCODE_AGENT.READ_ONLY,
+  coder: OPENCODE_AGENT.RUNNER,
+  operator: OPENCODE_AGENT.RUNNER,
 };
 
+/** `role` stays a free string in the public contract; an unknown one gets the
+ *  all-tools agent, as a request with no role does. */
 function agentForRole(role: string | undefined): OpencodeAgent {
-  return (role && AGENT_FOR_ROLE[role]) || OPENCODE_AGENT.RUNNER;
+  return role && isStepProfileName(role) ? AGENT_FOR_ROLE[role] : OPENCODE_AGENT.RUNNER;
 }
 
 export function createOpencodeBackend(

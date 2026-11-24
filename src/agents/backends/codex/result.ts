@@ -1,6 +1,5 @@
 import type { AgentResult } from "../../../contracts/index.js";
-import { verdictFromStructured } from "../../../contracts/index.js";
-import { agentSession, killFields, parseStructuredVerdict, resolveVerdictOutcome } from "../result-helpers.js";
+import { agentSession, mapAgentResult, providerError } from "../result-helpers.js";
 import { type ParsedCodexEvents, parseCodexEvents } from "./events.js";
 import { computeCostUsd } from "./pricing.js";
 import type { CodexOptions, RawCodexExecutionResult } from "./types.js";
@@ -46,34 +45,17 @@ function buildStats(parsed: ParsedCodexEvents, durationMs: number): AgentResult[
 
 export function mapCodexExecutionResult(raw: RawCodexExecutionResult, options: CodexResultOptions = {}): AgentResult {
   const parsed = parseCodexEvents(raw.output, options.model);
-  // `--output-schema` usually makes the structured candidate the verdict; the
-  // shared cascade still lets an explicit ```json:verdict fence win, so a stray
-  // trailing JSON message cannot mask a verdict the agent already stated.
-  const structured =
-    options.outputFormat === "json" ? parseStructuredVerdict(parsed.text, parsed.structuredOutput) : {};
-  const verdictDetails = structured.value != null ? verdictFromStructured(structured.value) : undefined;
-  const { ok, failReason, failKind, failCause } = resolveVerdictOutcome({
-    kill: raw.kill,
-    code: raw.code,
-    // Codex stream errors are transport breaks and carry no stop signal of their
-    // own: no `cause`. Nothing here encodes one in the message either.
-    error: parsed.error ? { text: parsed.error } : undefined,
-    requiresVerdict: options.outputFormat === "json",
-    verdict: verdictDetails?.verdict,
-    invalidReason: structured.invalidReason ?? verdictDetails?.invalidReason,
-    missingVerdictLabel: "no Codex verdict",
-  });
   const session = agentSession("codex", parsed.sessionId, !options.ephemeral);
-  return {
+  return mapAgentResult({
     provider: "codex",
-    output: parsed.text,
-    ok,
+    // `--output-schema` constrains the final message, read by the shared cascade.
+    source: { text: parsed.text, ...(parsed.finalMessage != null ? { finalMessage: parsed.finalMessage } : {}) },
+    outputFormat: options.outputFormat,
     stats: buildStats(parsed, raw.durationMs),
     ...(session ? { session } : {}),
-    ...(structured.value != null ? { structuredOutput: structured.value } : {}),
-    ...killFields(raw.kill),
-    ...(failReason ? { failReason } : {}),
-    ...(failKind ? { failKind } : {}),
-    ...(failCause ? { failCause } : {}),
-  };
+    kill: raw.kill,
+    code: raw.code,
+    ...(parsed.error ? { error: providerError(parsed.error) } : {}),
+    missingVerdictLabel: "no Codex verdict",
+  });
 }

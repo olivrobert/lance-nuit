@@ -1,4 +1,5 @@
 import {
+  type AgentResult,
   type AgentSession,
   extractVerdictDetails,
   type StepFailCause,
@@ -31,36 +32,73 @@ export function killFields(kill: ProcessKill | undefined): {
   };
 }
 
+/** What an agent said, before anything is read as a verdict. */
+export interface VerdictSource {
+  /** Every message of the agent, joined. */
+  text: string;
+  /** The answer a native output schema constrained (Claude's StructuredOutput). */
+  structuredOutput?: unknown;
+  /** The last message alone, where `text` joins several (codex, opencode). */
+  finalMessage?: string;
+}
+
+function parseJson(text: string | undefined): { value: unknown } | undefined {
+  const trimmed = text?.trim();
+  if (!trimmed) return undefined;
+  try {
+    return { value: JSON.parse(trimmed) };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Verdict-candidate cascade shared by process-backed agents, from the most
- * explicit shape to the most forgiving: the ```json:verdict fence, then the
- * stream's structured output (validated), then the whole text as one JSON
- * object. One order for every backend — the same agent output must never pass
- * on one provider and fail on another because the candidates were tried in a
- * different sequence.
+ * Verdict-candidate cascade shared by every agent backend, following the guide
+ * (`guide/dsl.md`, "The verdict is read from `result.structured_output`"): the
+ * answer of a native output schema, then the final message as one JSON object
+ * (what codex's `--output-schema` produces), then the ```json:verdict fence as
+ * the fallback. One order for every backend — the same agent output must never
+ * pass on one provider and fail on another.
+ *
+ * The first VALID candidate wins: a stray JSON object that is not a verdict does
+ * not mask a fence the agent wrote. With no valid candidate, the reason given is
+ * the one of the most explicit candidate present.
  */
-export function parseStructuredVerdict(
-  text: string,
-  structuredOutput: unknown,
-): { value?: unknown; invalidReason?: string } {
-  const fence = extractVerdictDetails(text);
+export function parseStructuredVerdict(source: VerdictSource): { value?: unknown; invalidReason?: string } {
+  const finalJson = parseJson(source.finalMessage ?? source.text);
+  const fence = extractVerdictDetails(source.text);
+  const candidates = [
+    ...(source.structuredOutput != null ? [source.structuredOutput] : []),
+    ...(finalJson ? [finalJson.value] : []),
+  ];
+  let invalidReason: string | undefined;
+  for (const value of candidates) {
+    const checked = verdictFromStructured(value);
+    if (checked.verdict) return { value };
+    invalidReason ??= checked.invalidReason;
+  }
   // The RAW fence object, not the normalized verdict: the latter keeps only
   // success/reason/blocked, and a step's captured fields (`capture`) live next to
   // them. Every caller re-normalizes through `verdictFromStructured` anyway.
   if (fence.verdict) return { value: fence.raw };
-  if (structuredOutput != null) {
-    const checked = verdictFromStructured(structuredOutput);
-    return checked.verdict ? { value: structuredOutput } : { invalidReason: checked.invalidReason };
-  }
-  if (!text.trim()) return {};
-  try {
-    const value = JSON.parse(text.trim());
-    const checked = verdictFromStructured(value);
-    return checked.verdict ? { value } : { invalidReason: checked.invalidReason };
-  } catch {
-    // A malformed fence is still the best diagnostic available at this point.
-    return fence.invalidReason ? { invalidReason: fence.invalidReason } : {};
-  }
+  invalidReason ??= fence.invalidReason;
+  return invalidReason ? { invalidReason } : {};
+}
+
+const BLOCKING_PROVIDER_ERROR =
+  /\b(?:status|http|code)\W{0,3}40[13]\b|\b40[13] (?:unauthorized|forbidden)\b|unauthori[sz]ed|invalid[_ ]api[_ ]key|not logged in|authentication (?:failed|error|required)|usage limit|insufficient[_ ]quota|exceeded your current quota|billing|credit balance/i;
+const TRANSIENT_PROVIDER_ERROR = /try again in|retry in|retrying/i;
+
+/**
+ * A provider error that only states itself in prose (codex, opencode).
+ * Rejected credentials and an exhausted plan are blocks: no repair pass can get
+ * past them, and spending one is the failure this prevents. A message that
+ * announces its own retry is transient and stays a plain technical failure.
+ */
+export function providerError(text: string): VerdictOutcomeError {
+  return BLOCKING_PROVIDER_ERROR.test(text) && !TRANSIENT_PROVIDER_ERROR.test(text)
+    ? { text, cause: "blocked" }
+    : { text };
 }
 
 /** Parsed transport/stream error. `cause` travels with it so a backend can say
@@ -155,4 +193,49 @@ export function resolveVerdictOutcome(input: VerdictOutcomeInput): VerdictOutcom
           ? "blocked"
           : undefined;
   return { ok, failReason, failKind, failCause };
+}
+
+export interface AgentResultInput {
+  provider: string;
+  source: VerdictSource;
+  outputFormat?: "text" | "json";
+  stats: AgentResult["stats"];
+  session?: AgentSession;
+  kill?: ProcessKill;
+  code: number | null;
+  error?: VerdictOutcomeError;
+  missingVerdictLabel: string;
+  log?: (message: string) => void;
+}
+
+/**
+ * The `AgentResult` of one process-backed run. A verdict is read only when JSON
+ * output was asked for: a text run (a fix pass) has no verdict contract, and a
+ * fence it happens to print must not leave a `failReason` on a successful result.
+ */
+export function mapAgentResult(input: AgentResultInput): AgentResult {
+  const structured = input.outputFormat === "json" ? parseStructuredVerdict(input.source) : {};
+  const details = structured.value != null ? verdictFromStructured(structured.value) : undefined;
+  const { ok, failReason, failKind, failCause } = resolveVerdictOutcome({
+    kill: input.kill,
+    code: input.code,
+    error: input.error,
+    requiresVerdict: input.outputFormat === "json",
+    verdict: details?.verdict,
+    invalidReason: structured.invalidReason ?? details?.invalidReason,
+    missingVerdictLabel: input.missingVerdictLabel,
+    ...(input.log ? { log: input.log } : {}),
+  });
+  return {
+    provider: input.provider,
+    output: input.source.text,
+    ok,
+    stats: input.stats,
+    ...(input.session ? { session: input.session } : {}),
+    ...(structured.value != null ? { structuredOutput: structured.value } : {}),
+    ...killFields(input.kill),
+    ...(failReason ? { failReason } : {}),
+    ...(failKind ? { failKind } : {}),
+    ...(failCause ? { failCause } : {}),
+  };
 }

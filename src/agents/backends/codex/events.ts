@@ -49,7 +49,8 @@ export function accumulateCodexUsage(event: CodexEvent, totals: CodexUsageTotals
 export interface ParsedCodexEvents {
   text: string;
   sessionId?: string;
-  structuredOutput?: unknown;
+  /** The last agent message: under `--output-schema`, the constrained answer. */
+  finalMessage?: string;
   error?: string;
   model?: string;
   inputTokens?: number;
@@ -64,7 +65,6 @@ export function parseCodexEvents(raw: string, fallbackModel?: string): ParsedCod
   const messages: string[] = [];
   const tools = new Set<string>();
   let sessionId: string | undefined;
-  let structuredOutput: unknown;
   let error: string | undefined;
   const totals = newCodexUsageTotals(fallbackModel);
 
@@ -87,14 +87,6 @@ export function parseCodexEvents(raw: string, fallbackModel?: string): ParsedCod
     if (itemType === "agent_message") {
       const text = item.text ?? item.message;
       if (text) messages.push(text);
-      const maybeJson = text?.trim();
-      if (maybeJson?.startsWith("{") && maybeJson.endsWith("}")) {
-        try {
-          structuredOutput = JSON.parse(maybeJson);
-        } catch {
-          /* final parser handles text fallback */
-        }
-      }
     } else if (itemType === "command_execution") tools.add("Bash");
     else if (itemType === "file_change") tools.add("FileChange");
     else if (itemType === "mcp_tool_call") tools.add("MCP");
@@ -104,7 +96,7 @@ export function parseCodexEvents(raw: string, fallbackModel?: string): ParsedCod
   return {
     text: messages.join("\n"),
     ...(sessionId ? { sessionId } : {}),
-    ...(structuredOutput != null ? { structuredOutput } : {}),
+    ...(messages.length > 0 ? { finalMessage: messages[messages.length - 1] } : {}),
     ...(error ? { error } : {}),
     ...(totals.model ? { model: totals.model } : {}),
     ...(totals.inputTokens > 0 ? { inputTokens: totals.inputTokens } : {}),

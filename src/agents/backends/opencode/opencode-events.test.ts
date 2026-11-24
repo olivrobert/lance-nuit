@@ -109,16 +109,16 @@ test("parseOpencodeEvents: a repeated tool counts once", () => {
   expect(parseOpencodeEvents(raw).toolsUsed).toEqual(["read"]);
 });
 
-test("parseOpencodeEvents: keeps a pure JSON answer as structured output", () => {
+test("parseOpencodeEvents: hands the last text part over uninterpreted", () => {
   const raw = JSON.stringify({
     type: "text",
     sessionID: "ses_1",
     part: { id: "prt_1", type: "text", text: '{"tickets": ["PROJ-1"]}' },
   });
-  expect(parseOpencodeEvents(raw).structuredOutput).toEqual({ tickets: ["PROJ-1"] });
+  expect(parseOpencodeEvents(raw).finalMessage).toBe('{"tickets": ["PROJ-1"]}');
 });
 
-test("parseOpencodeEvents: prose is never mistaken for structured output", () => {
+test("parseOpencodeEvents: prose is kept as text, never parsed", () => {
   const raw = JSON.stringify({
     type: "text",
     sessionID: "ses_1",
@@ -126,7 +126,7 @@ test("parseOpencodeEvents: prose is never mistaken for structured output", () =>
   });
   const parsed = parseOpencodeEvents(raw);
 
-  expect(parsed.structuredOutput).toBeUndefined();
+  expect(parsed.finalMessage).toBe("{ this is not json");
   expect(parsed.text).toBe("{ this is not json");
 });
 

@@ -2,7 +2,7 @@ import { promptTemplate } from "./prompt.js";
 import type { ArtifactScope, JsonSchema } from "../../../contracts/index.js";
 import { capabilityAxes, isForked } from "../../../shared/env/capability-frontmatter.js";
 import { artifactScopeDirsOutside, artifactScopeInstruction } from "../artifact-scope.js";
-import { verdictInstruction, verdictSchema } from "../verdict-instruction.js";
+import { promptAsksForVerdictBlock, verdictInstruction, verdictSchema } from "../verdict-instruction.js";
 import type { ClaudeOptions } from "./types.js";
 
 const relay = promptTemplate("fork-relay", ["slash"]);
@@ -39,7 +39,7 @@ export function buildClaudeArgs(prompt: string, options: ClaudeArgsOptions = {})
   if (options.resumeSessionId) args.push("--resume", options.resumeSessionId);
   else if (options.sessionId) args.push("--session-id", options.sessionId);
   const schemaMode = (options.verdictMode ?? resolveVerdictMode()) === "schema";
-  const needsVerdict = options.outputFormat === "json" && (schemaMode || !prompt.includes("json:verdict"));
+  const needsVerdict = options.outputFormat === "json" && (schemaMode || !promptAsksForVerdictBlock(prompt));
   const slash = prompt.trimStart().match(/^\/[\w:-]+/)?.[0];
   const forkRelay =
     slash && options.capabilityRoots && isForkedSlashCommand(prompt, options.capabilityRoots)

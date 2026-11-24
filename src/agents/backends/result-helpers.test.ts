@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { parseStructuredVerdict, resolveVerdictOutcome, type VerdictOutcomeInput } from "./result-helpers.js";
+import {
+  parseStructuredVerdict,
+  providerError,
+  resolveVerdictOutcome,
+  type VerdictOutcomeInput,
+} from "./result-helpers.js";
 
 /* ------------------------------------------------------------------------- *
  * `failCause` is read from the branch the cascade RETAINS, never from the raw
@@ -118,21 +123,49 @@ test("a text-format attempt is ok whatever the verdict says, so it has no cause"
  * normalized verdict would drop it.
  * ------------------------------------------------------------------------- */
 
-test("parseStructuredVerdict: the fence wins and keeps its extra fields", () => {
+test("parseStructuredVerdict: the fence is the fallback and keeps its extra fields", () => {
   const text = 'done\n```json:verdict\n{"success": true, "reason": "ok", "commit": "feat: add capture"}\n```';
-  expect(parseStructuredVerdict(text, { success: false, reason: "stale stream" })).toEqual({
+  expect(parseStructuredVerdict({ text })).toEqual({
     value: { success: true, reason: "ok", commit: "feat: add capture" },
   });
 });
 
+test("parseStructuredVerdict: a schema-constrained answer wins over the fence, as the guide says", () => {
+  const text = 'done\n```json:verdict\n{"success": false, "reason": "draft"}\n```';
+  const structured = { success: true, reason: "ok", commit: "feat: x" };
+  expect(parseStructuredVerdict({ text, structuredOutput: structured })).toEqual({ value: structured });
+  expect(
+    parseStructuredVerdict({
+      text: `${text}\n${JSON.stringify(structured)}`,
+      finalMessage: JSON.stringify(structured),
+    }),
+  ).toEqual({ value: structured });
+});
+
 test("parseStructuredVerdict: structured output and whole-text JSON keep their extra fields too", () => {
   const structured = { success: true, reason: "ok", branch: { name: "feat/x" } };
-  expect(parseStructuredVerdict("prose", structured)).toEqual({ value: structured });
-  expect(parseStructuredVerdict(JSON.stringify(structured), undefined)).toEqual({ value: structured });
+  expect(parseStructuredVerdict({ text: "prose", structuredOutput: structured })).toEqual({ value: structured });
+  expect(parseStructuredVerdict({ text: JSON.stringify(structured) })).toEqual({ value: structured });
+});
+
+test("parseStructuredVerdict: a stray JSON object that is not a verdict does not mask the fence", () => {
+  const text = '```json:verdict\n{"success": false, "reason": "tests"}\n```\n{"tickets": ["PROJ-1"]}';
+  expect(parseStructuredVerdict({ text, finalMessage: '{"tickets": ["PROJ-1"]}' })).toEqual({
+    value: { success: false, reason: "tests" },
+  });
 });
 
 test("parseStructuredVerdict: an invalid fence still reports its own diagnostic", () => {
-  expect(parseStructuredVerdict('```json:verdict\n{"success": "yes"}\n```', undefined)).toEqual({
+  expect(parseStructuredVerdict({ text: '```json:verdict\n{"success": "yes"}\n```' })).toEqual({
     invalidReason: "success must be a boolean",
   });
+});
+
+test("providerError: rejected credentials and an exhausted plan block, a retried hiccup does not", () => {
+  expect(providerError("unexpected status 401 Unauthorized: invalid api key").cause).toBe("blocked");
+  expect(providerError("You've hit your usage limit. Upgrade to Pro.").cause).toBe("blocked");
+  expect(providerError("Insufficient balance: check your billing details").cause).toBe("blocked");
+  expect(providerError("Rate limit reached, try again in 20s").cause).toBeUndefined();
+  expect(providerError("stream disconnected before completion").cause).toBeUndefined();
+  expect(providerError("read 4013 bytes then EOF").cause).toBeUndefined();
 });

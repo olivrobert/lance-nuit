@@ -1,5 +1,6 @@
 import type { ArtifactScope } from "../../../contracts/index.js";
 import { artifactScopeDirsOutside, artifactScopeInstruction } from "../artifact-scope.js";
+import { pushOption } from "../cli-args.js";
 import { CODEX_SANDBOX, type CodexOptions } from "./types.js";
 
 export interface CodexArgsOptions {
@@ -8,10 +9,6 @@ export interface CodexArgsOptions {
   readonly resumeSessionId?: string;
   readonly schemaPath?: string;
   readonly artifactScope?: ArtifactScope;
-}
-
-function pushOption(args: string[], flag: string, value: string | undefined): void {
-  if (value != null && value !== "") args.push(flag, value);
 }
 
 function pushConfig(args: string[], key: string, value: string | undefined): void {

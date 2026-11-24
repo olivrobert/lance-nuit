@@ -15,7 +15,6 @@
 //
 // What stays out of the schema (and in code, in `events.ts`):
 // - which item types map to which tool label (`Bash`, `FileChange`, `MCP`, ...);
-// - the JSON sniffing of an agent message (`{...}` becomes `structuredOutput`);
 // - the error-message precedence (`event.message` before `event.error.message`);
 // - the cost estimation driven by `turn.completed`.
 //

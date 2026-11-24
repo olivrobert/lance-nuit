@@ -1,6 +1,7 @@
 import type { ArtifactScope, EffortLevel, JsonSchema } from "../../../contracts/index.js";
 import { artifactScopeInstruction } from "../artifact-scope.js";
-import { verdictInstruction } from "../verdict-instruction.js";
+import { pushOption } from "../cli-args.js";
+import { promptAsksForVerdictBlock, verdictInstruction } from "../verdict-instruction.js";
 import { OPENCODE_LOG_LEVEL, OPENCODE_VARIANT, type OpencodeOptions, type OpencodeVariant } from "./types.js";
 
 export interface OpencodeArgsOptions {
@@ -34,17 +35,13 @@ export function variantForEffort(effort: EffortLevel | undefined): OpencodeVaria
   }
 }
 
-function pushOption(args: string[], flag: string, value: string | undefined): void {
-  if (value != null && value !== "") args.push(flag, value);
-}
-
 /**
  * opencode has no `--output-schema` and no `StructuredOutput` tool, so the
  * verdict contract is injected into the prompt. Skipped when the caller already
  * spelled it out.
  */
 function needsVerdict(prompt: string, outputFormat: "text" | "json" | undefined): boolean {
-  return outputFormat === "json" && !prompt.includes("json:verdict");
+  return outputFormat === "json" && !promptAsksForVerdictBlock(prompt);
 }
 
 export function buildOpencodeArgs(

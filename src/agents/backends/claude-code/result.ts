@@ -1,6 +1,5 @@
 import type { AgentResult } from "../../../contracts/index.js";
-import { extractVerdictDetails, type VerdictDetails, verdictFromStructured } from "../../../contracts/index.js";
-import { agentSession, killFields, resolveVerdictOutcome, type VerdictOutcomeError } from "../result-helpers.js";
+import { agentSession, mapAgentResult, type VerdictOutcomeError } from "../result-helpers.js";
 import { netCumulative } from "./cost-state.js";
 import { type ClaudeTransportError, isAuthFailure, isRateLimited, parseClaudeEvents } from "./events.js";
 import type { RawClaudeExecutionResult } from "./types.js";
@@ -77,38 +76,18 @@ export function mapClaudeExecutionResult(
     if (parsed.stats.total_cost_usd == null) parsed.stats.cost_unknown = true;
     parsed.stats.total_cost_usd = (parsed.stats.total_cost_usd ?? 0) + raw.priorAttemptsCostUsd;
   }
-  const structured = parsed.structuredOutput != null;
-  const source = structured ? "StructuredOutput" : "json:verdict block";
-  const verdictResult: VerdictDetails = structured
-    ? verdictFromStructured(parsed.structuredOutput)
-    : extractVerdictDetails(parsed.text);
   if (parsed.transportError && !raw.kill) options.log?.(`  ⚠ ${summary(parsed.transportError)}`);
-  const { ok, failReason, failKind, failCause } = resolveVerdictOutcome({
+  const session = agentSession("claude", parsed.sessionId ?? options.sessionId ?? options.resumeSessionId);
+  return mapAgentResult({
+    provider: "claude",
+    source: { text: parsed.text, structuredOutput: parsed.structuredOutput },
+    outputFormat: options.outputFormat,
+    stats: parsed.stats,
+    ...(session ? { session } : {}),
     kill: raw.kill,
     code: raw.code,
-    error: parsed.transportError ? failReasonFor(parsed.transportError) : undefined,
-    requiresVerdict: options.outputFormat === "json",
-    verdict: verdictResult.verdict,
-    ...(verdictResult.invalidReason ? { invalidReason: `${source}: ${verdictResult.invalidReason}` } : {}),
+    ...(parsed.transportError ? { error: failReasonFor(parsed.transportError) } : {}),
     missingVerdictLabel: "no verdict in agent output (neither StructuredOutput nor a json:verdict block)",
     ...(options.log ? { log: options.log } : {}),
   });
-  const id = parsed.sessionId ?? options.sessionId ?? options.resumeSessionId;
-  const session = agentSession("claude", id);
-  // A verdict read from the fence is structured output too: its extra fields
-  // (`capture`) would otherwise be lost, since the normalized verdict keeps only
-  // success/reason/blocked. The raw object is what the runner reads them from.
-  const structuredOutput = structured ? parsed.structuredOutput : verdictResult.raw;
-  return {
-    provider: "claude",
-    output: parsed.text,
-    ok,
-    stats: parsed.stats,
-    ...(session ? { session } : {}),
-    ...(structuredOutput != null ? { structuredOutput } : {}),
-    ...killFields(raw.kill),
-    ...(failReason ? { failReason } : {}),
-    ...(failKind ? { failKind } : {}),
-    ...(failCause ? { failCause } : {}),
-  };
 }

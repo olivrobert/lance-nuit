@@ -45,7 +45,8 @@ export function opencodeToolLabel(tool: string, rawInput: unknown): string {
 export interface ParsedOpencodeEvents {
   text: string;
   sessionId?: string;
-  structuredOutput?: unknown;
+  /** The last text part, where a bare JSON verdict would be. */
+  finalMessage?: string;
   error?: string;
   inputTokens?: number;
   outputTokens?: number;
@@ -73,7 +74,6 @@ export function parseOpencodeEvents(raw: string): ParsedOpencodeEvents {
   const messages: string[] = [];
   const tools = new Set<string>();
   let sessionId: string | undefined;
-  let structuredOutput: unknown;
   let error: string | undefined;
   let inputTokens = 0;
   let outputTokens = 0;
@@ -118,14 +118,6 @@ export function parseOpencodeEvents(raw: string): ParsedOpencodeEvents {
       const text = event.part?.text;
       if (!text) continue;
       messages.push(text);
-      const candidate = text.trim();
-      if (candidate.startsWith("{") && candidate.endsWith("}")) {
-        try {
-          structuredOutput = JSON.parse(candidate);
-        } catch {
-          /* the verdict parser handles the text fallback */
-        }
-      }
       continue;
     }
 
@@ -140,7 +132,7 @@ export function parseOpencodeEvents(raw: string): ParsedOpencodeEvents {
   return {
     text: messages.join("\n"),
     ...(sessionId ? { sessionId } : {}),
-    ...(structuredOutput != null ? { structuredOutput } : {}),
+    ...(messages.length > 0 ? { finalMessage: messages[messages.length - 1] } : {}),
     ...(error ? { error } : {}),
     ...(inputTokens > 0 ? { inputTokens } : {}),
     ...(outputTokens > 0 ? { outputTokens } : {}),

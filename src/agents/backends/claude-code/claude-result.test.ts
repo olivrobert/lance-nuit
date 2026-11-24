@@ -50,12 +50,12 @@ describe("Claude result mapping", () => {
     expect(result.structuredOutput).toEqual({ success: true, reason: "ok", commit: "feat: x" });
   });
 
-  test("keeps the source in invalid verdict diagnostics", () => {
+  test("says why an invalid verdict was refused", () => {
     const structured = mapClaudeExecutionResult(
       raw(JSON.stringify({ type: "result", structured_output: { success: "yes" } })),
       { outputFormat: "json" },
     );
-    expect(structured.failReason).toContain("invalid verdict: StructuredOutput");
+    expect(structured.failReason).toBe("invalid verdict: success must be a boolean");
     const text = mapClaudeExecutionResult(
       raw(
         JSON.stringify({
@@ -65,7 +65,7 @@ describe("Claude result mapping", () => {
       ),
       { outputFormat: "json" },
     );
-    expect(text.failReason).toContain("invalid verdict: json:verdict block");
+    expect(text.failReason).toBe("invalid verdict: success must be a boolean");
   });
 
   test("charges a resumed attempt by difference and counts only its own turns", () => {

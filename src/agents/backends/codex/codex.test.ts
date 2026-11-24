@@ -207,18 +207,20 @@ test("parseCodexEvents: normalizes session, messages, tools, and usage", () => {
     reasoningTokens: 12,
     turns: 1,
     toolsUsed: ["Bash"],
+    finalMessage: "Analysis complete",
   });
 });
 
-test("parseCodexEvents: keeps a JSON verdict as structured output", () => {
+test("parseCodexEvents: hands the last agent message over uninterpreted", () => {
   const raw = [
     JSON.stringify({ type: "thread.started", thread_id: "codex-2" }),
+    JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Running the tests first." } }),
     JSON.stringify({
       type: "item.completed",
       item: { type: "agent_message", text: '{"success":false,"reason":"tests"}' },
     }),
   ].join("\n");
-  expect(parseCodexEvents(raw).structuredOutput).toEqual({ success: false, reason: "tests" });
+  expect(parseCodexEvents(raw).finalMessage).toBe('{"success":false,"reason":"tests"}');
 });
 
 test("CodexBackend: headless process → common result, session, and usage", async () => {

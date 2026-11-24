@@ -16,7 +16,6 @@
 // What stays out of the schema (and in code, in `events.ts`):
 // - `costReported`: a free model reports `cost: 0`, which is not "price unknown";
 //   only the absence of the field is, and that distinction is a rule, not a shape;
-// - the JSON sniffing of a text part (`{...}` becomes `structuredOutput`);
 // - `unquote` on the provider error message, and the `--print-logs` stderr scan;
 // - the tool-name translation (`opencodeToolLabel`, `TOOL_NAMES`).
 //

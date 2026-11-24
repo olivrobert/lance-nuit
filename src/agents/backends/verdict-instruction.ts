@@ -35,6 +35,9 @@ export function verdictSchema(fields?: Readonly<Record<string, JsonSchema>>): Ve
   return { type: "object", properties, required: Object.keys(properties), additionalProperties: false };
 }
 
+/** Info string of the fence `extractVerdictDetails()` reads back. */
+const VERDICT_FENCE = "json:verdict";
+
 /**
  * Prompt-injected verdict contract, for backends with no native output schema.
  * Parsed back by `extractVerdictDetails()` of `contracts/verdict.ts`. With `fields`,
@@ -49,10 +52,16 @@ export function verdictInstruction(fields?: Readonly<Record<string, JsonSchema>>
     ? `\nThe block MUST also carry these fields, each matching its JSON schema:\n${fieldLines.join("\n")}`
     : "";
   return `End your response with a verdict block (success required, reason and blocked optional):
-\`\`\`json:verdict
+\`\`\`${VERDICT_FENCE}
 {"success": true|false, "reason": "...", "blocked": true|false${extra}}
 \`\`\`
 Set "blocked": true only when an obstacle outside the code stops you — a missing branch, an unreachable service, a credential you do not have. The run then stops instead of attempting a repair that cannot work.${fieldsText}`;
+}
+
+/** True when the prompt already asks for the verdict block itself (a skill or a
+ *  pipeline that spells the contract out), so injecting it again would repeat it. */
+export function promptAsksForVerdictBlock(prompt: string): boolean {
+  return prompt.includes(VERDICT_FENCE);
 }
 
 /** The verdict block with no captured fields. */

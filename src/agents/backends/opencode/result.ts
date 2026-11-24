@@ -1,6 +1,5 @@
 import type { AgentResult } from "../../../contracts/index.js";
-import { verdictFromStructured } from "../../../contracts/index.js";
-import { agentSession, killFields, parseStructuredVerdict, resolveVerdictOutcome } from "../result-helpers.js";
+import { agentSession, mapAgentResult, providerError } from "../result-helpers.js";
 import { type ParsedOpencodeEvents, parseOpencodeEvents, parseOpencodeLogErrors } from "./events.js";
 import { resolveOpencodeCost } from "./pricing.js";
 import type { RawOpencodeExecutionResult } from "./types.js";
@@ -53,33 +52,18 @@ export function mapOpencodeExecutionResult(
   // without it a billing or upstream failure looks like an empty success.
   const logError = parsed.error ? undefined : parseOpencodeLogErrors(raw.logs);
   const error = parsed.error ?? logError;
-  // No `--output-schema` nor StructuredOutput tool: the verdict comes back inside
-  // the text, read by the shared cascade from the most explicit shape down.
-  const structured =
-    options.outputFormat === "json" ? parseStructuredVerdict(parsed.text, parsed.structuredOutput) : {};
-  const verdictDetails = structured.value != null ? verdictFromStructured(structured.value) : undefined;
-  const { ok, failReason, failKind, failCause } = resolveVerdictOutcome({
-    kill: raw.kill,
-    code: raw.code,
-    // Stream and stderr errors are transport breaks and carry no stop signal of
-    // their own: no `cause`. Nothing here encodes one in the message either.
-    error: error ? { text: error } : undefined,
-    requiresVerdict: options.outputFormat === "json",
-    verdict: verdictDetails?.verdict,
-    invalidReason: structured.invalidReason ?? verdictDetails?.invalidReason,
-    missingVerdictLabel: "no opencode verdict",
-  });
+  // A stderr error line names the failure only when the agent said nothing: next
+  // to an answer it may be a retried hiccup or an MCP server's, not the provider's.
   const session = agentSession("opencode", parsed.sessionId, true);
-  return {
+  return mapAgentResult({
     provider: "opencode",
-    output: parsed.text,
-    ok,
+    source: { text: parsed.text, ...(parsed.finalMessage != null ? { finalMessage: parsed.finalMessage } : {}) },
+    outputFormat: options.outputFormat,
     stats: buildStats(parsed, raw.durationMs, options.model),
     ...(session ? { session } : {}),
-    ...(structured.value != null ? { structuredOutput: structured.value } : {}),
-    ...killFields(raw.kill),
-    ...(failReason ? { failReason } : {}),
-    ...(failKind ? { failKind } : {}),
-    ...(failCause ? { failCause } : {}),
-  };
+    kill: raw.kill,
+    code: raw.code,
+    ...(error ? { error: parsed.error || !parsed.text ? providerError(error) : { text: error } } : {}),
+    missingVerdictLabel: "no opencode verdict",
+  });
 }

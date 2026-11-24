@@ -111,7 +111,7 @@ test("ClaudeBackend reports invalid and failed structured verdicts", () => {
   expect(failed.failReason).toBe("KO");
   const invalid = runBackend([{ type: "result", duration_ms: 1, structured_output: { success: "false" } }]);
   expect(invalid.ok).toBe(false);
-  expect(invalid.failReason).toContain("invalid verdict: StructuredOutput");
+  expect(invalid.failReason).toBe("invalid verdict: success must be a boolean");
 });
 
 test("ClaudeBackend streams agent text into the step log once per message", () => {
