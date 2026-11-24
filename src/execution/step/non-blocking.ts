@@ -5,11 +5,12 @@
 import type { RunStepView, RunView } from "../../run/index.js";
 import type { RunOutput } from "../run-output.js";
 import { absorbStepFailure, updateStep } from "../../run/index.js";
+import { ABSORBED, failed, type StepIssue } from "./step-issue.js";
 
 /**
  * Absorb a non-blocking step failure: keep the reason visible in JSON and the
  * timeline, and let the run continue. The step is not settled here: inside a pass
- * the caller returns `"succeeded"` and the pass writes `done`
+ * the caller returns `absorbed` and the pass writes `done`
  * (`step-pass.ts`); before any pass, `refuseStep` writes it.
  *
  * If `reason` is absent, preserve the reason already on the step (typically written
@@ -53,14 +54,14 @@ export function failStep(run: RunView, step: RunStepView, output: RunOutput, rea
  * step absorbs the refusal and settles `done` here, since no pass will; a
  * blocking one fails. Used by admission guards.
  */
-export function refuseStep(run: RunView, step: RunStepView, output: RunOutput, reason: string): { failed: boolean } {
+export function refuseStep(run: RunView, step: RunStepView, output: RunOutput, reason: string): StepIssue {
   if (step.def.blocking === false) {
     absorbNonBlocking(run, step, output, reason);
     updateStep(run, step, "done");
-    return { failed: false };
+    return ABSORBED;
   }
   failStep(run, step, output, reason);
-  return { failed: true };
+  return failed();
 }
 
 /**
@@ -85,12 +86,12 @@ export function settleStepFailure(
   reason: string | undefined,
   labels: { absorbDetail?: string; failSuffix: string },
   costStopped = false,
-): { failed: boolean } {
+): StepIssue {
   if (step.def.blocking === false && !costStopped) {
     absorbNonBlocking(run, step, output, reason, labels.absorbDetail);
-    return { failed: false };
+    return ABSORBED;
   }
   updateStep(run, step, "failed", reason);
   output.emit({ type: "step.failed", step, suffix: labels.failSuffix });
-  return { failed: true };
+  return failed();
 }

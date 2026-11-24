@@ -9,7 +9,8 @@
 import { isAbsolute, join } from "node:path";
 import { expectAllowances, type RunStepView, stopRun } from "../../run/index.js";
 import type { StepAdmission } from "./step-admission.js";
-import { INTERRUPTED, runStepPass, type StepLoopStop, type StepPassEnv } from "./step-pass.js";
+import { DONE, haltsLoop, INTERRUPTED, type StepIssue, stopped } from "./step-issue.js";
+import { runStepPass, type StepPassEnv } from "./step-pass.js";
 import { snapshotTree, treeChanges } from "./tree-snapshot.js";
 
 export interface AdmittedStep {
@@ -32,15 +33,10 @@ export function executionUnits(steps: readonly RunStepView[]): RunStepView[][] {
   return units;
 }
 
-/** A member is an agent step, whose pass asks only for these two: its cost stops reach
- *  the loop through the shared ledger (`ledgerStops`). */
-function mergeStops(stops: readonly (StepLoopStop | undefined)[]): StepLoopStop | undefined {
-  const asked = stops.filter((stop) => stop !== undefined);
-  if (asked.length === 0) return undefined;
-  return {
-    failed: asked.some((stop) => stop.failed),
-    stopped: asked.some((stop) => stop.stopped),
-  };
+/** A member is an agent step: its cost stops reach the loop through the shared
+ *  ledger (`ledgerStops`), and its pass asks only to fail or stop it. */
+function groupIssue(members: readonly StepIssue[]): StepIssue {
+  return members.some(haltsLoop) ? { kind: "group", members } : DONE;
 }
 
 /** What the group may leave behind: the run's own records, the work item, and the
@@ -61,25 +57,18 @@ function allowedWrites(env: StepPassEnv, admitted: readonly AdmittedStep[]): str
  * afterwards and undoes nothing, so a human decides: the members keep their verdict
  * and a resume goes on from the next step.
  */
-function stopOnTreeWrites(
-  env: StepPassEnv,
-  admitted: readonly AdmittedStep[],
-  changed: readonly string[],
-): StepLoopStop {
+function stopOnTreeWrites(env: StepPassEnv, admitted: readonly AdmittedStep[], changed: readonly string[]): StepIssue {
   const { run, deps } = env;
   const first = admitted[0]!.step;
   const detail = `${first.def.parallel_group?.name} — its steps changed files they should only read: ${changed.join(", ")}. Check them, then rerun to continue`;
   stopRun(run, first, detail, { kind: "needs-decision", detail });
   deps.output.emit({ type: "runner.message", level: "error", message: `⏹ ${detail}` });
-  return { stopped: true };
+  return stopped();
 }
 
-/** Run every admitted member of a group to its verdict. Returns the stop the group
- *  asks of the loop, or nothing when the loop may go on. */
-export async function runParallelGroup(
-  env: StepPassEnv,
-  admitted: readonly AdmittedStep[],
-): Promise<StepLoopStop | undefined> {
+/** Run every admitted member of a group to its verdict. Returns the issue of the
+ *  group: `done` when the loop may go on. */
+export async function runParallelGroup(env: StepPassEnv, admitted: readonly AdmittedStep[]): Promise<StepIssue> {
   const { run, budget, abort } = env;
   const before = await snapshotTree(env.baseCtx.cwd);
   if (abort.isRunAborted(run)) return INTERRUPTED;
@@ -105,6 +94,6 @@ export async function runParallelGroup(
     });
   }
   const changed = before && after ? treeChanges(before, after, allowedWrites(env, admitted)) : [];
-  const stops = passes.map((pass) => (pass.status === "fulfilled" ? pass.value : undefined));
-  return mergeStops(changed.length > 0 ? [...stops, stopOnTreeWrites(env, admitted, changed)] : stops);
+  const issues = passes.map((pass) => (pass.status === "fulfilled" ? pass.value : DONE));
+  return groupIssue(changed.length > 0 ? [...issues, stopOnTreeWrites(env, admitted, changed)] : issues);
 }

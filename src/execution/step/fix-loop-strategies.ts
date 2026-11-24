@@ -3,6 +3,7 @@ import { EscalationLatch, escalationLadderFor } from "./escalation.js";
 import { performFixAttempt, runStepCommandFresh } from "./fix-loop-pass.js";
 import type { FixRun } from "./fix-loop-runtime.js";
 import { settleStepFailure } from "./non-blocking.js";
+import { INTERRUPTED, type StepIssue } from "./step-issue.js";
 import { headCommit, snapshotTree, type TreeSnapshot, treeChanges } from "./tree-snapshot.js";
 
 interface WorkState {
@@ -21,22 +22,12 @@ function workStateChanged(before: WorkState, after: WorkState, runDir: string): 
   return before.head !== after.head || treeChanges(before.tree, after.tree, [runDir]).length > 0;
 }
 
-/** Outcome of the repair loop. `blocked` is set, step left unsettled, when a replay
- * declared an obstacle outside the code: the outcome phase stops the run on it as
- * it does for a first attempt. `doneSuffix` is set on a repaired success, which
- * the pass settles `done`. */
-export interface FixLoopOutcome {
-  failed: boolean;
-  blocked?: { failReason?: string };
-  doneSuffix?: string;
-}
-
 /** Repair pass then command replay, looping up to `max_retries`, with escalation. */
 export async function runFixRetryLoop(
   fx: FixRun,
   output: string,
   initialFailReason: string | undefined,
-): Promise<FixLoopOutcome> {
+): Promise<StepIssue> {
   const { run, step, budget, opts } = fx;
   const failure = step.def.on_failure!;
   const maxRetries = failure.max_retries;
@@ -108,7 +99,7 @@ export async function runFixRetryLoop(
     }
     const label = `${step.retries}/${maxRetries}`;
     const stateBeforeFix = failure.stop_if_unchanged ? await workState(fx.baseCtx.cwd) : undefined;
-    if (fx.abort.isRunAborted(run)) return { failed: false };
+    if (fx.abort.isRunAborted(run)) return INTERRUPTED;
     const pass = await performFixAttempt(fx, {
       output: lastOutput,
       lastFailReason,
@@ -116,7 +107,7 @@ export async function runFixRetryLoop(
       banner: `fix ${label}`,
       agentOptions: fx.fixBackend.applyEscalation?.(fx.backendOptions, latch.axes()) ?? fx.backendOptions,
     });
-    if (!pass || fx.abort.isRunAborted(run)) return { failed: false };
+    if (!pass || fx.abort.isRunAborted(run)) return INTERRUPTED;
 
     if (refundRetry(run, step, "retries", pass.fix)) {
       costStopped = true;
@@ -140,10 +131,10 @@ export async function runFixRetryLoop(
     // A replay after a repair that touched nothing would pay for the same verdict.
     if (stateBeforeFix) {
       const stateAfterFix = await workState(fx.baseCtx.cwd);
-      if (fx.abort.isRunAborted(run)) return { failed: false };
+      if (fx.abort.isRunAborted(run)) return INTERRUPTED;
       if (stateAfterFix && !workStateChanged(stateBeforeFix, stateAfterFix, run.run_dir)) {
         fx.output.emit({ type: "runner.message", level: "info", message: `  Fix changed nothing, replay skipped` });
-        return { failed: false, blocked: { failReason: `${lastFailReason ?? "failure"} (fix changed nothing)` } };
+        return { kind: "blocked", failReason: `${lastFailReason ?? "failure"} (fix changed nothing)` };
       }
     }
 
@@ -162,7 +153,7 @@ export async function runFixRetryLoop(
     }
 
     const retry = await runStepCommandFresh(fx, "Retry", `retry ${label}`);
-    if (fx.abort.isRunAborted(run)) return { failed: false };
+    if (fx.abort.isRunAborted(run)) return INTERRUPTED;
 
     if (retry.ok) {
       fixed = true;
@@ -174,18 +165,18 @@ export async function runFixRetryLoop(
       costStopped = true;
       break;
     }
-    if (retry.failCause === "blocked") return { failed: false, blocked: { failReason: retry.failReason } };
+    if (retry.failCause === "blocked") return { kind: "blocked", failReason: retry.failReason };
 
     // Exit status remains authoritative: a silent extractor after a crash cannot
     // turn the retry into success. Full output feeds the next fix.
     lastOutput = retry.output;
   }
 
-  if (fx.abort.isRunAborted(run)) return { failed: false };
+  if (fx.abort.isRunAborted(run)) return INTERRUPTED;
   if (fixed) {
     return {
-      failed: false,
-      doneSuffix:
+      kind: "done",
+      suffix:
         opts.resumeSession !== undefined ? ` (after ${step.retries} resumed fixes)` : ` (after ${step.retries} fixes)`,
     };
   }

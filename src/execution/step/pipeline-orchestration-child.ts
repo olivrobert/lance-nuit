@@ -28,10 +28,12 @@ import {
   recordChildStarted,
   remainingWork,
   type RunBudget,
+  type RunOutcome,
   settleChild,
   emitRunStats,
 } from "../../run/index.js";
-import type { ChildExecutionResult, PipelineOrchestrationInput } from "./pipeline-orchestration-types.js";
+import { DONE, failed, NO_COST_STOPS, type StepIssue, stopped } from "./step-issue.js";
+import type { PipelineOrchestrationInput } from "./pipeline-orchestration-types.js";
 import {
   childContext,
   lineageForChild,
@@ -54,30 +56,21 @@ export function childLaunchGate(
   budget: RunBudget,
   key: string,
   stepId: string | null = null,
-): ChildExecutionResult | undefined {
+): StepIssue | undefined {
   // The refused launch is recorded on the PARENT: the child it would have run has
   // no journal of its own, and the stop belongs to the scope that owns the ceiling.
   const stop = costGate(parent, budget, stepId);
   if (!stop) return undefined;
   if (stop === "budget-exceeded") {
-    return { ok: false, budgetExceeded: true, reason: `parent budget exhausted before ${key}` };
+    return failed({
+      cost: { ...NO_COST_STOPS, budgetExceeded: true },
+      reason: `parent budget exhausted before ${key}`,
+    });
   }
-  return {
-    ok: false,
-    costUnaccounted: true,
-    costUnaccountedStop: true,
+  return failed({
+    cost: { ...NO_COST_STOPS, costUnaccounted: true, costUnaccountedStop: true },
     reason: `parent spending unaccounted before ${key}`,
-  };
-}
-
-/** What the step loop reports about a child it ran, or nothing when the child
- *  was already terminal and only had to be settled. */
-interface ChildLoopOutcome {
-  failed: boolean;
-  stopped: boolean;
-  budgetExceeded: boolean;
-  costUnaccounted: boolean;
-  costUnaccountedStop: boolean;
+  });
 }
 
 /** Execute or resume one persisted child reference and reconcile its usage. */
@@ -87,10 +80,10 @@ export async function executeChild(
   invocation: PipelineInvocationDefinition,
   defaultTicket: string | undefined,
   defaultLot: PipelineLot | undefined,
-): Promise<ChildExecutionResult> {
+): Promise<StepIssue> {
   const { run: parent, step, baseCtx, budget, abort } = input;
-  if (abort.isRunAborted(parent)) return { ok: false, stopped: true };
-  if (isChildSettled(ref)) return { ok: true };
+  if (abort.isRunAborted(parent)) return stopped();
+  if (isChildSettled(ref)) return DONE;
 
   // 1. Gate. Every child launch reads the SAME stop decision as a step admission,
   //    and reads it BEFORE any of the child's own code is loaded. A remaining-
@@ -156,7 +149,7 @@ export async function executeChild(
   } catch (error) {
     const reason = errorMessage(error).trim();
     failChildLaunch(parent, ref, step.id, reason);
-    return { ok: false, reason };
+    return failed({ reason });
   }
   if (childRun.parentRunId !== parent.runId || childRun.parentNodeId !== step.id) {
     throw new Error(`Child run ${childRun.runId} is already linked to another orchestration node`);
@@ -169,20 +162,11 @@ export async function executeChild(
   //    done/skipped steps must be reported as-is; a settled snapshot that never
   //    received a verdict — the window between the last step and finalizeRun —
   //    still owes one, and this call stamps it.
-  let childOutcome: ChildLoopOutcome = {
-    failed: false,
-    stopped: false,
-    budgetExceeded: false,
-    costUnaccounted: false,
-    costUnaccountedStop: false,
-  };
+  let childOutcome: RunOutcome | undefined;
   if (!completedSuccessfully(childRun) && remainingWork(childRun).owed) {
-    // Keep the recursive dependency out of the step-loop → step-pass →
-    // orchestration → step-loop load graph.
-    const { executeRunSteps, stepLoopDeps } = await import("./step-loop.js");
     // The child runs under the parent's abort scope: a signal received by the
     // process stops its loops too, and the handler persists it as an active run.
-    childOutcome = await executeRunSteps(
+    childOutcome = await input.runChild(
       childRun,
       {
         resuming: childResumed,
@@ -190,7 +174,6 @@ export async function executeChild(
         replayInterrupted: input.replayInterrupted,
         workItemSourceStepId: childDefinition.work_item_source?.step_id,
       },
-      stepLoopDeps(input.output),
       childCtx,
     );
     finalizeRun(childRun, childOutcome);
@@ -205,27 +188,28 @@ export async function executeChild(
 
   // 8. Settlement of the reference from the child's own verdict.
   const success = settleChild(parent, ref, step, childRun, delta);
-  if (success) return { ok: true };
+  if (success) return DONE;
 
   // 9. Report. The budget facts come from the child: the stop its loop reported
   //    this generation, the stop it latched in a previous one, or a ledger that
   //    reached its own ceiling as `run/record/budget.ts` defines it.
-  return {
-    ok: false,
-    // A child halted short of its work without failing it (a clean stop, an
-    // interruption) stops the parent the same way.
-    stopped: isHalted(childRun.status),
-    budgetExceeded:
-      childOutcome.budgetExceeded ||
-      childRun.budget_exceeded === true ||
-      isBudgetExceeded(childRun.max_cost_usd, ref.accountedCostUsd),
-    ...(childOutcome.costUnaccounted ? { costUnaccounted: true } : {}),
-    // A child that stopped AT ITS OWN GATE makes the accounting stop the
-    // parent's stop reason too; a child that failed for its own reason with an
-    // unknown ledger does not.
-    ...(childOutcome.costUnaccountedStop ? { costUnaccountedStop: true } : {}),
+  const halt = {
+    cost: {
+      budgetExceeded:
+        childOutcome?.budgetExceeded === true ||
+        childRun.budget_exceeded === true ||
+        isBudgetExceeded(childRun.max_cost_usd, ref.accountedCostUsd),
+      costUnaccounted: childOutcome?.costUnaccounted === true,
+      // A child that stopped AT ITS OWN GATE makes the accounting stop the
+      // parent's stop reason too; a child that failed for its own reason with an
+      // unknown ledger does not.
+      costUnaccountedStop: childOutcome?.costUnaccountedStop === true,
+    },
     reason: childRun.outcome?.reason ?? `child pipeline ${childRun.pipeline} failed`,
     ...(childRun.outcome?.failKind ? { failKind: childRun.outcome.failKind } : {}),
     ...(childRun.outcome?.failCause ? { failCause: childRun.outcome.failCause } : {}),
   };
+  // A child halted short of its work without failing it (a clean stop, an
+  // interruption) stops the parent the same way.
+  return isHalted(childRun.status) ? stopped(halt) : failed(halt);
 }

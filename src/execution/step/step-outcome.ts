@@ -16,21 +16,7 @@ import type { runFixLoop } from "./fix-loop.js";
 import { absorbNonBlocking, settleStepFailure } from "./non-blocking.js";
 import { onFailureHandlerFor } from "./on-failure.js";
 import { runAttempt } from "./step-attempt.js";
-
-/** Verdict of a step's produce phase. `succeeded` leaves the step `running`:
- *  the pass settles it `done` (`step-pass.ts`), after its review if it declares
- *  one. An absorbed failure succeeds too, with `step.errors` set. */
-export type OutcomeAction = "succeeded" | "failed" | "stopped";
-
-export interface ResolvedOutcome {
-  action: OutcomeAction;
-  /** How the success was reached ("after 2 reruns"), for the `step.done` line. */
-  doneSuffix?: string;
-}
-
-const SUCCEEDED: ResolvedOutcome = { action: "succeeded" };
-const FAILED: ResolvedOutcome = { action: "failed" };
-const STOPPED: ResolvedOutcome = { action: "stopped" };
+import { ABSORBED, DONE, failed, INTERRUPTED, type StepIssue, stopped } from "./step-issue.js";
 
 export interface ResolveOutcomeDeps {
   executeStep: typeof executeStep;
@@ -134,18 +120,19 @@ async function reaskRefusedCapture(input: ResolveOutcomeInput): Promise<StepResu
 }
 
 /**
- * Resolve an attempt and apply exactly one action: succeed, stop cleanly, or mark
- * the step failed.
+ * Resolve an attempt into the step's issue: `done` or `absorbed` leave the step
+ * `running` for the pass to settle `done` (`step-pass.ts`), after its review if it
+ * declares one; `failed` and `stopped` are already written on the step.
  */
-export async function resolveOutcome(input: ResolveOutcomeInput): Promise<ResolvedOutcome> {
+export async function resolveOutcome(input: ResolveOutcomeInput): Promise<StepIssue> {
   const { run, step, command, baseCtx, deps } = input;
-  if (run.aborted) return STOPPED;
+  if (run.aborted) return INTERRUPTED;
   // The re-ask comes first because its result is the one the verdict is read
   // from: a corrected object takes the success path below like any other. It
   // loses nothing to the failures that outrank it — a refused capture is by
   // construction neither a block nor a kill, since the command had succeeded.
   const reasked = await reaskRefusedCapture(input);
-  if (run.aborted) return STOPPED;
+  if (run.aborted) return INTERRUPTED;
   const result = reasked ?? input.result;
   const stepLog = reasked ? (latestAttemptLog(run, step) ?? input.stepLog) : input.stepLog;
   const { output, ok } = result;
@@ -167,7 +154,7 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<Resolv
       true,
     );
     emitOutputPath(input.output, stepLog);
-    return FAILED;
+    return failed();
   }
 
   // A wall-clock timeout truncates output; no extractor error is not evidence of
@@ -179,7 +166,7 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<Resolv
   let extraction: ExtractionResult | undefined;
   if (!ok && !wasKilled && step.def.error_extractor) {
     extraction = await deps.extractErrors(step, output);
-    if (run.aborted) return STOPPED;
+    if (run.aborted) return INTERRUPTED;
     if (!extraction.hasErrors) {
       input.output.emit({
         type: "runner.message",
@@ -189,7 +176,7 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<Resolv
     }
   }
 
-  if (ok) return run.aborted ? STOPPED : SUCCEEDED;
+  if (ok) return run.aborted ? INTERRUPTED : DONE;
 
   // `failCause: "blocked"` means a fix cannot resolve an obstacle outside the
   // code. The signal is a field, decided at the two boundaries that read agent
@@ -201,11 +188,11 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<Resolv
   if (step.def.blocking === false && !step.def.on_failure) {
     absorbNonBlocking(run, step, input.output, lastFailReason);
     emitOutputPath(input.output, stepLog);
-    return SUCCEEDED;
+    return ABSORBED;
   }
 
   if (!step.def.on_failure) {
-    if (run.aborted) return STOPPED;
+    if (run.aborted) return INTERRUPTED;
     updateStep(run, step, "failed", lastFailReason);
     // A `fix: false` contract intentionally has no retry; report a final verdict
     // rather than making the absence of retry look like an omission. A refused
@@ -223,7 +210,7 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<Resolv
       suffix: `${noRetry}${lastFailReason ? ` — ${lastFailReason}` : ""}`,
     });
     emitOutputPath(input.output, stepLog);
-    return FAILED;
+    return failed();
   }
 
   const outcome = await onFailureHandlerFor(step.def.on_failure)({
@@ -240,22 +227,21 @@ export async function resolveOutcome(input: ResolveOutcomeInput): Promise<Resolv
     runOutput: input.output,
     deps: { executeStep: deps.executeStep, runFixLoop: deps.runFixLoop },
   });
-  if (run.aborted) return STOPPED;
-  if (outcome.blocked) {
-    return stopOnBlock(input, outcome.blocked.failReason, latestAttemptLog(run, step) ?? stepLog);
+  if (run.aborted) return INTERRUPTED;
+  if (outcome.kind === "blocked") {
+    return stopOnBlock(input, outcome.failReason, latestAttemptLog(run, step) ?? stepLog);
   }
-  if (outcome.failed) return FAILED;
-  return outcome.doneSuffix ? { action: "succeeded", doneSuffix: outcome.doneSuffix } : SUCCEEDED;
+  return outcome;
 }
 
-function stopOnBlock(input: ResolveOutcomeInput, failReason: string | undefined, stepLog: string): ResolvedOutcome {
+function stopOnBlock(input: ResolveOutcomeInput, failReason: string | undefined, stepLog: string): StepIssue {
   const { run, step } = input;
   // A backend may report the cause without a message. The stop still needs a
   // detail: the reader is told what happened, not left with an empty reason.
   const blockedReason = failReason ?? "blocked by an obstacle outside the code";
   if (step.def.blocking === false) {
     absorbNonBlocking(run, step, input.output, blockedReason);
-    return SUCCEEDED;
+    return ABSORBED;
   }
   // The step ran and failed: keep it visible as a failure so the report names it
   // and a resume replays it once the external obstacle is lifted. `stopRun` then
@@ -268,5 +254,5 @@ function stopOnBlock(input: ResolveOutcomeInput, failReason: string | undefined,
     message: `⏹ ${step.def.name} — non-code block, stopping without repair: ${blockedReason}`,
   });
   emitOutputPath(input.output, stepLog);
-  return STOPPED;
+  return stopped();
 }

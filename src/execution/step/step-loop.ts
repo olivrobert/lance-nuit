@@ -26,7 +26,8 @@ import {
 import { runFixLoop } from "./fix-loop.js";
 import { admitStep, type StepAdmission, skipForOperatorSelection } from "./step-admission.js";
 import { type AdmittedStep, executionUnits, runParallelGroup } from "./parallel-group.js";
-import { admissionStop, runStepPass, type StepLoopDeps, type StepLoopStop, type StepPassEnv } from "./step-pass.js";
+import { DONE, haltsLoop, type StepIssue, signalsOf } from "./step-issue.js";
+import { admissionStop, runStepPass, type StepLoopDeps, type StepPassEnv } from "./step-pass.js";
 
 export type { StepLoopDeps };
 
@@ -134,7 +135,7 @@ export async function executeRunSteps(
 
     // One ledger, shared by every phase of this execution.
     const budget = openRunLedger(run);
-    let stop: StepLoopStop = {};
+    let stop: StepIssue = DONE;
     let boundReached = false;
     const setAside: string[] = [];
     let leftUnfinished: RunStepView | undefined;
@@ -148,6 +149,7 @@ export async function executeRunSteps(
       abort,
       replayInterrupted: opts.replayInterrupted,
       deps,
+      runChild: (childRun, childOptions, childCtx) => executeRunSteps(childRun, childOptions, deps, childCtx),
     };
 
     // Every member is admitted, in order, before any of them spawns: a refusal stops
@@ -209,12 +211,12 @@ export async function executeRunSteps(
 
       // A group reduced to one member, by a resume or a skip, is a lone step.
       const [first] = admitted;
-      const passStop =
+      const passIssue =
         admitted.length > 1
           ? await runParallelGroup(passEnv, admitted)
           : first && (await runStepPass(passEnv, first.step, first.admission));
-      if (passStop) {
-        stop = passStop;
+      if (passIssue && haltsLoop(passIssue)) {
+        stop = passIssue;
         break;
       }
     }
@@ -227,10 +229,7 @@ export async function executeRunSteps(
     // A bound with nothing owed after it changes nothing: the run completes.
     const untilStop = boundReached && bound !== undefined && unfinished;
     if (untilStop) stopAtBound(run, bound, deps.output);
-    const failed = stop.failed === true;
-    const stopped = stop.stopped === true;
-    const budgetExceeded = stop.budgetExceeded === true;
-    const costUnaccounted = stop.costUnaccounted === true;
+    const { failed, stopped, budgetExceeded, costUnaccounted, costUnaccountedStop } = signalsOf(stop);
     // A loop that went to the end can still not pass: the selection left a step
     // whose last pass is unfinished in that state, and a PASS would start a new
     // run that loses the facts of that pass: an interruption to authorize, a
@@ -247,7 +246,7 @@ export async function executeRunSteps(
       costUnaccounted: costUnaccounted || ledger.costUnaccounted,
       // The retry and fix gates record their refusal on the shared ledger; the
       // admission gate and the orchestration gates report theirs directly.
-      costUnaccountedStop: stop.costUnaccountedStop === true || ledger.costUnaccountedStop,
+      costUnaccountedStop: costUnaccountedStop || ledger.costUnaccountedStop,
       setAside,
     };
   } finally {

@@ -13,8 +13,9 @@ import type { RunOutput } from "../run-output.js";
 import type { AbortScope } from "../abort.js";
 import { consumeRetry, costGate, type RetryQuota, type RunBudget, refundRetry } from "../../run/index.js";
 import { type EscalationLadder, EscalationLatch, escalationLadderFor } from "./escalation.js";
-import type { FixLoopOutcome, runFixLoop } from "./fix-loop.js";
+import type { runFixLoop } from "./fix-loop.js";
 import { settleStepFailure } from "./non-blocking.js";
+import { INTERRUPTED, type StepIssue } from "./step-issue.js";
 import { runAttempt, startFreshSession } from "./step-attempt.js";
 
 export interface OnFailureContext {
@@ -46,17 +47,10 @@ export interface OnFailureContext {
   };
 }
 
-export interface OnFailureOutcome {
-  /** True when the run stops for a blocking failure. */
-  failed: boolean;
-  /** A replay after a repair declared a block; the outcome phase settles it. */
-  blocked?: FixLoopOutcome["blocked"];
-  /** Set on a success the policy reached: how ("after 2 reruns"). The pass
-   *  writes `done`, never the policy. */
-  doneSuffix?: string;
-}
-
-export type OnFailureHandler = (ctx: OnFailureContext) => Promise<OnFailureOutcome>;
+/** A policy answers `done` with how it got there (the pass writes `done`, never
+ *  the policy), `absorbed`, `failed`, `blocked` (the outcome phase settles it) or
+ *  `interrupted`. */
+export type OnFailureHandler = (ctx: OnFailureContext) => Promise<StepIssue>;
 
 /** Only the behavior that differs between retry loops; plain rerun and timeout
  * drain loops differ only in these fields. */
@@ -203,8 +197,8 @@ export const rerunHandler: OnFailureHandler = async (ctx) => {
     escalateAfter: failure.escalate_after,
   });
 
-  if (state.aborted) return { failed: false };
-  if (state.ok) return { failed: false, doneSuffix: ` (after ${state.attempts} reruns)` };
+  if (state.aborted) return INTERRUPTED;
+  if (state.ok) return { kind: "done", suffix: ` (after ${state.attempts} reruns)` };
   return settleStepFailure(
     run,
     step,
@@ -221,7 +215,7 @@ export const rerunHandler: OnFailureHandler = async (ctx) => {
 /** Timeout-drain result: final verdict or input for the fix loop. */
 interface TimeoutDrainResult {
   /** Set when draining concludes the step (success or persistent timeout). */
-  outcome?: OnFailureOutcome;
+  outcome?: StepIssue;
   output: string;
   lastFailReason?: string;
 }
@@ -247,9 +241,9 @@ async function drainTimeouts(ctx: OnFailureContext): Promise<TimeoutDrainResult>
   });
   const drained = { output: state.output, lastFailReason: state.lastFailReason };
 
-  if (state.aborted) return { outcome: { failed: false }, ...drained };
+  if (state.aborted) return { outcome: INTERRUPTED, ...drained };
   if (state.ok) {
-    return { outcome: { failed: false, doneSuffix: ` (after ${state.attempts} post-timeout reruns)` }, ...drained };
+    return { outcome: { kind: "done", suffix: ` (after ${state.attempts} post-timeout reruns)` }, ...drained };
   }
 
   // Persistent timeout, retries, or budget exhaustion: fail without a fix pass;
@@ -283,7 +277,7 @@ async function drainTimeouts(ctx: OnFailureContext): Promise<TimeoutDrainResult>
  * never ran, so the raw stderr describes the infrastructure and a repair paid on it
  * edits code no test ever exercised. Returns `undefined` when the fix must proceed.
  */
-function withholdFixWithoutExtraction(ctx: OnFailureContext): OnFailureOutcome | undefined {
+function withholdFixWithoutExtraction(ctx: OnFailureContext): StepIssue | undefined {
   const { run, step, extraction } = ctx;
   if (!step.def.on_failure!.fix_only_when_extracted) return undefined;
   if (!extraction || extraction.hasErrors) return undefined;
@@ -320,7 +314,7 @@ function fixHandler(opts: { resumeSession?: string }): OnFailureHandler {
       output: ctx.runOutput,
       abort,
     });
-    if (abort.isRunAborted(run)) return { failed: false };
+    if (abort.isRunAborted(run)) return INTERRUPTED;
     // The fix loop settles blocking vs non-blocking itself (settleStepFailure),
     // except a blocked replay, which the outcome phase stops on.
     return result;

@@ -667,7 +667,7 @@ test("persisted format: a snapshot written before cost_unaccounted existed still
       return { output: "", ok: true, stats: { duration_ms: 1 } };
     },
     extractErrors: async () => ({ hasErrors: false, errors: "" }),
-    runFixLoop: async () => ({ failed: false }),
+    runFixLoop: async () => ({ kind: "done" }),
     output: NULL_RUN_OUTPUT,
   };
   const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);
@@ -726,7 +726,7 @@ test("persisted format: a snapshot that still carries a step's last_command open
   const deps: StepLoopDeps = {
     executeStep: async () => ({ output: "", ok: true, stats: { duration_ms: 1 } }),
     extractErrors: async () => ({ hasErrors: false, errors: "" }),
-    runFixLoop: async () => ({ failed: false }),
+    runFixLoop: async () => ({ kind: "done" }),
     output: NULL_RUN_OUTPUT,
   };
   await executeRunSteps(run, { resuming: true }, deps, ctx);
@@ -787,7 +787,7 @@ test("persisted format: a minimal step flagged cost_unknown with nothing measure
       return { output: "", ok: true, stats: { duration_ms: 1 } };
     },
     extractErrors: async () => ({ hasErrors: false, errors: "" }),
-    runFixLoop: async () => ({ failed: false }),
+    runFixLoop: async () => ({ kind: "done" }),
     output: NULL_RUN_OUTPUT,
   };
   const outcome = await executeRunSteps(run, { resuming: true }, deps, ctx);

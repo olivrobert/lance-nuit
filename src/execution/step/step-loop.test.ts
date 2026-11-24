@@ -78,7 +78,7 @@ function fakeDeps(results: Array<Partial<StepResult>> = []): {
       };
     },
     extractErrors: async () => ({ hasErrors: false, errors: "" }),
-    runFixLoop: async () => ({ failed: false }),
+    runFixLoop: async () => ({ kind: "done" }),
     output: NULL_RUN_OUTPUT,
   };
   return { deps, calls };
@@ -563,7 +563,7 @@ test("resolveOutcome: validates the contract", async () => {
   let fixCalled = false;
   deps.runFixLoop = async () => {
     fixCalled = true;
-    return { failed: false };
+    return { kind: "done" };
   };
 
   const outcome = await resolveOutcome({
@@ -582,7 +582,7 @@ test("resolveOutcome: validates the contract", async () => {
     deps,
   });
 
-  expect(outcome.action).toBe("stopped");
+  expect(outcome.kind).toBe("stopped");
   expect(fixCalled).toBe(false);
   expect(run.stopped_reason).toBe("app unavailable");
   // An obstacle outside the code is a stop kind of its own: no subject approves
@@ -597,7 +597,7 @@ test("resolveOutcome: a BLOCKED: prefix without the cause no longer stops the ru
   let fixCalled = false;
   deps.runFixLoop = async () => {
     fixCalled = true;
-    return { failed: false };
+    return { kind: "done" };
   };
 
   const outcome = await resolveOutcome({
@@ -615,7 +615,7 @@ test("resolveOutcome: a BLOCKED: prefix without the cause no longer stops the ru
 
   // A result that reaches the loop with a prefix and no cause never came through
   // a backend: every production path normalizes it at `invokeBackend`.
-  expect(outcome.action).toBe("succeeded");
+  expect(outcome.kind).toBe("done");
   expect(fixCalled).toBe(true);
   expect(run.outcome?.stop).toBeUndefined();
 });
@@ -638,7 +638,7 @@ test("resolveOutcome: a blocked cause without a reason still gets a readable sto
     deps,
   });
 
-  expect(outcome.action).toBe("stopped");
+  expect(outcome.kind).toBe("stopped");
   expect(run.outcome?.stop?.kind).toBe("blocked");
   expect(run.outcome?.stop?.detail).toBe("blocked by an obstacle outside the code");
 });
@@ -1055,7 +1055,7 @@ test("step-loop: validates the integration contract", async () => {
   const { deps } = fakeDeps([{ ok: false }]);
   deps.runFixLoop = async () => {
     fixCalled = true;
-    return { failed: false };
+    return { kind: "done" };
   };
   const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
   expect(fixCalled).toBe(true);
@@ -1118,7 +1118,7 @@ test("step-loop: validates the integration contract", async () => {
   ]);
   deps.runFixLoop = async () => {
     fixCalled = true;
-    return { failed: false };
+    return { kind: "done" };
   };
 
   const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
@@ -1143,7 +1143,7 @@ test("step-loop: validates the integration contract", async () => {
   const { deps, calls } = fakeDeps([{ ok: false, failReason: "app unreachable", failCause: "blocked" }, { ok: true }]);
   deps.runFixLoop = async () => {
     fixCalled = true;
-    return { failed: false };
+    return { kind: "done" };
   };
 
   const out = await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
@@ -1161,7 +1161,7 @@ test("step-loop: validates the integration contract", async () => {
   const { deps } = fakeDeps([{ ok: false, failReason: "UI-002: expected label is missing" }]);
   deps.runFixLoop = async () => {
     fixCalled = true;
-    return { failed: false };
+    return { kind: "done" };
   };
 
   await executeRunSteps(run, { resuming: false }, deps, buildPipelineContext({}));
@@ -1728,7 +1728,7 @@ function realSpawnDeps(): { deps: StepLoopDeps; fixCalls: () => number } {
       extractErrors,
       runFixLoop: async () => {
         fixCalls++;
-        return { failed: false };
+        return { kind: "done" };
       },
       output: NULL_RUN_OUTPUT,
     },

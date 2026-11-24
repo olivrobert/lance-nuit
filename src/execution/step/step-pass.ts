@@ -43,9 +43,11 @@ import {
 import type { runFixLoop } from "./fix-loop.js";
 import { failStep } from "./non-blocking.js";
 import { executePipelineOrchestration } from "./pipeline-orchestration.js";
+import type { ChildRunExecutor } from "./pipeline-orchestration-types.js";
 import type { IgnoredReading, StepAdmission } from "./step-admission.js";
 import { runAttempt, startFreshSession } from "./step-attempt.js";
-import { type ResolvedOutcome, resolveOutcome } from "./step-outcome.js";
+import { ABSORBED, DONE, failed, INTERRUPTED, signalsOf, type StepIssue, stopped } from "./step-issue.js";
+import { resolveOutcome } from "./step-outcome.js";
 import { runReviewPhase } from "./step-review.js";
 
 export interface StepLoopDeps {
@@ -59,35 +61,20 @@ export interface StepLoopDeps {
   output: RunOutput;
 }
 
-/**
- * Why the loop must not go on after a step, in the terms of `RunOutcome`. No field
- * set is an interruption: the loop ends and the run's `aborted` flag carries the
- * verdict, so the stop has nothing to add to it.
- */
-export interface StepLoopStop {
-  failed?: boolean;
-  stopped?: boolean;
-  budgetExceeded?: boolean;
-  costUnaccounted?: boolean;
-  costUnaccountedStop?: boolean;
-}
-
-export const INTERRUPTED: StepLoopStop = {};
-
-/** The stop a refused admission asks for. */
-export function admissionStop(admission: Exclude<StepAdmission, { kind: "skip" | "ready" }>): StepLoopStop {
+/** The issue a refused admission asks of the loop. */
+export function admissionStop(admission: Exclude<StepAdmission, { kind: "skip" | "ready" }>): StepIssue {
   switch (admission.kind) {
     case "budget-exceeded":
-      return { budgetExceeded: true };
+      return { kind: "budget-exceeded" };
     // Not routed through the non-blocking absorber: an unaccountable spend is a
     // run-level fact, not this step's failure, so `blocking: false` cannot
     // swallow it and keep spending.
     case "cost-unaccounted":
-      return { costUnaccounted: true, costUnaccountedStop: true };
+      return { kind: "cost-unaccounted" };
     case "stopped":
-      return { stopped: true };
+      return stopped();
     case "failed":
-      return { failed: true };
+      return failed();
   }
 }
 
@@ -100,6 +87,8 @@ export interface StepPassEnv {
   abort: AbortScope;
   replayInterrupted?: boolean;
   deps: StepLoopDeps;
+  /** Runs a composed child under these same deps. */
+  runChild: ChildRunExecutor;
 }
 
 function emitPipelineStep(run: RunView, step: RunStepView, index: number, total: number): void {
@@ -158,13 +147,13 @@ async function runInitialAttempt(input: {
   return { result, stepLog: latestAttemptLog(run, step) ?? join(run.run_dir, logicalAttemptLogPath(step.id, 1)) };
 }
 
-/** Run one admitted step to its verdict. Returns the stop it asks of the loop, or
- *  nothing when the loop may go on. */
+/** Run one admitted step to its verdict. Returns its issue: the loop goes on after
+ *  `done` and stops on any other. */
 export async function runStepPass(
   env: StepPassEnv,
   step: RunStepView,
   admission: Extract<StepAdmission, { kind: "ready" }>,
-): Promise<StepLoopStop | undefined> {
+): Promise<StepIssue> {
   const { run, deps } = env;
   const stepIndex = run.steps.indexOf(step) + 1;
   deps.output.emit({ type: "step.started", step, index: stepIndex, total: run.steps.length });
@@ -185,10 +174,10 @@ async function passStamp(
   step: RunStepView,
   admitted: Freshness,
   sourcesNow: Record<string, Fingerprint>,
+  absorbed: boolean,
 ): Promise<StepStamp | undefined> {
   const { run, baseCtx } = env;
   const outputs = step.def.outputs ?? [];
-  const absorbed = step.errors !== undefined;
   if (absorbed && outputs.length > 0) return undefined;
   const sources = Object.fromEntries(ownSources(step).map((source) => [source, sourcesNow[source] ?? null]));
   const produced = await readInputs(baseCtx, outputs);
@@ -257,11 +246,12 @@ async function commitSettledPass(
   step: RunStepView,
   freshness: Freshness | undefined,
   ignored: IgnoredReading | undefined,
+  absorbed: boolean,
 ): Promise<void> {
   if (!freshness && !ignored) return;
   try {
     const sourcesNow = await sourcesAfterPass(env, step, freshness !== undefined, ignored);
-    const stamp = freshness ? await passStamp(env, step, freshness, sourcesNow) : undefined;
+    const stamp = freshness ? await passStamp(env, step, freshness, sourcesNow, absorbed) : undefined;
     const advances = ignored ? ignoredAdvances(env, ignored, sourcesNow) : [];
     commitPass(env.baseCtx, stampKey(step.id, env.baseCtx.lot), stamp, advances);
   } catch (error) {
@@ -274,10 +264,11 @@ async function commitSettledPass(
 }
 
 /** The verdict of the produce phase, then of the review when the step declares one. */
-async function passVerdict(env: StepPassEnv, step: RunStepView, produced: ResolvedOutcome): Promise<ResolvedOutcome> {
-  if (produced.action !== "succeeded" || !step.def.review) return produced;
+async function passVerdict(env: StepPassEnv, step: RunStepView, produced: StepIssue): Promise<StepIssue> {
+  if ((produced.kind !== "done" && produced.kind !== "absorbed") || !step.def.review) return produced;
   const { run, baseCtx, budget, abort, deps } = env;
-  return runReviewPhase({ run, step, baseCtx, budget, abort, output: deps.output });
+  const reviewed = await runReviewPhase({ run, step, baseCtx, budget, abort, output: deps.output });
+  return produced.kind === "absorbed" && reviewed.kind === "done" ? ABSORBED : reviewed;
 }
 
 async function passStartedStep(
@@ -285,14 +276,14 @@ async function passStartedStep(
   step: RunStepView,
   { command, stepLogDir, freshness, ignored }: Extract<StepAdmission, { kind: "ready" }>,
   stepIndex: number,
-): Promise<StepLoopStop | undefined> {
+): Promise<StepIssue> {
   const { run, baseCtx, budget, abort, deps } = env;
   if (freshness) {
     try {
       clearStamp(baseCtx, stampKey(step.id, baseCtx.lot));
     } catch (error) {
       failStep(run, step, deps.output, `freshness lock: ${errorMessage(error)}`);
-      return { failed: true };
+      return failed();
     }
   }
   updateStep(run, step, "running");
@@ -307,21 +298,12 @@ async function passStartedStep(
       abort,
       replayInterrupted: env.replayInterrupted,
       output: deps.output,
+      runChild: env.runChild,
     });
     if (abort.isRunAborted(run)) return INTERRUPTED;
     // A child stopped by its guard stops the parent the same durable way.
-    if (orchestration.budgetExceeded) inheritChildBudgetStop(run, budget);
-    if (orchestration.action === "continue") return undefined;
-    return {
-      failed: orchestration.action === "failed",
-      stopped: orchestration.action === "stopped",
-      budgetExceeded: orchestration.budgetExceeded,
-      costUnaccounted: orchestration.costUnaccounted === true,
-      // A fan-out that refused to launch the next child, or a child that
-      // stopped at its own gate, is an accounting stop the parent reports as
-      // one: the failed node is the carrier of the stop, not a defect to fix.
-      costUnaccountedStop: orchestration.costUnaccountedStop === true,
-    };
+    if (signalsOf(orchestration).budgetExceeded) inheritChildBudgetStop(run, budget);
+    return orchestration;
   }
 
   const attempt = await runInitialAttempt({
@@ -355,12 +337,9 @@ async function passStartedStep(
   if (abort.isRunAborted(run)) return INTERRUPTED;
   const verdict = await passVerdict(env, step, produced);
   if (abort.isRunAborted(run)) return INTERRUPTED;
-  if (verdict.action === "failed") return { failed: true };
-  if (verdict.action === "stopped") return { stopped: true };
-  // `updateStep(running)` cleared `errors` for this pass, so a step carrying one
-  // absorbed its failure, which its warning already said.
+  if (verdict.kind !== "done" && verdict.kind !== "absorbed") return verdict;
   updateStep(run, step, "done");
-  if (step.errors === undefined) deps.output.emit({ type: "step.done", step, suffix: verdict.doneSuffix });
-  await commitSettledPass(env, step, freshness, ignored);
-  return undefined;
+  if (verdict.kind === "done") deps.output.emit({ type: "step.done", step, suffix: verdict.suffix });
+  await commitSettledPass(env, step, freshness, ignored, verdict.kind === "absorbed");
+  return DONE;
 }

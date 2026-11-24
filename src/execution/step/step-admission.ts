@@ -221,7 +221,9 @@ function rejectAdmission(
   input: AdmitStepInput,
   reason: string,
 ): Exclude<StepAdmission, { kind: "ready" } | { kind: "budget-exceeded" } | { kind: "cost-unaccounted" }> {
-  return refuseStep(input.run, input.step, input.output, reason).failed ? { kind: "failed", reason } : { kind: "skip" };
+  return refuseStep(input.run, input.step, input.output, reason).kind === "failed"
+    ? { kind: "failed", reason }
+    : { kind: "skip" };
 }
 
 /** A materialized orchestration freezes its admission decision in the snapshot.

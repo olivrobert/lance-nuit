@@ -187,7 +187,7 @@ test("fix loop: validates the contract", async () => {
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
   });
-  expect(res.failed).toBe(false);
+  expect(res.kind).not.toBe("failed");
   expect(step.status).toBe("running");
   expect(step.retries).toBe(1);
   expect(calls.retry).toBe(1);
@@ -202,7 +202,7 @@ test("fix loop: validates the contract", async () => {
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
   });
-  expect(res.failed).toBe(true);
+  expect(res.kind).toBe("failed");
   expect(step.status).toBe("failed");
   expect(step.retries).toBe(1);
   expect(calls.retry).toBe(0);
@@ -217,7 +217,7 @@ test("fix loop: validates the contract", async () => {
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
   });
-  expect(res.failed).toBe(true);
+  expect(res.kind).toBe("failed");
   expect(step.retries).toBe(0);
   expect(calls.fix.length).toBe(0);
   expect(step.errors).toBe("r0");
@@ -233,7 +233,7 @@ test("fix loop: validates the contract", async () => {
     output: NULL_RUN_OUTPUT,
     abort: createAbortScope(),
   });
-  expect(res.failed).toBe(true);
+  expect(res.kind).toBe("failed");
   expect(calls.fix.length).toBe(1);
   expect(calls.retry).toBe(0);
   expect(budget.cumulative).toBe(2);
@@ -253,7 +253,7 @@ test("a single fix attempt: validates the contract", async () => {
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(true);
+  expect(res.kind).toBe("failed");
   expect(step.status).toBe("failed");
   expect(step.errors).toBe("constraints still failing");
   expect(calls.retry).toBe(1);
@@ -270,7 +270,7 @@ test("a fix without replay settles the step on the original failure, marked unve
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(false);
+  expect(res.kind).not.toBe("failed");
   expect(calls.fix.length).toBe(1);
   expect(calls.retry).toBe(0);
   expect(step.status).toBe("running");
@@ -413,7 +413,7 @@ test("a resumed fix on a bash step follows the resumed session provider", async 
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(false);
+  expect(res.kind).not.toBe("failed");
   expect(calls.fix[0].spec.id).toBe("codex");
   expect(calls.fix[0].budget.resumeSession?.id).toBe("codex-1");
   // No fix profile: load-time options were shaped for the default backend and are dropped.
@@ -557,7 +557,7 @@ test("fix loop non bloquant: validates the contract", async () => {
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(false);
+  expect(res.kind).not.toBe("failed");
   expect(step.status).toBe("running");
   // The retry loop keeps the last command failReason; a failed fix does not replace it.
   expect(step.errors).toBe("r0");
@@ -577,7 +577,7 @@ test("single fix attempt non bloquant: validates the contract", async () => {
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(false);
+  expect(res.kind).not.toBe("failed");
   expect(step.status).toBe("running");
   expect(step.errors).toBe("constraints still failing");
 });
@@ -780,7 +780,7 @@ test("without stopIfUnchanged, a repair that changed nothing is still replayed",
     abort: createAbortScope(),
   });
 
-  expect(res).toMatchObject({ failed: false });
+  expect(res).toMatchObject({ kind: "done" });
   expect(calls.retry).toBe(1);
   expect(step.status).toBe("running");
 });
@@ -802,7 +802,7 @@ for (const [change, effect] of [
       abort: createAbortScope(),
     });
 
-    expect(res).toMatchObject({ failed: false });
+    expect(res).toMatchObject({ kind: "done" });
     expect(calls.retry).toBe(1);
     expect(step.status).toBe("running");
   });
@@ -829,7 +829,7 @@ test("a resumed fix whose target recorded no session falls back to the default b
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(false);
+  expect(res.kind).not.toBe("failed");
   expect(step.status).toBe("running");
   expect(calls.fix[0].spec.id).toBe("claude");
   expect(calls.retry).toBe(1);
@@ -849,7 +849,7 @@ test("a resumed fix whose target is absent from the run falls back to the defaul
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(false);
+  expect(res.kind).not.toBe("failed");
   expect(calls.fix[0].spec.id).toBe("claude");
   expect(calls.fix[0].budget.resumeSession?.id).toBeUndefined();
 });
@@ -920,7 +920,7 @@ test("a fix quota already consumed announces the spent quota and launches no rep
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(true);
+  expect(res.kind).toBe("failed");
   expect(calls.fix.length).toBe(0);
   expect(calls.retry).toBe(0);
   // The persisted counter is untouched: only the announcement changed.
@@ -977,7 +977,7 @@ test("a non-blocking step whose repair the budget gate withholds stays failed", 
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(true);
+  expect(res.kind).toBe("failed");
   expect(step.status).toBe("failed");
   expect(step.errors).toBe("r0");
   expect(step.retries).toBe(0);
@@ -998,7 +998,7 @@ test("a non-blocking step whose replay the live guard kills stays failed", async
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(true);
+  expect(res.kind).toBe("failed");
   expect(step.status).toBe("failed");
 });
 
@@ -1015,7 +1015,7 @@ test("a repair killed by the live guard gives its quota back to the --budget res
     abort: createAbortScope(),
   });
 
-  expect(res.failed).toBe(true);
+  expect(res.kind).toBe("failed");
   expect(step.status).toBe("failed");
   expect(step.retries).toBe(0);
   expect(first.calls.retry).toBe(0);
@@ -1029,8 +1029,8 @@ test("a repair killed by the live guard gives its quota back to the --budget res
     abort: createAbortScope(),
   });
 
-  expect(again.failed).toBe(false);
-  expect(again.doneSuffix).toBe(" (after 1 fixes)");
+  expect(again.kind).not.toBe("failed");
+  expect(again).toMatchObject({ kind: "done", suffix: " (after 1 fixes)" });
   expect(second.calls.fix.length).toBe(1);
   expect(messages().some((message) => message.includes("quota already consumed"))).toBe(false);
 });

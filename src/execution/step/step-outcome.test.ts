@@ -23,6 +23,7 @@ import { createAbortScope } from "../abort.ts";
 import { setLogInterceptor } from "../../shared/runtime/logging.ts";
 import type { RunOutput, RunOutputEvent } from "../run-output.ts";
 import { makeRunStep } from "../../run/record/run-step.ts";
+import { failed } from "./step-issue.ts";
 import { type ResolveOutcomeInput, resolveOutcome } from "./step-outcome.ts";
 
 afterEach(() => setLogInterceptor(undefined));
@@ -74,7 +75,7 @@ function failedInput(def: Partial<PipelineStep>, output: RunOutput): ResolveOutc
         throw new Error("no attempt is expected on this path");
       },
       extractErrors: async () => ({ errors: "", hasErrors: false }),
-      runFixLoop: async () => ({ failed: true }),
+      runFixLoop: async () => failed(),
     },
     output,
   };
@@ -85,7 +86,7 @@ test("a step failing without a retry policy says it once, on the output port", a
 
   const action = await resolveOutcome(failedInput({}, output));
 
-  expect(action.action).toBe("failed");
+  expect(action.kind).toBe("failed");
   expect(events.map((event) => event.type)).toEqual(["step.failed", "runner.message"]);
   const message = events[1] as Extract<RunOutputEvent, { type: "runner.message" }>;
   expect(message.level).toBe("info");
@@ -114,7 +115,7 @@ test("an absorbed non-blocking failure warns through the port, not through stder
 
   const action = await resolveOutcome(failedInput({ blocking: false }, output));
 
-  expect(action.action).toBe("succeeded");
+  expect(action.kind).toBe("absorbed");
   const warnings = events.filter(
     (event): event is Extract<RunOutputEvent, { type: "runner.message" }> =>
       event.type === "runner.message" && event.level === "warn",
@@ -147,7 +148,7 @@ function fixPolicyInput(
   input.deps.extractErrors = async () => extraction;
   input.deps.runFixLoop = async () => {
     fixCalls++;
-    return { failed: true };
+    return failed();
   };
   return { input, fixCalls: () => fixCalls };
 }
@@ -158,7 +159,7 @@ test("fixOnlyWhenExtracted fails a step whose report was never written, without 
 
   const action = await resolveOutcome(input);
 
-  expect(action.action).toBe("failed");
+  expect(action.kind).toBe("failed");
   expect(fixCalls()).toBe(0);
   // No repair and no replay: the quota is untouched, so a resume can still fix it
   // once the infrastructure is back.
@@ -177,7 +178,7 @@ test("fixOnlyWhenExtracted distinguishes a green report from a missing one", asy
 
   const action = await resolveOutcome(input);
 
-  expect(action.action).toBe("failed");
+  expect(action.kind).toBe("failed");
   expect(fixCalls()).toBe(0);
   const messages = events
     .filter((event): event is Extract<RunOutputEvent, { type: "runner.message" }> => event.type === "runner.message")
@@ -192,7 +193,7 @@ test("fixOnlyWhenExtracted repairs as usual when the extractor found errors", as
 
   const action = await resolveOutcome(input);
 
-  expect(action.action).toBe("failed");
+  expect(action.kind).toBe("failed");
   expect(fixCalls()).toBe(1);
 });
 
@@ -204,7 +205,7 @@ test("without fixOnlyWhenExtracted an unextracted failure still reaches the fix 
 
   const action = await resolveOutcome(input);
 
-  expect(action.action).toBe("failed");
+  expect(action.kind).toBe("failed");
   expect(fixCalls()).toBe(1);
 });
 
@@ -314,7 +315,7 @@ function refusedCaptureInput(
         return { output: "", ok: true, stats: { duration_ms: 1 }, ...reasked };
       },
       extractErrors: async () => ({ errors: "", hasErrors: false }),
-      runFixLoop: async () => ({ failed: true }),
+      runFixLoop: async () => failed(),
     },
     output,
   };
@@ -340,7 +341,7 @@ test("re-ask: a refused capture is asked again in the same session, and a correc
 
   const action = await resolveOutcome(input);
 
-  expect(action.action).toBe("succeeded");
+  expect(action.kind).toBe("done");
   expect(input.step.status).toBe("running");
   // One re-ask, into the session that holds the work — not a fresh one.
   expect(spawns).toHaveLength(1);
@@ -366,7 +367,7 @@ test("re-ask: the same refused object comes back — the runner does not insist"
 
   const action = await resolveOutcome(input);
 
-  expect(action.action).toBe("failed");
+  expect(action.kind).toBe("failed");
   expect(input.step.status).toBe("failed");
   expect(spawns).toHaveLength(1);
   expect(values.has("triage.json")).toBe(false);
@@ -384,7 +385,7 @@ test("re-ask: without a resumable session there is no re-ask, and the failure na
 
     const action = await resolveOutcome(input);
 
-    expect(action.action).toBe("failed");
+    expect(action.kind).toBe("failed");
     expect(spawns).toHaveLength(0);
     expect(input.step.attempts).toHaveLength(0);
     expect(failedSuffixOf(events)).toContain("(output contract refused, no fix configured)");
@@ -398,7 +399,7 @@ test("re-ask: a budget that withholds work withholds the re-ask, and records the
 
   const action = await resolveOutcome(input);
 
-  expect(action.action).toBe("failed");
+  expect(action.kind).toBe("failed");
   expect(spawns).toHaveLength(0);
   expect(messagesOf(events).some((message) => message.includes("Budget exceeded, no re-ask"))).toBe(true);
   expect(failedSuffixOf(events)).toContain("(output contract refused, no fix configured)");
@@ -411,6 +412,6 @@ test("re-ask: a result that was not a refusal is never re-asked", async () => {
 
   const action = await resolveOutcome(input);
 
-  expect(action.action).toBe("failed");
+  expect(action.kind).toBe("failed");
   expect(spawns).toHaveLength(0);
 });

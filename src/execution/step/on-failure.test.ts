@@ -8,6 +8,7 @@ import type { Run, RunStep } from "../../run/record/run.ts";
 import { buildPipelineContext } from "../../definition/pipeline/context.ts";
 import { createDefaultAgentBackendRegistry } from "../../agents/default-registry.ts";
 import { stepLogPath } from "../../run/record/run-timeline.ts";
+import { failed } from "./step-issue.ts";
 import { type OnFailureContext, onFailureHandlerFor, rerunHandler } from "./on-failure.ts";
 import { makeRunStep } from "../../run/record/run-step.ts";
 import { createAbortScope } from "../abort.js";
@@ -66,7 +67,7 @@ function makeCtx(
       },
       runFixLoop: async () => {
         calls.fix++;
-        return { failed: false };
+        return { kind: "done" };
       },
     },
     ...overrides,
@@ -84,7 +85,7 @@ test("a fix policy forwards the resumed step id that drives the repair backend c
     const { ctx } = makeCtx(run, step, []);
     ctx.deps.runFixLoop = async (_run, _step, _command, _output, _baseCtx, _budget, _reason, opts) => {
       seen.push(opts.resumeSession);
-      return { failed: false };
+      return { kind: "done" };
     };
     await onFailureHandlerFor(step.def.on_failure!)(ctx);
   }
@@ -103,7 +104,7 @@ test("on-failure: validates the integration contract", async () => {
 
   const out = await rerunHandler(ctx);
 
-  expect(out.failed).toBe(false);
+  expect(out.kind).not.toBe("failed");
   expect(step.status).toBe("running");
   expect(step.retries).toBe(2);
   expect(calls.exec).toBe(2);
@@ -116,7 +117,7 @@ test("on-failure: validates the integration contract", async () => {
 
   const out = await rerunHandler(ctx);
 
-  expect(out.failed).toBe(true);
+  expect(out.kind).toBe("failed");
   expect(step.status).toBe("failed");
   expect(step.retries).toBe(2);
   expect(calls.exec).toBe(2);
@@ -130,7 +131,7 @@ test("on-failure: validates the integration contract", async () => {
 
   const out = await rerunHandler(ctx);
 
-  expect(out.failed).toBe(false);
+  expect(out.kind).not.toBe("failed");
   expect(step.status).toBe("running");
   expect(step.errors).toBe("initial failure");
 });
@@ -143,7 +144,7 @@ test("on-failure: validates the integration contract", async () => {
   const out = await rerunHandler(ctx);
 
   expect(calls.exec).toBe(0);
-  expect(out.failed).toBe(true);
+  expect(out.kind).toBe("failed");
   expect(step.retries).toBe(0);
 });
 
@@ -213,7 +214,7 @@ test("on-failure: validates the integration contract", async () => {
 
   const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
 
-  expect(out.failed).toBe(false);
+  expect(out.kind).not.toBe("failed");
   expect(step.status).toBe("running");
   expect(calls.exec).toBe(1);
   expect(calls.fix).toBe(0);
@@ -234,12 +235,12 @@ test("on-failure: validates the integration contract", async () => {
   ctx.deps.runFixLoop = async (_run, _step, _cmd, out, _c, _b, reason) => {
     calls.fix++;
     fixInput = { output: out, reason };
-    return { failed: false };
+    return { kind: "done" };
   };
 
   const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
 
-  expect(out.failed).toBe(false);
+  expect(out.kind).not.toBe("failed");
   expect(calls.exec).toBe(1);
   expect(calls.fix).toBe(1);
   expect(fixInput).toEqual({ output: "verdict FAIL authentique", reason: "AC 3 non satisfait" });
@@ -260,7 +261,7 @@ test("on-failure: validates the integration contract", async () => {
 
   const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
 
-  expect(out.failed).toBe(true);
+  expect(out.kind).toBe("failed");
   expect(step.status).toBe("failed");
   expect(calls.exec).toBe(2);
   expect(calls.fix).toBe(0);
@@ -284,7 +285,7 @@ test("on-failure: validates the integration contract", async () => {
 
   const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
 
-  expect(out.failed).toBe(false);
+  expect(out.kind).not.toBe("failed");
   expect(calls.exec).toBe(2);
   expect(calls.fix).toBe(1);
   // Two post-timeout reruns consumed; the fix quota remains intact.
@@ -299,7 +300,7 @@ test("on-failure: validates the integration contract", async () => {
 
   const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
 
-  expect(out.failed).toBe(false);
+  expect(out.kind).not.toBe("failed");
   expect(step.status).toBe("running");
   expect(calls.fix).toBe(0);
   expect(step.errors).toBeDefined();
@@ -312,7 +313,7 @@ test("on-failure: validates the integration contract", async () => {
 
   const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
 
-  expect(out.failed).toBe(false);
+  expect(out.kind).not.toBe("failed");
   expect(calls.exec).toBe(0);
   expect(calls.fix).toBe(1);
 });
@@ -323,11 +324,11 @@ test("on-failure: validates the integration contract", async () => {
   const step = failingStep({ max_retries: 1, fix_prompt: "corrige" });
   const run = makeRun(step);
   const { ctx } = makeCtx(run, step, []);
-  ctx.deps.runFixLoop = async () => ({ failed: true });
+  ctx.deps.runFixLoop = async () => failed();
 
   const out = await onFailureHandlerFor(step.def.on_failure!)(ctx);
 
-  expect(out.failed).toBe(true);
+  expect(out.kind).toBe("failed");
 });
 
 test("on-failure: an abort requested during a rerun ends the loop without another spawn", async () => {
@@ -347,7 +348,7 @@ test("on-failure: an abort requested during a rerun ends the loop without anothe
 
   expect(calls.exec).toBe(1);
   expect(step.retries).toBe(1);
-  expect(out.failed).toBe(false);
+  expect(out.kind).not.toBe("failed");
   // Not settled by the loop: the interruption owns the step's final status.
   expect(step.status).toBe("running");
 });
@@ -360,7 +361,7 @@ test("a non-blocking rerun withheld by the budget gate stays failed", async () =
   const out = await rerunHandler(ctx);
 
   expect(calls.exec).toBe(0);
-  expect(out.failed).toBe(true);
+  expect(out.kind).toBe("failed");
   expect(step.status).toBe("failed");
   expect(step.errors).toBe("initial failure");
 });
@@ -374,7 +375,7 @@ test("a rerun killed by the live guard stays failed and gives its quota back", a
 
   const out = await rerunHandler(ctx);
 
-  expect(out.failed).toBe(true);
+  expect(out.kind).toBe("failed");
   expect(step.status).toBe("failed");
   expect(step.retries).toBe(0);
 });

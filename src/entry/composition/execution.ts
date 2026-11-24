@@ -248,14 +248,9 @@ export function reportRun(
   const statsPath = emitRunStats(run, { context });
   consoleReport(run, outcome, { statsPath, registry: agentBackendRegistryOf(context) });
   const { exit } = runEnding({
+    ...outcome,
     // A signal this process received counts even when no run recorded it yet.
     aborted: abort.isAbortRequested() || run.aborted,
-    stopped: outcome.stopped,
-    failed: outcome.failed,
-    budgetExceeded: outcome.budgetExceeded,
-    costUnaccounted: outcome.costUnaccounted,
-    costUnaccountedStop: outcome.costUnaccountedStop,
-    untilStop: outcome.untilStop,
   });
   switch (exit) {
     case "interrupted":

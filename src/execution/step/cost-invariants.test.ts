@@ -38,6 +38,7 @@ import { makeRunStep, type StepStateInput } from "../../run/record/run-step.ts";
 import { abortRun, finalizeRun, reportLiveCost } from "../../run/record/run-transitions.ts";
 import { createAbortScope } from "../abort.ts";
 import { NULL_RUN_OUTPUT } from "../run-output.ts";
+import { failed } from "./step-issue.ts";
 import { type FixLoopDeps, runFixLoop } from "./fix-loop.ts";
 import { rerunHandler } from "./on-failure.ts";
 import { childLaunchGate } from "./pipeline-orchestration-child.ts";
@@ -87,7 +88,7 @@ function scriptedDeps(script: Array<Partial<StepResult> | ((step: RunStepView) =
       return { output: "", ok: r.ok ?? true, stats: r.stats ?? { duration_ms: 1 }, ...r } as StepResult;
     },
     extractErrors: async () => ({ hasErrors: false, errors: "" }),
-    runFixLoop: async () => ({ failed: true }),
+    runFixLoop: async () => failed(),
     output: NULL_RUN_OUTPUT,
   };
 }
@@ -584,7 +585,7 @@ const GATES: Record<string, (state: BudgetState) => Promise<{ run: Run; budget: 
           throw new Error("the gate withholds the re-ask");
         },
         extractErrors: async () => ({ errors: "", hasErrors: false }),
-        runFixLoop: async () => ({ failed: true }),
+        runFixLoop: async () => failed(),
       },
       output: NULL_RUN_OUTPUT,
     });
@@ -608,7 +609,7 @@ const GATES: Record<string, (state: BudgetState) => Promise<{ run: Run; budget: 
         executeStep: async () => {
           throw new Error("the gate withholds the rerun");
         },
-        runFixLoop: async () => ({ failed: true }),
+        runFixLoop: async () => failed(),
       },
     });
     return { run, budget };

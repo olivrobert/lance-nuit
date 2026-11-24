@@ -17,6 +17,7 @@ import type { RunStepView } from "../../run/run.ts";
 import { createAbortScope } from "../abort.ts";
 import { NULL_RUN_OUTPUT, type RunOutput, type RunOutputEvent } from "../run-output.ts";
 import type { StepResult } from "../runners.ts";
+import { failed } from "./step-issue.ts";
 import { executionUnits } from "./parallel-group.ts";
 import { executeRunSteps, type StepLoopDeps } from "./step-loop.ts";
 import { treeChanges } from "./tree-snapshot.ts";
@@ -89,7 +90,7 @@ function depsAnswering(script: Script, output: RunOutput = NULL_RUN_OUTPUT): Ste
       return { output: "", ok: true, stats: { duration_ms: 1 }, ...answer };
     }) as StepLoopDeps["executeStep"],
     extractErrors: async () => ({ hasErrors: false, errors: "" }),
-    runFixLoop: async () => ({ failed: true }),
+    runFixLoop: async () => failed(),
     output,
   };
 }

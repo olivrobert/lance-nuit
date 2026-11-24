@@ -404,7 +404,7 @@ function countingDeps(
         return result;
       },
       extractErrors: async () => ({ hasErrors: false, errors: "" }),
-      runFixLoop: async () => ({ failed: false }),
+      runFixLoop: async () => ({ kind: "done" }),
       output: NULL_RUN_OUTPUT,
     },
   };

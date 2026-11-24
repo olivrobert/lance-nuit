@@ -186,7 +186,7 @@ test("a real SIGTERM during a step persists the abort and leaves a resumable run
         return { ok: true, output: "", stats: { duration_ms: 1 } };
       },
       extractErrors: async () => ({ hasErrors: false, errors: "" }),
-      runFixLoop: async () => ({ failed: false }),
+      runFixLoop: async () => ({ kind: "done" }),
       output: NULL_RUN_OUTPUT,
     },
     ctx,

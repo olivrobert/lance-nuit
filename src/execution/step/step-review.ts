@@ -21,7 +21,7 @@ import type { RunOutput } from "../run-output.js";
 import { artifactScopeFor, invokeBackend, runWithAgent, type StepResult } from "../runners.js";
 import { settleStepFailure } from "./non-blocking.js";
 import { produceOutputs, readCaptures, refusedCaptureEntry, runFixAttempt, runTrackedAttempt } from "./step-attempt.js";
-import type { ResolvedOutcome } from "./step-outcome.js";
+import { failed, INTERRUPTED, type StepIssue } from "./step-issue.js";
 
 export interface ReviewPhaseInput {
   run: RunView;
@@ -32,15 +32,13 @@ export interface ReviewPhaseInput {
   output: RunOutput;
 }
 
-const STOPPED: ResolvedOutcome = { action: "stopped" };
-
-function fail(input: ReviewPhaseInput, reason: string, costStopped = false): ResolvedOutcome {
+function fail(input: ReviewPhaseInput, reason: string, costStopped = false): StepIssue {
   settleStepFailure(input.run, input.step, input.output, reason, { failSuffix: ` — ${reason}` }, costStopped);
-  return { action: "failed" };
+  return failed();
 }
 
 /** A gate that withholds the next review or fix stops the run without spawning it. */
-function withheld(input: ReviewPhaseInput, what: string): ResolvedOutcome | undefined {
+function withheld(input: ReviewPhaseInput, what: string): StepIssue | undefined {
   const stop = costGate(input.run, input.budget, input.step.id);
   if (!stop) return undefined;
   const why = stop === "cost-unaccounted" ? "Spending unaccounted" : "Budget exceeded";
@@ -102,7 +100,7 @@ async function reviewAttempt(input: ReviewPhaseInput, label: string): Promise<St
 
 /** Review attempts, plain reruns included. Returns the outcome when the phase
  *  ends here, `undefined` once a review returned its capture. */
-async function reviewUntilCaptured(input: ReviewPhaseInput): Promise<ResolvedOutcome | undefined> {
+async function reviewUntilCaptured(input: ReviewPhaseInput): Promise<StepIssue | undefined> {
   const { run, abort, output } = input;
   const total = 1 + input.step.def.review!.retries;
   let lastFailReason: string | undefined;
@@ -114,11 +112,11 @@ async function reviewUntilCaptured(input: ReviewPhaseInput): Promise<ResolvedOut
     try {
       result = await reviewAttempt(input, `review ${attempt}/${total}`);
     } catch (error) {
-      if (abort.isRunAborted(run)) return STOPPED;
+      if (abort.isRunAborted(run)) return INTERRUPTED;
       lastFailReason = `review: ${errorMessage(error)}`;
       continue;
     }
-    if (abort.isRunAborted(run)) return STOPPED;
+    if (abort.isRunAborted(run)) return INTERRUPTED;
     if (result.ok) return undefined;
     lastFailReason = result.failReason ?? "review failed";
     if (result.budgetExceeded || result.costUnaccounted) return fail(input, lastFailReason, true);
@@ -128,7 +126,7 @@ async function reviewUntilCaptured(input: ReviewPhaseInput): Promise<ResolvedOut
 
 /** The fix: exactly one attempt resuming the producing session, whatever its
  *  size, then every produce output must hold. */
-async function fixInProducingSession(input: ReviewPhaseInput, prompt: string): Promise<ResolvedOutcome | undefined> {
+async function fixInProducingSession(input: ReviewPhaseInput, prompt: string): Promise<StepIssue | undefined> {
   const { run, step, baseCtx, budget, abort } = input;
   const spec = backendSpecForStep(step.def);
   const session = step.session;
@@ -159,7 +157,7 @@ async function fixInProducingSession(input: ReviewPhaseInput, prompt: string): P
     },
     registry,
   });
-  if (abort.isRunAborted(run)) return STOPPED;
+  if (abort.isRunAborted(run)) return INTERRUPTED;
   bindSession(run, step, fix.session ?? session);
   if (!fix.ok) {
     return fail(
@@ -177,7 +175,7 @@ async function fixInProducingSession(input: ReviewPhaseInput, prompt: string): P
 }
 
 /** Run the review phase. `succeeded` leaves the step to the pass to settle. */
-export async function runReviewPhase(input: ReviewPhaseInput): Promise<ResolvedOutcome> {
+export async function runReviewPhase(input: ReviewPhaseInput): Promise<StepIssue> {
   const { run, step, baseCtx, abort } = input;
   const review = step.def.review!;
   const ended = await reviewUntilCaptured(input);
@@ -188,8 +186,8 @@ export async function runReviewPhase(input: ReviewPhaseInput): Promise<ResolvedO
   } catch (error) {
     return fail(input, `review fix prompt: ${errorMessage(error)}`);
   }
-  if (abort.isRunAborted(run)) return STOPPED;
-  if (!prompt?.trim()) return { action: "succeeded", doneSuffix: " (reviewed)" };
+  if (abort.isRunAborted(run)) return INTERRUPTED;
+  if (!prompt?.trim()) return { kind: "done", suffix: " (reviewed)" };
   const fixed = await fixInProducingSession(input, prompt);
-  return fixed ?? { action: "succeeded", doneSuffix: " (reviewed, fixed)" };
+  return fixed ?? { kind: "done", suffix: " (reviewed, fixed)" };
 }

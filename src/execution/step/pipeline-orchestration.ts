@@ -20,31 +20,20 @@ import {
   updateStep,
 } from "../../run/index.js";
 import { childLaunchGate, executeChild } from "./pipeline-orchestration-child.js";
-import type {
-  ChildExecutionResult,
-  PipelineOrchestrationInput,
-  PipelineOrchestrationResult,
-} from "./pipeline-orchestration-types.js";
+import type { PipelineOrchestrationInput } from "./pipeline-orchestration-types.js";
+import { DONE, failed, type StepIssue, stopped } from "./step-issue.js";
 import { childContext, currentLineage, evaluatePredicate, resolveTicket } from "./pipeline-orchestration-resolution.js";
 
 /** Convert every child failure into the same parent-step transition. */
-function childFailure(
-  input: PipelineOrchestrationInput,
-  result: ChildExecutionResult,
-): PipelineOrchestrationResult | undefined {
-  if (result.ok) return undefined;
+function childFailure(input: PipelineOrchestrationInput, result: StepIssue): StepIssue | undefined {
+  if (result.kind !== "failed" && result.kind !== "stopped") return undefined;
   // The parent step is only the carrier of the child's answer. Recorded before
   // the transition: `updateStep` stamps the run outcome from `fail_kind` and
   // `fail_cause`, which is what the final report reads to choose between
   // "Quality check failed" and "Technical error".
   recordStepVerdict(input.run, input.step, { ok: false, failKind: result.failKind, failCause: result.failCause });
   updateStep(input.run, input.step, "failed", result.reason);
-  return {
-    action: result.stopped ? "stopped" : "failed",
-    budgetExceeded: !!result.budgetExceeded,
-    ...(result.costUnaccounted ? { costUnaccounted: true } : {}),
-    ...(result.costUnaccountedStop ? { costUnaccountedStop: true } : {}),
-  };
+  return result;
 }
 
 function invocationForMain(def: PipelineOrchestrationDefinition, ticket?: string): PipelineInvocationDefinition {
@@ -66,11 +55,11 @@ async function executeCallback(
   kind: ChildRefView["kind"],
   defaultTicket: string | undefined,
   defaultLot: PipelineLot | undefined,
-): Promise<ChildExecutionResult> {
+): Promise<StepIssue> {
   // Loop callbacks run in the current item context: `ticket: ctx => ctx.ticket`
   // must identify the child, not the work item owning the orchestration node.
   const existing = state.children.find((candidate) => candidate.key === key);
-  if (existing && isChildSettled(existing)) return { ok: true };
+  if (existing && isChildSettled(existing)) return DONE;
   // Same gate as a child launch, and for the same reason: an `afterEach` or
   // `afterAll` pipeline is real spend. Evaluated before the ticket and the child
   // reference exist, so a refused callback leaves nothing behind to resume from.
@@ -89,10 +78,10 @@ async function executeCallback(
     if (!predicate.ok) {
       if (predicate.threw) {
         failChildLaunch(input.run, ref, step.id, predicate.reason ?? "composition predicate failed");
-        return { ok: false, reason: predicate.reason };
+        return failed({ reason: predicate.reason });
       }
       skipChild(input.run, ref, step.id, predicate.reason ?? "condition not met");
-      return { ok: true };
+      return DONE;
     }
     commitChildCall(input.run, ref);
   }
@@ -104,7 +93,7 @@ async function executeRunPipeline(
   input: PipelineOrchestrationInput,
   def: Extract<PipelineOrchestrationDefinition, { kind: "runPipeline" }>,
   state: OrchestrationView,
-): Promise<PipelineOrchestrationResult> {
+): Promise<StepIssue> {
   const existing = state.children.find((candidate) => candidate.key === "main");
   const ticket = existing?.ticket ?? (await resolveTicket(def.ticket, input.baseCtx, input.baseCtx.ticket));
   const ref = declareChild(input.run, state, { key: "main", kind: "main", pipeline: def.pipeline, ticket });
@@ -112,14 +101,14 @@ async function executeRunPipeline(
   const failure = childFailure(input, result);
   if (failure) return failure;
   updateStep(input.run, input.step, "done");
-  return { action: "continue", budgetExceeded: false };
+  return DONE;
 }
 
 async function executeForEachPipeline(
   input: PipelineOrchestrationInput,
   def: Extract<PipelineOrchestrationDefinition, { kind: "forEachPipeline" }>,
   state: OrchestrationView,
-): Promise<PipelineOrchestrationResult> {
+): Promise<StepIssue> {
   let items = state.items;
   if (!items) {
     const raw = (await resolveTemplateAsync(def.items, input.baseCtx)) as unknown;
@@ -130,13 +119,13 @@ async function executeForEachPipeline(
         "failed",
         "forEachPipeline().items must return a list of non-empty ticket identifiers",
       );
-      return { action: "failed", budgetExceeded: false };
+      return failed();
     }
     items = freezeOrchestrationItems(input.run, state, raw);
   }
 
   for (const [index, item] of items.entries()) {
-    if (input.abort.isRunAborted(input.run)) return { action: "stopped", budgetExceeded: false };
+    if (input.abort.isRunAborted(input.run)) return stopped();
     const ticket = await resolveTicket(def.ticket, input.baseCtx, item);
     const lot = def.lot ? await def.lot(input.baseCtx, item) : undefined;
     const mainRef = declareChild(input.run, state, {
@@ -182,17 +171,15 @@ async function executeForEachPipeline(
   }
 
   updateStep(input.run, input.step, "done");
-  return { action: "continue", budgetExceeded: false };
+  return DONE;
 }
 
 /** Entry point called by step-pass after node admission. */
-export async function executePipelineOrchestration(
-  input: PipelineOrchestrationInput,
-): Promise<PipelineOrchestrationResult> {
+export async function executePipelineOrchestration(input: PipelineOrchestrationInput): Promise<StepIssue> {
   const def = input.step.def.orchestration;
   if (!def) {
     updateStep(input.run, input.step, "failed", "orchestration definition missing");
-    return { action: "failed", budgetExceeded: false };
+    return failed();
   }
   const state = openOrchestration(input.run, input.step, def.kind, currentLineage(input.run));
   try {
@@ -202,8 +189,8 @@ export async function executePipelineOrchestration(
   } catch (error) {
     // Nothing to reconstruct here: each child posts its delta during reconciliation,
     // so already-spent cost is already in the budget.
-    if (input.abort.isRunAborted(input.run)) return { action: "stopped", budgetExceeded: false };
+    if (input.abort.isRunAborted(input.run)) return stopped();
     updateStep(input.run, input.step, "failed", errorMessage(error).trim());
-    return { action: "failed", budgetExceeded: false };
+    return failed();
   }
 }
