@@ -107,7 +107,7 @@ test("a runner killed while its attempt runs leaves it running; the resume close
   const resumed = runEntry(cwd, "CRASH-1");
 
   expect(resumed.status).toBe(0);
-  const [crashed, replayed] = runState(cwd)?.steps[0].attempts;
+  const [crashed, replayed] = runState(cwd)!.steps[0].attempts;
   expect(crashed).toMatchObject({
     attempt: 1,
     status: "failed",

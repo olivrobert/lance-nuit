@@ -1582,7 +1582,8 @@ export default ({ pipeline, runPipeline }) => pipeline("parent")
   const firstStep = writable(first.run.steps[0]!);
   const ref = firstStep.orchestration!.children[0]!;
   expect(ref.startedAt).toBeString();
-  const { runId, startedAt } = ref;
+  const runId = ref.runId!;
+  const { startedAt } = ref;
 
   ref.status = "running";
   updateStep(first.run, firstStep, "failed", "crash before settlement");
