@@ -1,25 +1,8 @@
 //
 import type { ActivityRunnerEvent, ContextRunnerEvent } from "./events.js";
 
-// PURE helpers (no I/O) for the context occupancy of a Claude session.
-// The measurement remains observable; it no longer drives execution.
-//
-// Context occupancy = footprint of the LAST turn:
-//   input + cache_read + cache_creation
-// (NOT output, NOT the sum of turns — that is cost, see stream.ts.)
-
-export interface ClaudeUsage {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_read_input_tokens?: number;
-  cache_creation_input_tokens?: number;
-}
-
-/** Tokens occupying the context window at THIS turn (the sent prompt). */
-export function contextTokensFromUsage(u?: ClaudeUsage | null): number {
-  if (!u) return 0;
-  return (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-}
+// PURE builders (no I/O) of the stream telemetry every backend publishes. Each
+// backend measures the occupancy off its own stream; these only shape the events.
 
 /** Build a context event (written to the events.jsonl journal). */
 export function contextEvent(

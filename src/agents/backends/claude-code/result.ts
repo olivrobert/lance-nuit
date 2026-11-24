@@ -1,7 +1,7 @@
 import type { AgentResult } from "../../../contracts/index.js";
 import { agentSession, mapAgentResult, type VerdictOutcomeError } from "../result-helpers.js";
 import { netCumulative } from "./cost-state.js";
-import { type ClaudeTransportError, isAuthFailure, isRateLimited, parseClaudeEvents } from "./events.js";
+import { type ClaudeTransportError, isAuthFailure, isRateLimited } from "./events.js";
 import type { RawClaudeExecutionResult } from "./types.js";
 export interface ClaudeResultOptions {
   outputFormat?: "text" | "json";
@@ -36,7 +36,7 @@ export function mapClaudeExecutionResult(
   raw: RawClaudeExecutionResult,
   options: ClaudeResultOptions = {},
 ): AgentResult {
-  const parsed = parseClaudeEvents(raw.output, options.model);
+  const parsed = structuredClone(raw.stream);
   // `duration_ms` only arrives on the CLI's final `result` event, which a process
   // killed for timeout or budget never emits: fall back to the supervisor's clock.
   if (raw.kill || !parsed.stats.duration_ms) parsed.stats.duration_ms = raw.durationMs;

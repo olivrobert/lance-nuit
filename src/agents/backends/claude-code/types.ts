@@ -2,6 +2,7 @@ import type { LiveCostSink } from "../../../contracts/backends.js";
 import type { ClaudeOptions, ClaudeResumeBaseline } from "../../../contracts/backends/claude-code.js";
 import type { ProcessKill } from "../../../shared/process/process-runner.js";
 import type { BackendSpawnEvent } from "../spawn-event.js";
+import type { ClaudeParsedEvents } from "./events.js";
 
 export type {
   ClaudeBackendOptions,
@@ -30,6 +31,9 @@ export interface ClaudeExecutionOptions {
 }
 export interface RawClaudeExecutionResult {
   output: string;
+  /** The stream as the live reader left it: the transport and the mapper read
+   *  this rather than parsing `output` again. */
+  stream: ClaudeParsedEvents;
   code: number | null;
   /** The kill this backend counts as one. */
   kill?: ProcessKill;

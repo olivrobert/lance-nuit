@@ -1,6 +1,6 @@
 import { type JsonRecord, jsonRecords, asRecord as record } from "../../../shared/lib/json-values.js";
 import { toolLabel } from "../../../shared/lib/tool-label.js";
-import { parseOpencodeEvent } from "./events.schema.js";
+import { type OpencodeEvent, parseOpencodeEvent } from "./events.schema.js";
 
 /** Message identity and text as read off one stream event, for the live step log. */
 export function textFromEvent(event: JsonRecord): { key: string; text: string } | undefined {
@@ -42,6 +42,58 @@ export function opencodeToolLabel(tool: string, rawInput: unknown): string {
   });
 }
 
+/** Running usage totals shared by the final parse and the live budget guard. */
+export interface OpencodeUsageTotals {
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  costUsd: number;
+  /** A free model reports `cost: 0`; only the absence of the field means "unpriced". */
+  costReported: boolean;
+  /** `tokens.total` of the last step: context occupancy, not the model window. */
+  lastContextTokens?: number;
+}
+
+export function newOpencodeUsageTotals(): OpencodeUsageTotals {
+  return {
+    turns: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    costUsd: 0,
+    costReported: false,
+  };
+}
+
+/** Folds one parsed stream event into the totals; true when it finished a step —
+ * the only event that carries usage. The caller parses the line once
+ * (`parseOpencodeEvent`) and hands the same event to every consumer. */
+export function accumulateOpencodeUsage(
+  event: OpencodeEvent,
+  totals: OpencodeUsageTotals,
+): event is Extract<OpencodeEvent, { type: "step_finish" }> {
+  if (event.type !== "step_finish") return false;
+  totals.turns++;
+  const tokens = event.part?.tokens;
+  totals.inputTokens += tokens?.input ?? 0;
+  totals.outputTokens += tokens?.output ?? 0;
+  totals.reasoningTokens += tokens?.reasoning ?? 0;
+  totals.cacheReadTokens += tokens?.cache?.read ?? 0;
+  totals.cacheCreationTokens += tokens?.cache?.write ?? 0;
+  if (tokens?.total != null) totals.lastContextTokens = tokens.total;
+  const cost = event.part?.cost;
+  if (cost != null) {
+    totals.costUsd += cost;
+    totals.costReported = true;
+  }
+  return true;
+}
+
 export interface ParsedOpencodeEvents {
   text: string;
   sessionId?: string;
@@ -75,15 +127,7 @@ export function parseOpencodeEvents(raw: string): ParsedOpencodeEvents {
   const tools = new Set<string>();
   let sessionId: string | undefined;
   let error: string | undefined;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let reasoningTokens = 0;
-  let cacheReadTokens = 0;
-  let cacheCreationTokens = 0;
-  let costUsd = 0;
-  let costReported = false;
-  let lastContextTokens: number | undefined;
-  let turns = 0;
+  const totals = newOpencodeUsageTotals();
 
   for (const record of jsonRecords(raw)) {
     // An event type this release does not know reads as `{ type: null }`: it
@@ -91,23 +135,7 @@ export function parseOpencodeEvents(raw: string): ParsedOpencodeEvents {
     const event = parseOpencodeEvent(record);
     sessionId = event.sessionID ?? sessionId;
 
-    if (event.type === "step_finish") {
-      turns++;
-      const tokens = event.part?.tokens;
-      inputTokens += tokens?.input ?? 0;
-      outputTokens += tokens?.output ?? 0;
-      reasoningTokens += tokens?.reasoning ?? 0;
-      cacheReadTokens += tokens?.cache?.read ?? 0;
-      cacheCreationTokens += tokens?.cache?.write ?? 0;
-      const total = tokens?.total;
-      if (total != null) lastContextTokens = total;
-      const cost = event.part?.cost;
-      if (cost != null) {
-        costUsd += cost;
-        costReported = true;
-      }
-      continue;
-    }
+    if (accumulateOpencodeUsage(event, totals)) continue;
 
     if (event.type === "error") {
       error = unquote(event.error?.data?.message) ?? error ?? "opencode run failed";
@@ -134,15 +162,15 @@ export function parseOpencodeEvents(raw: string): ParsedOpencodeEvents {
     ...(sessionId ? { sessionId } : {}),
     ...(messages.length > 0 ? { finalMessage: messages[messages.length - 1] } : {}),
     ...(error ? { error } : {}),
-    ...(inputTokens > 0 ? { inputTokens } : {}),
-    ...(outputTokens > 0 ? { outputTokens } : {}),
-    ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
-    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
-    ...(cacheCreationTokens > 0 ? { cacheCreationTokens } : {}),
-    ...(costReported ? { costUsd } : {}),
-    costReported,
-    ...(lastContextTokens != null ? { lastContextTokens } : {}),
-    turns,
+    ...(totals.inputTokens > 0 ? { inputTokens: totals.inputTokens } : {}),
+    ...(totals.outputTokens > 0 ? { outputTokens: totals.outputTokens } : {}),
+    ...(totals.reasoningTokens > 0 ? { reasoningTokens: totals.reasoningTokens } : {}),
+    ...(totals.cacheReadTokens > 0 ? { cacheReadTokens: totals.cacheReadTokens } : {}),
+    ...(totals.cacheCreationTokens > 0 ? { cacheCreationTokens: totals.cacheCreationTokens } : {}),
+    ...(totals.costReported ? { costUsd: totals.costUsd } : {}),
+    costReported: totals.costReported,
+    ...(totals.lastContextTokens != null ? { lastContextTokens: totals.lastContextTokens } : {}),
+    turns: totals.turns,
     toolsUsed: [...tools],
   };
 }

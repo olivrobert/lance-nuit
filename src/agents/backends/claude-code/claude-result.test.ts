@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { mapClaudeExecutionResult } from "./result.js";
+import { parseClaudeEvents } from "./events.js";
+import { type ClaudeResultOptions, mapClaudeExecutionResult } from "./result.js";
+import type { RawClaudeExecutionResult } from "./types.js";
+
+/** Maps a spawn whose stream is read the way the live host reads it. */
+const map = (spawn: Omit<RawClaudeExecutionResult, "stream">, options?: ClaudeResultOptions) =>
+  mapClaudeExecutionResult({ ...spawn, stream: parseClaudeEvents(spawn.output, options?.model) }, options);
 
 const raw = (output: string) => ({ output, code: 0, durationMs: 1 });
 
 describe("Claude result mapping", () => {
   test("returns structured output and successful verdict", () => {
-    const result = mapClaudeExecutionResult(
+    const result = map(
       raw(
         [
           JSON.stringify({
@@ -27,7 +33,7 @@ describe("Claude result mapping", () => {
   test("a fence verdict is structured output too, extra fields included", () => {
     // Text mode (`RUNNER_VERDICT_MODE=text`, or a skill writing the fence itself):
     // a captured field lives in the fence, and must reach `structuredOutput`.
-    const result = mapClaudeExecutionResult(
+    const result = map(
       raw(
         JSON.stringify({
           type: "assistant",
@@ -43,7 +49,7 @@ describe("Claude result mapping", () => {
   });
 
   test("native structured output keeps its extra fields", () => {
-    const result = mapClaudeExecutionResult(
+    const result = map(
       raw(JSON.stringify({ type: "result", structured_output: { success: true, reason: "ok", commit: "feat: x" } })),
       { outputFormat: "json" },
     );
@@ -51,12 +57,11 @@ describe("Claude result mapping", () => {
   });
 
   test("says why an invalid verdict was refused", () => {
-    const structured = mapClaudeExecutionResult(
-      raw(JSON.stringify({ type: "result", structured_output: { success: "yes" } })),
-      { outputFormat: "json" },
-    );
+    const structured = map(raw(JSON.stringify({ type: "result", structured_output: { success: "yes" } })), {
+      outputFormat: "json",
+    });
     expect(structured.failReason).toBe("invalid verdict: success must be a boolean");
-    const text = mapClaudeExecutionResult(
+    const text = map(
       raw(
         JSON.stringify({
           type: "assistant",
@@ -79,7 +84,7 @@ describe("Claude result mapping", () => {
         total_cost_usd: 3.5,
       }),
     ].join("\n");
-    const result = mapClaudeExecutionResult({ ...raw(output), resumeBaseline: { costUsd: 3, apiDurationMs: 600 } }, {});
+    const result = map({ ...raw(output), resumeBaseline: { costUsd: 3, apiDurationMs: 600 } }, {});
     // The CLI reported the whole coder session; this pass only cost $0.50.
     expect(result.stats.total_cost_usd).toBeCloseTo(0.5, 10);
     expect(result.stats.duration_api_ms).toBe(300);
@@ -90,10 +95,7 @@ describe("Claude result mapping", () => {
 
   test("adds the discarded transport attempts on top of the netted cost", () => {
     const output = JSON.stringify({ type: "result", duration_ms: 1, total_cost_usd: 0.7 });
-    const result = mapClaudeExecutionResult(
-      { ...raw(output), resumeBaseline: { costUsd: 0.4 }, priorAttemptsCostUsd: 0.4 },
-      {},
-    );
+    const result = map({ ...raw(output), resumeBaseline: { costUsd: 0.4 }, priorAttemptsCostUsd: 0.4 }, {});
     expect(result.stats.total_cost_usd).toBeCloseTo(0.7, 10);
     expect(result.stats.cost_unknown).toBeUndefined();
   });
@@ -102,7 +104,7 @@ describe("Claude result mapping", () => {
     // Timeout after an overload retry: the $0.40 of the discarded attempt is real,
     // the final attempt's own spend is unmeasured. Reporting $0.40 as THE cost
     // would let the ledger read the spawn as fully priced.
-    const result = mapClaudeExecutionResult(
+    const result = map(
       {
         output: "",
         code: null,
@@ -121,9 +123,8 @@ describe("Claude result mapping", () => {
       type: "assistant",
       message: { id: "m1", model: "claude-sonnet-4-6", usage: { input_tokens: 1000, output_tokens: 100 } },
     });
-    const estimated = mapClaudeExecutionResult({ ...raw(output) }, {}).stats.total_cost_usd;
-    const netted = mapClaudeExecutionResult({ ...raw(output), resumeBaseline: { costUsd: 3 } }, {}).stats
-      .total_cost_usd;
+    const estimated = map({ ...raw(output) }, {}).stats.total_cost_usd;
+    const netted = map({ ...raw(output), resumeBaseline: { costUsd: 3 } }, {}).stats.total_cost_usd;
     expect(netted).toBe(estimated);
   });
 
@@ -139,14 +140,14 @@ describe("Claude result mapping", () => {
       kill: { cause: "timeout" as const, afterMs: 900_000 },
       durationMs: 900_000,
     };
-    const estimate = mapClaudeExecutionResult(killed).stats.total_cost_usd;
+    const estimate = map(killed).stats.total_cost_usd;
 
     test("is charged what the session ledger gained, still flagged as not the CLI's final figure", () => {
-      const fresh = mapClaudeExecutionResult({ ...killed, settledLedgerUsd: 1.8 }).stats;
+      const fresh = map({ ...killed, settledLedgerUsd: 1.8 }).stats;
       expect(fresh.total_cost_usd).toBeCloseTo(1.8, 10);
       expect(fresh.cost_estimated).toBe(true);
 
-      const resumed = mapClaudeExecutionResult({
+      const resumed = map({
         ...killed,
         resumeBaseline: { costUsd: 3 },
         settledLedgerUsd: 3.5,
@@ -155,17 +156,17 @@ describe("Claude result mapping", () => {
     });
 
     test("keeps the token estimate when the ledger did not move", () => {
-      const unmoved = mapClaudeExecutionResult({
+      const unmoved = map({
         ...killed,
         resumeBaseline: { costUsd: 3 },
         settledLedgerUsd: 3,
       }).stats;
       expect(unmoved.total_cost_usd).toBe(estimate);
-      expect(mapClaudeExecutionResult({ ...killed, settledLedgerUsd: 0 }).stats.total_cost_usd).toBe(estimate);
+      expect(map({ ...killed, settledLedgerUsd: 0 }).stats.total_cost_usd).toBe(estimate);
     });
 
     test("prices the spawn through the ledger when no usage reached the stream at all", () => {
-      const result = mapClaudeExecutionResult({
+      const result = map({
         ...killed,
         output: "",
         priorAttemptsCostUsd: 0.4,
@@ -186,7 +187,7 @@ describe("Claude result mapping", () => {
       type: "assistant",
       message: { id: "m1", usage: { input_tokens: 10, output_tokens: 2 } },
     });
-    const result = mapClaudeExecutionResult({
+    const result = map({
       output: assistant,
       code: null,
       kill,
@@ -197,17 +198,17 @@ describe("Claude result mapping", () => {
 
   test("keeps the CLI-reported duration of a completed attempt", () => {
     const output = JSON.stringify({ type: "result", duration_ms: 42 });
-    expect(mapClaudeExecutionResult({ ...raw(output), durationMs: 50 }).stats.duration_ms).toBe(42);
+    expect(map({ ...raw(output), durationMs: 50 }).stats.duration_ms).toBe(42);
   });
 
   test("adds the discarded transport attempts to the duration", () => {
     const output = JSON.stringify({ type: "result", duration_ms: 42 });
-    const result = mapClaudeExecutionResult({ ...raw(output), priorAttemptsDurationMs: 1000 });
+    const result = map({ ...raw(output), priorAttemptsDurationMs: 1000 });
     expect(result.stats.duration_ms).toBe(1042);
   });
 
   test("maps timeout cleanup as a technical timeout", () => {
-    const result = mapClaudeExecutionResult({
+    const result = map({
       output: "",
       code: null,
       kill: { cause: "timeout" as const, afterMs: 1000 },
@@ -219,7 +220,7 @@ describe("Claude result mapping", () => {
   });
   test("reports an authentication failure as blocked so the run stops without repair", () => {
     const logs: string[] = [];
-    const result = mapClaudeExecutionResult(
+    const result = map(
       {
         output: JSON.stringify({ type: "result", is_error: true, result: "Not logged in · Please run /login" }),
         code: 1,
@@ -238,7 +239,7 @@ describe("Claude result mapping", () => {
 
   test("reports a usage limit as blocked with its reset time so a resume replays the step", () => {
     const resetsAt = 1_785_405_000;
-    const result = mapClaudeExecutionResult({
+    const result = map({
       output: [
         JSON.stringify({ type: "rate_limit_event", rate_limit_info: { resetsAt } }),
         JSON.stringify({ type: "result", is_error: true, api_error_status: 429, result: "session limit" }),
@@ -253,7 +254,7 @@ describe("Claude result mapping", () => {
   });
 
   test("leaves other transport errors without a blocked cause", () => {
-    const result = mapClaudeExecutionResult({
+    const result = map({
       output: JSON.stringify({
         type: "result",
         is_error: true,

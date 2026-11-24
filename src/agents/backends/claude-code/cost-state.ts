@@ -104,3 +104,13 @@ export function readSessionCostBaseline(
 export function netCumulative(reported: number, baseline: number): number {
   return reported >= baseline ? reported - baseline : reported;
 }
+
+/**
+ * What THIS attempt spent, not what the session has: a resumed attempt reports
+ * the cumulative ledger, and charging that would repay its ancestors. An
+ * estimated cost is computed from this process's tokens, so it has nothing to net.
+ */
+export function attemptCostUsd(cost: { usd?: number; estimated: boolean }, baselineUsd = 0): number {
+  const usd = cost.usd ?? 0;
+  return cost.estimated ? usd : netCumulative(usd, baselineUsd);
+}

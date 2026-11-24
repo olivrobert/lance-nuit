@@ -8,6 +8,19 @@ import {
   retryOptionsForSession,
   transportBackoffDelays,
 } from "./transport.js";
+import type { ClaudeExecutionOptions, RawClaudeExecutionResult } from "./types.js";
+
+type Spawn = Omit<RawClaudeExecutionResult, "stream">;
+
+/** A fake spawn whose stream is read the way the live host reads it. */
+function read(
+  execute: (options: ClaudeExecutionOptions) => Promise<Spawn>,
+): (options: ClaudeExecutionOptions) => Promise<RawClaudeExecutionResult> {
+  return async (options) => {
+    const spawn = await execute(options);
+    return { ...spawn, stream: parseClaudeEvents(spawn.output) };
+  };
+}
 
 const HOUR = 60 * 60 * 1000;
 const NOW = 1_785_400_000_000;
@@ -44,8 +57,7 @@ function runWith(spawns: Array<ReturnType<typeof quotaSpawn>>, wait: RateLimitWa
   let calls = 0;
   const run = executeClaudeWithTransportRetry(
     { bin: "claude", args: [] },
-    async () => spawns[Math.min(calls++, spawns.length - 1)]!,
-    (output) => parseClaudeEvents(output),
+    read(async () => spawns[Math.min(calls++, spawns.length - 1)]!),
     [],
     undefined,
     undefined,
@@ -67,7 +79,7 @@ describe("Claude transport", () => {
       let overloadCalls = 0;
       const overload = await executeClaudeWithTransportRetry(
         { bin: "claude", args: [] },
-        async () => {
+        read(async () => {
           overloadCalls++;
           return overloadCalls === 1
             ? {
@@ -82,8 +94,7 @@ describe("Claude transport", () => {
                 durationMs: 1,
               }
             : { output: JSON.stringify({ type: "result", duration_ms: 1 }), code: 0, durationMs: 1 };
-        },
-        (output) => parseClaudeEvents(output),
+        }),
       );
       expect(overloadCalls).toBe(2);
       expect(parseClaudeEvents(overload.output).transportError).toBeUndefined();
@@ -91,7 +102,7 @@ describe("Claude transport", () => {
       let quotaCalls = 0;
       await executeClaudeWithTransportRetry(
         { bin: "claude", args: [] },
-        async () => {
+        read(async () => {
           quotaCalls++;
           return {
             output: JSON.stringify({
@@ -104,8 +115,7 @@ describe("Claude transport", () => {
             code: 0,
             durationMs: 1,
           };
-        },
-        (output) => parseClaudeEvents(output),
+        }),
       );
       expect(quotaCalls).toBe(1);
     } finally {
@@ -164,7 +174,7 @@ describe("Claude transport", () => {
     const seenBudgets: Array<number | undefined> = [];
     const result = await executeClaudeWithTransportRetry(
       { bin: "claude", args: [], budgetRemaining: 0.5 },
-      async (options) => {
+      read(async (options) => {
         seenBudgets.push(options.budgetRemaining);
         return {
           output: JSON.stringify({
@@ -178,8 +188,7 @@ describe("Claude transport", () => {
           code: 0,
           durationMs: 1,
         };
-      },
-      (output) => parseClaudeEvents(output),
+      }),
       [0],
     );
 
@@ -192,7 +201,7 @@ describe("Claude transport", () => {
     const seenBaselines: Array<number | undefined> = [];
     const result = await executeClaudeWithTransportRetry(
       { bin: "claude", args: ["--resume", "s1", "-p", "x"] },
-      async (options) => {
+      read(async (options) => {
         seenBaselines.push(options.sessionCostBaselineUsd);
         // The CLI reports the WHOLE session: $3 of coder plus $0.50 of this pass.
         return {
@@ -200,8 +209,7 @@ describe("Claude transport", () => {
           code: 0,
           durationMs: 1,
         };
-      },
-      (output) => parseClaudeEvents(output),
+      }),
       [0],
       () => true,
       () => ({ costUsd: 3, apiDurationMs: 600 }),
@@ -221,8 +229,7 @@ describe("Claude transport", () => {
     const run = (args: string[], output: string) =>
       executeClaudeWithTransportRetry(
         { bin: "claude", args },
-        async () => ({ output, code: null, durationMs: 1 }),
-        (o) => parseClaudeEvents(o),
+        read(async () => ({ output, code: null, durationMs: 1 })),
         [],
         undefined,
         (id) => {
@@ -257,7 +264,7 @@ describe("Claude transport", () => {
     let calls = 0;
     const result = await executeClaudeWithTransportRetry(
       { bin: "claude", args: ["--session-id", "s1", "-p", "x"], budgetRemaining: 5 },
-      async () => {
+      read(async () => {
         calls++;
         const output =
           calls === 1
@@ -272,8 +279,7 @@ describe("Claude transport", () => {
             : // Resumed: $0.40 of the discarded attempt plus $0.30 of its own.
               JSON.stringify({ type: "result", duration_ms: 1, total_cost_usd: 0.7 });
         return { output, code: 0, durationMs: 1 };
-      },
-      (output) => parseClaudeEvents(output),
+      }),
       [0],
       () => true,
       // The discarded attempt has not flushed its cost-state yet: the floor at the
@@ -291,7 +297,7 @@ describe("Claude transport", () => {
     let calls = 0;
     const result = await executeClaudeWithTransportRetry(
       { bin: "claude", args: ["--resume", "coder", "-p", "fix"], budgetRemaining: 20 },
-      async (options) => {
+      read(async (options) => {
         seenBaselines.push(options.sessionCostBaselineUsd);
         calls++;
         const output =
@@ -308,8 +314,7 @@ describe("Claude transport", () => {
             : // Resumed once more: $12 restored plus $1 of its own.
               JSON.stringify({ type: "result", duration_ms: 1, total_cost_usd: 13 });
         return { output, code: 0, durationMs: 1 };
-      },
-      (output) => parseClaudeEvents(output),
+      }),
       [0],
       () => true,
       // The overloaded pass never flushed its cost-state: the ledger on disk still
@@ -340,14 +345,13 @@ describe("Claude transport", () => {
     let calls = 0;
     const result = await executeClaudeWithTransportRetry(
       { bin: "claude", args: [], budgetRemaining: 5 },
-      async (options) => {
+      read(async (options) => {
         seenPrior.push(options.priorAttemptsCostUsd);
         calls++;
         const output =
           calls < 3 ? overloaded(0.2) : JSON.stringify({ type: "result", duration_ms: 1, total_cost_usd: 0.1 });
         return { output, code: 0, durationMs: 1 };
-      },
-      (output) => parseClaudeEvents(output),
+      }),
       [0, 0],
     );
 
@@ -367,14 +371,13 @@ describe("Claude transport", () => {
     let calls = 0;
     const result = await executeClaudeWithTransportRetry(
       { bin: "claude", args: [] },
-      async () => {
+      read(async () => {
         calls++;
         // The final spawn is killed by the timeout: no `result`, wall time only.
         return calls === 1
           ? { output: overloaded, code: 0, durationMs: 300 }
           : { output: "", code: null, kill: { cause: "timeout" as const, afterMs: 1000 }, durationMs: 900 };
-      },
-      (output) => parseClaudeEvents(output),
+      }),
       [5],
     );
 

@@ -1,7 +1,7 @@
 import { runSupervisedStream } from "../../../shared/process/process-runner.js";
 import { jsonRecords } from "../../../shared/lib/json-values.js";
 import { writeStderr } from "../../../shared/runtime/logging.js";
-import { budgetExceededKill, costUnaccountedKill, lineSplitter, liveMessageSink } from "../host-helpers.js";
+import { guardLiveSpend, lineSplitter, liveMessageSink } from "../host-helpers.js";
 import { accumulateCodexUsage, agentMessageFromEvent, newCodexUsageTotals } from "./events.js";
 import { parseCodexEvent } from "./events.schema.js";
 import { computeCostUsd } from "./pricing.js";
@@ -21,26 +21,9 @@ const CODEX_STDIN_NOTICE = /^\s*Reading additional input from stdin\.\.\.\s*$/;
 
 /** Forwards the child's stderr to ours, minus the empty-stdin notice. */
 function stderrForwarder(): { push(text: string): void; flush(): void } {
-  let pending = "";
-  const writeKept = (lines: string[]): void => {
-    const kept = lines.filter((line) => !CODEX_STDIN_NOTICE.test(line));
-    if (kept.length > 0) writeStderr(`${kept.join("\n")}\n`);
-  };
-  return {
-    push(text: string): void {
-      pending += text;
-      const lines = pending.split("\n");
-      // A chunk rarely ends on a line boundary: the tail waits for the next chunk.
-      pending = lines.pop() ?? "";
-      writeKept(lines);
-    },
-    flush(): void {
-      if (pending.length === 0) return;
-      const tail = pending;
-      pending = "";
-      if (!CODEX_STDIN_NOTICE.test(tail)) writeStderr(tail);
-    },
-  };
+  return lineSplitter((line) => {
+    if (!CODEX_STDIN_NOTICE.test(line)) writeStderr(`${line}\n`);
+  });
 }
 
 /** Node-only fallback host. Applications can replace it with their supervisor. */
@@ -73,20 +56,21 @@ export function createNodeCodexHost(hostOptions: NodeCodexHostOptions = {}): Cod
               },
               totals.model,
             );
-            options.onLiveCost?.(estimated ?? undefined, totals.model);
-            if (control.killed) return;
             // Proof, not suspicion: this attempt HAS consumed tokens and no rate
             // covers its model, so its spend can never be compared to the ceiling.
-            // An attempt that has not reported usage yet reaches neither branch —
+            // An attempt that has not reported usage yet is never unaccounted —
             // `checkBudget` only runs on a usage event, and silence is not proof.
-            if (options.strictCostAccounting === true && estimated == null && spentTokens > 0) {
-              control.kill(costUnaccountedKill(`${totals.model ?? "unknown model"}: no pricing entry`));
-              return;
-            }
-            if (options.budgetRemaining == null) return;
-            if (estimated != null && estimated > options.budgetRemaining) {
-              control.kill(budgetExceededKill(estimated, options.budgetRemaining, "estimated"));
-            }
+            const unpriceable = estimated == null && spentTokens > 0;
+            guardLiveSpend(
+              control,
+              {
+                costUsd: estimated,
+                model: totals.model,
+                source: "estimated",
+                ...(unpriceable ? { unaccounted: `${totals.model ?? "unknown model"}: no pricing entry` } : {}),
+              },
+              options,
+            );
           };
           const lines = lineSplitter((line) => {
             for (const record of jsonRecords(line)) {

@@ -1,14 +1,9 @@
 import { runSupervisedStream } from "../../../shared/process/process-runner.js";
-import {
-  type JsonRecord,
-  jsonRecords,
-  asFiniteNumber as numberValue,
-  asRecord as record,
-  asString as stringValue,
-} from "../../../shared/lib/json-values.js";
+import { type JsonRecord, jsonRecords, asRecord as record } from "../../../shared/lib/json-values.js";
 import { activityEvent, contextEvent } from "../../../shared/runtime/context.js";
-import { budgetExceededKill, costUnaccountedKill, lineSplitter, liveMessageSink } from "../host-helpers.js";
-import { opencodeToolLabel, textFromEvent } from "./events.js";
+import { guardLiveSpend, lineSplitter, liveMessageSink } from "../host-helpers.js";
+import { accumulateOpencodeUsage, newOpencodeUsageTotals, opencodeToolLabel, textFromEvent } from "./events.js";
+import { parseOpencodeEvent } from "./events.schema.js";
 import { resolveOpencodeCost } from "./pricing.js";
 import type {
   NodeOpencodeHostOptions,
@@ -41,17 +36,11 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
         },
         (control) => {
           const appendMessage = liveMessageSink(options.stepLogPath, textFromEvent);
-          let costUsd = 0;
-          let costReported = false;
-          // Token totals for the estimate path: a provider that reports usage but no
-          // `cost` is priced from pricing.json, live, the way the mapper prices it at
-          // the end. Otherwise such a model is never stopped by the guard, and a kill
-          // leaves `cost_unknown` on a spend that was estimable all along.
-          let inputTokens = 0;
-          let outputTokens = 0;
-          let cacheReadTokens = 0;
-          let cacheCreationTokens = 0;
-          const projectPricing = hostOptions.projectPricing;
+          // The same totals the mapper reads at the end: a provider that reports
+          // usage but no `cost` is priced from pricing.json, live, the way the mapper
+          // prices it. Otherwise such a model is never stopped by the guard, and a
+          // kill leaves `cost_unknown` on a spend that was estimable all along.
+          const totals = newOpencodeUsageTotals();
 
           // A model never called before can take over 60s to warm up and then answer
           // in 1.4s: the deadline watches the first event, not the total duration.
@@ -70,77 +59,60 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
             // falls back to the declared project rate exactly as an absent cost
             // does: with no table, an unknown model must never be billed at the
             // price of the most expensive one — unknown is not free, not costly.
-            const breakdown = {
-              input_tokens: inputTokens,
-              cache_read_tokens: cacheReadTokens,
-              cache_creation_tokens: cacheCreationTokens,
-              output_tokens: outputTokens,
-            };
-            const cost = resolveOpencodeCost({ costReported, costUsd }, breakdown, options.model, projectPricing);
-            const spent = cost.costUsd;
-            options.onLiveCost?.(spent, options.model);
-            if (control.killed) return;
+            const cost = resolveOpencodeCost(
+              totals,
+              {
+                input_tokens: totals.inputTokens,
+                cache_read_tokens: totals.cacheReadTokens,
+                cache_creation_tokens: totals.cacheCreationTokens,
+                output_tokens: totals.outputTokens,
+              },
+              options.model,
+              hostOptions.projectPricing,
+            );
             // `unknown` is opencode's own verdict on this usage: tokens were spent
             // and neither the provider figure nor the project table could price
-            // them. Under a ceiling nobody authorized unmetered spend against,
-            // that is the stop — not a comparison against a number nobody stands
-            // behind. `checkBudget` runs on a usage event only, so an attempt that
-            // has reported nothing yet is never killed for it.
-            if (cost.unknown && options.strictCostAccounting === true) {
-              control.kill(costUnaccountedKill(`${options.model ?? "unknown model"}: no reliable price`));
-              return;
-            }
-            // An unknown spend cannot be compared to a budget: killing on it would
-            // stop a run over a number nobody stands behind.
-            if (spent == null || cost.unknown || options.budgetRemaining == null) return;
-            if (spent <= options.budgetRemaining) return;
-            control.kill(budgetExceededKill(spent, options.budgetRemaining, cost.estimated ? "estimated" : "reported"));
+            // them. `checkBudget` runs on a usage event only, so an attempt that
+            // has reported nothing yet is never unaccounted.
+            guardLiveSpend(
+              control,
+              {
+                costUsd: cost.costUsd,
+                model: options.model,
+                source: cost.estimated ? "estimated" : "reported",
+                ...(cost.unknown ? { unaccounted: `${options.model ?? "unknown model"}: no reliable price` } : {}),
+              },
+              options,
+            );
           };
 
-          const handle = (event: JsonRecord): void => {
+          // Each stream line is parsed exactly once; re-parsing the accumulated
+          // output on every chunk made a long run quadratic in its own transcript.
+          const handle = (raw: JsonRecord): void => {
             if (firstEventTimer) clearTimeout(firstEventTimer);
-            // Each stream line is parsed exactly once; re-parsing the accumulated
-            // output on every chunk made a long run quadratic in its own transcript.
-            appendMessage(event);
-            const part = record(event.part);
+            appendMessage(raw);
+            const event = parseOpencodeEvent(raw);
             if (event.type === "tool_use") {
-              const tool = stringValue(part?.tool);
-              const input = record(part?.state)?.input;
+              const tool = event.part?.tool;
+              const input = record(record(raw.part)?.state)?.input;
               if (tool)
                 hostOptions.onEvent?.(activityEvent(opencodeToolLabel(tool, input), tool, Date.now(), options.stepId));
               return;
             }
-            if (event.type !== "step_finish") return;
-            const tokens = record(part?.tokens);
-            inputTokens += numberValue(tokens?.input) ?? 0;
-            outputTokens += numberValue(tokens?.output) ?? 0;
-            const cache = record(tokens?.cache);
-            cacheReadTokens += numberValue(cache?.read) ?? 0;
-            cacheCreationTokens += numberValue(cache?.write) ?? 0;
-            const total = numberValue(tokens?.total);
-            if (total != null) {
-              // `tokens.total` is the occupancy of this step, so it is published per
-              // step rather than accumulated.
+            if (!accumulateOpencodeUsage(event, totals)) return;
+            const window = hostOptions.contextWindow?.(options.model);
+            // `tokens.total` is the occupancy of this step, so it is published per
+            // step rather than accumulated. Without a known window there is no share
+            // to report: an event with a window of 0 would read as an empty context.
+            if (event.part?.tokens?.total != null && window)
               hostOptions.onEvent?.(
-                contextEvent(
-                  total,
-                  hostOptions.contextWindow?.(options.model) ?? 0,
-                  options.model,
-                  Date.now(),
-                  options.stepId,
-                ),
+                contextEvent(event.part.tokens.total, window, options.model, Date.now(), options.stepId),
               );
-            }
-            const cost = numberValue(part?.cost);
-            if (cost != null) {
-              costUsd += cost;
-              costReported = true;
-            }
             checkBudget();
           };
 
           const lines = lineSplitter((line) => {
-            for (const event of jsonRecords(line)) handle(event);
+            for (const raw of jsonRecords(line)) handle(raw);
           });
 
           return {

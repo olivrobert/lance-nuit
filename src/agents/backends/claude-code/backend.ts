@@ -11,7 +11,6 @@ import type {
 import { buildClaudeArgs } from "./args.js";
 import { createRunnerClaudeHost } from "./claude-host.js";
 import { readSessionCostBaseline } from "./cost-state.js";
-import { parseClaudeEvents } from "./events.js";
 import { executeClaude } from "./execution.js";
 import { normalizeClaudeStepOptions } from "./normalize.js";
 import { DEFAULT_PRICING_KEY, MODEL_PRICING } from "./pricing.js";
@@ -106,7 +105,6 @@ export class ClaudeBackend implements AgentBackend {
         stepId: request.stepId,
       },
       (o) => executeClaude(o, this.host),
-      (out) => parseClaudeEvents(out, options?.model),
       undefined,
       // A first attempt may have created the session on disk before the overload:
       // retrying with the same --session-id would be rejected by the CLI.

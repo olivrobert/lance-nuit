@@ -27,7 +27,3 @@ export function computeCostUsd(
 ): number {
   return tokenCostUsd(breakdown, pricingForModel(model, projectPricing), breakdown.input_tokens ?? 0);
 }
-export const DEFAULT_CONTEXT_WINDOW = 200_000;
-export function contextWindow(model?: string): number {
-  return model?.toLowerCase().includes("1m") ? 1_000_000 : DEFAULT_CONTEXT_WINDOW;
-}

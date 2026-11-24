@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ProjectPricing } from "../../../contracts/pricing.js";
-import { computeCostUsd, contextWindow, DEFAULT_CONTEXT_WINDOW, MODEL_PRICING, pricingForModel } from "./pricing.js";
+import { contextWindow, DEFAULT_CONTEXT_WINDOW } from "./events.js";
+import { computeCostUsd, MODEL_PRICING, pricingForModel } from "./pricing.js";
 
 test("pricingForModel matches the model by substring (case-insensitive)", () => {
   expect(pricingForModel("claude-sonnet-4-6")).toBe(MODEL_PRICING.sonnet!);

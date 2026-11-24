@@ -13,9 +13,8 @@ import {
   asRecord as record,
   asString as stringValue,
 } from "../../shared/lib/json-values.js";
-import { toolLabel } from "../../shared/lib/tool-label.js";
-import { bold, cyan, detectColor, dim, green, setColorEnabled, yellow } from "./color.js";
-import { formatCompactDuration, formatContextShare } from "./format.js";
+import { bold, cyan, detectColor, dim, setColorEnabled, yellow } from "./color.js";
+import { formatContextShare } from "./format.js";
 import { CONTEXT_WARN_PCT } from "./status-line.js";
 
 interface PipelineStep {
@@ -23,12 +22,6 @@ interface PipelineStep {
   name: string;
   index?: number;
   total?: number;
-}
-
-interface InflightTool {
-  name: string;
-  label: string;
-  startedAt: number;
 }
 
 function displayValue(value: unknown): string {
@@ -42,13 +35,12 @@ setColorEnabled(detectColor(process.env, process.stdout));
 /** What the formatter remembers between events of one stream. */
 interface FormatterState {
   step: PipelineStep | undefined;
-  inflight: Map<string, InflightTool>;
   /** Context occupancy per step id; `undefined` for telemetry naming no step. */
   pct: Map<string | undefined, number>;
 }
 
 function newFormatterState(): FormatterState {
-  return { step: undefined, inflight: new Map(), pct: new Map() };
+  return { step: undefined, pct: new Map() };
 }
 
 /** The occupancy rides along with the tool call it was measured on. */
@@ -118,56 +110,6 @@ function processEvent(state: FormatterState, rawEvent: unknown): void {
         yellow(`  ⚠ context ${Math.round(pct * 100)}% of ${Math.round((numberValue(obj.window) ?? 0) / 1000)}k`),
       );
     state.pct.set(stepId, pct);
-    return;
-  }
-
-  if (obj.type === "rate_limit_event") {
-    writeLine(dim(`  ⏱ rate-limit check OK`));
-    return;
-  }
-
-  if (obj.type === "system" && obj.subtype === "init" && typeof obj.session_id === "string") {
-    writeLine(`  🚀 claude ready ${dim(`(session ${obj.session_id.slice(0, 8)}…)`)}`);
-    return;
-  }
-
-  if (obj.type === "assistant") {
-    const message = record(obj.message);
-    for (const rawContent of Array.isArray(message?.content) ? message.content : []) {
-      const c = record(rawContent);
-      if (c?.type === "tool_use" && typeof c.name === "string") {
-        const label = toolLabel(c.name, c.input ?? {});
-        const entry: InflightTool = { name: c.name, label, startedAt: Date.now() };
-        if (typeof c.id === "string" && c.id) state.inflight.set(c.id, entry);
-        writeLine(`  ${cyan("▶")} ${label}`);
-      }
-    }
-    return;
-  }
-
-  if (obj.type === "user") {
-    const message = record(obj.message);
-    for (const rawContent of Array.isArray(message?.content) ? message.content : []) {
-      const c = record(rawContent);
-      if (c?.type === "tool_result" && typeof c.tool_use_id === "string" && c.tool_use_id) {
-        const entry = state.inflight.get(c.tool_use_id);
-        if (entry) {
-          const dur = formatCompactDuration(Date.now() - entry.startedAt);
-          writeLine(`    ${green("✓")} ${entry.label} ${dim(`(${dur})`)}`);
-          state.inflight.delete(c.tool_use_id);
-        }
-      }
-    }
-    return;
-  }
-
-  if (obj.type === "result") {
-    const durationMs = numberValue(obj.duration_ms);
-    const totalCost = numberValue(obj.total_cost_usd);
-    const dur = durationMs ? formatCompactDuration(durationMs) : "?";
-    const cost = totalCost != null ? `$${totalCost.toFixed(2)}` : "$?";
-    writeLine(dim(`  [DONE: ${dur} | ${cost}]`));
-    return;
   }
 }
 

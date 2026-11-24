@@ -1,7 +1,7 @@
 import type { AttemptStats, TokenBreakdown } from "../../../contracts/index.js";
 import { jsonRecords } from "../../../shared/lib/json-values.js";
-import { parseClaudeEvent, parseClaudeToolInput, parseClaudeUsage } from "./events.schema.js";
-import { computeCostUsd, contextWindow } from "./pricing.js";
+import { type ClaudeEvent, parseClaudeEvent, parseClaudeToolInput, parseClaudeUsage } from "./events.schema.js";
+import { computeCostUsd } from "./pricing.js";
 export interface ClaudeTransportError {
   status?: number;
   terminalReason?: string;
@@ -27,6 +27,12 @@ export interface ClaudeParsedEvents {
  * context window to 200k mid-stream.
  */
 export const SYNTHETIC_MODEL = "<synthetic>";
+
+export const DEFAULT_CONTEXT_WINDOW = 200_000;
+/** Only the full session identifier carries the `[1m]` suffix that lifts the window. */
+export function contextWindow(model?: string): number {
+  return model?.toLowerCase().includes("1m") ? 1_000_000 : DEFAULT_CONTEXT_WINDOW;
+}
 
 /**
  * Message identity and text as read off one stream event, for the live step log.
@@ -159,16 +165,55 @@ export function usageBreakdown(totals: ModelUsageTotals): TokenBreakdown {
     cache_creation_1h_tokens: totals.cache1 + unsplit,
   };
 }
-export function parseClaudeEvents(raw: string, fallbackModel?: string): ClaudeParsedEvents {
+/** What one stream event changed, for the live telemetry of the host. */
+export interface ClaudeEventEffect {
+  /** Tool calls seen for the first time, `StructuredOutput` excluded. */
+  tools: Array<{ name: string; input: unknown }>;
+  /** Set when the event brought a message's usage for the first time. Occupancy
+   *  is the footprint of THIS turn, so it goes down after a compaction. */
+  context?: { tokens: number; window: number; model?: string };
+}
+
+/** The cost of the attempt as the stream states it so far, before any netting. */
+export interface ClaudeStreamCost {
+  usd?: number;
+  /** Priced from the rate table, so it carries no session ledger to net out. */
+  estimated: boolean;
+}
+
+/** Reads the Claude stream one event at a time. */
+export interface ClaudeStreamReader {
+  push(record: unknown): ClaudeEventEffect;
+  /** The model cost follows: the one that ran the last turn. */
+  model(): string | undefined;
+  cost(): ClaudeStreamCost;
+  finish(): ClaudeParsedEvents;
+}
+
+function toolName(name: string, input: unknown): string {
+  const inp = parseClaudeToolInput(input);
+  if (name === "Skill") return `skill(${String(inp?.skill ?? "?")})`;
+  if (name === "Agent") return `agent(${String(inp?.subagent_type ?? inp?.name ?? "?")})`;
+  return name;
+}
+
+/**
+ * The ONE reader of the Claude stream: the live guard feeds it line by line, and
+ * the transport and the mapper read the state it ends on. A mid-flight estimate
+ * therefore follows the same rules as the cost reported at the end: deduplication,
+ * model, settled output and the meaning of a reported zero.
+ */
+export function createClaudeStreamReader(fallbackModel?: string): ClaudeStreamReader {
   const tools: string[] = [];
+  const announced = new Set<string>();
+  const seen = new Set<string>();
+  const totals = newUsageTotals();
   let text = "",
     structuredOutput: unknown,
     transportError: ClaudeTransportError | undefined,
     reset: number | undefined,
-    sessionId: string | undefined;
-  const seen = new Set<string>();
-  const totals = newUsageTotals();
-  let model = fallbackModel,
+    sessionId: string | undefined,
+    model = fallbackModel,
     // TWO models, because they answer two different questions.
     //
     // `model` is the model that produced the LAST turn, read off the `assistant`
@@ -185,104 +230,134 @@ export function parseClaudeEvents(raw: string, fallbackModel?: string): ClaudePa
     duration = 0,
     api: number | undefined,
     turns: number | undefined,
-    reportedOutput: number | undefined,
     lastMessageModel: string | undefined;
-  for (const record of jsonRecords(raw)) {
-    // An event type this release does not know reads as `{ type: null }`: it
-    // contributes its `session_id` like any other event, and nothing else.
-    const obj = parseClaudeEvent(record);
-    if (!sessionId && obj.session_id !== undefined) sessionId = obj.session_id;
-    if (obj.type === "system" && obj.model !== undefined) {
-      sessionModel = obj.model;
-      model = obj.model;
-    }
-    if (obj.type === "rate_limit_event") {
-      const r = obj.rate_limit_info?.resetsAt;
-      if (r !== undefined) reset = r * 1000;
-    }
-    if (obj.type === "assistant") {
-      const msg = obj.message;
-      if (!msg) continue;
-      const messageModel = msg.model !== undefined && msg.model !== SYNTHETIC_MODEL ? msg.model : undefined;
-      if (messageModel) model = messageModel;
-      for (const content of msg.content) {
-        if (!content) continue;
-        if (content.type === "tool_use") {
-          const inp = parseClaudeToolInput(content.input);
-          if (content.name === "StructuredOutput") structuredOutput = content.input;
-          else {
-            const name =
-              content.name === "Skill"
-                ? `skill(${String(inp?.skill ?? "?")})`
-                : content.name === "Agent"
-                  ? `agent(${String(inp?.subagent_type ?? inp?.name ?? "?")})`
-                  : content.name;
-            if (!tools.includes(name)) tools.push(name);
-          }
-        }
-        if (content.type === "text") text += content.text;
+
+  const readAssistant = (msg: NonNullable<Extract<ClaudeEvent, { type: "assistant" }>["message"]>) => {
+    const effect: ClaudeEventEffect = { tools: [] };
+    const messageModel = msg.model !== undefined && msg.model !== SYNTHETIC_MODEL ? msg.model : undefined;
+    if (messageModel) model = messageModel;
+    for (const content of msg.content) {
+      if (content?.type === "text") text += content.text;
+      if (content?.type !== "tool_use") continue;
+      if (content.name === "StructuredOutput") {
+        structuredOutput = content.input;
+        continue;
       }
-      const usage = msg.usage;
-      const id = msg.id ?? `__anon_${seen.size}`;
-      if (usage && !seen.has(id)) {
-        seen.add(id);
-        addUsage(totals, usage, messageModel);
-        lastMessageModel = messageModel;
-      }
+      const name = toolName(content.name, content.input);
+      if (!tools.includes(name)) tools.push(name);
+      // The CLI repeats a message as it streams, and splits its blocks over several
+      // events of the same message id: a call is announced once, by the id of its
+      // block, else by what it is within its message.
+      const key =
+        typeof content.id === "string"
+          ? content.id
+          : msg.id !== undefined
+            ? `${msg.id}:${content.name}:${JSON.stringify(content.input ?? null)}`
+            : undefined;
+      if (key && announced.has(key)) continue;
+      if (key) announced.add(key);
+      effect.tools.push({ name: content.name, input: content.input });
     }
-    if (obj.type === "result") {
-      if (obj.is_error === true || obj.terminal_reason === "api_error")
-        transportError = {
-          ...(obj.api_error_status !== undefined ? { status: obj.api_error_status } : {}),
-          ...(obj.terminal_reason !== undefined ? { terminalReason: obj.terminal_reason } : {}),
-          message: String(obj.result ?? "CLI error without a message"),
-        };
-      duration = obj.duration_ms ?? 0;
-      api = obj.duration_api_ms;
-      turns = obj.num_turns;
-      resultCost = obj.total_cost_usd;
-      reportedOutput = obj.usage?.output_tokens;
-      if (obj.structured_output != null) structuredOutput = obj.structured_output;
-      if (obj.result && structuredOutput == null && !text.trimEnd().endsWith(String(obj.result).trimEnd()))
-        text += String(obj.result);
+    // A message is counted once, on the first copy that carries a usage block.
+    const id = msg.id ?? `__anon_${seen.size}`;
+    if (msg.usage && !seen.has(id)) {
+      seen.add(id);
+      addUsage(totals, msg.usage, messageModel);
+      lastMessageModel = messageModel;
+      effect.context = {
+        tokens: totals.lastTurn,
+        window: contextWindow(sessionModel ?? model),
+        model: sessionModel ?? model,
+      };
     }
-  }
-  settleOutputTokens(totals, reportedOutput, lastMessageModel);
-  // A reported `0` over consumed tokens is the CLI admitting it could not price
-  // the turn, not a free turn — the same gap `resolveOpencodeCost` handles for
-  // opencode. Claude ships its own rate table, so estimate from it instead of
-  // recording a free attempt that would make `max_cost_usd` unfirable. A reported
-  // `0` with no tokens at all is a real measured zero and stays exact.
-  const consumedTokens = totals.input + totals.output + totals.read + totals.cacheTotal;
-  const reportedUsable = resultCost != null && (resultCost > 0 || consumedTokens === 0);
-  const estimate = seen.size ? estimateCostUsd(totals, model) : undefined;
-  const total = reportedUsable ? resultCost : (estimate ?? resultCost);
-  const estimated = !reportedUsable && estimate != null;
-  const stats: AttemptStats = {
-    duration_ms: duration,
-    duration_api_ms: api,
-    num_turns: turns ?? (seen.size || undefined),
-    total_cost_usd: total,
-    ...(estimated ? { cost_estimated: true } : {}),
-    input_tokens: seen.size ? totals.input : undefined,
-    output_tokens: seen.size ? totals.output : undefined,
-    cache_read_tokens: seen.size ? totals.read : undefined,
-    cache_creation_tokens: seen.size ? totals.cacheTotal : undefined,
-    last_turn_context_tokens: totals.lastTurn || undefined,
-    context_window: totals.lastTurn ? contextWindow(sessionModel ?? model) : undefined,
-    model,
-    tools_used: tools.length ? tools : undefined,
+    return effect;
   };
-  if (transportError && reset != null && isRateLimited(transportError))
-    transportError = { ...transportError, resetsAt: reset };
+
+  const readResult = (obj: Extract<ClaudeEvent, { type: "result" }>) => {
+    if (obj.is_error === true || obj.terminal_reason === "api_error")
+      transportError = {
+        ...(obj.api_error_status !== undefined ? { status: obj.api_error_status } : {}),
+        ...(obj.terminal_reason !== undefined ? { terminalReason: obj.terminal_reason } : {}),
+        message: String(obj.result ?? "CLI error without a message"),
+      };
+    duration = obj.duration_ms ?? 0;
+    api = obj.duration_api_ms;
+    turns = obj.num_turns;
+    resultCost = obj.total_cost_usd;
+    settleOutputTokens(totals, obj.usage?.output_tokens, lastMessageModel);
+    if (obj.structured_output != null) structuredOutput = obj.structured_output;
+    if (obj.result && structuredOutput == null && !text.trimEnd().endsWith(String(obj.result).trimEnd()))
+      text += String(obj.result);
+  };
+
+  const cost = (): ClaudeStreamCost => {
+    // A reported `0` over consumed tokens is the CLI admitting it could not price
+    // the turn, not a free turn — the same gap `resolveOpencodeCost` handles for
+    // opencode. Claude ships its own rate table, so estimate from it instead of
+    // recording a free attempt that would make `max_cost_usd` unfirable. A reported
+    // `0` with no tokens at all is a real measured zero and stays exact.
+    const consumedTokens = totals.input + totals.output + totals.read + totals.cacheTotal;
+    if (resultCost != null && (resultCost > 0 || consumedTokens === 0)) return { usd: resultCost, estimated: false };
+    if (seen.size) return { usd: estimateCostUsd(totals, model), estimated: true };
+    return { usd: resultCost, estimated: false };
+  };
+
   return {
-    text,
-    stats,
-    turnsInProcess: seen.size,
-    ...(structuredOutput != null ? { structuredOutput } : {}),
-    ...(transportError ? { transportError } : {}),
-    ...(sessionId ? { sessionId } : {}),
+    push(record) {
+      // An event type this release does not know reads as `{ type: null }`: it
+      // contributes its `session_id` like any other event, and nothing else.
+      const obj = parseClaudeEvent(record);
+      if (!sessionId && obj.session_id !== undefined) sessionId = obj.session_id;
+      if (obj.type === "system" && obj.model !== undefined) {
+        sessionModel = obj.model;
+        model = obj.model;
+      }
+      if (obj.type === "rate_limit_event" && obj.rate_limit_info?.resetsAt !== undefined)
+        reset = obj.rate_limit_info.resetsAt * 1000;
+      if (obj.type === "result") readResult(obj);
+      return obj.type === "assistant" && obj.message ? readAssistant(obj.message) : { tools: [] };
+    },
+    model: () => model,
+    cost,
+    finish() {
+      const total = cost();
+      const stats: AttemptStats = {
+        provider: "claude",
+        duration_ms: duration,
+        duration_api_ms: api,
+        num_turns: turns ?? (seen.size || undefined),
+        total_cost_usd: total.usd,
+        ...(total.estimated ? { cost_estimated: true } : {}),
+        input_tokens: seen.size ? totals.input : undefined,
+        output_tokens: seen.size ? totals.output : undefined,
+        cache_read_tokens: seen.size ? totals.read : undefined,
+        cache_creation_tokens: seen.size ? totals.cacheTotal : undefined,
+        last_turn_context_tokens: totals.lastTurn || undefined,
+        context_window: totals.lastTurn ? contextWindow(sessionModel ?? model) : undefined,
+        model,
+        tools_used: tools.length ? [...tools] : undefined,
+      };
+      const error =
+        transportError && reset != null && isRateLimited(transportError)
+          ? { ...transportError, resetsAt: reset }
+          : transportError;
+      return {
+        text,
+        stats,
+        turnsInProcess: seen.size,
+        ...(structuredOutput != null ? { structuredOutput } : {}),
+        ...(error ? { transportError: error } : {}),
+        ...(sessionId ? { sessionId } : {}),
+      };
+    },
   };
+}
+
+/** A whole recorded stream, read by the same reader the live host feeds. */
+export function parseClaudeEvents(raw: string, fallbackModel?: string): ClaudeParsedEvents {
+  const reader = createClaudeStreamReader(fallbackModel);
+  for (const record of jsonRecords(raw)) reader.push(record);
+  return reader.finish();
 }
 export function isOverloaded(error: ClaudeTransportError): boolean {
   return error.status != null

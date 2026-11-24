@@ -1,6 +1,6 @@
 import type { Environment } from "./args.js";
-import { type ClaudeResumeBaseline, netCumulative, readSessionCostBaseline } from "./cost-state.js";
-import { type ClaudeParsedEvents, type ClaudeTransportError, isOverloaded, isRateLimited } from "./events.js";
+import { attemptCostUsd, type ClaudeResumeBaseline, readSessionCostBaseline } from "./cost-state.js";
+import { type ClaudeTransportError, isOverloaded, isRateLimited } from "./events.js";
 import type { ClaudeExecutionOptions, RawClaudeExecutionResult } from "./types.js";
 
 const DEFAULT = [30000, 120000];
@@ -70,21 +70,16 @@ function sessionIdOf(args: readonly string[]): string | undefined {
   return resumeSessionIdOf(args) ?? (i >= 0 ? args[i + 1] : undefined);
 }
 
-export async function executeClaudeWithTransportRetry(
-  options: ClaudeExecutionOptions,
-  execute: (o: ClaudeExecutionOptions) => Promise<RawClaudeExecutionResult>,
-  parse: (raw: string) => Pick<ClaudeParsedEvents, "transportError" | "stats" | "sessionId">,
-  delays = transportBackoffDelays(),
-  sessionExists: (id: string) => boolean = () => false,
-  readLedger: (id: string) => ClaudeResumeBaseline | null = (id) => readSessionCostBaseline(id),
-  rateLimit: RateLimitWait = defaultRateLimitWait(),
-): Promise<RawClaudeExecutionResult> {
-  let attempt = options;
+/** The pause before the next spawn, or undefined when this error ends the attempt.
+ *  Counts the overloads and rate-limit waits already spent on the attempt. */
+function transportPauses(
+  delays: readonly number[],
+  rateLimit: RateLimitWait,
+): (error: ClaudeTransportError | undefined) => number | undefined {
   let overloads = 0;
   let rateLimitWaits = 0;
   let rateLimitWaitedMs = 0;
-  // The pause before the next spawn, or undefined when this error ends the attempt.
-  const pauseAfter = (error: ClaudeTransportError | undefined): number | undefined => {
+  return (error) => {
     if (!error) return undefined;
     if (isOverloaded(error)) return overloads < delays.length ? delays[overloads++] : undefined;
     // Without a reset time the wait would be a guess: the error goes back to the
@@ -96,6 +91,58 @@ export async function executeClaudeWithTransportRetry(
     rateLimitWaitedMs += wait;
     return wait;
   };
+}
+
+/**
+ * The session ledger read just before the spawn that will restore it; undefined
+ * for a fresh session. The floor at `expectedLedger` covers a retry whose
+ * predecessor has not flushed its `cost-state` yet: that spend is already charged,
+ * so it must be netted out of the cumulative figure the resumed process reports
+ * either way. The floor is NOT the prior cost alone: when the first spawn was
+ * itself a `--resume` (a fix pass on the coder session), the ledger already held
+ * that session's history, and a floor below it would charge the discarded attempt
+ * a second time through the difference.
+ */
+function resumeBaselineFor(
+  args: readonly string[],
+  readLedger: (id: string) => ClaudeResumeBaseline | null,
+  expectedLedger: number,
+): ClaudeResumeBaseline | undefined {
+  const resumeId = resumeSessionIdOf(args);
+  if (!resumeId) return undefined;
+  const persisted = readLedger(resumeId);
+  return {
+    costUsd: Math.max(persisted?.costUsd ?? 0, expectedLedger),
+    ...(persisted?.apiDurationMs != null ? { apiDurationMs: persisted.apiDurationMs } : {}),
+  };
+}
+
+/** The next spawn after a transport error: resumed when the session exists, and
+ *  carrying what the discarded attempts spent. The next spawn publishes its live
+ *  estimate on top of `priorCost`, so an abort during the retry charges them too. */
+function retryAttempt(
+  attempt: ClaudeExecutionOptions,
+  sessionExists: (id: string) => boolean,
+  priorCost: number,
+  attemptCost: number,
+): ClaudeExecutionOptions {
+  let next = retryOptionsForSession(attempt, sessionExists);
+  if (priorCost > 0) next = { ...next, priorAttemptsCostUsd: priorCost };
+  if (next.budgetRemaining != null && attemptCost > 0)
+    next = { ...next, budgetRemaining: Math.max(0, next.budgetRemaining - attemptCost) };
+  return next;
+}
+
+export async function executeClaudeWithTransportRetry(
+  options: ClaudeExecutionOptions,
+  execute: (o: ClaudeExecutionOptions) => Promise<RawClaudeExecutionResult>,
+  delays = transportBackoffDelays(),
+  sessionExists: (id: string) => boolean = () => false,
+  readLedger: (id: string) => ClaudeResumeBaseline | null = (id) => readSessionCostBaseline(id),
+  rateLimit: RateLimitWait = defaultRateLimitWait(),
+): Promise<RawClaudeExecutionResult> {
+  let attempt = options;
+  const pauseAfter = transportPauses(delays, rateLimit);
   // Tokens burned by attempts discarded before an overload are real spend:
   // carry their cost forward so the budget ledger and stats still see it.
   let priorCost = 0;
@@ -106,24 +153,9 @@ export async function executeClaudeWithTransportRetry(
   // has run, or when the first spawn was a fresh session.
   let expectedLedger = 0;
   for (;;) {
-    // Read the session ledger just before the spawn that will restore it. The
-    // floor at `expectedLedger` covers a retry whose predecessor has not flushed
-    // its `cost-state` yet: that spend is already charged here, so it must be
-    // netted out of the cumulative figure the resumed process reports either way.
-    // The floor is NOT `priorCost` alone: when the first spawn was itself a
-    // `--resume` (a fix pass on the coder session), the ledger already held that
-    // session's history, and a floor below it would charge the discarded attempt a
-    // second time through the difference.
-    const resumeId = resumeSessionIdOf(attempt.args);
-    const persisted = resumeId ? readLedger(resumeId) : null;
-    const baseline: ClaudeResumeBaseline | undefined = resumeId
-      ? {
-          costUsd: Math.max(persisted?.costUsd ?? 0, expectedLedger),
-          ...(persisted?.apiDurationMs != null ? { apiDurationMs: persisted.apiDurationMs } : {}),
-        }
-      : undefined;
+    const baseline = resumeBaselineFor(attempt.args, readLedger, expectedLedger);
     const result = await execute(baseline ? { ...attempt, sessionCostBaselineUsd: baseline.costUsd } : attempt),
-      parsed = parse(result.output),
+      parsed = result.stream,
       error = parsed.transportError;
     const finish = (): RawClaudeExecutionResult => {
       // A process killed before its `result` event (timeout, budget guard) priced
@@ -141,11 +173,8 @@ export async function executeClaudeWithTransportRetry(
     };
     const pause = pauseAfter(error);
     if (pause === undefined) return finish();
-    // What THIS attempt spent, not what the session has spent: a resumed attempt
-    // reports the cumulative ledger, and charging that would repay its ancestors.
-    const reported = parsed.stats.total_cost_usd ?? 0;
     const estimated = parsed.stats.cost_estimated === true;
-    const attemptCost = baseline && !estimated ? netCumulative(reported, baseline.costUsd) : reported;
+    const attemptCost = attemptCostUsd({ usd: parsed.stats.total_cost_usd, estimated }, baseline?.costUsd);
     // A transport retry is fresh paid work. If this attempt consumed the whole
     // remaining allowance, return its transport error instead of spawning once
     // more with a zero-dollar budget and overspending before the first usage tick.
@@ -161,12 +190,6 @@ export async function executeClaudeWithTransportRetry(
         `  ⏸ Claude usage limit reached — waiting until ${new Date(error.resetsAt).toLocaleTimeString()} before retrying`,
       );
     await rateLimit.sleep(pause);
-    attempt = retryOptionsForSession(attempt, sessionExists);
-    // The next spawn publishes its live estimate on top of this: an abort during
-    // the retry must charge the discarded attempts too, not only the current one.
-    if (priorCost > 0) attempt = { ...attempt, priorAttemptsCostUsd: priorCost };
-    if (attempt.budgetRemaining != null && attemptCost > 0) {
-      attempt = { ...attempt, budgetRemaining: Math.max(0, attempt.budgetRemaining - attemptCost) };
-    }
+    attempt = retryAttempt(attempt, sessionExists, priorCost, attemptCost);
   }
 }
