@@ -42,6 +42,7 @@ test("cost stop: a gate stopping on the ledger journals the ceiling and latches 
   expect(budget.exceeded).toBeUndefined();
   expect(run.budget_exceeded).toBeUndefined();
   expect(budget.unaccountedStop).toBeUndefined();
+  expect(budget.exceededStop).toBe(true);
   const events = eventsOf(run, "run.budget.exceeded");
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({
@@ -180,4 +181,24 @@ test("ledger stops: the accounting latch names the stop only once a gate withhel
     costUnaccounted: false,
     costUnaccountedStop: false,
   });
+});
+
+test("ledger stops: a ceiling reached on closed attempts names the stop only once a gate withheld work", () => {
+  // The ledger sitting at the ceiling with work left is not a stop by itself: a
+  // bound reached on the ceiling, or a step that failed on its own while
+  // spending the last dollar, withheld nothing.
+  const run = makeRun(1);
+  const budget: RunBudget = { cumulative: 1, costUnknown: true };
+  expect(ledgerStops(run, budget, true).budgetExceeded).toBe(false);
+
+  recordCostStop(run, budget, "budget-exceeded", { kind: "gate", stepId: "a" });
+  expect(ledgerStops(run, budget, true)).toEqual({
+    budgetExceeded: true,
+    costUnaccounted: false,
+    costUnaccountedStop: false,
+  });
+  expect(budget.exceeded).toBeUndefined();
+  expect(run.budget_exceeded).toBeUndefined();
+
+  expect(ledgerStops(run, budget, false).budgetExceeded).toBe(false);
 });

@@ -4,7 +4,13 @@
 // extraction live in `report-extraction.ts`.
 
 import { appendFileSync } from "node:fs";
-import type { AgentBackendRegistry, AttemptStats, LiveCostSink, RunnerResult } from "../contracts/backends.js";
+import type {
+  AgentBackendRegistry,
+  AttemptStats,
+  LiveCostSink,
+  RunnerResult,
+  StepFailCause,
+} from "../contracts/backends.js";
 import {
   type AgentIntent,
   type AgentRequest,
@@ -267,6 +273,7 @@ export async function runWithAgent(
   stats: AttemptStats;
   session?: AgentSession;
   failReason?: string;
+  failCause?: StepFailCause;
   budgetExceeded?: boolean;
   costUnaccounted?: boolean;
 }> {
@@ -279,6 +286,7 @@ export async function runWithAgent(
     stats: result.stats,
     ...(result.session ? { session: result.session } : {}),
     ...(result.failReason ? { failReason: result.failReason } : {}),
+    ...(result.failCause ? { failCause: result.failCause } : {}),
     // A repair pass spends like a step: both cost stops must reach the ledger
     // from here, or a fix loop would keep repairing a run that already stopped.
     ...(result.budgetExceeded ? { budgetExceeded: true } : {}),

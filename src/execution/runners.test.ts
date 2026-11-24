@@ -301,6 +301,32 @@ test("runners: a cause the backend already set is left alone, and prose is never
   expect(successful.failCause).toBeUndefined();
 });
 
+test("runWithAgent: a fix pass keeps the cause the backend reported", async () => {
+  const fix = async (result: AgentResult) => {
+    blockedBackendResult = result;
+    return runWithAgent("fix prompt", { id: blockedBackendId }, undefined, { registry: blockedRegistry });
+  };
+
+  const notLoggedIn = await fix({
+    provider: blockedBackendId,
+    output: "",
+    ok: false,
+    failReason: "API Claude: Not logged in",
+    failCause: "blocked",
+    stats: { duration_ms: 1 },
+  });
+  expect(notLoggedIn).toMatchObject({ ok: false, failReason: "API Claude: Not logged in", failCause: "blocked" });
+
+  const prefixed = await fix({
+    provider: blockedBackendId,
+    output: "",
+    ok: false,
+    failReason: "BLOCKED: the staging app is unreachable",
+    stats: { duration_ms: 1 },
+  });
+  expect(prefixed.failCause).toBe("blocked");
+});
+
 test("runners: normalization keeps the result identical when there is nothing to add", () => {
   const result: AgentResult = {
     provider: blockedBackendId,

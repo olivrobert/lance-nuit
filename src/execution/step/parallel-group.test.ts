@@ -258,6 +258,24 @@ test("a member's guard kill stops the run once its sibling has finished, with no
   expect(run.budget_exceeded).toBe(true);
 });
 
+test("a member's retry withheld at a ceiling its attempt reached stops the run, with no latch", async () => {
+  const root = repo();
+  const run = makeRun([member("failing", { on_failure: { max_retries: 3 } }), member("b"), lone("after")], 2);
+  const deps = depsAnswering(async (step) =>
+    step.id === "audits.failing"
+      ? { ok: false, failReason: "exit 1", stats: { duration_ms: 1, total_cost_usd: 2 } }
+      : { stats: { duration_ms: 1, total_cost_usd: 0 } },
+  );
+
+  const outcome = await run_(run, deps, root);
+
+  expect(outcome.budgetExceeded).toBe(true);
+  expect(deps.spawned.filter((id) => id === "audits.failing")).toHaveLength(1);
+  expect(statuses(run)["audits.b"]).toBe("done");
+  expect(statuses(run).after).toBe("pending");
+  expect(run.budget_exceeded).toBeUndefined();
+});
+
 test("a signal closes both members and reports an interruption, not their results", async () => {
   const root = repo();
   const bothRunning = barrier(2);

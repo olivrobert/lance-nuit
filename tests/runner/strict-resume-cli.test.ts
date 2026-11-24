@@ -28,11 +28,14 @@ function git(cwd: string, ...args: string[]) {
 }
 
 function runRunner(cwd: string, ...args: string[]) {
+  // The kit lives inside the scratch repository: a caller's LANCENUIT_ORIGIN would
+  // record the run's origin there and dirty the tree the next run checks.
+  const { LANCENUIT_ORIGIN: _origin, ...env } = process.env;
   return spawnSync(process.execPath, [runnerEntry, ...args], {
     cwd,
     encoding: "utf8",
     timeout: 25_000,
-    env: { ...process.env, PIPELINE_HOME: join(cwd, "shared-kit") },
+    env: { ...env, PIPELINE_HOME: join(cwd, "shared-kit") },
   });
 }
 

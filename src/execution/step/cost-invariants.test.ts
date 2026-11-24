@@ -458,11 +458,11 @@ function budgetIn(state: BudgetState): RunBudget {
 const EXPECTED: Record<BudgetState, { events: Array<Record<string, unknown>>; budget: Partial<RunBudget> }> = {
   ceiling: {
     events: [{ type: "run.budget.exceeded", stepId: "s", cumulativeUsd: 1, maxCostUsd: 1, estimated: false }],
-    budget: { exceededJournaled: true },
+    budget: { exceededStop: true, exceededJournaled: true },
   },
   guard: {
     events: [{ type: "run.budget.exceeded", stepId: "s", cumulativeUsd: 0.5, maxCostUsd: 1, estimated: true }],
-    budget: { exceeded: true, exceededJournaled: true },
+    budget: { exceeded: true, exceededStop: true, exceededJournaled: true },
   },
   unaccounted: {
     events: [{ type: "run.cost.unaccounted", stepId: "s", cumulativeUsd: 0.5, maxCostUsd: 1 }],
@@ -491,6 +491,7 @@ function stopRecord(run: Run, budget: RunBudget): StopRecord {
     ),
     budget: {
       exceeded: budget.exceeded,
+      exceededStop: budget.exceededStop,
       exceededJournaled: budget.exceededJournaled,
       costUnknown: budget.costUnknown,
       unaccountedStop: budget.unaccountedStop,
@@ -506,6 +507,7 @@ function expectedRecord(state: BudgetState): StopRecord {
     events,
     budget: {
       exceeded: undefined,
+      exceededStop: undefined,
       exceededJournaled: undefined,
       costUnknown: undefined,
       unaccountedStop: undefined,
@@ -671,6 +673,86 @@ test("a stop is journaled once per generation, however many gates observe it", a
   await admitStep({ run, step, baseCtx: context(), budget, output: NULL_RUN_OUTPUT });
 
   expect(stopRecord(run, budget)).toEqual(expectedRecord("unaccounted"));
+});
+
+/* ------------------------------------------------------------------------- *
+ * A ceiling reached on closed attempts: the gate that withholds work names the
+ * stop, and nothing else does.
+ * ------------------------------------------------------------------------- */
+
+const SPENT_CEILING = { ok: false, failReason: "exit 1", stats: { duration_ms: 1, total_cost_usd: 1 } } as const;
+
+test("a retry withheld at a ceiling the closed attempts reached ends the run as a budget stop", async () => {
+  const run = makeRun([bashStep("a", { on_failure: { max_retries: 2 } }), bashStep("b")], 1);
+
+  const outcome = await executeRunSteps(run, LOOP, scriptedDeps([SPENT_CEILING]), buildPipelineContext({}));
+
+  expect(run.steps.map((step) => step.status)).toEqual(["failed", "pending"]);
+  expect(run.steps[0]!.attempts).toHaveLength(1);
+  expect(outcome).toMatchObject({ failed: true, budgetExceeded: true });
+  expect(eventsOf(run, "run.budget.exceeded")).toEqual([expect.objectContaining({ stepId: "a", estimated: false })]);
+  expect(run.budget_exceeded).toBeUndefined();
+  finalizeRun(run, outcome);
+  expect(run.status).toBe("FAIL");
+  expect(run.outcome?.stopKind).toBe("budget-exceeded");
+});
+
+test("a raised ceiling replays the withheld retry and reports no budget stop", async () => {
+  const resumedSteps = (): RunStep[] => [
+    bashStep(
+      "a",
+      { on_failure: { max_retries: 2 } },
+      { status: "failed", control: { duration_ms: 1, total_cost_usd: 1 } },
+    ),
+    bashStep("b"),
+  ];
+
+  // Without `--budget` the ledger reseeded from the steps stops at admission.
+  const plain = makeRun(resumedSteps(), 1);
+  const stopped = await executeRunSteps(plain, { resuming: true }, scriptedDeps([]), buildPipelineContext({}));
+  expect(stopped.budgetExceeded).toBe(true);
+  expect(plain.steps.map((step) => step.status)).toEqual(["failed", "pending"]);
+
+  const raised = makeRun(resumedSteps(), 5);
+  const replayed = await executeRunSteps(raised, { resuming: true }, scriptedDeps([]), buildPipelineContext({}));
+
+  expect(replayed).toMatchObject({ failed: false, budgetExceeded: false });
+  expect(raised.steps.map((step) => step.status)).toEqual(["done", "done"]);
+});
+
+test("a step that fails on its own while spending the last dollar is a plain failure", async () => {
+  // No gate withheld anything in this generation: the ceiling is the next
+  // generation's stop, at admission, not the reason this one ended.
+  const run = makeRun([bashStep("a"), bashStep("b")], 1);
+
+  const outcome = await executeRunSteps(run, LOOP, scriptedDeps([SPENT_CEILING]), buildPipelineContext({}));
+
+  expect(outcome).toMatchObject({ failed: true, budgetExceeded: false });
+  finalizeRun(run, outcome);
+  expect(run.outcome?.stopKind).toBeUndefined();
+});
+
+test("a run that completes every step under a reached ceiling passes", async () => {
+  const run = makeRun([bashStep("a"), bashStep("b")], 1);
+  const deps = scriptedDeps([
+    { ok: true, stats: { duration_ms: 1, total_cost_usd: 0.5 } },
+    { ok: true, stats: { duration_ms: 1, total_cost_usd: 1 } },
+  ]);
+
+  const outcome = await executeRunSteps(run, LOOP, deps, buildPipelineContext({}));
+
+  expect(outcome.budgetExceeded).toBe(false);
+  finalizeRun(run, outcome);
+  expect(run.status).toBe("PASS");
+});
+
+test("a bound reached on the ceiling stays a bound stop", async () => {
+  const run = makeRun([bashStep("a"), bashStep("b")], 1);
+  const deps = scriptedDeps([{ ok: true, stats: { duration_ms: 1, total_cost_usd: 1 } }]);
+
+  const outcome = await executeRunSteps(run, { resuming: false, until: "a" }, deps, buildPipelineContext({}));
+
+  expect(outcome).toMatchObject({ untilStop: true, stopped: true, budgetExceeded: false });
 });
 
 /* ------------------------------------------------------------------------- *

@@ -313,6 +313,7 @@ test("review: a ceiling reached before the review stops the run without spawning
   const outcome = await executeRunSteps(run, { resuming: false }, produceDeps(values), ctx);
 
   expect(outcome.failed).toBe(true);
+  expect(outcome.budgetExceeded).toBe(true);
   expect(later.status).toBe("pending");
   expect(readRunEvents(run.run_dir).filter((event) => event.type === "run.budget.exceeded")).toEqual([
     expect.objectContaining({ stepId: "plan" }),
@@ -331,6 +332,7 @@ test("review: a ceiling reached before the fix stops the run without spawning it
   const outcome = await executeRunSteps(run, { resuming: false }, produceDeps(values), ctx);
 
   expect(outcome.failed).toBe(true);
+  expect(outcome.budgetExceeded).toBe(true);
   expect(seen.map((request) => request.intent)).toEqual(["step"]);
   expect(kinds(step)).toEqual(["step", "review"]);
   expect(values.get("plan.md")).toBe("plan v1");

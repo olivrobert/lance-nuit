@@ -54,12 +54,19 @@ export interface RunBudget {
   /** A live cost guard killed an attempt mid-flight for crossing what it may spend.
    * `cumulative` may still sit under the ceiling — the guard fires on an estimate
    * the provider never confirmed — so this flag, not the ledger, is what stops the
-   * retry loops and what makes the report read "Budget exceeded". It is mirrored
+   * retry loops after a kill. It is mirrored
    * into `run.budget_exceeded` so a resume without `--budget` stops the same way.
    * Latched by `recordCostStop` on a live-guard stop and by
    * `inheritChildBudgetStop` when a composed child stopped at its guard; restored
    * from the snapshot by `openRunLedger`. */
   exceeded?: boolean;
+  /** A gate or a live guard WITHHELD work at the ceiling in this generation. The
+   * ledger reaching the ceiling with work left is not enough to name the stop: a
+   * bound reached on the ceiling, or a step that failed on its own while spending
+   * the last dollar, withheld nothing. The step loop reads it to report "Budget
+   * exceeded". Never persisted, so a resume decides again on its own ledger.
+   * Written by `recordCostStop` (`run/record/cost-stop-events.ts`) only. */
+  exceededStop?: boolean;
   /** `run.budget.exceeded` has already been journaled for this generation, with
    * the same one-fact-per-stop rule as `unaccountedJournaled`. */
   exceededJournaled?: boolean;

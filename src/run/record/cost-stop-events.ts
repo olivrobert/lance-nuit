@@ -24,7 +24,7 @@
 // observe the same stop one after another. A resume decides again, on a new
 // ledger, and journals again — that is a new stop, not a duplicate.
 //
-// Five facts, kept apart on purpose because they coexist:
+// Six facts, kept apart on purpose because they coexist:
 //
 // - `budget.costUnknown` / `run.cost_unaccounted` — PROOF of unpriceable
 //   consumption. Written by cost accounting when it charges the figures; never
@@ -34,8 +34,9 @@
 //   here (`live-guard` origin, and inherited from a stopped child); restored by
 //   `openRunLedger` from the snapshot and wiped by a `--budget` resume in
 //   `run/record/run-opening.ts`.
-// - `budget.unaccountedStop` — work was actually WITHHELD over the uncertainty.
-//   Written here only; read by the step loop to name the stop reason.
+// - `budget.exceededStop` / `budget.unaccountedStop` — work was actually WITHHELD
+//   at the ceiling, or over the uncertainty, in this generation. Written here
+//   only, never persisted; read by the step loop to name the stop reason.
 // - `exceededJournaled` / `unaccountedJournaled` — the one-fact-per-generation
 //   latches of the two journal events. Written here only.
 // - `budget.allowUnmetered` / `run.allow_unmetered` — the human authorization
@@ -80,6 +81,7 @@ export interface CostStopOrigin {
  */
 export function recordCostStop(run: Run, budget: RunBudget, stop: CostStop, origin: CostStopOrigin): void {
   if (stop === "budget-exceeded") {
+    budget.exceededStop = true;
     if (origin.kind === "live-guard") {
       latchBudgetExceeded(run, budget);
       saveRun(run);
@@ -88,8 +90,8 @@ export function recordCostStop(run: Run, budget: RunBudget, stop: CostStop, orig
     }
     // `estimated` distinguishes the two roads to a gate: a ledger that reached the
     // ceiling on closed attempts, or the flag a live guard's estimate left on the
-    // run (`budget_exceeded`, restored by the resume). The gate itself latches
-    // nothing: the ledger is the fact, and a resume reaches the same decision.
+    // run (`budget_exceeded`, restored by the resume). The gate latches nothing
+    // durable: the ledger is the fact, and a resume reaches the same decision.
     journalBudgetExceeded(run, budget, { stepId: origin.stepId, estimated: budget.exceeded === true });
     return;
   }
@@ -142,11 +144,16 @@ export interface LedgerStops {
  * step the guard killed. "Unfinished" is the caller's reading of the steps
  * (`remainingWork`). `budget-exceeded` keeps its precedence over
  * `cost-unaccounted`, as in `costStopOf`.
+ *
+ * A ceiling the ledger reached is a stop only once a gate withheld work at it
+ * (`exceededStop`), as uncertainty is only once a gate withheld work over it: a
+ * bound reached on the ceiling, or a step that failed on its own while spending
+ * the last dollar, leaves work unfinished without anything having been withheld.
  */
 export function ledgerStops(run: RunView, budget: RunBudget, unfinished: boolean): LedgerStops {
   const decision = unfinished ? costDecision(run.max_cost_usd, budget) : undefined;
   return {
-    budgetExceeded: budget.exceeded === true && unfinished,
+    budgetExceeded: unfinished && (budget.exceeded === true || budget.exceededStop === true),
     costUnaccounted: decision === "cost-unaccounted",
     costUnaccountedStop: budget.unaccountedStop === true && decision === "cost-unaccounted",
   };
