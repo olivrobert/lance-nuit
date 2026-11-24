@@ -1,5 +1,6 @@
 import { runSupervisedStream } from "../../../shared/process/process-runner.js";
 import { jsonRecords } from "../../../shared/lib/json-values.js";
+import { writeStderr } from "../../../shared/runtime/logging.js";
 import { budgetExceededKill, costUnaccountedKill, lineSplitter, liveMessageSink } from "../host-helpers.js";
 import { accumulateCodexUsage, agentMessageFromEvent, newCodexUsageTotals } from "./events.js";
 import { parseCodexEvent } from "./events.schema.js";
@@ -23,7 +24,7 @@ function stderrForwarder(): { push(text: string): void; flush(): void } {
   let pending = "";
   const writeKept = (lines: string[]): void => {
     const kept = lines.filter((line) => !CODEX_STDIN_NOTICE.test(line));
-    if (kept.length > 0) process.stderr.write(`${kept.join("\n")}\n`);
+    if (kept.length > 0) writeStderr(`${kept.join("\n")}\n`);
   };
   return {
     push(text: string): void {
@@ -37,7 +38,7 @@ function stderrForwarder(): { push(text: string): void; flush(): void } {
       if (pending.length === 0) return;
       const tail = pending;
       pending = "";
-      if (!CODEX_STDIN_NOTICE.test(tail)) process.stderr.write(tail);
+      if (!CODEX_STDIN_NOTICE.test(tail)) writeStderr(tail);
     },
   };
 }

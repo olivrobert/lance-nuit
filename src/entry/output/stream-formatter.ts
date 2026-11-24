@@ -19,6 +19,7 @@ import { formatCompactDuration, formatContextShare } from "./format.js";
 import { CONTEXT_WARN_PCT } from "./status-line.js";
 
 interface PipelineStep {
+  id?: string;
   name: string;
   index?: number;
   total?: number;
@@ -38,11 +39,17 @@ function displayValue(value: unknown): string {
 // its color support has to be decided on the stream it actually writes to.
 setColorEnabled(detectColor(process.env, process.stdout));
 
-const state = {
-  step: undefined as PipelineStep | undefined,
-  inflight: new Map<string, InflightTool>(),
-  pct: undefined as number | undefined,
-};
+/** What the formatter remembers between events of one stream. */
+interface FormatterState {
+  step: PipelineStep | undefined;
+  inflight: Map<string, InflightTool>;
+  /** Context occupancy per step id; `undefined` for telemetry naming no step. */
+  pct: Map<string | undefined, number>;
+}
+
+function newFormatterState(): FormatterState {
+  return { step: undefined, inflight: new Map(), pct: new Map() };
+}
 
 /** The occupancy rides along with the tool call it was measured on. */
 function paintShare(pct: number | undefined): string {
@@ -55,7 +62,7 @@ function writeLine(s: string): void {
   process.stdout.write(`${s}\n`);
 }
 
-function processEvent(rawEvent: unknown): void {
+function processEvent(state: FormatterState, rawEvent: unknown): void {
   const obj = record(rawEvent);
   if (!obj) return;
 
@@ -64,10 +71,18 @@ function processEvent(rawEvent: unknown): void {
     if (!name) return;
     const index = numberValue(obj.index);
     const total = numberValue(obj.total);
-    state.step = { name, ...(index !== undefined ? { index } : {}), ...(total !== undefined ? { total } : {}) };
-    state.inflight.clear();
-    // A new step means a new session: the previous occupancy no longer applies.
-    state.pct = undefined;
+    const id = stringValue(obj.id);
+    state.step = {
+      name,
+      ...(id !== undefined ? { id } : {}),
+      ...(index !== undefined ? { index } : {}),
+      ...(total !== undefined ? { total } : {}),
+    };
+    // The members of a group start one after the other while their siblings run:
+    // the tools in flight stay, keyed by their own ids. A new pass of a step means
+    // a new session, so its previous occupancy no longer applies.
+    state.pct.delete(id);
+    state.pct.delete(undefined);
     const pos = index && total ? ` ${index}/${total}` : "";
     writeLine("");
     writeLine(bold(`━━━ step${pos}: ${obj.name} ━━━`));
@@ -84,20 +99,25 @@ function processEvent(rawEvent: unknown): void {
 
   if (obj.type === "runner-event" && obj.event === "activity") {
     const label = stringValue(obj.label);
-    if (label) writeLine(`  ${cyan("▶")} ${label}${paintShare(state.pct)}`);
+    const stepId = stringValue(obj.stepId);
+    // A member of a group reports under the header of the last one started.
+    const owner = stepId && stepId !== state.step?.id ? `${dim(stepId)} ` : "";
+    if (label) writeLine(`  ${cyan("▶")} ${owner}${label}${paintShare(state.pct.get(stepId))}`);
     return;
   }
 
   if (obj.type === "runner-event" && obj.event === "context") {
     const pct = numberValue(obj.pct);
     if (pct === undefined) return;
+    const stepId = stringValue(obj.stepId);
+    const previous = state.pct.get(stepId);
     // Only the crossing is worth a line of its own; the value itself rides along
     // with the next tool call.
-    if (state.pct != null && state.pct < CONTEXT_WARN_PCT && pct >= CONTEXT_WARN_PCT)
+    if (previous != null && previous < CONTEXT_WARN_PCT && pct >= CONTEXT_WARN_PCT)
       writeLine(
         yellow(`  ⚠ context ${Math.round(pct * 100)}% of ${Math.round((numberValue(obj.window) ?? 0) / 1000)}k`),
       );
-    state.pct = pct;
+    state.pct.set(stepId, pct);
     return;
   }
 
@@ -151,91 +171,96 @@ function processEvent(rawEvent: unknown): void {
   }
 }
 
-function processLine(line: string): void {
+function processLine(state: FormatterState, line: string): void {
   const trimmed = line.trim();
   if (!trimmed) return;
   try {
-    processEvent(JSON.parse(trimmed));
+    processEvent(state, JSON.parse(trimmed));
   } catch {
     // ignore non-JSON
   }
 }
 
-const streamFile = process.argv[2];
+function main(): void {
+  const state = newFormatterState();
+  const streamFile = process.argv[2];
 
-if (!streamFile) {
-  // Stdin mode (recommended): `tail -F <file> | stream-formatter`
-  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  rl.on("line", processLine);
-  rl.on("close", () => process.exit(0));
-} else {
-  // File mode: follow the file with fs.watch (inotify) and incremental reads.
-  // `read` is a hoisted declaration, so the `!streamFile` narrowing above does
-  // not reach it: a local bound inside this branch carries the type.
-  const file = streamFile;
-  let offset = 0;
-  let leftover = "";
-  let reading = false;
-  let pending = false;
+  if (!streamFile) {
+    // Stdin mode (recommended): `tail -F <file> | stream-formatter`
+    const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+    rl.on("line", (line) => processLine(state, line));
+    rl.on("close", () => process.exit(0));
+  } else {
+    // File mode: follow the file with fs.watch (inotify) and incremental reads.
+    // `read` is a hoisted declaration, so the `!streamFile` narrowing above does
+    // not reach it: a local bound inside this branch carries the type.
+    const file = streamFile;
+    let offset = 0;
+    let leftover = "";
+    let reading = false;
+    let pending = false;
 
-  function read(): void {
-    if (reading) {
-      pending = true;
-      return;
+    function read(): void {
+      if (reading) {
+        pending = true;
+        return;
+      }
+      reading = true;
+      let size = 0;
+      try {
+        size = statSync(file).size;
+      } catch {
+        reading = false;
+        return;
+      }
+      if (size < offset) {
+        offset = 0;
+        leftover = "";
+      }
+      if (size === offset) {
+        reading = false;
+        if (pending) {
+          pending = false;
+          read();
+        }
+        return;
+      }
+      const stream = createReadStream(file, { start: offset, end: size - 1, encoding: "utf-8" });
+      let chunk = "";
+      stream.on("data", (c) => {
+        chunk += c;
+      });
+      stream.on("end", () => {
+        offset = size;
+        const data = leftover + chunk;
+        const lines = data.split("\n");
+        leftover = lines.pop() ?? "";
+        for (const l of lines) processLine(state, l);
+        reading = false;
+        if (pending) {
+          pending = false;
+          read();
+        }
+      });
+      stream.on("error", () => {
+        reading = false;
+      });
     }
-    reading = true;
-    let size = 0;
+
+    // Initial flush
+    if (existsSync(file)) read();
+
+    // Watch through inotify (reactive).
     try {
-      size = statSync(file).size;
+      watch(file, () => read());
     } catch {
-      reading = false;
-      return;
+      // Fall back to polling if watch fails.
+      setInterval(read, 300);
     }
-    if (size < offset) {
-      offset = 0;
-      leftover = "";
-    }
-    if (size === offset) {
-      reading = false;
-      if (pending) {
-        pending = false;
-        read();
-      }
-      return;
-    }
-    const stream = createReadStream(file, { start: offset, end: size - 1, encoding: "utf-8" });
-    let chunk = "";
-    stream.on("data", (c) => {
-      chunk += c;
-    });
-    stream.on("end", () => {
-      offset = size;
-      const data = leftover + chunk;
-      const lines = data.split("\n");
-      leftover = lines.pop() ?? "";
-      for (const l of lines) processLine(l);
-      reading = false;
-      if (pending) {
-        pending = false;
-        read();
-      }
-    });
-    stream.on("error", () => {
-      reading = false;
-    });
+
+    process.on("SIGINT", () => process.exit(0));
+    process.on("SIGTERM", () => process.exit(0));
   }
-
-  // Initial flush
-  if (existsSync(file)) read();
-
-  // Watch through inotify (reactive).
-  try {
-    watch(file, () => read());
-  } catch {
-    // Fall back to polling if watch fails.
-    setInterval(read, 300);
-  }
-
-  process.on("SIGINT", () => process.exit(0));
-  process.on("SIGTERM", () => process.exit(0));
 }
+
+main();

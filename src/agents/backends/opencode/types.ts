@@ -36,6 +36,7 @@ export interface OpencodeExecutionOptions {
   strictCostAccounting?: boolean;
   onLiveCost?: LiveCostSink;
   stepLogPath?: string;
+  stepId?: string;
 }
 
 export interface RawOpencodeExecutionResult {

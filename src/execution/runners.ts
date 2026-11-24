@@ -60,6 +60,7 @@ export interface InvokeBackendInput {
   readonly session?: AgentSession;
   readonly resumeSession?: AgentSession;
   readonly stepLogPath?: string;
+  readonly stepId?: string;
   readonly artifactScope?: ArtifactScope;
   /** Explicit: the registry travels with the run, it is never resolved here. */
   readonly registry: AgentBackendRegistry;
@@ -78,6 +79,7 @@ export interface AgentRunBudget {
   session?: AgentSession;
   resumeSession?: AgentSession;
   stepLogPath?: string;
+  stepId?: string;
   /** Same imposed scope as the repaired step: a fix writes the same artifacts and
    * cannot infer their location from convention. */
   artifactScope?: ArtifactScope;
@@ -148,6 +150,7 @@ export async function invokeBackend(input: InvokeBackendInput): Promise<AgentRes
     session,
     resumeSession,
     stepLogPath: input.stepLogPath,
+    stepId: input.stepId,
     artifactScope: input.artifactScope,
   };
   return normalizeAgentResult(await backend.run(request));
@@ -177,6 +180,7 @@ function invokeBackendWithBudget(
     session: budget.session,
     resumeSession: budget.resumeSession,
     stepLogPath: budget.stepLogPath,
+    stepId: budget.stepId,
     artifactScope: budget.artifactScope,
     registry: budget.registry,
   });
@@ -246,6 +250,7 @@ export async function executeStep(
       cwd: ctx?.cwd,
       runnerDir: ctx?.runnerDir,
       role: step.profile,
+      stepId: step.id,
       timeout: timeoutMs,
       artifactScope: artifactScopeFor(ctx),
       registry: agentRegistryFor(ctx),

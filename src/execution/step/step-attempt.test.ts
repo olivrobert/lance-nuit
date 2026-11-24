@@ -739,6 +739,8 @@ test("runFixAttempt: validates the contract", async () => {
       // No ceiling on this run, so nothing for a live accounting guard to enforce.
       strictCostAccounting: false,
       onLiveCost: expect.any(Function),
+      // The repair's telemetry is the step's: a group shows it on its member.
+      stepId: step.id,
       registry: REGISTRY,
     },
   });

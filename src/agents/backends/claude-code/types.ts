@@ -19,6 +19,7 @@ export interface ClaudeExecutionOptions {
   budgetRemaining?: number;
   onLiveCost?: LiveCostSink;
   stepLogPath?: string;
+  stepId?: string;
   /** Cost of the transport attempts this one replaces (overload retries). Folded
    *  into the live estimate so an abort mid-retry charges the whole spawn. */
   priorAttemptsCostUsd?: number;

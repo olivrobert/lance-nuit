@@ -117,6 +117,10 @@ export interface AgentRequest {
   readonly session?: AgentSession;
   readonly resumeSession?: AgentSession;
   readonly stepLogPath?: string;
+  /** The step this request runs for. The `context` and `activity` telemetry a
+   *  backend publishes carries it, so an observer can tell apart the steps of a
+   *  `parallelize` group running at the same time. */
+  readonly stepId?: string;
   readonly options?: unknown;
 }
 

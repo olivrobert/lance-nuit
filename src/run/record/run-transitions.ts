@@ -274,11 +274,18 @@ export function abortRun(runView: RunView, signal: "SIGINT" | "SIGTERM"): void {
  * reader does not have to parse the console sentence. It stays optional: an
  * admission that declares nothing still stops the run, and a snapshot written
  * before this field existed remains valid.
+ *
+ * The members of a `parallelize` group may each stop the run, in whatever order
+ * their passes settle. One stop names the run: the earliest step in pipeline
+ * order, so the outcome never depends on timing. A stop on a later step is
+ * dropped, journal included; its step keeps its own status and cause.
  */
 export function stopRun(runView: RunView, stepView: RunStepView, reason: string, stop?: RunStopState): void {
   const run = writable(runView);
   const step = writable(stepView);
   if (run.aborted) return;
+  const current = stoppingStep(run);
+  if (current && run.steps.indexOf(step) > run.steps.indexOf(current)) return;
   run.stopped_reason = reason;
   run.outcome = {
     phase: step.id,
@@ -294,6 +301,12 @@ export function stopRun(runView: RunView, stepView: RunStepView, reason: string,
     logPath: relativeRunPath(run.run_dir, latestAttemptLog(run, step)),
     stop,
   });
+}
+
+/** The step whose clean stop names the run, once `stopRun` has recorded one. */
+function stoppingStep(run: Run): RunStep | undefined {
+  if (run.stopped_reason === undefined) return undefined;
+  return run.steps.find((step) => step.id === run.outcome?.phase);
 }
 
 /**
@@ -367,7 +380,6 @@ export function finalizeRun(runView: RunView, outcome?: RunFinalizationSignals):
   // the verdict, which would otherwise point away from the real stop.
   const setAside = outcome?.setAside ?? [];
   const failed = run.steps.find((step) => step.status === "failed" && !setAside.includes(step.id));
-  const logPath = failed ? relativeRunPath(run.run_dir, latestAttemptLog(run, failed)) : (run.outcome?.logPath ?? null);
   // Case precedence lives in run-verdict.ts, shared with the stats projection.
   const status = deriveRunStatus(run, {
     failed: outcome?.failed,
@@ -388,18 +400,26 @@ export function finalizeRun(runView: RunView, outcome?: RunFinalizationSignals):
   // machine-readable in the journal: `run.budget_exceeded` is wiped by a
   // `--budget` resume, and the failing step's `failKind` stays `technical`.
   const stopKind = stopKindOf(outcome);
-  // What the offending step established about itself, read BEFORE `run.outcome`
-  // is rebuilt below. Every finalization rewrites that object, so a field the new
+  // One step speaks for the outcome, so its phase, log and cause never come from
+  // two members of a group that ended differently: the step whose clean stop
+  // names a STOPPED run, the first failed step otherwise.
+  const cause = (status === "STOPPED" ? stoppingStep(run) : undefined) ?? failed;
+  const logPath = cause ? relativeRunPath(run.run_dir, latestAttemptLog(run, cause)) : (run.outcome?.logPath ?? null);
+  // What that step established about itself, read BEFORE `run.outcome` is
+  // rebuilt below. Every finalization rewrites that object, so a field the new
   // one omits is lost: the step's own answer is the authority, and the previous
   // outcome the fallback for a resumed generation that no longer holds the step.
-  const failKind = failed?.fail_kind ?? run.outcome?.failKind;
-  const failCause = failed?.fail_cause ?? run.outcome?.failCause;
+  const failKind = cause?.fail_kind ?? run.outcome?.failKind;
+  const failCause = cause?.fail_cause ?? run.outcome?.failCause;
   const stop = run.outcome?.stop;
   if (status === "ABORTED") {
+    // `abortRun` named the step the signal killed; a sibling that failed before
+    // it is not what interrupted the run.
+    const interrupted = run.aborted === true && run.outcome ? run.outcome : undefined;
     run.outcome = {
-      phase: failed?.id ?? run.outcome?.phase ?? null,
+      phase: interrupted?.phase ?? failed?.id ?? run.outcome?.phase ?? null,
       reason: run.outcome?.reason ?? "run stopped manually",
-      logPath,
+      logPath: interrupted ? interrupted.logPath : logPath,
       resumable,
       at,
     };
@@ -411,8 +431,8 @@ export function finalizeRun(runView: RunView, outcome?: RunFinalizationSignals):
     // it mattered, and a composed parent — which reads its child's FINALIZED
     // outcome — could never see its child's block.
     run.outcome = {
-      phase: failed?.id ?? run.outcome?.phase ?? null,
-      reason: run.stopped_reason ?? failed?.errors ?? run.outcome?.reason ?? "clean stop",
+      phase: cause?.id ?? run.outcome?.phase ?? null,
+      reason: run.stopped_reason ?? cause?.errors ?? run.outcome?.reason ?? "clean stop",
       logPath: logPath ?? run.outcome?.logPath ?? null,
       resumable,
       at,

@@ -24,6 +24,8 @@ export interface ContextRunnerEvent {
   pct: number;
   model?: string;
   timestamp: number;
+  /** The step whose agent reported it; absent from a request made for no step. */
+  stepId?: string;
 }
 
 /** A tool call observed on the backend stream, published while the step runs.
@@ -35,6 +37,7 @@ export interface ActivityRunnerEvent {
   label: string;
   tool: string;
   timestamp: number;
+  stepId?: string;
 }
 
 export interface PipelineStepEvent {

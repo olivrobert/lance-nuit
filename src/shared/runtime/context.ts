@@ -27,6 +27,7 @@ export function contextEvent(
   window: number,
   model: string | undefined,
   timestamp: number,
+  stepId?: string,
 ): ContextRunnerEvent {
   return {
     type: "runner-event",
@@ -36,10 +37,11 @@ export function contextEvent(
     pct: window > 0 ? occupancy / window : 0,
     model,
     timestamp,
+    ...(stepId ? { stepId } : {}),
   };
 }
 
 /** Build an activity event (the tool the agent just invoked). */
-export function activityEvent(label: string, tool: string, timestamp: number): ActivityRunnerEvent {
-  return { type: "runner-event", event: "activity", label, tool, timestamp };
+export function activityEvent(label: string, tool: string, timestamp: number, stepId?: string): ActivityRunnerEvent {
+  return { type: "runner-event", event: "activity", label, tool, timestamp, ...(stepId ? { stepId } : {}) };
 }

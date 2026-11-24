@@ -89,7 +89,7 @@ async function executeNode(
               for (const c of Array.isArray(m.content) ? m.content : []) {
                 const x = rec(c);
                 if (fresh && x?.type === "tool_use" && typeof x.name === "string" && x.name !== "StructuredOutput")
-                  host.onEvent?.(activityEvent(toolLabel(x.name, x.input), x.name, Date.now()));
+                  host.onEvent?.(activityEvent(toolLabel(x.name, x.input), x.name, Date.now(), options.stepId));
               }
               const usage = rec(m.usage);
               if (fresh && usage) {
@@ -102,6 +102,7 @@ async function executeNode(
                     contextWindow(sessionModel ?? streamModel),
                     sessionModel ?? streamModel,
                     Date.now(),
+                    options.stepId,
                   ),
                 );
               }

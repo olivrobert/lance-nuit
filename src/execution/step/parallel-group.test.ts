@@ -109,10 +109,15 @@ function barrier(count: number): () => Promise<void> {
   };
 }
 
-function run_(run: Run, deps: StepLoopDeps, cwd: string, options: { resuming?: boolean; replay?: boolean } = {}) {
+function run_(
+  run: Run,
+  deps: StepLoopDeps,
+  cwd: string,
+  options: { resuming?: boolean; replay?: boolean; until?: string } = {},
+) {
   return executeRunSteps(
     run,
-    { resuming: options.resuming ?? false, replayInterrupted: options.replay },
+    { resuming: options.resuming ?? false, replayInterrupted: options.replay, until: options.until },
     deps,
     buildPipelineContext({ ...builtinRegistries(), cwd }),
   );
@@ -777,8 +782,75 @@ test("an obstacle followed by a sibling's failure still reads as the stop it was
 
   expect(outcome).toMatchObject({ failed: true, stopped: true });
   expect(statuses(run)).toEqual({ "audits.blocked": "failed", "audits.fails": "failed" });
-  // The sibling's failure rewrote the outcome after the stop, so `stop.kind` is gone;
-  // the verdict, the reason and the cause are what a reader still gets.
   expect(run.status).toBe("STOPPED");
-  expect(run.outcome).toMatchObject({ phase: "audits.blocked", reason: "no access", failCause: "blocked" });
+  expect(run.outcome).toMatchObject({
+    phase: "audits.blocked",
+    reason: "no access",
+    failCause: "blocked",
+    stop: { kind: "blocked" },
+  });
+});
+
+test("a failure followed by a sibling's obstacle names the obstacle, never a mix of both", async () => {
+  const root = repo();
+  const run = makeRun([member("fails"), member("blocked")]);
+  const deps = depsAnswering(async (step) => {
+    if (step.id === "audits.fails") return { ok: false, failReason: "boom" };
+    await Bun.sleep(5);
+    return { ok: false, failCause: "blocked", failReason: "no access" };
+  });
+
+  const outcome = await run_(run, deps, root);
+  finalizeRun(run, outcome);
+
+  expect(run.status).toBe("STOPPED");
+  expect(run.outcome).toMatchObject({
+    phase: "audits.blocked",
+    reason: "no access",
+    failCause: "blocked",
+    stop: { kind: "blocked" },
+  });
+  expect(run.outcome?.logPath).toContain("audits.blocked");
+});
+
+test("two members blocked name the first in pipeline order, whichever settles first", async () => {
+  const root = repo();
+  const run = makeRun([member("first"), member("second")]);
+  const deps = depsAnswering(async (step) => {
+    if (step.id === "audits.first") await Bun.sleep(10);
+    return { ok: false, failCause: "blocked", failReason: `no access for ${step.id}` };
+  });
+
+  const outcome = await run_(run, deps, root);
+  finalizeRun(run, outcome);
+
+  expect(run.status).toBe("STOPPED");
+  expect(run.outcome).toMatchObject({ phase: "audits.first", reason: "no access for audits.first" });
+});
+
+test("--until a member runs its whole group, then stops", async () => {
+  const root = repo();
+  const run = makeRun([member("a"), member("b"), lone("after")]);
+  const deps = depsAnswering(() => ({}));
+
+  const outcome = await run_(run, deps, root, { until: "audits.a" });
+  finalizeRun(run, outcome);
+
+  expect([...deps.spawned].sort()).toEqual(["audits.a", "audits.b"]);
+  expect(statuses(run)).toEqual({ "audits.a": "done", "audits.b": "done", after: "pending" });
+  expect(outcome.untilStop).toBe(true);
+  expect(run.outcome).toMatchObject({ phase: "audits.b", stop: { kind: "until" } });
+  expect(run.outcome?.reason).toContain(`after ${GROUP.name}`);
+});
+
+test("--until a member of the last group stops nothing: the run passes", async () => {
+  const root = repo();
+  const run = makeRun([lone("before"), member("a"), member("b")]);
+  const deps = depsAnswering(() => ({}));
+
+  const outcome = await run_(run, deps, root, { until: "audits.a" });
+  finalizeRun(run, outcome);
+
+  expect(statuses(run)).toEqual({ before: "done", "audits.a": "done", "audits.b": "done" });
+  expect(run.status).toBe("PASS");
 });

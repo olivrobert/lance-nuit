@@ -113,6 +113,32 @@ test("parallel siblings: the first to finish hands the line back to the one stil
   expect(writes.at(-1)).toBe("\r\x1b[K");
 });
 
+test("parallel siblings: telemetry refines the step it names, and the line says whose it is", () => {
+  const { writes, stream } = capture(true);
+  const line = new StatusLineOutput(stream, clock().now);
+  line.attach();
+  const sibling = makeRunStep({ id: "review", name: "Review", command: "true", runner: "agent" });
+  const paint = () => (line as unknown as { paint(): void }).paint();
+
+  line.emit({ type: "step.started", step, index: 1, total: 2 });
+  line.emit({ type: "step.started", step: sibling, index: 2, total: 2 });
+  line.emit({ ...contextAt(0.9), stepId: "implement" } as RunnerEvent);
+  line.emit({ ...activity("Edit Order.php"), stepId: "implement" } as RunnerEvent);
+  paint();
+  expect(writes.at(-1)).toContain("Edit Order.php");
+  expect(writes.at(-1)).toContain("90%");
+
+  line.emit({ ...activity("Read spec.md"), stepId: "review" } as RunnerEvent);
+  paint();
+  expect(writes.at(-1)).toContain("Review · Read spec.md");
+  expect(writes.at(-1)).not.toContain("90%");
+
+  line.emit({ type: "step.ended", step: sibling });
+  paint();
+  expect(writes.at(-1)).toContain("Edit Order.php");
+  expect(writes.at(-1)).not.toContain("Implement ·");
+});
+
 test("a step that ends without a verdict event still takes the line down", () => {
   const { writes, stream } = capture(true);
   const line = new StatusLineOutput(stream, clock().now);

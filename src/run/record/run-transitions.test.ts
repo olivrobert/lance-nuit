@@ -633,6 +633,36 @@ test("abortRun: with only a dead pass running, no step is marked aborted", () =>
   expect(run.outcome).toMatchObject({ phase: null, logPath: null });
 });
 
+test("finalizeRun: an interrupted run names the step the signal killed, not a sibling that failed before", () => {
+  const run = twoStepRun("transitions-abort-after-sibling-failure-");
+  const [a, b] = run.steps as [RunStep, RunStep];
+  updateStep(run, a, "running");
+  updateStep(run, b, "running");
+  updateStep(run, a, "failed", "boom");
+
+  abortRun(run, "SIGINT");
+  finalizeRun(run, { failed: true });
+
+  expect(run.status).toBe("ABORTED");
+  expect(run.outcome).toMatchObject({ phase: "b", reason: "SIGINT: run interrupted manually" });
+});
+
+test("stopRun: a later step's stop never replaces an earlier one's, and an earlier one's does", () => {
+  const run = twoStepRun("transitions-stop-order-");
+  const [a, b] = run.steps as [RunStep, RunStep];
+
+  stopRun(run, a, "a blocked", { kind: "blocked", detail: "a blocked" });
+  stopRun(run, b, "b blocked", { kind: "blocked", detail: "b blocked" });
+  expect(run.outcome).toMatchObject({ phase: "a", reason: "a blocked" });
+
+  const reversed = twoStepRun("transitions-stop-order-reversed-");
+  const [first, second] = reversed.steps as [RunStep, RunStep];
+  stopRun(reversed, second, "b blocked", { kind: "blocked", detail: "b blocked" });
+  stopRun(reversed, first, "a wrote", { kind: "needs-decision", detail: "a wrote" });
+  finalizeRun(reversed, { stopped: true });
+  expect(reversed.outcome).toMatchObject({ phase: "a", reason: "a wrote", stop: { kind: "needs-decision" } });
+});
+
 test("finalizeRun: a failed step the selection set aside is not named as the cause of a later failure or stop", () => {
   const failing = twoStepRun("transitions-set-aside-fail-");
   const setAside = makeRunStep({ id: "old", name: "Old", command: "true", runner: "bash" }, { status: "failed" });
@@ -655,9 +685,10 @@ test("finalizeRun: a failed step the selection set aside is not named as the cau
 
   expect(stopped.status).toBe("STOPPED");
   expect(stopped.outcome).toMatchObject({ phase: "a", stop: { kind: "until" } });
-  // Without the selection, the failed step is the cause, as before.
+  // Without the selection, the stop still names the run: its reason belongs to
+  // "a", so the phase does too, never the failed step beside it.
   finalizeRun(stopped, { stopped: true });
-  expect(stopped.outcome?.phase).toBe("old");
+  expect(stopped.outcome).toMatchObject({ phase: "a", reason: "until reached", stop: { kind: "until" } });
 });
 
 test("reportLiveCost: a tick without a model keeps the model an earlier tick reported", () => {

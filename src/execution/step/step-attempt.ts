@@ -442,6 +442,7 @@ export async function runFixAttempt(
         budgetRemaining: ctx.budgetRemaining,
         strictCostAccounting: strictCostAccountingFor(ctx.run.max_cost_usd, ctx.budget.allowUnmetered),
         onLiveCost: liveCostSink(ctx),
+        stepId: step.id,
         registry: options.registry,
       }),
   });

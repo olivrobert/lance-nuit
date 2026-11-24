@@ -79,6 +79,7 @@ async function reviewAttempt(input: ReviewPhaseInput, label: string): Promise<St
         onLiveCost: (costUsd, model) => reportLiveCost(run, step, costUsd, model),
         session,
         stepLogPath: ctx.stepLogPath,
+        stepId: step.id,
         artifactScope: artifactScopeFor(baseCtx),
         registry,
       });

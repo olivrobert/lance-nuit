@@ -4,6 +4,7 @@
 import { closeSync, openSync, writeSync } from "node:fs";
 import type { RunnerResult } from "../../contracts/backends.js";
 import { liveFeedFilePath } from "../runtime/live-feed.js";
+import { writeStderr } from "../runtime/logging.js";
 import {
   describeKill,
   killedByPolicy,
@@ -83,7 +84,7 @@ export async function runBashAsync(command: string, opts: BashOptions): Promise<
   const end = await supervised.settle();
   const stdout = captured.stdout();
   const stderr = captured.stderr();
-  if (stderr) process.stderr.write(stderr);
+  if (stderr) writeStderr(stderr);
   return { output: combineShellOutput(stdout, stderr), ...bashOutcome(end, stderr) };
 }
 
@@ -156,7 +157,7 @@ export async function runBashStreaming(
     if (!clean) return;
     output += clean;
     if (isErr) {
-      process.stderr.write(clean);
+      writeStderr(clean);
       stderrTail = (stderrTail + clean).slice(-4096);
     }
     if (liveFd !== undefined) {

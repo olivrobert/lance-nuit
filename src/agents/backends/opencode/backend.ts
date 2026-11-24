@@ -123,6 +123,7 @@ export class OpencodeBackend implements AgentBackend {
         ...(request.strictCostAccounting === true ? { strictCostAccounting: true } : {}),
         ...(request.onLiveCost ? { onLiveCost: request.onLiveCost } : {}),
         ...(request.stepLogPath ? { stepLogPath: request.stepLogPath } : {}),
+        ...(request.stepId ? { stepId: request.stepId } : {}),
       },
       this.host,
     );

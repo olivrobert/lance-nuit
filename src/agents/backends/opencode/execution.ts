@@ -106,7 +106,8 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
             if (event.type === "tool_use") {
               const tool = stringValue(part?.tool);
               const input = record(part?.state)?.input;
-              if (tool) hostOptions.onEvent?.(activityEvent(opencodeToolLabel(tool, input), tool, Date.now()));
+              if (tool)
+                hostOptions.onEvent?.(activityEvent(opencodeToolLabel(tool, input), tool, Date.now(), options.stepId));
               return;
             }
             if (event.type !== "step_finish") return;
@@ -121,7 +122,13 @@ export function createNodeOpencodeHost(hostOptions: NodeOpencodeHostOptions = {}
               // `tokens.total` is the occupancy of this step, so it is published per
               // step rather than accumulated.
               hostOptions.onEvent?.(
-                contextEvent(total, hostOptions.contextWindow?.(options.model) ?? 0, options.model, Date.now()),
+                contextEvent(
+                  total,
+                  hostOptions.contextWindow?.(options.model) ?? 0,
+                  options.model,
+                  Date.now(),
+                  options.stepId,
+                ),
               );
             }
             const cost = numberValue(part?.cost);

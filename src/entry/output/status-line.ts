@@ -82,7 +82,8 @@ function clip(text: string, max: number): string {
  */
 export class StatusLineOutput {
   /** Keyed by the step object, not its id: a composed child may reuse an id of
-   * its parent. Insertion order makes the last started step the one shown. */
+   * its parent. Insertion order makes the last step started or heard from the
+   * one shown. */
   private readonly running = new Map<RunStepView, StatusLineState>();
 
   private timer: NodeJS.Timeout | undefined;
@@ -131,18 +132,31 @@ export class StatusLineOutput {
     }
   }
 
-  /** The step on the line: the last one started that is still running. */
+  /** The step on the line: the last one started or heard from that is still
+   * running. When several agents report at once, the activity names its step. */
   private get state(): StatusLineState | undefined {
-    return [...this.running.values()].at(-1);
+    const states = [...this.running.values()];
+    const shown = states.at(-1);
+    if (!shown?.activity) return shown;
+    const reporting = states.filter((state) => state.activity !== undefined || state.pct !== undefined);
+    return reporting.length > 1 ? { ...shown, activity: `${shown.step} · ${shown.activity}` } : shown;
   }
 
-  /** Backend telemetry only refines the CURRENT step; it never opens a line of
-   * its own, so late events from a finished step cannot resurrect the spinner. */
+  /** Backend telemetry only refines a running step; it never opens a line of its
+   * own, so late events from a finished step cannot resurrect the spinner. It
+   * refines the step it names (the last started with that id: a composed child
+   * may reuse its parent's), or the current one when it names none. */
   private observe(event: Extract<RunnerEvent, { type: "runner-event" }>): void {
-    const state = this.state;
-    if (!state) return;
+    if (event.event !== "context" && event.event !== "activity") return;
+    const entry = [...this.running.entries()]
+      .reverse()
+      .find(([step]) => event.stepId === undefined || step.id === event.stepId);
+    if (!entry) return;
+    const [step, state] = entry;
     if (event.event === "context") state.pct = event.pct;
-    else if (event.event === "activity") state.activity = event.label;
+    else state.activity = event.label;
+    this.running.delete(step);
+    this.running.set(step, state);
   }
 
   private start(): void {

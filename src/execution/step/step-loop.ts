@@ -84,13 +84,18 @@ function keptByPendingFork(run: RunView, step: RunStepView): boolean {
   return run.steps.indexOf(step) < run.steps.findIndex((candidate) => candidate.id === run.startAt);
 }
 
-/** The step `--until` names. Boot already refused an unknown id with the list of
- *  steps; reaching here without one is a caller bug, not an operator typo. */
+/** The step after which `--until` stops the loop. Boot already refused an unknown
+ *  id with the list of steps; reaching here without one is a caller bug, not an
+ *  operator typo. A member of a `parallelize` group bounds the whole group: its
+ *  members run together, and stopping between them would launch the siblings
+ *  anyway, since the bound is only checked when the next step is admitted. */
 function untilStepOf(run: RunView, until: string | undefined): RunStepView | undefined {
   if (until === undefined) return undefined;
   const step = run.steps.find((candidate) => candidate.id === until);
   if (!step) throw new Error(`--until: step "${until}" is not a step of pipeline "${run.name}"`);
-  return step;
+  const group = step.def.parallel_group?.id;
+  if (group === undefined) return step;
+  return [...run.steps].reverse().find((candidate) => candidate.def.parallel_group?.id === group) ?? step;
 }
 
 /**
@@ -100,7 +105,7 @@ function untilStepOf(run: RunView, until: string | undefined): RunStepView | und
  * keeps the run resumable.
  */
 function stopAtBound(run: RunView, bound: RunStepView, output: RunOutput): void {
-  const detail = `stop requested by --until after ${bound.def.name}: rerun to continue`;
+  const detail = `stop requested by --until after ${bound.def.parallel_group?.name ?? bound.def.name}: rerun to continue`;
   stopRun(run, bound, detail, { kind: "until", detail });
   output.emit({ type: "runner.message", level: "info", message: `⏹ ${bound.def.name} — ${detail}` });
 }
