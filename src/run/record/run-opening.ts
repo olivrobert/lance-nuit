@@ -25,9 +25,9 @@ import type { DeepReadonly, RunView } from "../run.js";
 import type { Run, RunStep } from "./run.js";
 import type { RunEventStore, RunLogStore, RunStateStore } from "../storage-ports.js";
 import { log } from "../../shared/runtime/logging.js";
-import type { PersistedAttempt } from "../persisted.js";
+import type { PersistedAttempt, PersistedStepState } from "../persisted.js";
 import { closeAttempt, journalAttemptClosed } from "./attempt-closure.js";
-import { runProvesUnpricedSpend, runSpend } from "./cost-accounting.js";
+import { costIsLowerBound, runProvesUnpricedSpend, runSpend } from "./cost-accounting.js";
 import { appendRunEvent } from "./run-journal.js";
 import { remainingWork } from "./run-predicates.js";
 import { saveRun } from "./run-repository.js";
@@ -543,7 +543,48 @@ function forkSteps(pipeline: Pipeline, source: Run, startAt: string): RunStep[] 
   });
 }
 
-function newFork(request: ForkRunRequest, source: Run, dir: string): Run {
+interface ChildSpend {
+  usd: number;
+  /** Some of it could not be priced, or could not be read: the figure is a floor. */
+  unknown: boolean;
+}
+
+/**
+ * What the runs these steps composed spent beyond what their nodes already hold.
+ * A child still out when the source's runner died never reported to its node,
+ * and the fork closes it without a reconciliation: charged by difference here,
+ * like `chargeChildReconciliation`, or the fork would neither count it against
+ * its ceiling nor show it anywhere (a composed child is never summed on its own).
+ */
+function unreconciledChildSpend(
+  steps: readonly DeepReadonly<Pick<PersistedStepState, "orchestration">>[],
+  context: PipelineContext,
+  visited: Set<string>,
+): ChildSpend {
+  const outstanding: ChildSpend = { usd: 0, unknown: false };
+  for (const step of steps) {
+    for (const ref of step.orchestration?.children ?? []) {
+      if (ref.runId === undefined) continue;
+      const dir = join(pipelineRunsDir(ref.pipeline, ref.ticket, context), ref.runId);
+      if (visited.has(dir)) continue;
+      visited.add(dir);
+      const diagnostic = readRunSnapshotDiagnostic(join(dir, STATE_FILE));
+      if (diagnostic.kind !== "valid") {
+        if (ref.startedAt !== undefined) outstanding.unknown = true;
+        continue;
+      }
+      const child = diagnostic.snapshot;
+      const nested = unreconciledChildSpend(child.steps, context, visited);
+      const total = (runSpend(child).usd ?? 0) + nested.usd;
+      outstanding.usd += Math.max(0, total - (ref.accountedCostUsd ?? 0));
+      const crashed = child.steps.some((state) => state.attempts?.some((attempt) => attempt.status === "running"));
+      if (nested.unknown || crashed || costIsLowerBound(child)) outstanding.unknown = true;
+    }
+  }
+  return outstanding;
+}
+
+function newFork(request: ForkRunRequest, source: Run, dir: string, children: ChildSpend): Run {
   const { pipeline, scope, location, context } = request;
   const runId = basename(dir);
   const now = new Date().toISOString();
@@ -563,7 +604,8 @@ function newFork(request: ForkRunRequest, source: Run, dir: string): Run {
     budget_approved: scope.budgetApproved ? true : undefined,
     allow_unmetered: scope.allowUnmetered ? true : undefined,
     // The fork has no attempt left to prove it: the latch is carried over.
-    cost_unaccounted: source.cost_unaccounted === true || runProvesUnpricedSpend(source) ? true : undefined,
+    cost_unaccounted:
+      source.cost_unaccounted === true || runProvesUnpricedSpend(source) || children.unknown ? true : undefined,
     rootRunId: runId,
     budgetScopeId: runId,
     lot: source.lot ?? context.lot,
@@ -572,7 +614,7 @@ function newFork(request: ForkRunRequest, source: Run, dir: string): Run {
     specPath: source.specPath ?? context.config.specPath,
     forkedFrom: source.runId,
     startAt: request.startAt,
-    inheritedSpendUsd: (source.inheritedSpendUsd ?? 0) + (runSpend(source).usd ?? 0),
+    inheritedSpendUsd: (source.inheritedSpendUsd ?? 0) + (runSpend(source).usd ?? 0) + children.usd,
     steps: forkSteps(pipeline, source, request.startAt),
   };
 }
@@ -656,7 +698,8 @@ export function forkRun(request: ForkRunRequest): OpenedRun {
     const dir = join(pipelineDir, allocateRunId(pipelineDir, pipeline.name));
     mkdirSync(dir, { recursive: true });
     const forkClaim = claimRunDir(dir);
-    const fork = newFork(request, source.run, dir);
+    const children = unreconciledChildSpend(source.run.steps, context, new Set([sourceDir]));
+    const fork = newFork(request, source.run, dir, children);
     fork.stateStore = new FileRunStateStore({ context, ticket, pipeline: pipeline.name });
     fork.eventStore = new FileRunEventStore({ runDir: dir });
     fork.logStore = new FileRunLogStore({ runDir: dir });

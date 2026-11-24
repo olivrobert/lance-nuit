@@ -384,9 +384,10 @@ It decides from the ledger and records the stop, so the same ledger gives the
 same `run.budget.exceeded` or `run.cost.unaccounted` whichever site observed it.
 
 A run forked by `--start-at` seeds its ledger with `inheritedSpendUsd` — the
-source's inherited spend plus its own — on top of its own spend, and compares
-the sum to `max_cost_usd`: a fork whose inheritance reaches the ceiling stops at
-the first gate. `budget_exceeded`, `budget_approved` and `allow_unmetered` come
+source's inherited spend plus its own, plus what a composed child still out
+when the source died spent beyond what its node received — on top of its own
+spend, and compares the sum to `max_cost_usd`: a fork whose inheritance reaches
+the ceiling stops at the first gate. `budget_exceeded`, `budget_approved` and `allow_unmetered` come
 from the fork's own flags. `total_control`, the report and the statistics count
 only the run's own spend.
 

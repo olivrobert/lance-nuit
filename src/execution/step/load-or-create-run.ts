@@ -53,9 +53,11 @@ export interface LoadOrCreateRunOptions extends RunScope {
  * directory and the source untouched.
  *
  * Every step before `startAt` must be settled: the fork keeps it as it is. A
- * stamped one with a stamp must still be fresh on its artifacts, and a `done`
- * one must have a stamp: the fork never runs it again, so its outputs must still
- * be the ones its inputs produced. Sources are not compared, so a hand edit of
+ * stamped one with a stamp must still be fresh on its artifacts, a `done` one
+ * must have a stamp unless it is non-blocking (an absorbed failure leaves none),
+ * and a `skipped` one without a stamp must declare the `when` that skipped it:
+ * the fork never runs it again, so its outputs must still be the ones its
+ * inputs produced. Sources are not compared, so a hand edit of
  * the code tree, which is what a fork usually follows, blocks nothing.
  */
 export async function checkForkSource(
@@ -82,8 +84,12 @@ export async function checkForkSource(
     const freshness = await stepFreshness(ctx, step, stampKey(step.id, lot), { artifactsOnly: true });
     if (freshness.value === "stale") {
       problems.push(`step "${step.id}" is stale: its artifacts changed since it succeeded`);
-    } else if (freshness.value === "none" && status === "done") {
+    } else if (freshness.value === "none" && status === "done" && step.blocking !== false) {
       problems.push(`step "${step.id}" is done but has no stamp in the freshness lock`);
+    } else if (freshness.value === "none" && status === "skipped" && (step.inputs?.length ?? 0) === 0) {
+      // Without a `when` to skip it, only `--steps`/`--skip` leaves a stamped step
+      // skipped with no stamp: it never produced what the steps after it read.
+      problems.push(`step "${step.id}" was left out by --steps or --skip and never ran`);
     }
   }
   return problems;

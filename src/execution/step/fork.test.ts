@@ -26,13 +26,13 @@ import { NULL_RUN_OUTPUT } from "../run-output.js";
 import { checkForkSource, loadOrCreateRun } from "./load-or-create-run.js";
 import { executeRunSteps, type StepLoopDeps } from "./step-loop.js";
 
-function pipelineFile(root: string, maxCost?: number): string {
+function pipelineFile(root: string, maxCost?: number, aOptions = ""): string {
   const path = join(root, "p.ts");
   writeFileSync(
     path,
     `export default ({ pipeline, actionStep, textArtifact }) => pipeline("p")
   ${maxCost === undefined ? "" : `.maxCost(${maxCost})`}
-  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", output: [textArtifact("a.txt")] }))
+  .add(actionStep({ id: "a", name: "a", run: () => {}, describe: "a", output: [textArtifact("a.txt")]${aOptions} }))
   .add(actionStep({ id: "b", name: "b", run: () => {}, describe: "b", output: [textArtifact("b.txt")] }))
   .add(actionStep({ id: "c", name: "c", run: () => {}, describe: "c", output: [textArtifact("c.txt")] }))
   .build();`,
@@ -60,10 +60,10 @@ interface Fixture {
 }
 
 /** A source run whose first steps are done and paid for, its lock released. */
-async function sourceRun(ticket: string, done: string[], maxCost?: number): Promise<Fixture> {
+async function sourceRun(ticket: string, done: string[], maxCost?: number, aOptions?: string): Promise<Fixture> {
   const root = mkdtempSync(join(tmpdir(), "fork-"));
   const ctx = buildPipelineContext({ ...builtinRegistries(), cwd: root, ticket });
-  const path = pipelineFile(root, maxCost);
+  const path = pipelineFile(root, maxCost, aOptions);
   const dir = resolveRunDir("p", ticket, undefined, true, ctx);
   const opened = await loadOrCreateRun({ pipelinePath: path, ticket, runDir: dir, context: ctx, worktree: false });
   const source = writable(opened.run);
@@ -215,6 +215,56 @@ test("fork: the supersession cascades to the unfinished runs the source composed
   });
 });
 
+test("fork: a child still out when the source died hands down the spend its node never received", async () => {
+  const fixture = await sourceRun("T-child-out", ["a"]);
+  const childDir = join(dirname(dirname(fixture.dir)), "child", "child-run");
+  mkdirSync(childDir, { recursive: true });
+  const child = { schemaVersion: 2, runId: "child-run", name: "child", pipeline: "child", ticket: "T-child-out" };
+  writeFileSync(
+    join(childDir, "state.json"),
+    JSON.stringify({
+      ...child,
+      status: "RUNNING",
+      parentRunId: fixture.source.runId,
+      steps: [
+        { id: "x", status: "done", retries: 0, control: { duration_ms: 1, total_cost_usd: 8 } },
+        {
+          id: "y",
+          status: "running",
+          retries: 0,
+          attempts: [
+            { attempt: 1, kind: "step", status: "running", started_at: "2026-01-01T00:00:00.000Z", log_path: "y.log" },
+          ],
+        },
+      ],
+    }),
+  );
+  const node = fixture.source.steps[1]!;
+  updateStep(fixture.source, node, "running");
+  node.orchestration = {
+    kind: "runPipeline",
+    children: [
+      {
+        key: "main",
+        kind: "main",
+        pipeline: "child",
+        ticket: "T-child-out",
+        runId: "child-run",
+        status: "running",
+        accountedCostUsd: 3,
+        startedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ],
+  };
+  saveRun(fixture.source);
+  releaseRunDir(fixture.dir);
+
+  const forked = await fork(fixture, "b");
+
+  expect(forked.inheritedSpendUsd).toBe(1 + (8 - 3));
+  expect(forked.cost_unaccounted).toBe(true);
+});
+
 test("fork: the ledger counts the inherited spend, stops at the first gate when it reaches the ceiling, and the statistics do not (F3)", async () => {
   const fixture = await sourceRun("T-F3", ["a", "b"]);
   releaseRunDir(fixture.dir);
@@ -248,6 +298,35 @@ test("fork pre-check: every offending step before the start is listed, and nothi
     'step "a" is stale: its artifacts changed since it succeeded',
     'step "b" is done but has no stamp in the freshness lock',
   ]);
+});
+
+test("fork pre-check: a step left out by --skip is refused, a skip by its when and an absorbed non-blocking failure are not", async () => {
+  const left = await sourceRun("T-left", []);
+  const a = left.source.steps[0]!;
+  updateStep(left.source, a, "skipped");
+  saveRun(left.source);
+  releaseRunDir(left.dir);
+  const leftDef = await loadPipelineDefinition(left.path, left.ctx);
+  expect(await checkForkSource(leftDef, selectForkSource("p", "T-left", undefined, left.ctx), "b", left.ctx)).toEqual([
+    'step "a" was left out by --steps or --skip and never ran',
+  ]);
+
+  const when = await sourceRun("T-when", [], undefined, ", when: () => false");
+  updateStep(when.source, when.source.steps[0]!, "skipped");
+  saveRun(when.source);
+  releaseRunDir(when.dir);
+  const whenDef = await loadPipelineDefinition(when.path, when.ctx);
+  expect(await checkForkSource(whenDef, selectForkSource("p", "T-when", undefined, when.ctx), "b", when.ctx)).toEqual(
+    [],
+  );
+
+  const absorbed = await sourceRun("T-absorbed", [], undefined, ", blocking: false");
+  updateStep(absorbed.source, absorbed.source.steps[0]!, "done");
+  saveRun(absorbed.source);
+  releaseRunDir(absorbed.dir);
+  const absorbedDef = await loadPipelineDefinition(absorbed.path, absorbed.ctx);
+  const absorbedSource = selectForkSource("p", "T-absorbed", undefined, absorbed.ctx);
+  expect(await checkForkSource(absorbedDef, absorbedSource, "b", absorbed.ctx)).toEqual([]);
 });
 
 test("fork source: no run, a composed child, and an older run behind an unfinished latest are refused (F4)", async () => {
