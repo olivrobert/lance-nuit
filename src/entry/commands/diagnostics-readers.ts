@@ -4,7 +4,7 @@
 // the central history file as a substitute for a work-item snapshot.
 
 import { existsSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { createArtifactRef } from "../../shared/language/artifact-ports.js";
 import type { PipelineContext } from "../../shared/language/context.js";
@@ -32,9 +32,10 @@ import { parseAge } from "../../shared/lib/durations.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import { gateDecisionStatus, isValidSubjectToken, readLock, stampKey } from "../../work-items/index.js";
 import { formatDuration } from "../output/format.js";
+import { isPathWithin } from "../../shared/lib/path-safety.js";
+import { isPipelineName } from "../../definition/index.js";
 
 type WorkItemLock = ReturnType<typeof readLock>;
-import { isPathWithin } from "../../shared/lib/path-safety.js";
 
 export interface DiagnosticsOptions {
   stateStore?: RunStateStore;
@@ -261,7 +262,8 @@ function stepLine(step: PersistedStepState, state: PersistedRun, lock: WorkItemL
   const attempts = step.attempts ?? [];
   const last = attempts.at(-1);
   const tried = last ? ` (${plural(attempts.length, "attempt")}, last ${last.kind} ${last.status})` : "";
-  const absorbed = lock?.steps[stampKey(step.id, state.lot)]?.absorbed ? " [absorbed]" : "";
+  const stamp = lock?.steps[stampKey(step.id, state.lot)];
+  const absorbed = stamp?.absorbed && stamp.runId === state.runId ? " [absorbed]" : "";
   const error = step.errors ? ` — ${step.errors.split("\n", 1)[0]}` : "";
   return `  ${step.status.padEnd(8)} ${step.id}${tried}${absorbed}${error}`;
 }
@@ -308,9 +310,23 @@ function foreignChildRefs(parent: RunRecord, listed: ReadonlySet<string>): Persi
     .filter((ref) => ref.runId !== undefined && !listed.has(ref.runId));
 }
 
-function formatChildRefLine(ref: PersistedPipelineChildRef): string {
+/** The child's own snapshot, read as a listed run, so a child whose runner died
+ *  reads as interrupted like a top-level run; the parent's ref otherwise. */
+function formatChildRefLine(ref: PersistedPipelineChildRef, child: RunRecord | undefined): string {
   const ticket = ref.ticket ? ` ${ref.ticket}` : "";
-  return `${ref.status.padEnd(9)} ${ref.pipeline}${ticket} (${ref.runId})`;
+  return `${(child?.status ?? ref.status).padEnd(9)} ${ref.pipeline}${ticket} (${ref.runId})`;
+}
+
+function foreignChildFinder(context: PipelineContext, stateStore: RunStateStore) {
+  const byTicket = new Map<string | undefined, RunStateSnapshot[]>();
+  const location = runsLocationOf(context);
+  return (ref: PersistedPipelineChildRef): RunRecord | undefined => {
+    if (!byTicket.has(ref.ticket)) byTicket.set(ref.ticket, stateStore.listSnapshots?.(ref.ticket, context) ?? []);
+    const snapshot = byTicket
+      .get(ref.ticket)!
+      .find((entry) => entry.state.runId === ref.runId && entry.state.ticket === ref.ticket);
+    return snapshot ? toRecord(snapshot, location) : undefined;
+  };
 }
 
 function formatChildLine(record: RunRecord): string {
@@ -324,9 +340,15 @@ function formatChildLine(record: RunRecord): string {
 /** Render a run followed by its sub-run tree, one indented line per child. A
  * `forEachPipeline` run spawns one child per item; listing them here is the only
  * way to see the whole run without grepping `parentRunId` in the snapshots. */
-async function formatRunTree(context: PipelineContext, record: RunRecord, records: RunRecord[]): Promise<string> {
+async function formatRunTree(
+  context: PipelineContext,
+  stateStore: RunStateStore,
+  record: RunRecord,
+  records: RunRecord[],
+): Promise<string> {
   const lines = [formatRunRecord(record, readWorkItemLock(context), await approvalLine(context, record))];
   const listed = new Set(records.map((entry) => entry.runId));
+  const foreignChild = foreignChildFinder(context, stateStore);
   const render = (parent: RunRecord, depth: number) => {
     const children = childrenOf(parent, records);
     const foreign = foreignChildRefs(parent, listed);
@@ -335,7 +357,7 @@ async function formatRunTree(context: PipelineContext, record: RunRecord, record
       lines.push(`${"  ".repeat(depth)}${formatChildLine(child)}`);
       render(child, depth + 1);
     }
-    for (const ref of foreign) lines.push(`${"  ".repeat(depth)}${formatChildRefLine(ref)}`);
+    for (const ref of foreign) lines.push(`${"  ".repeat(depth)}${formatChildRefLine(ref, foreignChild(ref))}`);
   };
   render(record, 1);
   return lines.join("\n");
@@ -343,8 +365,21 @@ async function formatRunTree(context: PipelineContext, record: RunRecord, record
 
 export interface InspectSelection {
   runId?: string;
-  /** Only the runs of this pipeline name. */
+  /** Only the runs of this pipeline: a name, or the path of its file as `-p` takes it. */
   pipeline?: string;
+}
+
+/** A path names the runs started from that file. A snapshot records it relative
+ *  to the cwd of its run, a worktree maybe, so the pipeline named after the file
+ *  matches too. */
+function pipelineMatcher(context: PipelineContext, pipeline: string | undefined): (record: RunRecord) => boolean {
+  if (pipeline === undefined) return () => true;
+  if (isPipelineName(pipeline)) return (record) => record.pipeline === pipeline;
+  const file = resolve(context.cwd, pipeline);
+  const stem = basename(pipeline, extname(pipeline));
+  return (record) =>
+    record.pipeline === stem ||
+    (record.state.pipeline_path !== undefined && resolve(context.cwd, record.state.pipeline_path) === file);
 }
 
 export async function inspectTicket(
@@ -355,12 +390,12 @@ export async function inspectTicket(
 ): Promise<string> {
   const { runId, pipeline } = selection;
   const { stateStore, records } = recordsFor(context, ticket, options);
-  const ofPipeline = (record: RunRecord) => pipeline === undefined || record.pipeline === pipeline;
+  const ofPipeline = pipelineMatcher(context, pipeline);
   const among = pipeline === undefined ? "" : ` of pipeline ${pipeline}`;
   if (!records.some(ofPipeline)) return `No run${among} found for ${ticket}.`;
   const selected = runId ? selectRunRecord(records.filter(ofPipeline), runId) : undefined;
   if (runId && !selected) return `Run ${runId}${among} not found for ${ticket}.`;
-  if (selected) return formatRunTree(context, selected, records);
+  if (selected) return formatRunTree(context, stateStore, selected, records);
   // A child run belongs to the tree of its parent; only orphans (parent snapshot
   // gone) compete for the "latest per pipeline" slots, and, under `--pipeline`,
   // the children whose parent runs another pipeline.
@@ -370,7 +405,9 @@ export async function inspectTicket(
     return ofPipeline(record) && (!parent || (pipeline !== undefined && !ofPipeline(parent)));
   });
   const trees = await Promise.all(
-    latestPerPipeline(topLevel, stateStore, ticket).map((record) => formatRunTree(context, record, records)),
+    latestPerPipeline(topLevel, stateStore, ticket).map((record) =>
+      formatRunTree(context, stateStore, record, records),
+    ),
   );
   return trees.join("\n\n");
 }

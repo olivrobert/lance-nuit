@@ -68,7 +68,7 @@ export const WRAPPER_COMMANDS: readonly WrapperCommand[] = [
   {
     verb: "inspect",
     flag: "--inspect",
-    usage: "inspect <id>",
+    usage: "inspect <id> [--pipeline <name>]",
     desc: "Display a run's state.",
   },
   {

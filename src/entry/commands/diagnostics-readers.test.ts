@@ -445,6 +445,44 @@ test("B7: --pipeline keeps the runs of that pipeline, children whose parent runs
   );
 });
 
+test("B7: --pipeline takes the path of the pipeline's file, as -p does", async () => {
+  const quality: PersistedRun = {
+    ...snapshot("quality-latest", "quality", "2026-07-02T00:00:00.000Z"),
+    pipeline_path: ".lance-nuit/pipelines/quality.ts",
+  };
+  const renamed: PersistedRun = {
+    ...snapshot("checks-latest", "checks", "2026-07-03T00:00:00.000Z"),
+    pipeline_path: "pipelines/local-checks.ts",
+  };
+  const stateStore = new FakeStateStore([
+    { state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z") },
+    { state: quality },
+    { state: renamed },
+  ]);
+  const inspect = (pipeline: string) => inspectTicket(context, "PROJ-1", { pipeline }, { stateStore });
+
+  const byStem = await inspect("./elsewhere/quality.ts");
+  expect(byStem).toContain("Run quality-latest");
+  expect(byStem).not.toContain("Run feature-latest");
+  const byPath = await inspect(join(context.cwd, "pipelines/local-checks.ts"));
+  expect(byPath).toContain("Run checks-latest");
+  expect(byPath).not.toContain("Run quality-latest");
+});
+
+test("B7: the absorbed mark belongs to the run that wrote the stamp", async () => {
+  const ctx = workItemContext("inspect-lock-other-");
+  const lockPath = workItemLayout(ctx.paths.workItemDir!).lockPath;
+  mkdirSync(dirname(lockPath), { recursive: true });
+  const stamp = { pipeline: "feature", runId: "feature-older", stampedAt: "2026-07-03T00:00:00.000Z", inputs: {} };
+  writeFileSync(
+    lockPath,
+    JSON.stringify({ schemaVersion: 1, steps: { "quality.tests": { ...stamp, outputs: {}, absorbed: true } } }),
+  );
+  const stateStore = new FakeStateStore([{ state: snapshot("feature-latest", "feature", "2026-07-03T00:00:00.000Z") }]);
+
+  expect(await inspectTicket(ctx, "PROJ-1", {}, { stateStore })).not.toContain("[absorbed]");
+});
+
 test("B7: inspect lists a composed child of another work item from its parent's ref", async () => {
   const ref = { kind: "main" as const, pipeline: "feature", accountedCostUsd: 0 };
   const parent: PersistedRun = {
@@ -468,4 +506,37 @@ test("B7: inspect lists a composed child of another work item from its parent's 
 
   expect(output).toContain("children:\n  failed    feature PROJ-2 (r-2)");
   expect(output).not.toContain("PROJ-3");
+});
+
+test("B7: a child on another work item whose runner died reads as interrupted, from its own snapshot", async () => {
+  const ref = { kind: "main" as const, pipeline: "feature", accountedCostUsd: 0 };
+  const parent: PersistedRun = {
+    ...snapshot("batch-latest", "batch", "2026-07-03T00:00:00.000Z"),
+    status: "FAIL",
+    steps: [
+      {
+        id: "each-ticket",
+        status: "failed",
+        retries: 0,
+        orchestration: {
+          kind: "forEachPipeline",
+          children: [{ ...ref, key: "PROJ-2", ticket: "PROJ-2", runId: "r-2", status: "running" }],
+        },
+      },
+    ],
+  };
+  const child: PersistedRun = {
+    ...snapshot("r-2", "feature", "2026-07-03T00:05:00.000Z"),
+    ticket: "PROJ-2",
+    status: "RUNNING",
+    parentRunId: "batch-latest",
+  };
+  const childDir = mkdtempSync(join(tmpdir(), "inspect-foreign-child-"));
+  const stateStore = new FakeStateStore([{ state: parent }, { state: child, runDir: childDir }]);
+  stateStore.listSnapshots = (ticket?: string) =>
+    stateStore.snapshots.filter((entry) => (entry.state.ticket ?? "PROJ-1") === (ticket ?? "PROJ-1"));
+
+  const output = await inspectTicket(context, "PROJ-1", {}, { stateStore });
+
+  expect(output).toContain("children:\n  ABORTED   feature PROJ-2 (r-2)");
 });

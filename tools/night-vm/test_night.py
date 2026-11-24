@@ -453,6 +453,19 @@ class ReportTests(unittest.TestCase):
         view = night_report.run_view(state, now)
         self.assertEqual((view["costUsd"], view["durationMs"], view["outcome"]), (2.25, 600000, None))
 
+    def test_a_running_run_nobody_holds_reads_as_aborted_and_stops_aging(self):
+        state = {"runId": "r", "status": "RUNNING", "createdAt": "2026-11-14T21:00:00Z",
+                 "updatedAt": "2026-11-14T21:05:00Z", "steps": [{"id": "code", "status": "running"}]}
+        now = night_report.parse_iso("2026-11-15T09:00:00Z")
+        view = night_report.run_view(state, now, held=False)
+        self.assertEqual((view["status"], view["interrupted"], view["durationMs"]), ("ABORTED", True, 300000))
+        self.scan("1.json", {"18": {"state": "done", "outcome": "failed", "runId": "r"}})
+        path = self.run_dir / "work-items/18/runs/claude/r/state.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(dict(state, ticket="18")))
+        run = night_report.live(self.run_dir)["tickets"][0]["run"]
+        self.assertEqual((run["status"], run["durationMs"]), ("ABORTED", 300000))
+
     def test_a_run_not_charged_yet_has_no_cost(self):
         state = {"runId": "r", "status": "RUNNING", "createdAt": "2026-11-14T21:00:00Z",
                  "steps": [{"id": "plan", "status": "pending"}]}

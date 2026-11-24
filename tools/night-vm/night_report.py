@@ -263,22 +263,27 @@ def run_cost(state: dict, steps: list) -> float | int | None:
     return (inherited or 0) + sum(charged)
 
 
-def run_duration(state: dict, now: datetime) -> float | int | None:
-    if state.get("status") == "RUNNING" and (created := parse_iso(state.get("createdAt"))) is not None:
-        return max(0, round((now - created).total_seconds() * 1000))
+def run_duration(state: dict, end: datetime | None) -> float | int | None:
+    if state.get("status") == "RUNNING" and (created := parse_iso(state.get("createdAt"))) is not None and end:
+        return max(0, round((end - created).total_seconds() * 1000))
     return number(mapping(state.get("total_control")).get("duration_ms"))
 
 
-def run_view(state: dict, now: datetime | None = None) -> dict:
+def run_view(state: dict, now: datetime | None = None, held: bool = True) -> dict:
+    """`held` says a runner may still drive the run; a RUNNING run nobody holds died
+    without a verdict, and reads as `lancenuit inspect` reads it: ABORTED, interrupted."""
     outcome = mapping(state.get("outcome"))
     stop = mapping(outcome.get("stop"))
     steps = state.get("steps") if isinstance(state.get("steps"), list) else []
+    interrupted = state.get("status") == "RUNNING" and not held
+    end = parse_iso(state.get("updatedAt")) if interrupted else now or datetime.now(timezone.utc)
     return {
         "runId": text(state.get("runId"), 128),
         "pipeline": text(state.get("name"), 128),
-        "status": text(state.get("status"), 32),
+        "status": "ABORTED" if interrupted else text(state.get("status"), 32),
+        "interrupted": interrupted,
         "updatedAt": text(state.get("updatedAt"), 40),
-        "durationMs": run_duration(state, now or datetime.now(timezone.utc)),
+        "durationMs": run_duration(state, end),
         "costUsd": run_cost(state, steps),
         "outcome": {
             "phase": text(outcome.get("phase"), 128),
@@ -327,7 +332,8 @@ def live(run_dir: Path) -> dict:
                 "ticket": ticket,
                 "state": text(entry.get("state"), 32),
                 "outcome": text(entry.get("outcome"), 64),
-                "run": None if (state := ticket_run(ticket, entry, states)) is None else run_view(state),
+                "run": None if (state := ticket_run(ticket, entry, states)) is None
+                else run_view(state, held=result is None and entry.get("state") == "running"),
             }
             for ticket, entry in scan_tickets(scan_records(source))
         ],

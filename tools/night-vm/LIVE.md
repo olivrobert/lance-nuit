@@ -28,8 +28,9 @@ resumed the night (`chief:<thread>` for instance), when that caller had one.
       "run": {                                 // null while pending or deferred
         "runId": "…", "pipeline": "autonome",
         "status": "RUNNING|PASS|FAIL|STOPPED|ABORTED|SUPERSEDED",
+        "interrupted": false,                  // RUNNING on disk but no runner left: status reads ABORTED
         "updatedAt": "…",
-        "durationMs": 1234,                    // since createdAt while RUNNING, the recorded total once ended
+        "durationMs": 1234,                    // since createdAt while RUNNING, to updatedAt once interrupted, the recorded total once ended
         "costUsd": 0.42,                       // inheritedSpendUsd + every step's spend so far; null before any charge
         "outcome": { "phase": "tests", "reason": "…" },  // FAIL only, else null
         "stoppedReason": "…",                  // null unless stopped
@@ -47,6 +48,15 @@ resumed the night (`chief:<thread>` for instance), when that caller had one.
 Any field may be `null` when the VM did not say. Texts are cut at 2,000
 characters; ticket names that are not plain names (`[A-Za-z0-9._-]`) are left
 out.
+
+## A run that died RUNNING
+
+`lancenuit inspect` reads a `RUNNING` run as `ABORTED` (interrupted) when no live
+process holds its `runner.lock`. That pid lives in the VM, so the host cannot
+probe it: `live.json` reads a run as held only while the night has no `result`
+and the scan still says its ticket is `running`. A runner that dies while the
+VM unit keeps going therefore still reads `RUNNING` until the unit ends, the
+next scan settles the ticket, or the night writes its result.
 
 ## The night has gone quiet
 
