@@ -11,6 +11,13 @@ invoke when a plan creates or modifies such a file.
 | Dashboard read model — read-only composer over the runner's state internals | `src/dashboard/read-model/*.ts` | `quality-read-model` |
 | Step execution — module driving one stage of the step loop (admission, attempt, verdict, failure policy, fix loop, nested pipeline) | `src/execution/step/*.ts` | `quality-step` |
 
+## Cross-cutting constraints
+
+Every runner module under `src/**/*.ts` (outside tests, test harnesses and
+`src/dashboard/ui/app/`) also follows
+`.claude/quality/code/constraints/structure.md` (single responsibility, no hidden
+coupling), on top of the scope skill above when one matches.
+
 ## Arbitration with generic skills
 
 - `react-expert` is generic React guidance. Inside `src/dashboard/ui/app/**/*.tsx`,
