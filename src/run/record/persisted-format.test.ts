@@ -27,7 +27,8 @@ import {
   readDecisionAt,
   recordApproval,
 } from "../../work-items/store/decisions.js";
-import { cleanLogs, inspectTicket, logsForTicket } from "../../entry/commands/diagnostics-readers.js";
+import { inspectTicket, logsForTicket } from "../../entry/commands/diagnostics-readers.js";
+import { cleanLogs } from "../../entry/commands/log-cleaner.js";
 import { appendRunEvent, readRunEvents } from "./run-journal.js";
 import { emitRunStats } from "../stats/index.js";
 import { saveRun } from "./run-repository.js";

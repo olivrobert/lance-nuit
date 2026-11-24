@@ -160,7 +160,6 @@ const ALLOWED: Record<string, string[]> = {
   // The default store `--inspect`, `--logs` and `clean` list snapshots from;
   // each listed snapshot is then read through `readListedRun`.
   "entry/commands/diagnostics-readers.ts": ["FileRunStateStore"],
-  "entry/commands/diagnostics.ts": ["FileRunStateStore"],
 };
 
 function sourceFiles(dir: string): string[] {

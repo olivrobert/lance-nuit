@@ -6,6 +6,7 @@ exclude:
   - "src/entry/commands/approval-subject.ts"
   - "src/entry/commands/diagnostics-readers.ts"
   - "src/entry/commands/lint-config-check.ts"
+  - "src/entry/commands/log-cleaner.ts"
   - "src/entry/commands/pipeline-reference.ts"
   - "src/entry/commands/pipeline-templates.ts"
   - "src/entry/commands/runner-command.ts"

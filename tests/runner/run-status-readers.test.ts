@@ -8,7 +8,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { closeLatestRun } from "../../src/entry/commands/closure.js";
-import { cleanLogs, inspectTicket } from "../../src/entry/commands/diagnostics-readers.js";
+import { inspectTicket } from "../../src/entry/commands/diagnostics-readers.js";
+import { cleanLogs } from "../../src/entry/commands/log-cleaner.js";
 import { loadPipelineConfig } from "../../src/shared/env/config.js";
 import type { PersistedRun } from "../../src/run/persisted.js";
 import { readItem } from "../../src/dashboard/read-model/items.js";

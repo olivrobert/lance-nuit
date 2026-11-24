@@ -3,8 +3,8 @@
 import { buildPipelineContext } from "../../definition/index.js";
 import type { RunnerArgs } from "../cli-options.js";
 import { log } from "../../shared/runtime/logging.js";
-import { cleanLogs, inspectTicket, logsForTicket } from "./diagnostics-readers.js";
-import { FileRunLogStore, FileRunStateStore } from "../../run/index.js";
+import { inspectTicket, logsForTicket } from "./diagnostics-readers.js";
+import { cleanLogs } from "./log-cleaner.js";
 import type { RunnerCommand } from "./runner-command.js";
 import { isValidTicket } from "./shared.js";
 
@@ -19,13 +19,6 @@ function contextFor(ticket?: string) {
   return buildPipelineContext({ cwd: process.cwd(), ticket });
 }
 
-function storesFor(context: ReturnType<typeof contextFor>, ticket?: string) {
-  return {
-    stateStore: new FileRunStateStore({ context, ticket }),
-    logStore: new FileRunLogStore({ context, ticket }),
-  };
-}
-
 export const inspectCommand: RunnerCommand = {
   id: "inspect",
   flag: "--inspect",
@@ -38,7 +31,7 @@ export const inspectCommand: RunnerCommand = {
     }
     const context = contextFor(args.ticket);
     const selection = { runId: args.runId, pipeline: args.pipelinePath };
-    const report = await inspectTicket(context, args.ticket, selection, storesFor(context, args.ticket));
+    const report = await inspectTicket(context, args.ticket, selection);
     process.stdout.write(`${report}\n`);
     return 0;
   },
@@ -55,9 +48,7 @@ export const logsCommand: RunnerCommand = {
       return 1;
     }
     const context = contextFor(args.ticket);
-    process.stdout.write(
-      `${logsForTicket(context, args.ticket, args.step, args.runId, storesFor(context, args.ticket))}\n`,
-    );
+    process.stdout.write(`${logsForTicket(context, args.ticket, args.step, args.runId)}\n`);
     return 0;
   },
 };

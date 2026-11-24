@@ -3,9 +3,8 @@
 // durable `runs/<pipeline>/<runId>` tree; they never consult the old run layout or
 // the central history file as a substitute for a work-item snapshot.
 
-import { existsSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, extname, join, resolve } from "node:path";
-import { gzipSync } from "node:zlib";
+import { realpathSync } from "node:fs";
+import { basename, extname, resolve } from "node:path";
 import { createArtifactRef } from "../../shared/language/artifact-ports.js";
 import type { PipelineContext } from "../../shared/language/context.js";
 import type { PersistedPipelineChildRef, PersistedRun, PersistedStepState, RunJournalCounts } from "../../run/index.js";
@@ -17,7 +16,6 @@ import {
   type RunLogStore,
   type RunStateSnapshot,
   type RunStateStore,
-  awaitsHuman,
   effectiveStepStatus,
   FileRunLogStore,
   FileRunStateStore,
@@ -29,7 +27,6 @@ import {
   readRunJournal,
   runsLocationOf,
 } from "../../run/index.js";
-import { parseAge } from "../../shared/lib/durations.js";
 import { errorMessage } from "../../shared/lib/errors.js";
 import { gateDecisionStatus, isValidSubjectToken, readLock, stampKey } from "../../work-items/index.js";
 import { formatDuration } from "../output/format.js";
@@ -105,7 +102,7 @@ function toRecord(snapshot: RunStateSnapshot, location: RunsLocation): RunRecord
   };
 }
 
-function listRunRecords(context: PipelineContext, ticket?: string, options?: DiagnosticsOptions): RunRecord[] {
+export function listRunRecords(context: PipelineContext, ticket?: string, options?: DiagnosticsOptions): RunRecord[] {
   const stateStore = stateStoreFor(context, ticket, options);
   const snapshots = stateStore.listSnapshots?.(ticket, context) ?? [];
   const location = runsLocationOf(context);
@@ -118,7 +115,8 @@ function listRunRecords(context: PipelineContext, ticket?: string, options?: Dia
   ];
 }
 
-function recordDate(record: RunRecord): number {
+/** When a run last changed: its snapshot's own date, else the file's. */
+export function recordDate(record: RunRecord): number {
   const value = Date.parse(record.state.updatedAt ?? record.state.createdAt ?? "");
   if (Number.isFinite(value)) return value;
   return record.modifiedAt ?? 0;
@@ -500,63 +498,6 @@ export function logsForTicket(
     if (log !== undefined) chunks.push(`===== ${stateStep.id} =====\n${log}`);
   }
   return chunks.length > 0 ? chunks.join("\n") : `No logs found for ${step ?? "this run"}.`;
-}
-
-function compressAndRemove(path: string): number {
-  try {
-    const compressed = `${path}.gz`;
-    if (!existsSync(compressed)) writeFileSync(compressed, gzipSync(readFileSync(path)));
-    unlinkSync(path);
-    return 1;
-  } catch {
-    // Retention is best effort: one unreadable or changing log must not stop cleanup.
-    return 0;
-  }
-}
-
-function removeStepLogs(dir: string): number {
-  let count = 0;
-  for (const entry of (() => {
-    try {
-      return readdirSync(dir, { withFileTypes: true });
-    } catch {
-      // A step directory removed concurrently contributes no files to this pass.
-      return [];
-    }
-  })()) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory() && !entry.isSymbolicLink()) count += removeStepLogs(path);
-    else if (entry.isFile() && (entry.name === "output.log" || entry.name.endsWith(".log"))) {
-      count += compressAndRemove(path);
-    }
-  }
-  return count;
-}
-
-export function cleanLogs(
-  context: PipelineContext,
-  ticket: string | undefined,
-  olderThan: string | undefined,
-  keepFailed: boolean,
-): { runs: number; files: number } {
-  const cutoff = Date.now() - parseAge(olderThan ?? "30d");
-  let runs = 0;
-  let files = 0;
-  for (const record of listRunRecords(context, ticket)) {
-    if (recordDate(record) > cutoff) continue;
-    // Kept: what a person still has to look at, an interrupted run included.
-    if (keepFailed && awaitsHuman(record.status)) continue;
-    const stepsDir = join(record.dir, "steps");
-    const removed = removeStepLogs(stepsDir);
-    // `events.jsonl` is the append-only audit journal and also the live feed for
-    // the dashboard. It is canonical, so retention never deletes or rewrites it; only the
-    // bulky per-attempt logs are pruned.
-    if (removed > 0) {
-      runs++;
-      files += removed;
-    }
-  }
-  return { runs, files };
 }
 
 /**
