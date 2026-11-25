@@ -13,7 +13,7 @@ import {
   source as externalSource,
   textArtifact,
 } from "../../src/definition/dsl.ts";
-import { assertStrictSchema } from "../../src/definition/dsl/dsl-steps.ts";
+import { strictSchemaError } from "../../src/definition/step-shape.ts";
 import { CODEX_SANDBOX } from "../../src/agents/backends/codex/types.ts";
 import { PipelineStructureValidator } from "../../src/definition/validation/structure.ts";
 import { createDefaultAgentBackendRegistry } from "../../src/agents/default-registry.js";
@@ -601,6 +601,11 @@ test("input: an untyped orchestration node is rejected at validation", () => {
 
 type CaptureOptions = LlmStepOptions<"extractor", "codex">;
 
+function assertStrictSchema(schema: Parameters<typeof strictSchemaError>[0], where: string): void {
+  const error = strictSchemaError(schema, where);
+  if (error) throw new Error(error);
+}
+
 function captureStep(capture: CaptureOptions["capture"], extra: Pick<CaptureOptions, "output"> = {}) {
   return llmStep(
     {
@@ -720,7 +725,9 @@ test("capture: the runner-side rule refuses captures on a non-agent step", () =>
     profileOverrides: {},
     stepOverrides: {},
   });
-  expect(findings.map((finding) => finding.message)).toContain('step "bash": capture applies only to runner "agent"');
+  expect(findings.map((finding) => finding.message)).toContain(
+    'step "bash": capture applies only to an agent step (llmStep)',
+  );
 });
 
 /* ------------------------------------------------------------------------- *

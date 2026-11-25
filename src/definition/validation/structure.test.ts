@@ -27,20 +27,37 @@ test("a policy accepted by the builder passes validation", () => {
 
 test("resume_session without a fix prompt has nothing to resume into", () => {
   expect(findings({ resume_session: "implement", max_retries: 2 })).toEqual([
-    'step "verify": on_failure.resume_session requires fix_prompt',
+    'step "verify": onFail.resumeSession requires fix',
   ]);
 });
 
 test("stop_if_unchanged without a fix prompt has no repair to measure", () => {
   expect(findings({ stop_if_unchanged: true, fix_prompt: "fix", max_retries: 2 })).toEqual([]);
   expect(findings({ stop_if_unchanged: true, max_retries: 2 })).toEqual([
-    'step "verify": on_failure.stop_if_unchanged requires fix_prompt',
+    'step "verify": onFail.stopIfUnchanged requires fix',
   ]);
 });
 
 test("a fix policy bounded to zero attempts would never repair", () => {
   expect(findings({ fix_prompt: "fix", max_retries: 0 })).toEqual([
-    'step "verify": on_failure.max_retries must be >= 1 when fix_prompt is set',
+    'step "verify": onFail.retries must be >= 1 when fix is set',
+  ]);
+});
+
+test("a raw definition meets the rules the builder used to hold alone", () => {
+  expect(findings({ fix_prompt: "fix", max_retries: 1, fix_only_when_extracted: true })).toEqual([
+    'step "verify": fixOnlyWhenExtracted requires errorExtractor',
+  ]);
+  expect(findings({ fix_prompt: "fix", max_retries: 2, replay_after_fix: false })).toEqual([
+    'step "verify": replayAfterFix: false requires blocking: false',
+    'step "verify": replayAfterFix: false requires retries: 1',
+  ]);
+  expect(
+    findings({ max_retries: 1, escalate_model: " ", escalate_effort: "huge" as never, escalate_after: -1 }),
+  ).toEqual([
+    'step "verify": escalate.model must be a non-empty string',
+    'step "verify": escalate.effort is invalid (received: huge)',
+    'step "verify": escalate.after must be a non-negative integer (received: -1)',
   ]);
 });
 
@@ -66,10 +83,10 @@ test("a raw definition writing a source, or declaring one twice, is refused like
   expect(validate([tree, tree], [result])).toEqual(['step "derive": source "tree" is declared twice in input']);
 });
 
-/** `captures` reach the runner from a raw definition too, without the builder's
- *  checks. A capture named after a verdict field would overwrite its type in the
- *  verdict schema (`{ ...VERDICT_FIELDS, ...fields }`) and break the contract in
- *  silence, so the rule repeats the builder's refusals. */
+/** `captures` reach the runner from a raw definition too. A capture named after a
+ *  verdict field would overwrite its type in the verdict schema
+ *  (`{ ...VERDICT_FIELDS, ...fields }`) and break the contract in silence, so the
+ *  builder and this rule share one refusal. */
 function captureFindings(captures: StepCapture[]) {
   const pipeline = {
     name: "gate",
@@ -112,4 +129,45 @@ test("a raw capture cannot repeat a field or an artifact", () => {
     'step "commit": capture field names must be non-empty',
     'step "commit": capture "x" needs an artifact',
   ]);
+});
+
+test("a raw capture schema is held to strict mode", () => {
+  const open = { type: "object", properties: { name: { type: "string" } }, required: ["name"] };
+  expect(captureFindings([{ field: "branch", artifact: branch, schema: open, text: false }])).toEqual([
+    'step "commit": capture "branch".schema: schema must set additionalProperties: false on every object',
+  ]);
+  expect(captureFindings([{ field: "branch", artifact: branch, text: false } as unknown as StepCapture])).toEqual([
+    'step "commit": capture "branch".schema must be a schema object',
+  ]);
+});
+
+test("a raw rework names a declared step that writes the approved artifact", () => {
+  const plan = textArtifact("plan.md");
+  const validate = (outputs: Artifact<unknown>[], stepId: string) =>
+    new PipelineStructureValidator()
+      .validate({
+        source: "gate.ts",
+        pipeline: {
+          name: "gate",
+          steps: [{ id: "write-plan", name: "Plan", command: "plan", runner: "bash", outputs }],
+          approvals: new Map([["plan", plan]]),
+          reworks: new Map([["plan", { stepId, maxRounds: 3 }]]),
+        } as unknown as Pipeline,
+        profileOverrides: {},
+      })
+      .map((finding) => finding.message);
+
+  expect(validate([plan], "write-plan")).toEqual([]);
+  expect(validate([plan], "missing")).toEqual(['rework step "missing" of subject "plan" is not declared']);
+  expect(validate([textArtifact("other.md")], "write-plan")).toEqual([
+    'rework step "write-plan" of subject "plan" does not declare plan.md as an output',
+  ]);
+});
+
+test("an entry that is not a step object is reported, not dereferenced", () => {
+  const pipeline = { name: "gate", steps: [null] } as unknown as Pipeline;
+  const messages = new PipelineStructureValidator()
+    .validate({ source: "gate.ts", pipeline, profileOverrides: {} })
+    .map((finding) => finding.message);
+  expect(messages).toEqual(["steps[0] must be a step object"]);
 });

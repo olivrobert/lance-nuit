@@ -67,7 +67,6 @@ const required = [
   "dist/definition/dsl/artifact.d.ts",
   "dist/definition/dsl/input.d.ts",
   "dist/definition/dsl/profiles.d.ts",
-  "dist/definition/dsl/work-item-assembly.d.ts",
   "dist/definition/pipeline/context.js",
   "dist/definition/pipeline/loader.js",
   "dist/definition/project/dsl.d.ts",

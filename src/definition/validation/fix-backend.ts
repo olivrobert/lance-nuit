@@ -1,5 +1,6 @@
 import { backendSpecForStep } from "../../contracts/backends.js";
 import type { PipelineStep } from "../definition.js";
+import { pipelineSteps } from "./structure.js";
 import {
   backendRegistryOf,
   type PipelineValidationContext,
@@ -20,13 +21,10 @@ export class FixBackendValidator implements PipelineValidationRule {
   validate(context: PipelineValidationContext): readonly PipelineValidationFinding[] {
     const registry = backendRegistryOf(context);
     const findings: PipelineValidationFinding[] = [];
-    for (const step of context.pipeline.steps) {
+    for (const step of pipelineSteps(context)) {
       const fixBackend = step.on_failure?.fix_backend;
-      if (fixBackend === undefined) continue;
-      if (backendSpecForStep(step)) {
-        findings.push(this.error(step, "fixBackend applies only to a step without a backend"));
-        continue;
-      }
+      // A step with its own backend is refused by the structure rule.
+      if (fixBackend === undefined || backendSpecForStep(step)) continue;
       if (!registry.has(fixBackend)) {
         findings.push(
           this.error(

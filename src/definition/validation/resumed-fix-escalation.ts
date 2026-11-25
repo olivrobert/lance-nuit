@@ -1,5 +1,6 @@
 import { backendSpecForStep } from "../../contracts/backends.js";
 import type { PipelineStep } from "../definition.js";
+import { pipelineSteps } from "./structure.js";
 import {
   backendRegistryOf,
   type PipelineValidationContext,
@@ -19,7 +20,7 @@ export class ResumedFixEscalationValidator implements PipelineValidationRule {
   validate(context: PipelineValidationContext): readonly PipelineValidationFinding[] {
     const registry = backendRegistryOf(context);
     const defaultId = registry.defaultBackendId();
-    const steps = context.pipeline.steps;
+    const steps = pipelineSteps(context);
     const findings: PipelineValidationFinding[] = [];
     for (const step of steps.filter(isResumedBashFixWithModelEscalation)) {
       const target = step.on_failure!.resume_session!;

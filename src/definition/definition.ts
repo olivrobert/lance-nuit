@@ -123,13 +123,15 @@ export interface ParallelGroup {
   name: string;
 }
 
+export const STEP_RUNNERS = ["agent", "bash", "fn", "pipeline"] as const;
+
 export interface PipelineStep {
   id: string;
   name: string;
   command: AsyncTemplated<PipelineContext>;
   /** Step execution mode. The provider lives in `backend`: these are distinct
    *  axes, and one agent mode can serve every provider. */
-  runner?: "agent" | "bash" | "fn" | "pipeline";
+  runner?: (typeof STEP_RUNNERS)[number];
   /** Definition of a pipeline call controlled by the runner. */
   orchestration?: PipelineOrchestrationDefinition;
   /** Provider that runs the step. Required by every `agent` step. */

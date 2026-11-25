@@ -132,15 +132,17 @@ test("the builder refuses a policy whose options could never apply", () => {
   // `resumeSession` without `fix` is a type error (tests/dsl/dsl-options.test.ts
   // asserts it with @ts-expect-error); an untyped JavaScript caller still reaches here.
   expect(() =>
-    step("resume-without-fix").onFail({ retries: 2, resumeSession: "implement" } as unknown as OnFail),
-  ).toThrow(/onFail: resumeSession requires fix/);
+    step("resume-without-fix")
+      .onFail({ retries: 2, resumeSession: "implement" } as unknown as OnFail)
+      .build(),
+  ).toThrow('Step "resume-without-fix": onFail.resumeSession requires fix');
   // The target is an id, never a bare flag.
   expect(() => step("resume-blank").onFail({ fix: prompt, resumeSession: " " })).toThrow(
     /resumeSession must be a non-empty string/,
   );
   // A fix loop bounded to zero attempts would fail the step without repairing it.
-  expect(() => step("fix-without-retry").onFail({ fix: prompt, retries: 0 })).toThrow(
-    /onFail: retries must be >= 1 when fix is set/,
+  expect(() => step("fix-without-retry").onFail({ fix: prompt, retries: 0 }).build()).toThrow(
+    'Step "fix-without-retry": onFail.retries must be >= 1 when fix is set',
   );
 });
 

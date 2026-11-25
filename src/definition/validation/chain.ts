@@ -31,15 +31,20 @@ export class PipelineValidationError extends Error {
 /**
  * Extensible chain of consistency rules.
  *
- * It collects diagnostics instead of stopping at the first error. Future rules
- * can be added without bloating the loader or mixing invariants.
+ * It collects diagnostics instead of stopping at the first error, except after a
+ * rule the later ones rely on (`haltsOnError`): a malformed structure would make
+ * them throw instead of report.
  */
 export class PipelineValidationChain {
   constructor(private readonly rules: readonly PipelineValidationRule[]) {}
 
   validate(context: PipelineValidationContext): PipelineValidationReport {
     const findings: PipelineValidationFinding[] = [];
-    for (const rule of this.rules) findings.push(...rule.validate(context));
+    for (const rule of this.rules) {
+      const found = rule.validate(context);
+      findings.push(...found);
+      if (rule.haltsOnError && found.some((finding) => finding.level === "error")) break;
+    }
     return new PipelineValidationReport(findings);
   }
 }

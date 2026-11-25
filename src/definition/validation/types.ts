@@ -36,5 +36,7 @@ export function backendRegistryOf(context: PipelineValidationContext): AgentBack
 
 export interface PipelineValidationRule {
   readonly id: string;
+  /** The rules after this one rely on what it checks: an error stops the chain. */
+  readonly haltsOnError?: boolean;
   validate(context: PipelineValidationContext): readonly PipelineValidationFinding[];
 }

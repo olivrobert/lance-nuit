@@ -172,11 +172,11 @@ test("mechanicalFix keeps the restricted repair policy together", () => {
 
 test("DSL: validates the contract", () => {
   const withEscalate = (escalate: Escalate) => () =>
-    bashStep({ id: "x", name: "X", command: "c", onFail: { retries: 1, escalate } });
-  expect(withEscalate({ model: "  " })).toThrow(/model/);
-  expect(withEscalate({ effort: "invalid" as never })).toThrow(/effort/);
-  expect(withEscalate({ after: -1 })).toThrow(/after/);
-  expect(withEscalate({ after: 1.5 })).toThrow(/after/);
+    bashStep({ id: "x", name: "X", command: "c", rerunOnResume: true, onFail: { retries: 1, escalate } }).build();
+  expect(withEscalate({ model: "  " })).toThrow('Step "x": escalate.model must be a non-empty string');
+  expect(withEscalate({ effort: "invalid" as never })).toThrow('Step "x": escalate.effort is invalid');
+  expect(withEscalate({ after: -1 })).toThrow('Step "x": escalate.after must be a non-negative integer');
+  expect(withEscalate({ after: 1.5 })).toThrow('Step "x": escalate.after must be a non-negative integer');
 });
 
 test("Claude DSL normalizes public camelCase options: validates the contract", () => {

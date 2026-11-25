@@ -2,22 +2,18 @@ import type { PipelineContext } from "../../shared/language/context.js";
 import {
   type Pipeline,
   type PipelineRework,
+  type PipelineStep,
   ignoringErrors,
   producerConflicts,
   stepsWithoutDeliverable,
   withoutDeliverableMessage,
 } from "../definition.js";
+import { budgetError, reworkErrors } from "../step-shape.js";
 import { isValidSubjectToken } from "../../work-items/index.js";
 import type { Artifact } from "./artifact.js";
-import { StepBuilder } from "./dsl-steps.js";
+import { type StepAssembly, StepBuilder } from "./dsl-steps.js";
 import type { ForEachWorkItemOptions, PipelineEntry } from "./dsl-types.js";
 import { createInternalWorkItemSourceStep, resolveWorkItemDir } from "./dsl-work-item.js";
-import {
-  approvalDeclaration,
-  bindPipelineName,
-  bindPipelineWorkItemSource,
-  workItemSourceDeclaration,
-} from "./work-item-assembly.js";
 
 type PipelineBuilderMode = "empty" | "simple" | "workItem";
 type AddMethod<Mode extends PipelineBuilderMode> = Mode extends "workItem"
@@ -64,9 +60,8 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
     this.maxCost = ((usd: number) => {
       if (this.mode === "workItem")
         throw new Error(`Pipeline "${this.p.name}": maxCost() is incompatible with forEachWorkItem()`);
-      if (typeof usd !== "number" || !Number.isFinite(usd) || usd <= 0) {
-        throw new Error(`Pipeline "${this.p.name}": maxCost() expects a strictly positive number`);
-      }
+      const invalid = budgetError("maxCost()", usd);
+      if (invalid) throw new Error(`Pipeline "${this.p.name}": ${invalid}`);
       this.p.max_cost_usd = usd;
       this.mode = "simple";
       return this as unknown as PipelineBuilder<"simple">;
@@ -86,7 +81,7 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
       }
       if (this.mode === "workItem")
         throw new Error(`Pipeline "${this.p.name}": only one forEachWorkItem() loop is allowed`);
-      const normalized = normalizeForEachWorkItemOptions(options, this.p.name, this.p.max_cost_usd !== undefined);
+      const normalized = normalizeForEachWorkItemOptions(options, this.p.name);
       if (normalized.maxCostPerWorkItemUsd !== undefined)
         this.p.max_cost_per_work_item_usd = normalized.maxCostPerWorkItemUsd;
       this.appendEntries(materializeWorkItemLoop(normalized, this.p.name));
@@ -143,7 +138,7 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
   }
 
   private appendStep(step: StepBuilder): void {
-    const approval = approvalDeclaration(step);
+    const approval = step.approval;
     if (approval) {
       const { artifact, guard, rework } = approval;
       for (const subject of approval.subjects) {
@@ -153,7 +148,7 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
       }
       if (rework) this.reworkDeclarations.push({ gate: step, subjects: approval.subjects, artifact, rework });
     }
-    const source = workItemSourceDeclaration(step);
+    const source = step.workItemSource;
     if (source) {
       if (this.p.work_item_source) {
         throw new Error(
@@ -166,45 +161,56 @@ class PipelineBuilder<Mode extends PipelineBuilderMode> {
     this.stepBuilders.push(step);
   }
 
+  /** Build the pipeline without touching the builder: two calls give equal pipelines. */
   build(): Pipeline {
     if (this.stepBuilders.length === 0) throw new Error(`Pipeline "${this.p.name}": no steps declared`);
-    this.p.steps = this.stepBuilders.map((step) => {
-      bindPipelineWorkItemSource(step, this.p.work_item_source);
-      bindPipelineName(step, this.p.name);
-      return step.build();
-    });
-    if (this.approvals.size > 0) this.p.approvals = new Map(this.approvals);
-    if (this.approvalGuards.size > 0) this.p.approvalGuards = new Map(this.approvalGuards);
-    const reworks = this.bindReworks();
-    if (reworks.size > 0) this.p.reworks = reworks;
-    const unclassified = stepsWithoutDeliverable(this.p);
+    const assembly: StepAssembly = { pipelineName: this.p.name, workItemSource: this.p.work_item_source };
+    const reworks = this.reworks();
+    const built: Pipeline = {
+      ...this.p,
+      steps: this.withReworkSubjects(this.stepBuilders.map((step) => step.build(assembly))),
+      ...(this.approvals.size > 0 ? { approvals: new Map(this.approvals) } : {}),
+      ...(this.approvalGuards.size > 0 ? { approvalGuards: new Map(this.approvalGuards) } : {}),
+      ...(reworks.size > 0 ? { reworks } : {}),
+    };
+    const [reworkError] = reworkErrors(built);
+    if (reworkError) throw new Error(`Pipeline "${this.p.name}": ${reworkError}`);
+    this.assertReworksBeforeGates(built.steps);
+    const unclassified = stepsWithoutDeliverable(built);
     if (unclassified.length > 0) {
       throw new Error(`Pipeline "${this.p.name}": ${withoutDeliverableMessage(unclassified)}`);
     }
-    const [conflict] = [...producerConflicts(this.p), ...ignoringErrors(this.p)];
+    const [conflict] = [...producerConflicts(built), ...ignoringErrors(built)];
     if (conflict) throw new Error(`Pipeline "${this.p.name}": ${conflict}`);
-    return this.p;
+    return built;
   }
 
-  /** A rework step must exist, run before its gate, and write the artifact the
-   *  gate reviews; otherwise a rejection would replay nothing that can answer it. */
-  private bindReworks(): Map<string, PipelineRework> {
-    const reworks = new Map<string, PipelineRework>();
-    for (const { gate, subjects, artifact, rework } of this.reworkDeclarations) {
-      const subject = subjects.join(", ");
-      const index = this.p.steps.findIndex((step) => step.id === rework.stepId);
-      const target = this.p.steps[index];
-      const fail = (why: string) =>
-        new Error(`Pipeline "${this.p.name}": rework step "${rework.stepId}" of subject "${subject}" ${why}`);
-      if (!target) throw fail("is not declared");
-      if (index > this.stepBuilders.indexOf(gate)) throw fail("must run before its gate");
-      if (!target.outputs?.some((output) => output.name === artifact.name)) {
-        throw fail(`does not declare ${artifact.name} as an output`);
+  private reworks(): Map<string, PipelineRework> {
+    return new Map(
+      this.reworkDeclarations.flatMap(({ subjects, rework }) => subjects.map((subject) => [subject, rework] as const)),
+    );
+  }
+
+  private withReworkSubjects(steps: PipelineStep[]): PipelineStep[] {
+    return steps.map((step) => {
+      const subjects = this.reworkDeclarations
+        .filter(({ rework }) => rework.stepId === step.id)
+        .flatMap(({ subjects }) => subjects);
+      return subjects.length > 0 ? { ...step, rework_for: [...new Set(subjects)] } : step;
+    });
+  }
+
+  /** Only the builder knows which gate declared a rework: replaying a step that
+   *  runs after its gate would never answer the rejection. */
+  private assertReworksBeforeGates(steps: readonly PipelineStep[]): void {
+    for (const { gate, subjects, rework } of this.reworkDeclarations) {
+      const index = steps.findIndex((step) => step.id === rework.stepId);
+      if (index > this.stepBuilders.indexOf(gate)) {
+        throw new Error(
+          `Pipeline "${this.p.name}": rework step "${rework.stepId}" of subject "${subjects.join(", ")}" must run before its gate`,
+        );
       }
-      target.rework_for = [...new Set([...(target.rework_for ?? []), ...subjects])];
-      for (const declared of subjects) reworks.set(declared, rework);
     }
-    return reworks;
   }
 }
 
@@ -215,23 +221,17 @@ interface NormalizedForEachWorkItemOptions extends ForEachWorkItemOptions {
 function normalizeForEachWorkItemOptions(
   options: ForEachWorkItemOptions,
   pipelineName: string,
-  hasPipelineBudget: boolean,
 ): NormalizedForEachWorkItemOptions {
   if (!options || typeof options !== "object" || Array.isArray(options))
     throw new Error(`Pipeline "${pipelineName}": forEachWorkItem() expects an options object`);
   if (!Array.isArray(options.do)) throw new Error(`Pipeline "${pipelineName}": forEachWorkItem().do must be an array`);
   if (options.before !== undefined && !Array.isArray(options.before))
     throw new Error(`Pipeline "${pipelineName}": forEachWorkItem().before must be an array`);
-  if (
-    options.maxCostPerWorkItemUsd !== undefined &&
-    (typeof options.maxCostPerWorkItemUsd !== "number" ||
-      !Number.isFinite(options.maxCostPerWorkItemUsd) ||
-      options.maxCostPerWorkItemUsd <= 0)
-  ) {
-    throw new Error(`Pipeline "${pipelineName}": maxCostPerWorkItemUsd must be a positive number`);
-  }
-  if (hasPipelineBudget)
-    throw new Error(`Pipeline "${pipelineName}": maxCost() is incompatible with forEachWorkItem()`);
+  const budget =
+    options.maxCostPerWorkItemUsd === undefined
+      ? undefined
+      : budgetError("maxCostPerWorkItemUsd", options.maxCostPerWorkItemUsd);
+  if (budget) throw new Error(`Pipeline "${pipelineName}": ${budget}`);
   if (options.dir !== undefined && typeof options.dir !== "string")
     throw new Error(`Pipeline "${pipelineName}": forEachWorkItem().dir must be a string`);
   if (options.scan?.query !== undefined && (typeof options.scan.query !== "string" || !options.scan.query.trim()))

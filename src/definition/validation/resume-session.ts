@@ -1,5 +1,6 @@
 import { backendSpecForStep } from "../../contracts/backends.js";
 import type { PipelineStep } from "../definition.js";
+import { pipelineSteps } from "./structure.js";
 import type { PipelineValidationContext, PipelineValidationFinding, PipelineValidationRule } from "./types.js";
 
 /**
@@ -16,9 +17,7 @@ export class ResumeSessionValidator implements PipelineValidationRule {
   readonly id = "resume-session";
 
   validate(context: PipelineValidationContext): readonly PipelineValidationFinding[] {
-    const steps = Array.isArray(context.pipeline.steps)
-      ? context.pipeline.steps.filter((step): step is PipelineStep => !!step && typeof step === "object")
-      : [];
+    const steps = pipelineSteps(context);
     const findings: PipelineValidationFinding[] = [];
     steps.forEach((step, index) => {
       const target = step.on_failure?.resume_session;

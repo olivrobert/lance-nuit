@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { readProjectPrompt } from "../../dsl/dsl-steps.js";
 
 const PLACEHOLDER_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
 
@@ -9,17 +9,8 @@ export type PromptRenderer<K extends readonly string[]> = (values: Record<K[numb
  * file base, so the pipeline never needs to know the runner cwd. */
 export type PromptFileFactory = <const K extends readonly string[]>(relativePath: string, keys: K) => PromptRenderer<K>;
 
-function formatPromptError(filePath: string, message: string, cause?: unknown): Error {
-  return new Error(`Project prompt "${filePath}": ${message}`, cause === undefined ? undefined : { cause });
-}
-
-function readProjectPrompt(filePath: string): string {
-  try {
-    return readFileSync(filePath, "utf8").trimEnd();
-  } catch (error) {
-    const detail = error instanceof Error ? ` : ${error.message}` : "";
-    throw formatPromptError(filePath, `missing or unreadable file${detail}`, error);
-  }
+function formatPromptError(filePath: string, message: string): Error {
+  return new Error(`Project prompt "${filePath}": ${message}`);
 }
 
 /** Bind `promptFile` to the imported pipeline directory. */

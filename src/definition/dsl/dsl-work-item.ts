@@ -4,14 +4,16 @@ import type { PipelineContext } from "../../shared/language/context.js";
 import type { PipelineWorkItemSource } from "../definition.js";
 import { ActionStepBuilder } from "./dsl-steps.js";
 import type { InternalWorkItemSourceOptions } from "./dsl-types.js";
-import { declareWorkItemSource } from "./work-item-assembly.js";
 
 export type { InternalWorkItemSourceOptions } from "./dsl-types.js";
 
 class InternalWorkItemSourceStepBuilder extends ActionStepBuilder {
-  constructor(id: string, name: string, source: PipelineWorkItemSource) {
+  constructor(
+    id: string,
+    name: string,
+    override readonly workItemSource: PipelineWorkItemSource,
+  ) {
     super(id, name);
-    declareWorkItemSource(this, source);
   }
 }
 

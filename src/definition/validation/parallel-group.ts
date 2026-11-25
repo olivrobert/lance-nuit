@@ -1,6 +1,7 @@
 import type { AgentBackendRegistry } from "../../contracts/backends.js";
 import { isLogicalSegment } from "../../shared/language/artifact-ports.js";
 import type { PipelineStep } from "../definition.js";
+import { pipelineSteps } from "./structure.js";
 import {
   backendRegistryOf,
   type PipelineValidationContext,
@@ -20,11 +21,7 @@ export class ParallelGroupValidator implements PipelineValidationRule {
   readonly id = "parallel-group";
 
   validate(context: PipelineValidationContext): readonly PipelineValidationFinding[] {
-    const steps = Array.isArray(context.pipeline.steps)
-      ? context.pipeline.steps.filter(
-          (step): step is PipelineStep => !!step && typeof step === "object" && typeof step.id === "string",
-        )
-      : [];
+    const steps = pipelineSteps(context);
     const groupIds = new Set(steps.flatMap((step) => step.parallel_group?.id ?? []));
     return [...groupIds].flatMap((groupId) =>
       problemsOfGroup(groupId, steps, backendRegistryOf(context)).map((problem) => ({

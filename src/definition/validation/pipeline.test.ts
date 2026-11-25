@@ -141,27 +141,42 @@ test("validatePipeline rejects reserved pipeline directory names", () => {
   }
 });
 
-test("validatePipeline rejects non-finite and fractional retry quotas", () => {
+test("the builder rejects non-finite and fractional retry quotas", () => {
   for (const [label, retries] of [
     ["infinite", Infinity],
     ["not-a-number", NaN],
     ["fractional", 1.5],
   ] as const) {
-    const definition = pipeline(`invalid-retries-${label}`)
-      .add(
-        bashStep({
-          id: "retry",
-          name: "Retry",
-          command: "false",
-          rerunOnResume: true,
-          onFail: { retries },
-        }),
-      )
-      .build();
+    const build = () =>
+      pipeline(`invalid-retries-${label}`)
+        .add(
+          bashStep({
+            id: "retry",
+            name: "Retry",
+            command: "false",
+            rerunOnResume: true,
+            onFail: { retries },
+          }),
+        )
+        .build();
 
-    expect(() => validatePipeline(definition, `${label}.ts`, { context: CONTEXT })).toThrow(
-      /max_retries must be a finite integer/,
-    );
+    expect(build).toThrow('Step "retry": onFail.retries must be an integer >= 0');
+  }
+});
+
+test("a definition without steps is reported, the rules that read steps never run", () => {
+  for (const [definition, message] of [
+    [{ name: "x" }, '"steps" must be a non-empty array'],
+    [{ name: "x", steps: [null] }, "steps[0] must be a step object"],
+  ] as const) {
+    let thrown: unknown;
+    try {
+      validatePipeline(definition as unknown as Pipeline, "x.ts", { context: CONTEXT });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PipelineValidationError);
+    expect((thrown as PipelineValidationError).findings.map((finding) => finding.message)).toEqual([message]);
   }
 });
 
@@ -180,6 +195,6 @@ test("validatePipeline rejects a raw definition capturing on a non-agent step", 
   } as unknown as Pipeline;
 
   expect(() => validatePipeline(definition, "capture.ts", { context: CONTEXT })).toThrow(
-    /capture applies only to runner "agent"/,
+    /capture applies only to an agent step \(llmStep\)/,
   );
 });

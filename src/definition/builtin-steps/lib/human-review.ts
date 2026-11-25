@@ -11,7 +11,7 @@
 // What this module unifies across exit points:
 //  - `blocked` describes ONLY the raw artifact verdict. This module adds "and no
 //    one approved" whenever `approval` is declared, replacing each `*PendingReview`.
-//  - the approval subjects are declared from the gate (`declareApproval`), so the
+//  - the approval subjects are declared by the gate (its `approval`), so the
 //    pipeline's `approvals` map need not repeat them. A gate offers either one
 //    static subject or, per blocking value, one of a declared list or none.
 //  - the stop message is prefixed `escalated:` and suffixed with `--approve`, rather
@@ -29,16 +29,22 @@
 // exit point is the gate alone.
 
 import type { WorkItemNote } from "../../../contracts/work-items.js";
+import type { PipelineStep } from "../../definition.js";
 import type { Artifact } from "../../dsl/artifact.js";
-import { type ActionStepBuilder, actionStep, type StepBuilder } from "../../dsl/dsl-steps.js";
-import type { InputPredicateResult } from "../../dsl/input.js";
+import {
+  ActionStepBuilder,
+  actionStep,
+  type StepApprovalDeclaration,
+  type StepAssembly,
+  type StepBuilder,
+} from "../../dsl/dsl-steps.js";
+import { type InputPredicateResult, normalizeWhen } from "../../dsl/input.js";
 import { reject } from "../../dsl/preconditions.js";
-import { declareApproval, inferredPipelineName } from "../../dsl/work-item-assembly.js";
 import type { PipelineContext } from "../../../shared/language/context.js";
 import type { RunStopState } from "../../../shared/language/run-stop.js";
 import { artifactKey, decisionMatchesArtifact, readDecision, rejectionStatus } from "../../../work-items/index.js";
 import { abandonWorkItemBranch } from "./branch.js";
-import { workItemEscalateStep } from "./work-item-steps.js";
+import { assembledEscalateStep } from "./work-item-steps.js";
 
 /**
  * Expected recovery, in the reader's vocabulary, not the pipeline's. Every
@@ -175,164 +181,158 @@ function withReviewFields(
   return { ...note, fields };
 }
 
-/**
- * Steps for an exit point: escalation (non-blocking), optional branch abandonment,
- * then stop gate. Insert as-is into a phase.
- */
-export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
-  const escalateId = opts.ids?.escalate ?? `escalate-${opts.id}`;
-  const abandonId = opts.ids?.abandon ?? `abandon-${opts.id}-branch`;
-  const gateId = opts.ids?.gate ?? `${opts.id}-gate`;
-  const approval = opts.approval;
-  const choice = approval && "subjects" in approval ? approval : undefined;
-  const staticSubject = approval && !("subjects" in approval) ? approval.subject : undefined;
-  if (choice && (!Array.isArray(choice.subjects) || choice.subjects.length === 0)) {
-    throw new Error(`humanReview("${opts.id}"): approval.subjects must be a non-empty array`);
+/** Gate of an exit point. Its verdict names the pipeline in the commands it
+ *  suggests, so the admission is composed when the pipeline assembles the step. */
+class ReviewGateStepBuilder extends ActionStepBuilder {
+  constructor(
+    id: string,
+    name: string,
+    description: string,
+    override readonly approval: StepApprovalDeclaration | undefined,
+    private readonly verdict: (ctx: PipelineContext, pipelineName: string | undefined) => Promise<InputPredicateResult>,
+  ) {
+    super(id, name);
+    this.run(() => "human review complete or not required");
+    this.describe(() => description);
+    // The verdict is recomputed on every admission, so a replay re-checks the
+    // approval against the current artifact: a stale one stops the run again.
+    this.rerunOnResume();
   }
-  if (opts.rework && !approval)
-    throw new Error(`humanReview("${opts.id}"): rework needs an approval subject to reject`);
-  const maxRounds = opts.rework?.maxRounds ?? 3;
-  if (!Number.isInteger(maxRounds) || maxRounds < 1) {
-    throw new Error(`humanReview("${opts.id}"): rework.maxRounds must be a positive integer`);
+
+  protected override assemble(assembly: StepAssembly | undefined): PipelineStep {
+    const base = super.assemble(assembly);
+    const pipelineName = assembly?.pipelineName;
+    const admission = normalizeWhen({ if: (ctx) => this.verdict(ctx, pipelineName), else: "stop" });
+    return { ...base, inputs: [...(base.inputs ?? []), ...admission] };
   }
-  const reworkable = opts.rework !== undefined;
-  const declaredSubjects: readonly string[] = choice ? choice.subjects : staticSubject ? [staticSubject] : [];
-  // The builder binds this metadata before building the step. Looking it up at
-  // execution time keeps approval notes and stop reasons correct when a pipeline
-  // is renamed, without copying the name into every review declaration.
-  let gate: ActionStepBuilder;
-  const approvalCommand = (subject: string | undefined, ctx: PipelineContext): string | undefined =>
-    subject
-      ? approveCommand(subject, ctx.ticket, inferredPipelineName(gate) ?? failPipelineName(), ctx.worktree === true)
-      : undefined;
+}
+
+/** What an exit point decides, shared by its escalation, branch abandonment and gate. */
+class ReviewRules<T> {
+  readonly choice: ReviewApprovalChoice<T> | undefined;
+
+  readonly staticSubject: string | undefined;
+
+  readonly declaredSubjects: readonly string[];
+
+  readonly reworkable: boolean;
+
+  readonly maxRounds: number;
+
+  /** A review without approval has a pure verdict and can safely share the artifact
+   *  read between escalation and its gate. Approval checks remain uncached because
+   *  a decision may be recorded between those two steps. */
+  private readonly cachedPending = new WeakMap<PipelineContext, Promise<boolean>>();
+
+  constructor(private readonly opts: HumanReviewOptions<T>) {
+    const approval = opts.approval;
+    this.choice = approval && "subjects" in approval ? approval : undefined;
+    this.staticSubject = approval && !("subjects" in approval) ? approval.subject : undefined;
+    if (this.choice && (!Array.isArray(this.choice.subjects) || this.choice.subjects.length === 0)) {
+      throw new Error(`humanReview("${opts.id}"): approval.subjects must be a non-empty array`);
+    }
+    if (opts.rework && !approval) {
+      throw new Error(`humanReview("${opts.id}"): rework needs an approval subject to reject`);
+    }
+    this.maxRounds = opts.rework?.maxRounds ?? 3;
+    if (!Number.isInteger(this.maxRounds) || this.maxRounds < 1) {
+      throw new Error(`humanReview("${opts.id}"): rework.maxRounds must be a positive integer`);
+    }
+    this.reworkable = opts.rework !== undefined;
+    this.declaredSubjects = this.choice ? this.choice.subjects : this.staticSubject ? [this.staticSubject] : [];
+  }
+
+  /** The pipeline name reaches the step when the pipeline assembles it; it is read
+   *  at execution so approval notes and stop reasons follow a renamed pipeline. */
+  pipelineName(name: string | undefined): string {
+    if (name === undefined) {
+      throw new Error(`humanReview("${this.opts.id}"): pipeline name was not bound during assembly`);
+    }
+    return name;
+  }
+
   /** Console hint naming every way out the gate accepts for `subject`. `--approve`
    *  on a run records the decision AND resumes: there is no second command to type. */
-  const liftHint = (subject: string | undefined, ctx: PipelineContext): string => {
-    const command = approvalCommand(subject, ctx);
-    if (!command) return "";
-    const rejection =
-      subject && reworkable
-        ? ` or reject with "${rejectCommand(subject, ctx.ticket, inferredPipelineName(gate) ?? failPipelineName())}"`
-        : "";
+  liftHint(subject: string | undefined, ctx: PipelineContext, pipelineName: string | undefined): string {
+    if (!subject) return "";
+    const name = this.pipelineName(pipelineName);
+    const command = approveCommand(subject, ctx.ticket, name, ctx.worktree === true);
+    const rejection = this.reworkable ? ` or reject with "${rejectCommand(subject, ctx.ticket, name)}"` : "";
     return ` — lift with "${command}"${rejection}`;
-  };
-
-  function failPipelineName(): never {
-    throw new Error(`humanReview("${opts.id}"): pipeline name was not bound during assembly`);
   }
 
   /** Subject that lifts this blocking value. Gate, note and CLI guard all read it
    *  here, so `--approve` never accepts a subject the gate would ignore. */
-  const offeredSubject = async (value: T, ctx: PipelineContext): Promise<string | undefined> => {
-    if (!choice) return staticSubject;
-    const subject = await choice.subjectFor(value, ctx);
+  async offeredSubject(value: T, ctx: PipelineContext): Promise<string | undefined> {
+    if (!this.choice) return this.staticSubject;
+    const subject = await this.choice.subjectFor(value, ctx);
     // The subject becomes a filename under `decisions/`: an undeclared one is a
     // pipeline bug, not a verdict that cannot be approved.
-    if (subject !== undefined && !choice.subjects.includes(subject)) {
+    if (subject !== undefined && !this.choice.subjects.includes(subject)) {
       throw new Error(
-        `humanReview("${opts.id}"): approval.subjectFor returned "${subject}", which is not declared ` +
-          `(subjects: ${choice.subjects.join(", ")})`,
+        `humanReview("${this.opts.id}"): approval.subjectFor returned "${subject}", which is not declared ` +
+          `(subjects: ${this.choice.subjects.join(", ")})`,
       );
     }
     return subject;
-  };
+  }
 
   /** Value of a raw blocking verdict; undefined when the artifact is absent,
    *  unreadable (the check did not happen) or does not block. */
-  const blockingValue = async (ctx: PipelineContext): Promise<T | undefined> => {
+  async blockingValue(ctx: PipelineContext): Promise<T | undefined> {
     let value: T | undefined;
     try {
-      value = await opts.artifact.read(ctx);
+      value = await this.opts.artifact.read(ctx);
     } catch {
       return undefined;
     }
     if (value === undefined) return undefined;
-    return (await opts.blocked(value, ctx)) ? value : undefined;
-  };
+    return (await this.opts.blocked(value, ctx)) ? value : undefined;
+  }
 
   /** Block remains: raw verdict AND no valid approval. `decisionMatchesArtifact`
    *  provides the hash lock; approval is invalidated when the artifact changes,
    *  reopening the exit point. */
-  const cachedPending = new WeakMap<PipelineContext, Promise<boolean>>();
-  const pending = async (ctx: PipelineContext): Promise<boolean> => {
-    // A review without approval has a pure verdict and can safely share the
-    // artifact read between escalation and its gate. Approval checks remain
-    // uncached because a decision may be recorded between those two steps.
-    if (!approval) {
-      const cached = cachedPending.get(ctx);
-      if (cached) return cached;
-      const result = computePending(ctx);
-      cachedPending.set(ctx, result);
-      return result;
-    }
-    return computePending(ctx);
-  };
+  pending(ctx: PipelineContext): Promise<boolean> {
+    if (this.opts.approval) return this.computePending(ctx);
+    const cached = this.cachedPending.get(ctx);
+    if (cached) return cached;
+    const result = this.computePending(ctx);
+    this.cachedPending.set(ctx, result);
+    return result;
+  }
 
-  const computePending = async (ctx: PipelineContext): Promise<boolean> => {
-    const value = await blockingValue(ctx);
+  private async computePending(ctx: PipelineContext): Promise<boolean> {
+    const value = await this.blockingValue(ctx);
     if (value === undefined) return false;
-    const subject = await offeredSubject(value, ctx);
+    const subject = await this.offeredSubject(value, ctx);
     // No subject offered: no decision file lifts it, even one left by an earlier
     // approvable verdict under another declared subject.
     if (subject === undefined) return true;
-    return !(await decisionMatchesArtifact(ctx, subject, opts.artifact));
-  };
-
-  // No note: no escalation step. The queue lookup that publishes it lives in a
-  // pipeline that owns work items, so a child pipeline gets the gate only.
-  const escalation = opts.note;
-  const steps: StepBuilder[] = escalation
-    ? [
-        workItemEscalateStep<T>({
-          id: escalateId,
-          name: opts.names?.escalate ?? `Work item escalation (${opts.id})`,
-          artifact: opts.artifact,
-          onlyIf: (_value, ctx) => pending(ctx),
-          note: async (value, ctx) =>
-            withReviewFields(
-              await escalation(value, ctx),
-              opts.kind,
-              await offeredSubject(value, ctx),
-              ctx.ticket,
-              inferredPipelineName(gate) ?? failPipelineName(),
-              ctx.worktree === true,
-              reworkable,
-            ),
-        }),
-      ]
-    : [];
-
-  if (opts.abandonBranch) {
-    const baseOf = opts.abandonBranch;
-    steps.push(
-      actionStep({
-        id: abandonId,
-        name: opts.names?.abandon ?? `Abandon work branch (${opts.id})`,
-        when: async (ctx) => ((await pending(ctx)) ? true : { ok: false, reason: "no escalation — branch kept" }),
-        run: (ctx) => abandonWorkItemBranch(ctx, baseOf(ctx)),
-        describe: (ctx) => `restore ${baseOf(ctx)} and delete the branch for ticket ${ctx.ticket ?? "?"}`,
-        // Replay is safe: once on the base branch there is nothing left to delete.
-        rerunOnResume: true,
-      }),
-    );
+    return !(await decisionMatchesArtifact(ctx, subject, this.opts.artifact));
   }
 
   /** What the stop is about, for a reader of `state.json` that must not parse the
    *  console sentence: the subject that lifts it, the artifact under review, the
    *  expected recovery, and the reason as the exit point wrote it. */
-  const stopInfo = (detail: string, subject: string | undefined): RunStopState => ({
-    ...(subject ? { subject } : {}),
-    artifact: artifactKey(opts.artifact.name),
-    kind: opts.kind,
-    detail,
-    ...(reworkable ? { reworkable: true } : {}),
-  });
+  stopInfo(detail: string, subject: string | undefined): RunStopState {
+    return {
+      ...(subject ? { subject } : {}),
+      artifact: artifactKey(this.opts.artifact.name),
+      kind: this.opts.kind,
+      detail,
+      ...(this.reworkable ? { reworkable: true } : {}),
+    };
+  }
 
   /** A rejection holds the gate until a human approves a new version: the rework
    *  may well produce content `blocked` accepts, but only the person who rejected
    *  the artifact may accept its replacement. */
-  const rejectedStop = async (ctx: PipelineContext): Promise<InputPredicateResult | undefined> => {
-    for (const subject of declaredSubjects) {
+  private async rejectedStop(
+    ctx: PipelineContext,
+    pipelineName: string | undefined,
+  ): Promise<InputPredicateResult | undefined> {
+    for (const subject of this.declaredSubjects) {
       const status = await rejectionStatus(ctx, subject);
       if (!status) continue;
       const round = status.decision.round ?? 1;
@@ -342,73 +342,122 @@ export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
           : status.artifact === "unchanged"
             ? `the rework did not change the artifact rejected in round ${round}`
             : `the artifact was reworked after rejection round ${round} and needs a new decision (approve or reject again)`;
-      return reject(`escalated: ${detail}${liftHint(subject, ctx)}`, stopInfo(detail, subject));
+      return reject(`escalated: ${detail}${this.liftHint(subject, ctx, pipelineName)}`, this.stopInfo(detail, subject));
     }
     return undefined;
-  };
-
-  const verdict = async (ctx: PipelineContext): Promise<InputPredicateResult> => {
-    const rejected = await rejectedStop(ctx);
-    if (rejected) return rejected;
-    if (opts.gateCheck) {
-      const result = await opts.gateCheck(ctx);
-      // A custom gate owns its reason; it still stops for this exit point, so
-      // describe it here unless the author already did.
-      if (typeof result === "boolean" || result.ok || result.stop || !result.reason) return result;
-      const offered = await blockingValue(ctx);
-      const subject = choice ? offered && (await offeredSubject(offered, ctx)) : staticSubject;
-      return { ...result, stop: stopInfo(result.reason, subject) };
-    }
-    if (!(await pending(ctx))) return true;
-    const value = await opts.artifact.require(ctx);
-    const detail = await opts.reason(value, ctx);
-    const subject = await offeredSubject(value, ctx);
-    return reject(`escalated: ${detail}${liftHint(subject, ctx)}`, stopInfo(detail, subject));
-  };
-
-  gate = actionStep({
-    id: gateId,
-    name: opts.names?.gate ?? `Gate: stop until human review (${opts.id}) is complete`,
-    when: { if: verdict, else: "stop" as const },
-    run: () => "human review complete or not required",
-    describe: () => `validate human review for exit point "${opts.id}"`,
-    // The verdict is recomputed on every admission, so a replay re-checks the
-    // approval against the current artifact: a stale one stops the run again.
-    rerunOnResume: true,
-  });
-
-  // The `--approve <subject> → artifact` mapping comes from the gate that reads it:
-  // the CLI needs it without running the pipeline, so the pipeline need not repeat it.
-  // A per-verdict approval also hands the CLI the gate's own rule as a guard.
-  if (choice) {
-    declareApproval(gate, {
-      subjects: choice.subjects,
-      artifact: opts.artifact as Artifact<unknown>,
-      ...(opts.rework ? { rework: { stepId: opts.rework.step, maxRounds } } : {}),
-      guard: async (subject, ctx) => {
-        // The gate asks again about a rejected subject whatever the reworked
-        // verdict offers, so the human must be able to answer under that subject.
-        if (readDecision(ctx, subject)?.decision === "rejected") return undefined;
-        const value = await blockingValue(ctx);
-        const offered = value === undefined ? undefined : await offeredSubject(value, ctx);
-        if (offered === subject) return undefined;
-        const why =
-          value === undefined
-            ? "nothing blocks"
-            : offered === undefined
-              ? "this verdict cannot be approved"
-              : `offered: ${offered}`;
-        return `Approval subject "${subject}" is not offered by the current verdict of artifacts/${opts.artifact.name} (${why}).`;
-      },
-    });
-  } else if (staticSubject) {
-    declareApproval(gate, {
-      subjects: [staticSubject],
-      artifact: opts.artifact as Artifact<unknown>,
-      ...(opts.rework ? { rework: { stepId: opts.rework.step, maxRounds } } : {}),
-    });
   }
 
-  steps.push(gate);
-  return steps;
+  async verdict(ctx: PipelineContext, pipelineName: string | undefined): Promise<InputPredicateResult> {
+    const rejected = await this.rejectedStop(ctx, pipelineName);
+    if (rejected) return rejected;
+    if (this.opts.gateCheck) return this.customVerdict(ctx, this.opts.gateCheck);
+    if (!(await this.pending(ctx))) return true;
+    const value = await this.opts.artifact.require(ctx);
+    const detail = await this.opts.reason(value, ctx);
+    const subject = await this.offeredSubject(value, ctx);
+    return reject(`escalated: ${detail}${this.liftHint(subject, ctx, pipelineName)}`, this.stopInfo(detail, subject));
+  }
+
+  /** A custom gate owns its reason; it still stops for this exit point, so
+   *  describe it here unless the author already did. */
+  private async customVerdict(
+    ctx: PipelineContext,
+    gateCheck: NonNullable<HumanReviewOptions<T>["gateCheck"]>,
+  ): Promise<InputPredicateResult> {
+    const result = await gateCheck(ctx);
+    if (typeof result === "boolean" || result.ok || result.stop || !result.reason) return result;
+    const offered = await this.blockingValue(ctx);
+    const subject = this.choice ? offered && (await this.offeredSubject(offered, ctx)) : this.staticSubject;
+    return { ...result, stop: this.stopInfo(result.reason, subject) };
+  }
+
+  /** The `--approve <subject> → artifact` mapping comes from the gate that reads it:
+   *  the CLI needs it without running the pipeline, so the pipeline need not repeat
+   *  it. A per-verdict approval also hands the CLI the gate's own rule as a guard. */
+  approvalDeclaration(): StepApprovalDeclaration | undefined {
+    if (this.declaredSubjects.length === 0) return undefined;
+    return {
+      subjects: this.declaredSubjects,
+      artifact: this.opts.artifact as Artifact<unknown>,
+      ...(this.opts.rework ? { rework: { stepId: this.opts.rework.step, maxRounds: this.maxRounds } } : {}),
+      ...(this.choice ? { guard: (subject: string, ctx: PipelineContext) => this.approvalGuard(subject, ctx) } : {}),
+    };
+  }
+
+  private async approvalGuard(subject: string, ctx: PipelineContext): Promise<string | undefined> {
+    // The gate asks again about a rejected subject whatever the reworked verdict
+    // offers, so the human must be able to answer under that subject.
+    if (readDecision(ctx, subject)?.decision === "rejected") return undefined;
+    const value = await this.blockingValue(ctx);
+    const offered = value === undefined ? undefined : await this.offeredSubject(value, ctx);
+    if (offered === subject) return undefined;
+    const why =
+      value === undefined
+        ? "nothing blocks"
+        : offered === undefined
+          ? "this verdict cannot be approved"
+          : `offered: ${offered}`;
+    return `Approval subject "${subject}" is not offered by the current verdict of artifacts/${this.opts.artifact.name} (${why}).`;
+  }
+}
+
+/**
+ * Steps for an exit point: escalation (non-blocking), optional branch abandonment,
+ * then stop gate. Insert as-is into a phase.
+ */
+export function humanReview<T>(opts: HumanReviewOptions<T>): StepBuilder[] {
+  const rules = new ReviewRules(opts);
+  const gateId = opts.ids?.gate ?? `${opts.id}-gate`;
+  const gate = new ReviewGateStepBuilder(
+    gateId,
+    opts.names?.gate ?? `Gate: stop until human review (${opts.id}) is complete`,
+    `validate human review for exit point "${opts.id}"`,
+    rules.approvalDeclaration(),
+    (ctx, pipelineName) => rules.verdict(ctx, pipelineName),
+  );
+  return [...escalationSteps(opts, rules), ...abandonSteps(opts, rules), gate];
+}
+
+/** No note: no escalation step. The queue lookup that publishes it lives in a
+ *  pipeline that owns work items, so a child pipeline gets the gate only. */
+function escalationSteps<T>(opts: HumanReviewOptions<T>, rules: ReviewRules<T>): StepBuilder[] {
+  const escalation = opts.note;
+  if (!escalation) return [];
+  return [
+    assembledEscalateStep<T>(
+      {
+        id: opts.ids?.escalate ?? `escalate-${opts.id}`,
+        name: opts.names?.escalate ?? `Work item escalation (${opts.id})`,
+        artifact: opts.artifact,
+        onlyIf: (_value, ctx) => rules.pending(ctx),
+        note: escalation,
+      },
+      async (value, ctx, assembly) =>
+        withReviewFields(
+          await escalation(value, ctx),
+          opts.kind,
+          await rules.offeredSubject(value, ctx),
+          ctx.ticket,
+          rules.pipelineName(assembly?.pipelineName),
+          ctx.worktree === true,
+          rules.reworkable,
+        ),
+    ),
+  ];
+}
+
+function abandonSteps<T>(opts: HumanReviewOptions<T>, rules: ReviewRules<T>): StepBuilder[] {
+  const baseOf = opts.abandonBranch;
+  if (!baseOf) return [];
+  return [
+    actionStep({
+      id: opts.ids?.abandon ?? `abandon-${opts.id}-branch`,
+      name: opts.names?.abandon ?? `Abandon work branch (${opts.id})`,
+      when: async (ctx) => ((await rules.pending(ctx)) ? true : { ok: false, reason: "no escalation — branch kept" }),
+      run: (ctx) => abandonWorkItemBranch(ctx, baseOf(ctx)),
+      describe: (ctx) => `restore ${baseOf(ctx)} and delete the branch for ticket ${ctx.ticket ?? "?"}`,
+      // Replay is safe: once on the base branch there is nothing left to delete.
+      rerunOnResume: true,
+    }),
+  ];
 }

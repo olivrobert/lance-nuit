@@ -22,16 +22,20 @@
 // original prompt's “continue” behavior and prevents a failed note from keeping a
 // ticket in the work queue.
 
-import type { ExecutionKey, MoveTarget, WorkItemNote } from "../../../contracts/work-items.js";
+import type { ExecutionKey, MoveTarget, WorkItemNote, WorkQueue } from "../../../contracts/work-items.js";
+import type { PipelineStep } from "../../definition.js";
 // Focused imports on purpose: the `../../dsl.js` barrel re-exports this module
 // (via human-review), and importing it back here would evaluate the class
 // hierarchy before `ActionStepBuilder` is initialized (circular-import TDZ).
-import { ActionStepBuilder } from "../../dsl/dsl-steps.js";
+import { ActionStepBuilder, type StepAssembly } from "../../dsl/dsl-steps.js";
 import { skipUnless } from "../../dsl/input.js";
-import { inferredPipelineWorkItemSource } from "../../dsl/work-item-assembly.js";
 import { errorMessage } from "../../../shared/lib/errors.js";
 import type { PipelineContext } from "../../../shared/language/context.js";
-import type { ProjectEscalation, ProjectEscalationStepOptions } from "./public-work-item.js";
+import type {
+  ProjectEscalation,
+  ProjectEscalationNoteOptions,
+  ProjectEscalationStepOptions,
+} from "./public-work-item.js";
 import { deliveryNote } from "./work-item-notes.js";
 
 /** Readable movement description for logs and the step summary. */
@@ -220,12 +224,41 @@ function createReviewResolver<T>(opts: PublicReviewOptions<T>): {
   };
 }
 
-/** Builder injected into the project DSL. It learns its source queue only after the
- *  PipelineBuilder has gathered every source declaration. */
+/** Note published by an escalation, once the pipeline the step belongs to is known. */
+type EscalationNote<T> = (
+  value: T,
+  ctx: PipelineContext,
+  assembly: StepAssembly | undefined,
+) => WorkItemNote | Promise<WorkItemNote>;
+
+function authorNote<T>(opts: ProjectEscalationStepOptions<T>): EscalationNote<T> {
+  return async (value, ctx) =>
+    "escalation" in opts && opts.escalation
+      ? projectEscalationNote(await opts.escalation(value, ctx))
+      : await opts.note!(value, ctx);
+}
+
+/** Queue a work-item step leaves, known once the pipeline has gathered its source. */
+function sourceQueue(assembly: StepAssembly | undefined, stepId: string): WorkQueue {
+  const from = assembly?.workItemSource?.queue;
+  if (!from) {
+    throw new Error(
+      `Step "${stepId}": no identifiable work-item source queue — ` +
+        `declare forEachWorkItem({ queue: "bugTodo" | "featureTodo", do: [...] }) in the pipeline`,
+    );
+  }
+  return from;
+}
+
+/** Builder injected into the project DSL. It learns its source queue only when the
+ *  PipelineBuilder assembles it, after every source declaration is gathered. */
 class PublicWorkItemEscalateStepBuilder<T> extends ActionStepBuilder {
   private readonly reviewResolver: { resolve(ctx: PipelineContext): Promise<ReviewResolution<T>> };
 
-  constructor(private readonly opts: ProjectEscalationStepOptions<T>) {
+  constructor(
+    private readonly opts: ProjectEscalationStepOptions<T>,
+    private readonly note: EscalationNote<T>,
+  ) {
     super(opts.id ?? "escalate", opts.name ?? "Escalate work item (note + leave queue)");
     this.reviewResolver = createReviewResolver(opts);
   }
@@ -238,43 +271,32 @@ class PublicWorkItemEscalateStepBuilder<T> extends ActionStepBuilder {
       );
   }
 
-  build(): ReturnType<ActionStepBuilder["build"]> {
+  protected override assemble(assembly: StepAssembly | undefined): PipelineStep {
     const id = this.opts.id ?? "escalate";
     validatePublicEscalationOptions<T>(this.opts, id);
-    const source = inferredPipelineWorkItemSource(this);
-    const from = source?.queue;
-    if (!from) {
-      throw new Error(
-        `Step "${this.opts.id ?? "escalate"}": no identifiable work-item source queue — ` +
-          `declare forEachWorkItem({ queue: "bugTodo" | "featureTodo", do: [...] }) in the pipeline`,
-      );
-    }
-
-    this.applyInputs(
-      skipUnless(async (ctx) => {
+    const from = sourceQueue(assembly, id);
+    const base = super.assemble(assembly);
+    return {
+      ...base,
+      inputs: [
+        ...(base.inputs ?? []),
+        skipUnless(async (ctx) => {
+          const result = await this.resolveArtifact(ctx);
+          return result.ok ? true : { ok: false, reason: result.reason };
+        }, "escalation artifact missing or invalid"),
+      ],
+      action: async (ctx) => {
         const result = await this.resolveArtifact(ctx);
-        return result.ok ? true : { ok: false, reason: result.reason };
-      }, "escalation artifact missing or invalid"),
-    );
-    this.run(async (ctx) => {
-      const result = await this.resolveArtifact(ctx);
-      if (!result.ok) return `escalation skipped: ${result.reason}`;
-
-      const note =
-        "escalation" in this.opts && this.opts.escalation
-          ? projectEscalationNote(await this.opts.escalation(result.value, ctx))
-          : await this.opts.note(result.value, ctx);
-      validateWorkItemNote(note, id);
-      return applyWorkItemEffects(ctx, id, {
-        note,
-        move: { queue: "escalate", from },
-      });
-    });
-    this.describe((ctx) => `work item ${ctx.ticket ?? "?"}: escalation note + queue ${from}`);
-    this.blocking(false);
-    // Replay is safe: the note's execution key dedupes it and the move is idempotent.
-    this.rerunOnResume();
-    return super.build();
+        if (!result.ok) return `escalation skipped: ${result.reason}`;
+        const note = await this.note(result.value, ctx, assembly);
+        validateWorkItemNote(note, id);
+        return applyWorkItemEffects(ctx, id, { note, move: { queue: "escalate", from } });
+      },
+      command: (ctx) => `work item ${ctx.ticket ?? "?"}: escalation note + queue ${from}`,
+      blocking: false,
+      // Replay is safe: the note's execution key dedupes it and the move is idempotent.
+      rerun_on_resume: true,
+    };
   }
 }
 
@@ -285,7 +307,15 @@ class PublicWorkItemEscalateStepBuilder<T> extends ActionStepBuilder {
  * is read once for admission and note construction.
  */
 export function workItemEscalateStep<T>(opts: ProjectEscalationStepOptions<T>): ActionStepBuilder {
-  return new PublicWorkItemEscalateStepBuilder(opts);
+  return new PublicWorkItemEscalateStepBuilder(opts, authorNote(opts));
+}
+
+/** Escalation whose note depends on the pipeline it is assembled into (human review). */
+export function assembledEscalateStep<T>(
+  opts: ProjectEscalationNoteOptions<T>,
+  note: EscalationNote<T>,
+): ActionStepBuilder {
+  return new PublicWorkItemEscalateStepBuilder(opts, note);
 }
 
 /** Public delivery options: the queue left comes from the work-item source linked
@@ -312,40 +342,33 @@ class PublicWorkItemDeliveryStepBuilder extends ActionStepBuilder {
     super(opts.id ?? "work-item-update", opts.name ?? "Update work item (MR note + queue + state)");
   }
 
-  build(): ReturnType<ActionStepBuilder["build"]> {
+  protected override assemble(assembly: StepAssembly | undefined): PipelineStep {
+    const id = this.opts.id ?? "work-item-update";
     const mrUrl = this.opts.mrUrl;
     if (mrUrl !== undefined && typeof mrUrl !== "function") {
-      throw new Error(`Step "${this.opts.id ?? "work-item-update"}": mrUrl must be a function`);
+      throw new Error(`Step "${id}": mrUrl must be a function`);
     }
-    const source = inferredPipelineWorkItemSource(this);
-    const from = source?.queue;
-    if (!from) {
-      throw new Error(
-        `Step "${this.opts.id ?? "work-item-update"}": no identifiable work-item source queue — ` +
-          `declare forEachWorkItem({ queue: "bugTodo" | "featureTodo", do: [...] }) in the pipeline`,
-      );
-    }
-    const id = this.opts.id ?? "work-item-update";
-    const move: MoveTarget = { queue: "done", from, state: "inReview" };
-    this.run(async (ctx) => {
-      if (mrUrl === undefined) return applyWorkItemEffects(ctx, id, { move });
-      let url = "";
-      const extraFailures: string[] = [];
-      try {
-        url = (await mrUrl(ctx)) ?? "";
-      } catch (error) {
-        extraFailures.push(`merge-request URL: ${errorMessage(error)}`);
-      }
-      return applyWorkItemEffects(ctx, id, { note: deliveryNote(url), move, extraFailures });
-    });
-    this.describe((ctx) =>
-      mrUrl === undefined
-        ? `work item ${ctx.ticket ?? "?"}: ${describeMove(move)}`
-        : `work item ${ctx.ticket ?? "?"}: delivery note + ${describeMove(move)}`,
-    );
-    this.blocking(false);
-    this.rerunOnResume();
-    return super.build();
+    const move: MoveTarget = { queue: "done", from: sourceQueue(assembly, id), state: "inReview" };
+    return {
+      ...super.assemble(assembly),
+      action: async (ctx) => {
+        if (mrUrl === undefined) return applyWorkItemEffects(ctx, id, { move });
+        let url = "";
+        const extraFailures: string[] = [];
+        try {
+          url = (await mrUrl(ctx)) ?? "";
+        } catch (error) {
+          extraFailures.push(`merge-request URL: ${errorMessage(error)}`);
+        }
+        return applyWorkItemEffects(ctx, id, { note: deliveryNote(url), move, extraFailures });
+      },
+      command: (ctx) =>
+        mrUrl === undefined
+          ? `work item ${ctx.ticket ?? "?"}: ${describeMove(move)}`
+          : `work item ${ctx.ticket ?? "?"}: delivery note + ${describeMove(move)}`,
+      blocking: false,
+      rerun_on_resume: true,
+    };
   }
 }
 
