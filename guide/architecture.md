@@ -161,7 +161,7 @@ the files inside import each other freely.
 | `src/work-items/store/` | `index.ts` | What the runner keeps beside a ticket, outside any run: artifacts, the human decisions bound to them and the gate status they give, the freshness lock (`artifacts/lock.json`), and the work-item layout. |
 | `src/work-items/providers/` | `registry.ts` | The tracker adapters (Jira, GitHub, …) behind the work-item contract. |
 | `src/execution/step/` | `step-loop.ts` | Loading the definition and selection a run opens with; executing a step: admission, attempts, retries, verdicts, repairs, composed children. |
-| `src/definition/extractors/` | `registry.ts` | Error extractors and their discovery. |
+| `src/definition/extractors/` | `registry.ts` | Error extractors and the table that registers them by name. |
 | `src/dashboard/read-model/` | `index.ts` | The dashboard's read model: a read-only view over runs, work items and history. |
 | `src/dashboard/home/` | `index.ts` | The dashboard's own files under `~/.lance-nuit/ui/`. |
 | `src/dashboard/ui/` | `index.ts` | The dashboard server and its browser bundle. |
@@ -756,7 +756,7 @@ See [`failures-retries-escalation.md`](failures-retries-escalation.md) and
 | Add a ticket system | `WorkItemGateway` adapter, listed under `workItems` in an `ExtensionManifest` |
 | Add a project quality check | a `bashStep`, `llmStep`, or `actionStep` in the pipeline |
 | Add a pipeline | `.lance-nuit/pipelines/<name>.ts` |
-| Add a reusable fix parser | A runner-distributed `extractors/<name>.ts` module exporting `extract` |
+| Add a reusable fix parser | A runner-distributed `extractors/<name>.ts` module exporting `extract`, registered in `extractors/registry.ts` |
 | Prepare a run environment | a project worktree hook |
 
 The runner stays small by keeping these concerns behind ports and registries. A new

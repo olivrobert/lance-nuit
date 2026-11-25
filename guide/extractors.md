@@ -15,11 +15,13 @@ export function extract(output: string): { hasErrors: boolean; errors: string } 
 
 ## Where extractors live
 
-The current registry discovers flat `.ts`/`.js` modules in the runner's
-`extractors/` directory. A module must export `extract`; test files and
-`registry.ts` are excluded. The project configuration does not currently add a
-project-local extractor directory, so a custom extractor must be distributed with
-the runner/kit and pass normal pipeline validation before it can be referenced.
+Extractors are modules of the runner's `src/definition/extractors/` directory,
+each exporting `extract`. A step can name one only once it is registered in the
+table of `extractors/registry.ts`: adding an extractor means writing its module
+and adding its name and `extract` function to that table. Pipeline validation
+checks names against the table, and execution reads the function from it. The
+project configuration does not add project-local extractors, so a custom
+extractor must be distributed with the runner.
 
 Five extractors ship with the runner:
 

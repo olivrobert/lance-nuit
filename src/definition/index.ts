@@ -10,6 +10,7 @@ export type {
   StepFailure,
 } from "./definition.js";
 export type { Artifact } from "./dsl/artifact.js";
+export { errorExtractor } from "./extractors/registry.js";
 export type { InputAction, InputDecision, InputPredicate, StepInputCondition } from "./dsl/input.js";
 export { fixProfileOptions } from "./dsl/profiles.js";
 export {

@@ -6,22 +6,17 @@
 
 import { readFile, unlink } from "node:fs/promises";
 import type { ErrorExtractor, ExtractionResult } from "../contracts/extraction.js";
+import { errorExtractor } from "../definition/index.js";
 import { errnoCode, isErrno } from "../shared/lib/errors.js";
 import { MAX_ERROR_CHARS, truncate } from "../shared/lib/truncate.js";
 import type { RunStepView } from "../run/index.js";
 import { log } from "../shared/runtime/logging.js";
 
-const extractors = new Map<string, ErrorExtractor>();
-
-/** Load an extractor module by name, once. Resolved dynamically: the extractors
- *  are the files of that folder, and the name was already validated against
- *  `listAvailableExtractors` when the definition loaded. */
-async function loadExtractor(name: string): Promise<ErrorExtractor> {
-  const cached = extractors.get(name);
-  if (cached) return cached;
-  const mod = (await import(`../definition/extractors/${name}.js`)) as { extract: ErrorExtractor };
-  extractors.set(name, mod.extract);
-  return mod.extract;
+/** The name was validated against the same table when the definition loaded. */
+function extractorNamed(name: string): ErrorExtractor {
+  const extractor = errorExtractor(name);
+  if (!extractor) throw new Error(`error_extractor "${name}" is not registered`);
+  return extractor;
 }
 
 /** Remove a previous report before rerunning so stale errors cannot be extracted or
@@ -69,7 +64,7 @@ async function extractorInput(
 
 export async function extractErrors(step: RunStepView, output: string): Promise<ExtractionResult> {
   if (step.def.error_extractor) {
-    const extractor = await loadExtractor(step.def.error_extractor);
+    const extractor = extractorNamed(step.def.error_extractor);
     const { input, reportPresent } = await extractorInput(step, output);
     const result = extractor(input);
     // A declared report that was never written outranks whatever the extractor made

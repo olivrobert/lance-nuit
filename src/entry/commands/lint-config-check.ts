@@ -7,7 +7,6 @@
 // dead setting that looks active. This lint closes that gap and runs outside a run,
 // typically from bin/check.
 
-import { join } from "node:path";
 import { RUNNER_ROOT_DIR } from "../../shared/env/kit-layout.js";
 import type { ComposeRegistries } from "../boot/extensions.js";
 import { backendSpecForStep, declaredBackendAxes, isAgentStep } from "../../contracts/backends.js";
@@ -58,9 +57,7 @@ export interface LintReport {
  * key that actually targets its pipeline.
  */
 function pipelineFiles(context: PipelineContext): string[] {
-  // `runnerDir`, not `runnerDir/pipelines`: this is the BASE to which the chain
-  // joins `pipelines/<name>.ts`, as `resolveBuiltinPipeline` does.
-  return listPipelineFiles(context.cwd, join(context.runnerDir, "definition"));
+  return listPipelineFiles(context.cwd);
 }
 
 /** Load all pipelines WITHOUT applying overrides: lint must see DSL defaults and

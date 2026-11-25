@@ -1,14 +1,14 @@
 //
 // Resolve a pipeline by name through the kit chain: project > user > runner
 // builtin. Used by boot (pipeline `default` when --pipeline is absent) AND by
-// multi-US dispatch (`commit` / `finalize` pipelines), hence env/ rather than either.
+// multi-US dispatch (`commit` / `finalize` pipelines).
 //
 // HARD CONSTRAINT: resolution is FLAT (`pipelines/<name>.ts`). The `pipelines/`
 // root is a reserved namespace; see docs §7.4.
 
-import { existsSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { RUNNER_ROOT_DIR } from "../../shared/env/kit-layout.js";
 import { log } from "../../shared/runtime/logging.js";
 import { kitFileLayers, kitRoots, listKitFiles, resolveKitFile, userKitDir } from "../../shared/env/kit-paths.js";
 
@@ -26,24 +26,31 @@ export function isPipelineName(value: string): boolean {
   return PIPELINE_NAME_RE.test(value);
 }
 
-/** Installed package base, next to the bin. */
-function builtinDir(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..");
-}
+const BUILTIN_DIR = join(RUNNER_ROOT_DIR, "definition", "builtins");
+
+/** The pipelines the runner ships, by name. Declared rather than read from
+ *  `builtins/`: a published install also holds the compiled `.js` and `.d.ts`
+ *  there, which are not pipelines. */
+const BUILTIN_PIPELINES: ReadonlyMap<string, string> = new Map([["default", "default.ts"]]);
 
 function projectPipelineRelativePath(name: string): string {
   return join("pipelines", `${name}.ts`);
 }
 
-function builtinPipelinePath(name: string, base = builtinDir()): string {
-  return join(base, "builtins", `${name}.ts`);
+function shippedBuiltinPath(name: string): string | null {
+  const file = BUILTIN_PIPELINES.get(name);
+  if (!file) return null;
+  const path = join(BUILTIN_DIR, file);
+  return existsSync(path) ? path : null;
 }
 
 /** Paths consulted for a name, in order. Used in error messages: a "pipeline not
  *  found" message that does not say WHERE it searched helps nobody. */
 export function pipelineSearchPaths(name: string, cwd = process.cwd()): string[] {
   const relativePath = projectPipelineRelativePath(name);
-  return [...kitRoots({ cwd }).map((root) => join(root.dir, relativePath)), builtinPipelinePath(name)];
+  const builtin = BUILTIN_PIPELINES.get(name);
+  const kitPaths = kitRoots({ cwd }).map((root) => join(root.dir, relativePath));
+  return builtin ? [...kitPaths, join(BUILTIN_DIR, builtin)] : kitPaths;
 }
 
 const shadowed = new Set<string>();
@@ -72,8 +79,7 @@ export function resolveBuiltinPipeline(name: string, cwd = process.cwd()): strin
     warnShadowing(relativePath, projectOrUser, cwd);
     return projectOrUser;
   }
-  const builtin = builtinPipelinePath(name);
-  return existsSync(builtin) ? builtin : null;
+  return shippedBuiltinPath(name);
 }
 
 /**
@@ -82,26 +88,15 @@ export function resolveBuiltinPipeline(name: string, cwd = process.cwd()): strin
  * Collective counterpart of `resolveBuiltinPipeline`: a tool judging "config against
  * pipelines" (see `entry/commands/lint-config-check.ts`) must see exactly what a run would see,
  * including project homonyms; otherwise it judges a set nobody executes.
- *
- * `builtinBase` is explicit only for callers not running from the bin (lint, tests):
- * there `process.argv[1]` points to the tool, not the runner.
  */
-export function listPipelineFiles(cwd = process.cwd(), builtinBase = builtinDir()): string[] {
+export function listPipelineFiles(cwd = process.cwd()): string[] {
   const names = listKitFiles("pipelines", ".ts", { cwd })
     .filter((file) => !file.includes(".test."))
     .map((file) => file.slice(0, -".ts".length))
     .filter(isPipelineName);
-  try {
-    for (const file of readdirSync(join(builtinBase, "builtins"))) {
-      if (file.endsWith(".ts") && !file.includes(".test.")) names.push(file.slice(0, -3));
-    }
-  } catch {}
   const resolved: string[] = [];
-  for (const name of [...new Set(names)].sort()) {
-    const relativePath = projectPipelineRelativePath(name);
-    const path =
-      resolveKitFile(relativePath, { cwd }) ??
-      (existsSync(builtinPipelinePath(name, builtinBase)) ? builtinPipelinePath(name, builtinBase) : null);
+  for (const name of [...new Set([...names, ...BUILTIN_PIPELINES.keys()])].sort()) {
+    const path = resolveKitFile(projectPipelineRelativePath(name), { cwd }) ?? shippedBuiltinPath(name);
     if (path) resolved.push(path);
   }
   return resolved;

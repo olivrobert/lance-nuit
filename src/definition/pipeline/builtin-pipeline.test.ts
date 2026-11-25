@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isPipelineName, pipelineSearchPaths, resolveBuiltinPipeline } from "./builtin-pipeline.ts";
+import { isPipelineName, listPipelineFiles, pipelineSearchPaths, resolveBuiltinPipeline } from "./builtin-pipeline.ts";
 
 const originalHome = process.env.PIPELINE_HOME;
 
@@ -66,11 +66,20 @@ test("pipelineSearchPaths: chain order, builtin last", () => {
   const home = dir("home");
   process.env.PIPELINE_HOME = home;
   const project = dir("project");
-  const paths = pipelineSearchPaths("deploy", project);
-  expect(paths).toEqual([
+  expect(pipelineSearchPaths("default", project)).toEqual([
+    join(project, ".lance-nuit", "pipelines", "default.ts"),
+    join(home, "pipelines", "default.ts"),
+    join(import.meta.dir, "..", "builtins", "default.ts"),
+  ]);
+});
+
+test("pipelineSearchPaths: a name the runner does not ship has no builtin path", () => {
+  const home = dir("home");
+  process.env.PIPELINE_HOME = home;
+  const project = dir("project");
+  expect(pipelineSearchPaths("deploy", project)).toEqual([
     join(project, ".lance-nuit", "pipelines", "deploy.ts"),
     join(home, "pipelines", "deploy.ts"),
-    join(import.meta.dir, "..", "builtins", "deploy.ts"),
   ]);
 });
 
@@ -78,4 +87,17 @@ test("the package does not treat old opinionated presets as builtins", () => {
   process.env.PIPELINE_HOME = dir("home");
   expect(resolveBuiltinPipeline("default", dir("project"))).toEndWith(join("builtins", "default.ts"));
   expect(resolveBuiltinPipeline("quality", dir("project"))).toBeNull();
+});
+
+test("a published install's compiled builtins are not offered as pipelines", () => {
+  process.env.PIPELINE_HOME = dir("home");
+  const builtins = join(import.meta.dir, "..", "builtins");
+  const compiled = [join(builtins, "default.d.ts"), join(builtins, "default.js")];
+  for (const file of compiled) expect(existsSync(file)).toBe(false);
+  try {
+    for (const file of compiled) writeFileSync(file, "export {};\n");
+    expect(listPipelineFiles(dir("project"))).toEqual([join(builtins, "default.ts")]);
+  } finally {
+    for (const file of compiled) rmSync(file, { force: true });
+  }
 });

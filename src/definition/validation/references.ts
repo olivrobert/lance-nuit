@@ -1,5 +1,5 @@
 import { CONFIG_FILE_LABEL } from "../../shared/env/kit-paths.js";
-import { listAvailableExtractors } from "../extractors/registry.js";
+import { errorExtractorNames } from "../extractors/registry.js";
 import { isStepProfileName } from "../../shared/language/profiles.js";
 import { checkOverrideKeyShapes, checkStepOverrides } from "./step-overrides.js";
 import { pipelineSteps } from "./structure.js";
@@ -10,15 +10,13 @@ import {
   type PipelineValidationRule,
 } from "./types.js";
 
-export { listAvailableExtractors };
-
 /** References to extractor modules and report/extractor coupling. */
 export class ExtractorReferenceValidator implements PipelineValidationRule {
   readonly id = "extractor-references";
 
   validate(context: PipelineValidationContext): readonly PipelineValidationFinding[] {
     const findings: PipelineValidationFinding[] = [];
-    const available = listAvailableExtractors();
+    const available = new Set(errorExtractorNames());
 
     for (const step of pipelineSteps(context)) {
       if (step.error_extractor && !available.has(step.error_extractor)) {

@@ -1,28 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { isExtractorModuleFile, listAvailableExtractors } from "./registry.js";
+import { errorExtractor, errorExtractorNames } from "./registry.js";
 import { extract as extractTestsJson } from "./tests-json.js";
 import { extract as extractTsc } from "./tsc.js";
 
-test("registry lists the shipped extractors and hides internals", () => {
-  const available = listAvailableExtractors();
-  expect(available.has("tsc")).toBe(true);
-  expect(available.has("tests-json")).toBe(true);
-  expect(available.has("phpstan")).toBe(true);
-  expect(available.has("phpunit")).toBe(true);
-  expect(available.has("infection")).toBe(true);
-  expect(available.has("registry")).toBe(false);
-  expect(available.has("extractors.test")).toBe(false);
-  expect(available.has("php.test")).toBe(false);
-  expect(available.has("lib")).toBe(false);
+test("the registry names the shipped extractors and resolves each to its module", () => {
+  expect(errorExtractorNames().sort()).toEqual(["infection", "phpstan", "phpunit", "tests-json", "tsc"]);
+  expect(errorExtractor("tsc")).toBe(extractTsc);
+  expect(errorExtractor("tests-json")).toBe(extractTestsJson);
 });
 
-test("dist declaration files are not offered as extractors", () => {
-  expect(isExtractorModuleFile("tsc.js")).toBe(true);
-  expect(isExtractorModuleFile("tsc.ts")).toBe(true);
-  expect(isExtractorModuleFile("tsc.d.ts")).toBe(false);
-  expect(isExtractorModuleFile("registry.d.ts")).toBe(false);
-  expect(isExtractorModuleFile("extractors.test.ts")).toBe(false);
-  expect(isExtractorModuleFile("tsc.js.map")).toBe(false);
+test("a name outside the table resolves to nothing, prototype keys included", () => {
+  expect(errorExtractor("registry")).toBeUndefined();
+  expect(errorExtractor("constructor")).toBeUndefined();
 });
 
 describe("tsc extractor", () => {
