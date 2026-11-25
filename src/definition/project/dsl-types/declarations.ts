@@ -2,7 +2,16 @@
 // Generation and specialization of the declaration files installed in a kit.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import type * as TypeScript from "typescript";
@@ -98,12 +107,70 @@ export function withDslDeclarations<T>(use: (declarationsDir: string) => T): T {
   }
 }
 
+interface SourceStamp {
+  readonly path: string;
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+interface DeclarationsCache {
+  readonly files: ReadonlyMap<string, Buffer>;
+  readonly sources: readonly SourceStamp[];
+}
+
+/** Memo cache of the last successful checkout emission, invalidated on any source stat change. */
+let emittedDeclarationsCache: DeclarationsCache | undefined;
+
+function isDeclarationsCacheFresh(cache: DeclarationsCache): boolean {
+  for (const stamp of cache.sources) {
+    try {
+      const stat = statSync(stamp.path);
+      if (stat.mtimeMs !== stamp.mtimeMs || stat.size !== stamp.size) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function collectEmittedFiles(rootDir: string, dir = rootDir, out = new Map<string, Buffer>()): Map<string, Buffer> {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) collectEmittedFiles(rootDir, full, out);
+    else if (entry.isFile()) out.set(relative(rootDir, full), readFileSync(full));
+  }
+  return out;
+}
+
+function writeCachedFiles(files: ReadonlyMap<string, Buffer>, outDir: string): void {
+  for (const [relPath, content] of files) {
+    const destination = join(outDir, relPath);
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, content);
+  }
+}
+
 function emitDslDeclarations(outDir: string): void {
+  if (emittedDeclarationsCache && isDeclarationsCacheFresh(emittedDeclarationsCache)) {
+    writeCachedFiles(emittedDeclarationsCache.files, outDir);
+    return;
+  }
   const ts = loadTypeScript();
   const program = ts.createProgram([join(RUNNER_ROOT_DIR, DSL_SOURCE_ENTRY)], compilerOptions(outDir));
   throwOnDiagnostics("Unable to generate DSL declarations", ts.getPreEmitDiagnostics(program), RUNNER_ROOT_DIR);
   const emitted = program.emit();
   throwOnDiagnostics("Unable to emit DSL declarations", emitted.diagnostics, RUNNER_ROOT_DIR);
+  const sources: SourceStamp[] = [];
+  for (const sourceFile of program.getSourceFiles()) {
+    if (sourceFile.fileName.includes("/node_modules/") || sourceFile.fileName.includes("\\node_modules\\")) continue;
+    try {
+      const stat = statSync(sourceFile.fileName);
+      if (stat.isFile()) sources.push({ path: sourceFile.fileName, mtimeMs: stat.mtimeMs, size: stat.size });
+    } catch {
+      // Skip non-filesystem virtual entries if any.
+    }
+  }
+  emittedDeclarationsCache = { files: collectEmittedFiles(outDir), sources };
 }
 
 /**

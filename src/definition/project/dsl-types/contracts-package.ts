@@ -129,6 +129,19 @@ function diagnosticSummary(diagnostics: readonly TypeScript.Diagnostic[]): strin
     .join("\n");
 }
 
+/** Memo cache of compiled checkout contracts keyed by their content hash. */
+const compiledContractsCache = new Map<string, ReadonlyMap<string, Buffer>>();
+const MAX_CONTRACTS_CACHE_ENTRIES = 16;
+
+function collectCompiledFiles(rootDir: string, dir = rootDir, out = new Map<string, Buffer>()): Map<string, Buffer> {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) collectCompiledFiles(rootDir, full, out);
+    else if (entry.isFile()) out.set(relative(rootDir, full), readFileSync(full));
+  }
+  return out;
+}
+
 /**
  * Materialize `contracts/` (JS and declarations) under `outDir`.
  *
@@ -137,7 +150,7 @@ function diagnosticSummary(diagnostics: readonly TypeScript.Diagnostic[]): strin
  * contracts directory turns any import escaping it into an emit error. A
  * published install copies the files tsc emitted at build time.
  */
-function emitContracts(outDir: string, runnerDir: string): void {
+function emitContracts(outDir: string, runnerDir: string, sourceHash: string): void {
   const sourceDir = join(runnerDir, CONTRACTS_SUBDIR);
   const files = contractsSourceFiles(runnerDir);
   mkdirSync(outDir, { recursive: true });
@@ -146,6 +159,15 @@ function emitContracts(outDir: string, runnerDir: string): void {
       const destination = join(outDir, file);
       mkdirSync(dirname(destination), { recursive: true });
       writeFileSync(destination, readFileSync(join(sourceDir, file)));
+    }
+    return;
+  }
+  const cached = compiledContractsCache.get(sourceHash);
+  if (cached) {
+    for (const [relPath, content] of cached) {
+      const destination = join(outDir, relPath);
+      mkdirSync(dirname(destination), { recursive: true });
+      writeFileSync(destination, content);
     }
     return;
   }
@@ -160,6 +182,11 @@ function emitContracts(outDir: string, runnerDir: string): void {
   if (emitted.diagnostics.length > 0) {
     throw new Error(`Unable to emit contracts:\n${diagnosticSummary(emitted.diagnostics)}`);
   }
+  if (compiledContractsCache.size >= MAX_CONTRACTS_CACHE_ENTRIES) {
+    const oldest = compiledContractsCache.keys().next().value;
+    if (oldest !== undefined) compiledContractsCache.delete(oldest);
+  }
+  compiledContractsCache.set(sourceHash, collectCompiledFiles(outDir));
 }
 
 function runnerVersion(runnerDir: string): string {
@@ -257,7 +284,7 @@ export function installKitContracts(kitDir: string, runnerDir = RUNNER_ROOT_DIR)
   const sourceHash = contractsSourceHash(runnerDir);
   const staging = mkdtempSync(join(nodeModules, STAGING_PREFIX));
   try {
-    emitContracts(join(staging, CONTRACTS_SUBDIR), runnerDir);
+    emitContracts(join(staging, CONTRACTS_SUBDIR), runnerDir, sourceHash);
     if (!existsSync(join(staging, CONTRACTS_SUBDIR, "index.js"))) {
       throw new Error("Incomplete contracts generation: contracts/index.js is missing");
     }

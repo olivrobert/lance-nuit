@@ -6,8 +6,8 @@
 // of the parent journal, as if it had been started from the operator's shell.
 
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { withoutRunnerState } from "../../src/shared/env/runner-env.js";
@@ -21,13 +21,31 @@ function outerEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { ...withoutRunnerState(process.env), ...extra };
 }
 
-function runOuter(cwd: string, args: string[], extra: Record<string, string> = {}) {
-  const result = spawnSync(process.execPath, [runnerEntry, ...args], {
-    cwd,
-    encoding: "utf8",
-    env: outerEnv(extra),
+function runOuter(
+  cwd: string,
+  args: string[],
+  extra: Record<string, string> = {},
+): Promise<{ status: number | null; stdout: string; stderr: string; out: string }> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(process.execPath, [runnerEntry, ...args], {
+      cwd,
+      env: outerEnv(extra),
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", rejectPromise);
+    child.on("close", (status) => {
+      resolvePromise({ status, stdout, stderr, out: `${stdout}${stderr}` });
+    });
   });
-  return { ...result, out: `${result.stdout}${result.stderr}` };
 }
 
 /** `default` runs `command` as its only step; `inner` is what a nested runner
@@ -81,26 +99,33 @@ function worktreePath(worktrees: string, repo: string, ticket: string): string {
 const nestedRunner = (...args: string[]) =>
   [process.execPath, runnerEntry, ...args].map((part) => `'${part}'`).join(" ");
 
-test("a runner started by a step takes the project lock", () => {
+test.concurrent("a runner started by a step takes the project lock", async () => {
   const cwd = projectWith((dir) => `cd '${dir}' && ${nestedRunner("L-2", "--pipeline", "inner")}`);
+  try {
+    const result = await runOuter(cwd, ["L-1"]);
 
-  const result = runOuter(cwd, ["L-1"]);
-
-  expect(result.out).toContain("A runner is already active for this project");
-  expect(result.status).toBe(1);
+    expect(result.out).toContain("A runner is already active for this project");
+    expect(result.status).toBe(1);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 }, 60_000);
 
-test("a --worktree runner started by a step applies the worktree guards", () => {
+test.concurrent("a --worktree runner started by a step applies the worktree guards", async () => {
   const { repo, worktrees } = repoWith(nestedRunner("T2", "--worktree", "--pipeline", "inner"));
+  try {
+    const result = await runOuter(repo, ["T1", "--worktree"], { WORKTREES_ROOT: worktrees });
 
-  const result = runOuter(repo, ["T1", "--worktree"], { WORKTREES_ROOT: worktrees });
-
-  expect(result.out).toContain("--worktree from a worktree is not allowed");
-  expect(result.status).toBe(1);
-  expect(existsSync(worktreePath(worktrees, repo, "T2"))).toBe(false);
+    expect(result.out).toContain("--worktree from a worktree is not allowed");
+    expect(result.status).toBe(1);
+    expect(existsSync(worktreePath(worktrees, repo, "T2"))).toBe(false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(worktrees, { recursive: true, force: true });
+  }
 }, 60_000);
 
-test("a process started by a step does not write to the parent feed", () => {
+test.concurrent("a process started by a step does not write to the parent feed", async () => {
   // The marker goes only through liveFeedFilePath(), never to stdout, so the
   // step's own output capture cannot copy it into the journal.
   const foreign = [
@@ -109,16 +134,19 @@ test("a process started by a step does not write to the parent feed", () => {
     `appendFileSync(liveFeedFilePath(), JSON.stringify({ type: "foreign-marker" }) + "\\n");`,
   ].join("\n");
   const cwd = projectWith(() => `'${process.execPath}' -e '${foreign}' && echo visible-line`);
+  try {
+    const result = await runOuter(cwd, ["J-1"]);
+    expect(result.status).toBe(0);
 
-  const result = runOuter(cwd, ["J-1"]);
-  expect(result.status).toBe(0);
-
-  const journals = readdirSync(join(cwd, ".lance-nuit"), { recursive: true, encoding: "utf8" }).filter(
-    (entry) => entry.endsWith("feed.jsonl") && !entry.includes("latest"),
-  );
-  expect(journals).toHaveLength(1);
-  const journal = readFileSync(join(cwd, ".lance-nuit", journals[0]!), "utf8");
-  expect(journal).toContain('"type":"bash-output"');
-  expect(journal).toContain("visible-line");
-  expect(journal).not.toContain("foreign-marker");
+    const journals = readdirSync(join(cwd, ".lance-nuit"), { recursive: true, encoding: "utf8" }).filter(
+      (entry) => entry.endsWith("feed.jsonl") && !entry.includes("latest"),
+    );
+    expect(journals).toHaveLength(1);
+    const journal = readFileSync(join(cwd, ".lance-nuit", journals[0]!), "utf8");
+    expect(journal).toContain('"type":"bash-output"');
+    expect(journal).toContain("visible-line");
+    expect(journal).not.toContain("foreign-marker");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 }, 60_000);

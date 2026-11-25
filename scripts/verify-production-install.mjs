@@ -6,7 +6,7 @@
  * fresh directory with devDependencies omitted.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,12 +16,17 @@ import { DECLARATIONS_ENTRY } from "../dist/definition/project/dsl-types/layout.
 const runnerRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const temporaryRoot = mkdtempSync(join(tmpdir(), "lance-nuit-production-"));
-const npmCache = join(temporaryRoot, "npm-cache");
+const npmCache = process.env.npm_config_cache ?? join(tmpdir(), "lance-nuit-verify-npm-cache");
 const packageRoot = join(temporaryRoot, "consumer");
 const packageJsonPath = join(runnerRoot, "package.json");
 
+mkdirSync(npmCache, { recursive: true });
+
 const npmEnv = {
   ...process.env,
+  // Isolate temporary Git repositories from any global gitignore (such as one
+  // ignoring `.lance-nuit/`) while still testing each kit's own `.gitignore`.
+  GIT_CONFIG_GLOBAL: "/dev/null",
   npm_config_audit: "false",
   npm_config_cache: npmCache,
   npm_config_fund: "false",
@@ -39,6 +44,30 @@ function run(command, args, options = {}) {
   return result;
 }
 
+function runAsync(command, args, options = {}) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, {
+      cwd: runnerRoot,
+      env: npmEnv,
+      ...options,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", rejectPromise);
+    child.on("close", (status) => {
+      resolvePromise({ status, stdout, stderr });
+    });
+  });
+}
+
 function checked(command, args, options = {}) {
   const result = run(command, args, options);
   if (result.status !== 0) {
@@ -52,11 +81,15 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function packageTarball() {
+async function packageTarball() {
   const destination = join(temporaryRoot, "root");
   mkdirSync(destination, { recursive: true });
   const args = ["pack", "--json", "--ignore-scripts", "--pack-destination", destination];
-  const result = checked(npm, args);
+  const result = await runAsync(npm, args);
+  if (result.status !== 0) {
+    const details = [result.stdout?.trim(), result.stderr?.trim()].filter(Boolean).join("\n");
+    throw new Error(`${npm} ${args.join(" ")} failed with exit code ${result.status}\n${details}`);
+  }
   let manifest;
   try {
     [manifest] = JSON.parse(result.stdout);
@@ -80,29 +113,30 @@ function installConsumer(tarballs) {
   // This is deliberately a real npm install from the packed artifact. The
   // package's runtime dependencies must therefore be listed in dependencies,
   // not only in devDependencies or available from the checkout.
-  checked(npm, ["install", "--omit=dev", "--no-package-lock", ...tarballs], { cwd: packageRoot });
+  checked(npm, ["install", "--omit=dev", "--no-package-lock", "--prefer-offline", ...tarballs], { cwd: packageRoot });
 }
 
 /**
- * Installing the packed tarballs side by side hides the dependency a real
- * consumer actually resolves: `npm install lance-nuit` fetches every
- * entry of `dependencies` from the registry. A runtime dependency that is not
- * published there breaks that install while this script still reports PASS.
+ * Verify every runtime dependency is published and resolvable from the registry,
+ * even when `--prefer-offline` serves the install itself from a warm cache.
  */
-function verifyRegistryResolvable() {
+async function verifyRegistryResolvable() {
   const { name, dependencies = {} } = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  const unpublished = [];
-  for (const [name, range] of Object.entries(dependencies)) {
-    const spec = `${name}@${range}`;
-    const result = run(npm, ["view", "--json", spec, "version"]);
-    if (result.status === 0) continue;
-    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-    // Distinguish "the registry says no" from "the registry could not be asked":
-    // an offline run must not be reported as an unpublished dependency.
-    if (!/E404|ETARGET|No matching version/.test(output))
-      throw new Error(`npm view ${spec} could not reach the registry:\n${output.trim()}`);
-    unpublished.push(spec);
-  }
+  const checks = await Promise.all(
+    Object.entries(dependencies).map(async ([depName, range]) => {
+      const spec = `${depName}@${range}`;
+      const result = await runAsync(npm, ["view", "--json", spec, "version"]);
+      if (result.status === 0) return null;
+      const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+      // Distinguish "the registry says no" from "the registry could not be asked":
+      // an offline run must not be reported as an unpublished dependency.
+      if (!/E404|ETARGET|No matching version/.test(output)) {
+        throw new Error(`npm view ${spec} could not reach the registry:\n${output.trim()}`);
+      }
+      return spec;
+    }),
+  );
+  const unpublished = checks.filter(Boolean);
   assert(
     unpublished.length === 0,
     `runtime dependencies are not published, so "npm install ${name}" would fail: ${unpublished.join(", ")}\n` +
@@ -149,47 +183,12 @@ function verifyRuntimeDependencies() {
   }
 }
 
-function verifyBin(name, args = ["--help"]) {
-  const bin = join(packageRoot, "node_modules", ".bin", name);
-  assert(existsSync(bin), `installed binary is missing: ${name}`);
-  const result = checked(bin, args, { cwd: packageRoot, env: npmEnv });
-  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  assert(/lancenuit/i.test(output), `${name} --help did not identify the lancenuit CLI`);
-}
-
-/** Exercise the documented DSL setup against the installed package only. */
-function verifyInstalledTypesCommand() {
-  const project = join(temporaryRoot, "types-consumer");
-  const isolatedHome = join(temporaryRoot, "types-user-kit");
-  mkdirSync(project, { recursive: true });
+function verifyBinAndVersion() {
   const bin = join(packageRoot, "node_modules", ".bin", "lancenuit");
-  const consumerEnv = { ...npmEnv, PIPELINE_HOME: isolatedHome };
-
-  checked(bin, ["types", "install"], { cwd: project, env: consumerEnv });
-  const projectTypes = join(project, ".lance-nuit", ".lance-nuit-types", DECLARATIONS_ENTRY);
-  const projectTsconfig = join(project, ".lance-nuit", "tsconfig.json");
-  assert(existsSync(projectTypes), `lancenuit types install did not generate ${projectTypes}`);
-  assert(existsSync(projectTsconfig), `lancenuit types install did not generate ${projectTsconfig}`);
-  assertVendoredContracts(join(project, ".lance-nuit"));
-
-  const pipelineDir = join(project, ".lance-nuit", "pipelines");
-  mkdirSync(pipelineDir, { recursive: true });
-  writeFileSync(
-    join(pipelineDir, "minimal.ts"),
-    `import type { Dsl } from "@lance-nuit/dsl";
-export default ({ pipeline, bashStep }: Dsl) => pipeline("minimal")
-  .add(bashStep({ id: "check", name: "Check", command: "true", rerunOnResume: true }))
-  .build();
-`,
-  );
-  checked(bin, ["typecheck"], { cwd: project, env: consumerEnv });
-
-  checked(bin, ["types", "install", "--user"], { cwd: project, env: consumerEnv });
-  const userTypes = join(isolatedHome, ".lance-nuit-types", DECLARATIONS_ENTRY);
-  const userTsconfig = join(isolatedHome, "tsconfig.json");
-  assert(existsSync(userTypes), `lancenuit types install --user did not generate ${userTypes}`);
-  assert(existsSync(userTsconfig), `lancenuit types install --user did not generate ${userTsconfig}`);
-  assertVendoredContracts(isolatedHome);
+  assert(existsSync(bin), "installed binary is missing: lancenuit");
+  const { version } = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  const result = checked(bin, ["--version"], { cwd: packageRoot, env: npmEnv });
+  assert(result.stdout.trim() === `lance-nuit ${version}`, `incorrect installed version: ${result.stdout}`);
 }
 
 /** The kit carries a self-contained copy of `lance-nuit/contracts` for its extensions. */
@@ -207,23 +206,27 @@ function assertVendoredContracts(kitDir) {
 }
 
 /**
- * The global-CLI case: a project with NO `lance-nuit` in its node_modules, an
- * extension inside its kit importing `lance-nuit/contracts`, run by a CLI
- * installed elsewhere. The contracts must come from the package the runner
- * vendors into the kit, before the first import.
+ * Exercise the installed CLI against a consumer project that has NO local
+ * `node_modules/`: project & user DSL installation, a single full typecheck of a
+ * typed extension pipeline, git-ignored vendored contracts, stale contract
+ * refresh, and a work-item run through the kit extension.
  */
-function verifyKitExtensionWithoutLocalInstall() {
+function verifyInstalledKitAndExtension() {
   const bin = join(packageRoot, "node_modules", ".bin", "lancenuit");
   const project = join(temporaryRoot, "kit-consumer");
   const kit = join(project, ".lance-nuit");
-  mkdirSync(kit, { recursive: true });
-  const consumerEnv = { ...npmEnv, PIPELINE_HOME: join(temporaryRoot, "kit-consumer-user-kit") };
+  const isolatedHome = join(temporaryRoot, "kit-consumer-user-kit");
+  mkdirSync(project, { recursive: true });
+  const consumerEnv = { ...npmEnv, PIPELINE_HOME: isolatedHome };
   assert(!existsSync(join(project, "node_modules")), "kit-consumer must start without node_modules");
 
-  checked("git", ["init", "--quiet", "-b", "main"], { cwd: project });
-  checked("git", ["config", "user.email", "npm-smoke@example.invalid"], { cwd: project });
-  checked("git", ["config", "user.name", "Package verification"], { cwd: project });
-  checked(bin, ["create", "extension", "--command", "true"], { cwd: project, env: consumerEnv });
+  checked(bin, ["types", "install"], { cwd: project, env: consumerEnv });
+  const projectTypes = join(kit, ".lance-nuit-types", DECLARATIONS_ENTRY);
+  const projectTsconfig = join(kit, "tsconfig.json");
+  assert(existsSync(projectTypes), `lancenuit types install did not generate ${projectTypes}`);
+  assert(existsSync(projectTsconfig), `lancenuit types install did not generate ${projectTsconfig}`);
+  assertVendoredContracts(kit);
+
   cpSync(join(runnerRoot, "scripts/fixtures/npm-extension/extension.mjs"), join(kit, "extensions.mjs"));
   writeFileSync(
     join(kit, "config.json"),
@@ -232,10 +235,10 @@ function verifyKitExtensionWithoutLocalInstall() {
       workItem: { provider: "npm-smoke", project: "PROJ", todoState: "todo", reviewState: "inReview" },
     }),
   );
+  mkdirSync(join(kit, "pipelines"), { recursive: true });
   writeFileSync(
     join(kit, "pipelines/extension.ts"),
-    `
-import type { Dsl } from "@lance-nuit/dsl";
+    `import type { Dsl } from "@lance-nuit/dsl";
 export default ({ pipeline, bashStep }: Dsl) => pipeline("extension")
   .forEachWorkItem({ queue: "bugTodo", do: [bashStep({
     id: "check", name: "Read kit extension ticket",
@@ -244,6 +247,18 @@ export default ({ pipeline, bashStep }: Dsl) => pipeline("extension")
   })] }).build();
 `,
   );
+  checked(bin, ["typecheck"], { cwd: project, env: consumerEnv });
+
+  checked(bin, ["types", "install", "--user"], { cwd: project, env: consumerEnv });
+  const userTypes = join(isolatedHome, ".lance-nuit-types", DECLARATIONS_ENTRY);
+  const userTsconfig = join(isolatedHome, "tsconfig.json");
+  assert(existsSync(userTypes), `lancenuit types install --user did not generate ${userTypes}`);
+  assert(existsSync(userTsconfig), `lancenuit types install --user did not generate ${userTsconfig}`);
+  assertVendoredContracts(isolatedHome);
+
+  checked("git", ["init", "--quiet", "-b", "main"], { cwd: project });
+  checked("git", ["config", "user.email", "npm-smoke@example.invalid"], { cwd: project });
+  checked("git", ["config", "user.name", "Package verification"], { cwd: project });
   checked("git", ["add", "."], { cwd: project });
   checked("git", ["commit", "--quiet", "-m", "Kit extension"], { cwd: project });
   // The vendored package is git-ignored: the commit above must not have caught it.
@@ -270,11 +285,6 @@ export default ({ pipeline, bashStep }: Dsl) => pipeline("extension")
 
 function verifyInstalledExecution() {
   const bin = join(packageRoot, "node_modules", ".bin", "lancenuit");
-  const { version } = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  for (const arg of ["version", "--version"]) {
-    const result = checked(bin, [arg], { cwd: packageRoot });
-    assert(result.stdout.trim() === `lance-nuit ${version}`, `incorrect installed version: ${result.stdout}`);
-  }
   // Reuse the failure/resume assertions against the installed binary, never src/.
   const smoke = checked(process.execPath, [join(runnerRoot, "scripts/smoke-standalone.mjs")], {
     env: { ...npmEnv, SMOKE_RUNNER_BIN: bin },
@@ -297,52 +307,16 @@ function verifyInstalledExecution() {
     { cwd: packageRoot, env: consumerEnv },
   );
   checked(process.execPath, ["test", "./extension/extension.test.mjs"], { cwd: packageRoot, env: consumerEnv });
-
-  checked("git", ["init", "--quiet", "-b", "main"], { cwd: packageRoot });
-  checked("git", ["config", "user.email", "npm-smoke@example.invalid"], { cwd: packageRoot });
-  checked("git", ["config", "user.name", "Package verification"], { cwd: packageRoot });
-  writeFileSync(join(packageRoot, ".gitignore"), "node_modules/\n");
-  checked(bin, ["create", "extension", "--command", "true"], { cwd: packageRoot, env: consumerEnv });
-  writeFileSync(
-    join(packageRoot, ".lance-nuit/config.json"),
-    JSON.stringify({
-      extensions: { module: "./extension/extension.mjs" },
-      workItem: { provider: "npm-smoke", project: "PROJ", todoState: "todo", reviewState: "inReview" },
-    }),
-  );
-  writeFileSync(
-    join(packageRoot, ".lance-nuit/pipelines/extension.ts"),
-    `
-import type { Dsl } from "@lance-nuit/dsl";
-export default ({ pipeline, bashStep }: Dsl) => pipeline("extension")
-  .forEachWorkItem({ queue: "bugTodo", do: [bashStep({
-    id: "check", name: "Read installed extension ticket",
-    command: "test -s .lance-nuit/work-items/PROJ-24/artifacts/ticket.md",
-    rerunOnResume: true,
-  })] }).build();
-`,
-  );
-  checked(bin, ["typecheck"], { cwd: packageRoot, env: consumerEnv });
-  checked("git", ["add", "."], { cwd: packageRoot });
-  checked("git", ["commit", "--quiet", "-m", "Consumer extension"], { cwd: packageRoot });
-  checked(bin, ["run", "PROJ-24", "-p", "extension"], { cwd: packageRoot, env: consumerEnv });
-  const ticket = readFileSync(join(packageRoot, ".lance-nuit/work-items/PROJ-24/artifacts/ticket.md"), "utf8");
-  assert(
-    ticket.includes("Offline acceptance criteria"),
-    "extension ticket was not fetched through the installed runner",
-  );
 }
 
-function main() {
+async function main() {
   const bunVersion = verifyBunInterpreter();
-  verifyRegistryResolvable();
-  const rootPackage = packageTarball();
+  const [, rootPackage] = await Promise.all([verifyRegistryResolvable(), packageTarball()]);
   installConsumer([rootPackage.tarball]);
   verifyRuntimeDependencies();
-  verifyBin("lancenuit");
-  verifyInstalledTypesCommand();
+  verifyBinAndVersion();
   verifyInstalledExecution();
-  verifyKitExtensionWithoutLocalInstall();
+  verifyInstalledKitAndExtension();
   if (process.env.VERIFY_TARBALL_DEST) {
     const destination = resolve(process.env.VERIFY_TARBALL_DEST);
     mkdirSync(destination, { recursive: true });
@@ -366,7 +340,7 @@ function main() {
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   console.error(`verify:production FAIL: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;

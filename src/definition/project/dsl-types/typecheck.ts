@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import type * as TypeScript from "typescript";
 import { loadPipelineConfig } from "../../../shared/env/config.js";
 import { userKitDir } from "../../../shared/env/kit-paths.js";
 import { errorMessage } from "../../../shared/lib/errors.js";
@@ -46,6 +47,34 @@ export interface ProjectTypecheckResult {
   readonly output: string;
 }
 
+/** Memo cache of immutable TypeScript stdlib `lib.*.d.ts` SourceFiles across typecheck calls. */
+const stdlibSourceFileCache = new Map<string, TypeScript.SourceFile>();
+
+function isTypeScriptLibFile(fileName: string): boolean {
+  return /[\\/]typescript[\\/]lib[\\/]lib\.[^\\/]+\.d\.ts$/.test(fileName);
+}
+
+function createCachedCompilerHost(ts: typeof TypeScript, options: TypeScript.CompilerOptions): TypeScript.CompilerHost {
+  const host = ts.createCompilerHost(options);
+  const originalGetSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile) => {
+    if (!shouldCreateNewSourceFile && isTypeScriptLibFile(fileName)) {
+      const version =
+        typeof languageVersionOrOptions === "number"
+          ? languageVersionOrOptions
+          : languageVersionOrOptions.languageVersion;
+      const key = `${fileName}\0${version}`;
+      const cached = stdlibSourceFileCache.get(key);
+      if (cached) return cached;
+      const created = originalGetSourceFile(fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile);
+      if (created) stdlibSourceFileCache.set(key, created);
+      return created;
+    }
+    return originalGetSourceFile(fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile);
+  };
+  return host;
+}
+
 /** Typecheck pipelines in ONE kit directory using its generated tsconfig. */
 export function typecheckKitPipelines(
   kitDir: string,
@@ -72,7 +101,8 @@ export function typecheckKitPipelines(
   if (parsed.errors.length > 0) {
     return { ok: false, output: parsed.errors.map((d) => diagnosticText(d, displayRoot)).join("\n") };
   }
-  const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options });
+  const host = createCachedCompilerHost(ts, parsed.options);
+  const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, host });
   const diagnostics = ts.getPreEmitDiagnostics(program);
   if (diagnostics.length === 0) {
     const count = parsed.fileNames.filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts")).length;

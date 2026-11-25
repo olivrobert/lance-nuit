@@ -6,28 +6,44 @@
 // reject a project whose run passes. Everything runs the real CLI in a child
 // process against a real project; the backend is never invoked.
 
-import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { expect, setDefaultTimeout, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const runnerEntry = resolve(import.meta.dir, "../../src/runner.ts");
 setDefaultTimeout(60_000);
-const scratchRoots: string[] = [];
 
-afterEach(() => {
-  for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
-function runRunner(cwd: string, ...args: string[]) {
-  const result = spawnSync(process.execPath, [runnerEntry, ...args], {
-    cwd,
-    encoding: "utf8",
-    timeout: 50_000,
-    env: { ...process.env, PIPELINE_HOME: join(cwd, "shared-kit") },
+function runRunner(
+  cwd: string,
+  ...args: string[]
+): Promise<{ status: number | null; stdout: string; stderr: string; out: string }> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(process.execPath, [runnerEntry, ...args], {
+      cwd,
+      env: { ...process.env, PIPELINE_HOME: join(cwd, "shared-kit") },
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => child.kill("SIGKILL"), 50_000);
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      rejectPromise(err);
+    });
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      resolvePromise({ status, stdout, stderr, out: `${stdout}${stderr}` });
+    });
   });
-  return { ...result, out: `${result.stdout}${result.stderr}` };
 }
 
 /** Imports `lance-nuit/contracts` like a real kit extension, so the lint path
@@ -57,7 +73,6 @@ const DEMO = `export default ({ pipeline, llmStep }: any) => pipeline("demo")
 
 function scratchProject(): string {
   const cwd = mkdtempSync(join(tmpdir(), "extensions-outside-run-"));
-  scratchRoots.push(cwd);
   mkdirSync(join(cwd, ".lance-nuit", "pipelines"), { recursive: true });
   writeFileSync(join(cwd, ".lance-nuit", "extensions.mjs"), EXTENSIONS);
   writeFileSync(
@@ -75,39 +90,51 @@ function scratchProject(): string {
   return cwd;
 }
 
-test("--lint-pipeline accepts a backend declared by the extension manifest", () => {
+test.concurrent("--lint-pipeline accepts a backend declared by the extension manifest", async () => {
   const cwd = scratchProject();
+  try {
+    const lint = await runRunner(cwd, "--lint-pipeline", "-p", "demo");
 
-  const lint = runRunner(cwd, "--lint-pipeline", "-p", "demo");
-
-  expect(lint.out).not.toContain('unknown agent backend "custom"');
-  expect(lint.out).toContain("✓ definition and references are valid");
-  expect(lint.status).toBe(0);
+    expect(lint.out).not.toContain('unknown agent backend "custom"');
+    expect(lint.out).toContain("✓ definition and references are valid");
+    expect(lint.status).toBe(0);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
-test("a manifest that cannot load fails the lint, and leaves the commands that only read runs working", () => {
+test.concurrent("a manifest that cannot load fails the lint, and leaves the commands that only read runs working", async () => {
   const cwd = scratchProject();
-  writeFileSync(join(cwd, ".lance-nuit", "extensions.mjs"), `throw new Error("broken manifest");\n`);
+  try {
+    writeFileSync(join(cwd, ".lance-nuit", "extensions.mjs"), `throw new Error("broken manifest");\n`);
 
-  const lint = runRunner(cwd, "--lint-config");
-  expect(lint.out).toContain("Unable to load the project configuration");
-  expect(lint.out).toContain("broken manifest");
-  expect(lint.status).toBe(1);
+    const [lint, inspect] = await Promise.all([
+      runRunner(cwd, "--lint-config"),
+      // Inspecting the run such a manifest broke must not depend on it.
+      runRunner(cwd, "--inspect", "T-1"),
+    ]);
+    expect(lint.out).toContain("Unable to load the project configuration");
+    expect(lint.out).toContain("broken manifest");
+    expect(lint.status).toBe(1);
 
-  // Inspecting the run such a manifest broke must not depend on it.
-  const inspect = runRunner(cwd, "--inspect", "T-1");
-  expect(inspect.out).not.toContain("broken manifest");
-  expect(inspect.status).toBe(0);
+    expect(inspect.out).not.toContain("broken manifest");
+    expect(inspect.status).toBe(0);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
-test("--lint-config accepts a profile naming a backend declared by the extension manifest", () => {
+test.concurrent("--lint-config accepts a profile naming a backend declared by the extension manifest", async () => {
   const cwd = scratchProject();
+  try {
+    const lint = await runRunner(cwd, "--lint-config");
 
-  const lint = runRunner(cwd, "--lint-config");
-
-  expect(lint.out).not.toContain('unknown backend "custom"');
-  expect(lint.out).not.toContain("cannot be loaded outside a run");
-  expect(lint.out).toMatch(/code\s.*@coder/);
-  expect(lint.out).toContain("✓ Profile/step configuration is consistent with pipelines");
-  expect(lint.status).toBe(0);
+    expect(lint.out).not.toContain('unknown backend "custom"');
+    expect(lint.out).not.toContain("cannot be loaded outside a run");
+    expect(lint.out).toMatch(/code\s.*@coder/);
+    expect(lint.out).toContain("✓ Profile/step configuration is consistent with pipelines");
+    expect(lint.status).toBe(0);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

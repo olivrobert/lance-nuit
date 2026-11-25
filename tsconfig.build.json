@@ -11,7 +11,7 @@
     "paths": {},
     "outDir": "./dist",
     "rootDir": "./src",
-    "sourceMap": true
+    "sourceMap": false
   },
   "include": ["src/**/*.ts"],
   // This project replaces the root `exclude` rather than extending it, so the

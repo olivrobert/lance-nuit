@@ -6,7 +6,7 @@
 
 import { expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -38,13 +38,32 @@ function envFor(worktrees: string, extra: Record<string, string> = {}): NodeJS.P
   return { ...env, WORKTREES_ROOT: worktrees, ...extra };
 }
 
-function runEntry(repo: string, worktrees: string, args: string[], extra: Record<string, string> = {}) {
-  const result = spawnSync(process.execPath, [runnerEntry, ...args], {
-    cwd: repo,
-    encoding: "utf8",
-    env: envFor(worktrees, extra),
+function runEntry(
+  repo: string,
+  worktrees: string,
+  args: string[],
+  extra: Record<string, string> = {},
+): Promise<{ status: number | null; stdout: string; stderr: string; out: string }> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(process.execPath, [runnerEntry, ...args], {
+      cwd: repo,
+      env: envFor(worktrees, extra),
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", rejectPromise);
+    child.on("close", (status) => {
+      resolvePromise({ status, stdout, stderr, out: `${stdout}${stderr}` });
+    });
   });
-  return { ...result, out: `${result.stdout}${result.stderr}` };
 }
 
 function stopCalls(repo: string): string[] {
@@ -88,63 +107,84 @@ const GATED = `export default ({ pipeline, bashStep }: any) =>
     .build();
 `;
 
-test("a failing --worktree run stops the stack after its report and exits 1", () => {
+test.concurrent("a failing --worktree run stops the stack after its report and exits 1", async () => {
   const { repo, worktrees } = repoWith(FAILING, RECORDING_HOOK);
+  try {
+    const result = await runEntry(repo, worktrees, ["--worktree", "STOP-1"]);
 
-  const result = runEntry(repo, worktrees, ["--worktree", "STOP-1"]);
-
-  expect(result.status).toBe(1);
-  expect(stopCalls(repo)).toEqual([worktreePath(worktrees, repo, "STOP-1")]);
-  const report = result.out.lastIndexOf("FAIL");
-  expect(report).toBeGreaterThan(-1);
-  expect(result.out.indexOf("→ stopping services")).toBeGreaterThan(report);
+    expect(result.status).toBe(1);
+    expect(stopCalls(repo)).toEqual([worktreePath(worktrees, repo, "STOP-1")]);
+    const report = result.out.lastIndexOf("FAIL");
+    expect(report).toBeGreaterThan(-1);
+    expect(result.out.indexOf("→ stopping services")).toBeGreaterThan(report);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(worktrees, { recursive: true, force: true });
+  }
 }, 30_000);
 
-test("a gate stop runs the stop hook and exits 0", () => {
+test.concurrent("a gate stop runs the stop hook and exits 0", async () => {
   const { repo, worktrees } = repoWith(GATED, RECORDING_HOOK);
+  try {
+    const result = await runEntry(repo, worktrees, ["--worktree", "STOP-2"]);
 
-  const result = runEntry(repo, worktrees, ["--worktree", "STOP-2"]);
-
-  expect(result.status).toBe(0);
-  expect(stopCalls(repo)).toEqual([worktreePath(worktrees, repo, "STOP-2")]);
-  expect(result.out.indexOf("→ stopping services")).toBeGreaterThan(result.out.lastIndexOf("STOPPED"));
+    expect(result.status).toBe(0);
+    expect(stopCalls(repo)).toEqual([worktreePath(worktrees, repo, "STOP-2")]);
+    expect(result.out.indexOf("→ stopping services")).toBeGreaterThan(result.out.lastIndexOf("STOPPED"));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(worktrees, { recursive: true, force: true });
+  }
 }, 30_000);
 
-test("a passing --worktree run keeps the stack running", () => {
+test.concurrent("a passing --worktree run keeps the stack running", async () => {
   const { repo, worktrees } = repoWith(PASSING, RECORDING_HOOK);
+  try {
+    const result = await runEntry(repo, worktrees, ["--worktree", "STOP-3"]);
 
-  const result = runEntry(repo, worktrees, ["--worktree", "STOP-3"]);
-
-  expect(result.status).toBe(0);
-  expect(stopCalls(repo)).toEqual([]);
+    expect(result.status).toBe(0);
+    expect(stopCalls(repo)).toEqual([]);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(worktrees, { recursive: true, force: true });
+  }
 }, 30_000);
 
-test("a sub-runner (RUNNER_IN_WORKTREE=1) never runs the stop hook", () => {
+test.concurrent("a sub-runner (RUNNER_IN_WORKTREE=1) never runs the stop hook", async () => {
   const { repo, worktrees } = repoWith(FAILING, RECORDING_HOOK);
+  try {
+    const result = await runEntry(repo, worktrees, ["STOP-4"], { RUNNER_IN_WORKTREE: "1" });
 
-  const result = runEntry(repo, worktrees, ["STOP-4"], { RUNNER_IN_WORKTREE: "1" });
-
-  expect(result.status).toBe(1);
-  expect(stopCalls(repo)).toEqual([]);
+    expect(result.status).toBe(1);
+    expect(stopCalls(repo)).toEqual([]);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(worktrees, { recursive: true, force: true });
+  }
 }, 30_000);
 
-test("one Ctrl+C during the stop hook lets it finish and keeps exit 1 and FAIL", async () => {
+test.concurrent("one Ctrl+C during the stop hook lets it finish and keeps exit 1 and FAIL", async () => {
   const { repo, worktrees } = repoWith(
     FAILING,
-    'touch "$(dirname "$0")/stop.started"\nsleep 2\ntouch "$(dirname "$0")/stop.done"',
+    'touch "$(dirname "$0")/stop.started"\nsleep 0.4\ntouch "$(dirname "$0")/stop.done"',
   );
-  const child = spawn(process.execPath, [runnerEntry, "--worktree", "STOP-5"], {
-    cwd: repo,
-    env: envFor(worktrees),
-    stdio: "ignore",
-  });
-  const exited = new Promise<number | null>((done) => child.once("exit", (code) => done(code)));
+  try {
+    const child = spawn(process.execPath, [runnerEntry, "--worktree", "STOP-5"], {
+      cwd: repo,
+      env: envFor(worktrees),
+      stdio: "ignore",
+    });
+    const exited = new Promise<number | null>((done) => child.once("exit", (code) => done(code)));
 
-  const started = join(repo, ".lance-nuit", "stop.started");
-  while (!existsSync(started) && child.exitCode === null) await Bun.sleep(20);
-  child.kill("SIGINT");
+    const started = join(repo, ".lance-nuit", "stop.started");
+    while (!existsSync(started) && child.exitCode === null) await Bun.sleep(20);
+    child.kill("SIGINT");
 
-  expect(await exited).toBe(1);
-  expect(existsSync(join(repo, ".lance-nuit", "stop.done"))).toBe(true);
-  expect(runStatus(repo)).toBe("FAIL");
+    expect(await exited).toBe(1);
+    expect(existsSync(join(repo, ".lance-nuit", "stop.done"))).toBe(true);
+    expect(runStatus(repo)).toBe("FAIL");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(worktrees, { recursive: true, force: true });
+  }
 }, 30_000);
