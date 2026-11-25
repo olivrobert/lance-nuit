@@ -50,10 +50,10 @@ test("validation report: an invalid fix_profile is reported with the other error
       rerun_on_resume: true,
       on_failure: { max_retries: 1, fix_prompt: "fix", fix_profile: "planner", fix_backend: "codex" },
     },
-    { id: "lint", name: "Duplicate", command: "true", runner: "bash", rerun_on_resume: true },
+    { id: "test", name: "Test", command: "true", runner: "bash", rerun_on_resume: true, error_extractor: "nope" },
   ];
   expect(() => validatePipeline({ name: "demo", steps }, "demo.ts", { context: CONTEXT })).toThrow(
-    /duplicate id "lint"[\s\S]*\[profile-coherence\] step "lint": fix profile "planner" is not defined for backend "codex"/,
+    /\[profile-coherence\] step "lint": fix profile "planner" is not defined for backend "codex"[\s\S]*error_extractor "nope" not found/,
   );
 });
 

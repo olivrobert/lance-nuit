@@ -522,29 +522,6 @@ test("review: a capture named after a verdict field is refused", () => {
   ).toThrow(/reserved by the verdict contract/);
 });
 
-test("review: refused on a step whose backend cannot resume a session", () => {
-  const registry = createDefaultAgentBackendRegistry();
-  const resolve = registry.resolve.bind(registry);
-  registry.resolve = (spec) => {
-    const backend = resolve(spec);
-    return { ...backend, capabilities: { ...backend.capabilities, resume: false } };
-  };
-  expect(() =>
-    llmStep(
-      {
-        id: "plan",
-        name: "Plan",
-        profile: "planner",
-        backend: "claude",
-        command,
-        output: [result],
-        review: reviewSpec,
-      },
-      registry,
-    ).build(),
-  ).toThrow(/review needs a backend that resumes sessions/);
-});
-
 test("review: refused on a non-agent step at validation", () => {
   const findings = new PipelineStructureValidator().validate({
     source: "test.ts",

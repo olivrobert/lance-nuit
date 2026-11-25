@@ -298,13 +298,6 @@ export abstract class StepBuilder {
     const step = this.assemble(assembly);
     const [shapeError] = stepShapeErrors(step);
     if (shapeError) throw new Error(`Step "${step.id}": ${shapeError}`);
-    // The fix of a review resumes the producing session: a backend that cannot
-    // resume would always fix blind. The review's own session is never resumed.
-    if (step.review && step.backend && this.registry) {
-      if (!this.registry.resolve(step.backend).capabilities.resume) {
-        throw new Error(`Step "${step.id}": review needs a backend that resumes sessions; "${step.backend.id}" cannot`);
-      }
-    }
     return step;
   }
 
