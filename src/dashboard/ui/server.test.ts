@@ -207,9 +207,8 @@ test("api: the stats screen reads every ticket once, on request", async () => {
   const response = await fetch(url("/api/stats"));
 
   expect(response.status).toBe(200);
-  const body = (await response.json()) as { tickets: Array<{ key: string }>; archive: { status: string } };
+  const body = (await response.json()) as { tickets: Array<{ key: string }> };
   expect(body.tickets.map((ticket) => ticket.key)).toEqual(["demo-app/DEMO-1"]);
-  expect(body.archive.status).toBe("absent");
   expect((await fetch(url("/api/stats/extra"))).status).toBe(404);
 });
 

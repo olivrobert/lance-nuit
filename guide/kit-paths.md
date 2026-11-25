@@ -124,7 +124,8 @@ follow links, and backends grant that directory beside the worktree cwd.
 └── scans/<scan>.json          # one record per --scan dispatch
 ```
 
-`runs.jsonl` is the single cross-run projection read by `lancenuit stats`,
+`runs.jsonl` is the copy of each run that `lancenuit stats` and the dashboard's
+statistics page read once the run's snapshot is gone,
 `pricing.json` the rate table for backends that report no cost, and `scans/`
 holds one record per scan, named `<start instant>-<pipeline>-<short id>.json` so
 that the directory lists chronologically. Kept inside a worktree, all three

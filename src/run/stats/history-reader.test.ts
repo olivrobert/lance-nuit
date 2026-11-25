@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { aggregateHistory, filterHistory, type HistoryEntry, readHistory, summarizeHistory } from "./history-reader.js";
-import type { ProjectPricing } from "../../contracts/pricing.js";
+import { aggregateHistory, filterHistory, type HistoryEntry, type HistoryRun, readHistory } from "./history-reader.js";
+import { lineSpend, summarizeHistory } from "./history-runs.js";
 
 function historyRoot(lines: readonly string[]): string {
   const projRoot = mkdtempSync(join(tmpdir(), "history-reader-"));
@@ -32,6 +32,14 @@ function entry(overrides: Partial<HistoryEntry> & { runId: string }): HistoryEnt
 
 const line = (value: Partial<HistoryEntry> & { runId: string }): string => JSON.stringify(entry(value));
 
+/** A run whose snapshot is gone: read from its line alone. */
+const fromLine = (value: Partial<HistoryEntry> & { runId: string }): HistoryRun => {
+  const read = entry(value);
+  return { entry: read, spend: lineSpend(read) };
+};
+
+const ids = (runs: readonly HistoryRun[]): string[] => runs.map((run) => run.entry.runId);
+
 test("readHistory: skips malformed lines and returns the newest run first", () => {
   const projRoot = historyRoot([
     line({ runId: "old", startedAt: "2026-01-01T00:00:00.000Z" }),
@@ -51,51 +59,51 @@ test("readHistory: a missing history reads as empty rather than throwing", () =>
 });
 
 test("filterHistory: drops nested runs by default because the parent already counts them", () => {
-  const entries = [entry({ runId: "parent" }), entry({ runId: "child", parentRunId: "parent" })];
+  const entries = [fromLine({ runId: "parent" }), fromLine({ runId: "child", parentRunId: "parent" })];
 
-  expect(filterHistory(entries).map((candidate) => candidate.runId)).toEqual(["parent"]);
+  expect(ids(filterHistory(entries))).toEqual(["parent"]);
   expect(filterHistory(entries, { includeChildren: true })).toHaveLength(2);
 });
 
 test("filterHistory: a line written before parentRunId existed reads as a root run", () => {
-  const minimal = entry({ runId: "minimal" });
-  delete (minimal as { parentRunId?: unknown }).parentRunId;
+  const minimal = fromLine({ runId: "minimal" });
+  delete (minimal.entry as { parentRunId?: unknown }).parentRunId;
 
   expect(filterHistory([minimal])).toHaveLength(1);
 });
 
 test("filterHistory: pipeline, work item, failures, and recency narrow the set", () => {
   const entries = [
-    entry({ runId: "a", pipeline: "feature", ticket: "PROJ-1", status: "PASS" }),
-    entry({ runId: "b", pipeline: "bugfix", ticket: "PROJ-2", status: "FAIL" }),
-    entry({ runId: "c", pipeline: "feature", ticket: "PROJ-2", status: "FAIL" }),
+    fromLine({ runId: "a", pipeline: "feature", ticket: "PROJ-1", status: "PASS" }),
+    fromLine({ runId: "b", pipeline: "bugfix", ticket: "PROJ-2", status: "FAIL" }),
+    fromLine({ runId: "c", pipeline: "feature", ticket: "PROJ-2", status: "FAIL" }),
   ];
 
-  expect(filterHistory(entries, { pipeline: "feature" }).map((c) => c.runId)).toEqual(["a", "c"]);
-  expect(filterHistory(entries, { ticket: "PROJ-2" }).map((c) => c.runId)).toEqual(["b", "c"]);
-  expect(filterHistory(entries, { failuresOnly: true }).map((c) => c.runId)).toEqual(["b", "c"]);
+  expect(ids(filterHistory(entries, { pipeline: "feature" }))).toEqual(["a", "c"]);
+  expect(ids(filterHistory(entries, { ticket: "PROJ-2" }))).toEqual(["b", "c"]);
+  expect(ids(filterHistory(entries, { failuresOnly: true }))).toEqual(["b", "c"]);
   expect(filterHistory(entries, { sinceMs: Date.parse("2026-01-11T00:00:00.000Z") })).toEqual([]);
   expect(filterHistory(entries, { sinceMs: Date.parse("2026-01-01T00:00:00.000Z") })).toHaveLength(3);
 });
 
 test("filterHistory: --since excludes a run with no usable timestamp", () => {
-  const undated = entry({ runId: "undated", startedAt: null });
+  const undated = fromLine({ runId: "undated", startedAt: null });
 
   expect(filterHistory([undated], { sinceMs: Date.parse("2020-01-01T00:00:00.000Z") })).toEqual([]);
 });
 
 test("aggregateHistory: sums tokens and per-pipeline status without inventing a cost", () => {
   const aggregate = aggregateHistory([
-    entry({ runId: "a", pipeline: "feature", status: "PASS", costUsd: 1.5 }),
-    entry({ runId: "b", pipeline: "feature", status: "FAIL", failPhase: "implement", costUsd: 0.5 }),
-    entry({ runId: "c", pipeline: "bugfix", status: "PASS" }),
+    fromLine({ runId: "a", pipeline: "feature", status: "PASS", costUsd: 1.5 }),
+    fromLine({ runId: "b", pipeline: "feature", status: "FAIL", failPhase: "implement", costUsd: 0.5 }),
+    fromLine({ runId: "c", pipeline: "bugfix", status: "PASS" }),
   ]);
 
   expect(aggregate.runs).toBe(3);
   expect(aggregate.byStatus).toEqual({ PASS: 2, FAIL: 1 });
   expect(aggregate.costUsd).toBeCloseTo(2);
-  // The third run carries neither a written cost nor pricing: it is reported as
-  // unpriced instead of counted as free.
+  // The third run reported no amount: it is reported as unpriced instead of
+  // counted as free.
   expect(aggregate.costMissing).toBe(1);
   expect(aggregate.costEstimated).toBe(0);
   expect(aggregate.tokens).toEqual({ in: 300, out: 60, cacheRead: 0, cacheWrite: 0 });
@@ -106,35 +114,10 @@ test("aggregateHistory: sums tokens and per-pipeline status without inventing a 
   expect(aggregate.firstStartedAt).toBe("2026-01-10T10:00:00.000Z");
 });
 
-test("aggregateHistory: a cost derived from pricing.json is flagged as an estimate", () => {
-  const pricing: ProjectPricing = { opus: { in: 1_000_000, out: 1_000_000 } };
-
-  const aggregate = aggregateHistory(
-    [entry({ runId: "a", models: { opus: { in: 2, out: 3, cacheRead: 0, cacheWrite: 0 } } })],
-    pricing,
-  );
-
-  expect(aggregate.costUsd).toBeCloseTo(5);
-  expect(aggregate.costEstimated).toBe(1);
-  expect(aggregate.costMissing).toBe(0);
-});
-
-test("aggregateHistory: a written cost outranks the pricing estimate", () => {
-  const pricing: ProjectPricing = { opus: { in: 1_000_000 } };
-
-  const aggregate = aggregateHistory(
-    [entry({ runId: "a", costUsd: 0.25, models: { opus: { in: 99, out: 0, cacheRead: 0, cacheWrite: 0 } } })],
-    pricing,
-  );
-
-  expect(aggregate.costUsd).toBeCloseTo(0.25);
-  expect(aggregate.costEstimated).toBe(0);
-});
-
 test("aggregateHistory: a run with an unpriced attempt is summed but counted as under-counted", () => {
   const aggregate = aggregateHistory([
-    entry({ runId: "a", costUsd: 2 }),
-    entry({ runId: "b", costUsd: 1, costUnknown: true }),
+    fromLine({ runId: "a", costUsd: 2 }),
+    fromLine({ runId: "b", costUsd: 1, costUnknown: true }),
   ]);
 
   expect(aggregate.costUsd).toBeCloseTo(3);
@@ -146,11 +129,11 @@ test("aggregateHistory: a run with an unpriced attempt is summed but counted as 
 
 test("aggregateHistory: per-profile totals accumulate across runs", () => {
   const aggregate = aggregateHistory([
-    entry({
+    fromLine({
       runId: "a",
       profiles: { coder: { steps: 2, tokens: { in: 10, out: 5, cacheRead: 0, cacheWrite: 0 }, costUsd: 1 } },
     }),
-    entry({
+    fromLine({
       runId: "b",
       profiles: { coder: { steps: 1, tokens: { in: 4, out: 1, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.5 } },
     }),
@@ -170,9 +153,12 @@ test("summarizeHistory: reports the nested runs the same filter would have kept"
     line({ runId: "other-child", pipeline: "bugfix", parentRunId: "elsewhere" }),
   ]);
 
-  const { entries, aggregate } = summarizeHistory(projRoot, { pipeline: "feature" }, null);
+  const { runs, aggregate } = summarizeHistory(
+    { cwd: projRoot, specPath: ".lance-nuit/work-items" },
+    { pipeline: "feature" },
+  );
 
-  expect(entries.map((candidate) => candidate.runId)).toEqual(["parent"]);
+  expect(ids(runs)).toEqual(["parent"]);
   // Only the `feature` child counts: the summary must explain itself, not the file.
   expect(aggregate.childrenSkipped).toBe(1);
 });
@@ -182,21 +168,11 @@ test("aggregateHistory: a runner figure computed from a rate table is an estimat
   // writes `costUsd` but marks it `costStatus: "partial"`. Reading it as exact hid
   // every estimate the runner itself made.
   const aggregate = aggregateHistory([
-    entry({ runId: "a", costUsd: 2 }),
-    entry({ runId: "b", costUsd: 1, costStatus: "partial" }),
+    fromLine({ runId: "a", costUsd: 2 }),
+    fromLine({ runId: "b", costUsd: 1, costStatus: "partial" }),
   ]);
 
   expect(aggregate.costUsd).toBeCloseTo(3);
   expect(aggregate.costEstimated).toBe(1);
   expect(aggregate.byPipeline.feature?.costEstimated).toBe(1);
-});
-
-test("aggregateHistory: a non-USD pricing.json prices nothing, as the runtime prices nothing with it", () => {
-  // The runner's `costUsd` is always in dollars; estimating the remaining runs in
-  // euros and summing the two printed a total in no currency at all.
-  const entries = [
-    entry({ runId: "r", pipeline: "feature", models: { opus: { in: 10, out: 0, cacheRead: 0, cacheWrite: 0 } } }),
-  ];
-  const aggregate = aggregateHistory(entries, { _currency: "€", opus: { in: 1, out: 2 } });
-  expect(aggregate.costMissing).toBe(1);
 });

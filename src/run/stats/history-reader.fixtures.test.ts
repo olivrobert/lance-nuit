@@ -9,7 +9,8 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readHistory, summarizeHistory } from "./history-reader.js";
+import { readHistory } from "./history-reader.js";
+import { summarizeHistory } from "./history-runs.js";
 import { diagnoseHistoryEntry } from "./history-schema.js";
 
 /** A complete line as the current projector writes it. */
@@ -172,13 +173,13 @@ test("readHistory: a value this release does not know reads as absent, the line 
 });
 
 test("summarizeHistory: children are excluded from the totals but counted as skipped", () => {
-  const { entries, aggregate } = summarizeHistory(FIXTURE_ROOT(), {}, null);
+  const { runs, aggregate } = summarizeHistory({ cwd: FIXTURE_ROOT(), specPath: ".lance-nuit/work-items" });
 
-  expect(entries.map((entry) => entry.runId)).toEqual([FUTURE.runId, MODERN.runId, MINIMAL.runId]);
+  expect(runs.map((run) => run.entry.runId)).toEqual([FUTURE.runId, MODERN.runId, MINIMAL.runId]);
   expect(aggregate.childrenSkipped).toBe(1);
   expect(aggregate.byStatus).toEqual({ PASS: 2, FAIL: 1 });
   expect(aggregate.costUsd).toBeCloseTo(1.25, 10);
-  // The minimal line carries no cost and no priceable model.
+  // The minimal line carries no cost: it is unpriced, not free.
   expect(aggregate.costMissing).toBe(1);
 });
 

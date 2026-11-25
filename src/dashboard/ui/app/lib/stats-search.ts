@@ -27,7 +27,7 @@ export interface StatsSearch {
   desc?: boolean;
 }
 
-const SOURCES: readonly SourceFilter[] = ["all", "live", "archive"];
+const SOURCES: readonly SourceFilter[] = ["all", "live", "history"];
 const SCOPES: readonly ScopeFilter[] = ["delivery", "all"];
 const COLUMNS: readonly StatsColumn[] = [
   "project",

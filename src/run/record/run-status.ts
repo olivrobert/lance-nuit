@@ -10,7 +10,7 @@
 //
 // Everything here is pure. Whether a live process holds the run is a parameter:
 // the lock belongs to `stores/run-storage.ts`, and a reader that cannot ask it
-// (an archived run) says so by passing its own answer.
+// (a run read from its history line) says so by passing its own answer.
 
 import type { PersistedRun, RunStatus } from "../persisted.js";
 import { type CostStop, costStopOf } from "./budget.js";

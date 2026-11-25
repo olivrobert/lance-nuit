@@ -12,7 +12,7 @@ describe("stats search params", () => {
     const filter: StatsFilter = {
       project: "web",
       kind: "bug",
-      source: "archive",
+      source: "history",
       scope: "all",
       from: "2026-09-01",
       to: "2026-09-30",

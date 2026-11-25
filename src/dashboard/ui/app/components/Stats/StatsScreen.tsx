@@ -15,7 +15,7 @@ import { useMemo } from "react";
 import { statsQuery } from "../../api/queries.js";
 import type { StatsRead, TicketKind } from "../../api/types.js";
 import { cx } from "../../lib/cx.js";
-import { fmtCost, fmtDate, fmtDuration } from "../../lib/format.js";
+import { fmtCost, fmtDuration } from "../../lib/format.js";
 import {
   daysAgo,
   filterTickets,
@@ -128,7 +128,7 @@ function Filters({
       </div>
       <div className={styles.chips}>
         <span className="small mute">Source</span>
-        {(["all", "live", "archive"] as const).map((source) => (
+        {(["all", "live", "history"] as const).map((source) => (
           <Chip<SourceFilter>
             key={source}
             label={source}
@@ -208,18 +208,6 @@ function Recap({ totals }: { totals: StatsTotals }): JSX.Element {
   );
 }
 
-function ArchiveNote({ archive }: { archive: StatsRead["archive"] }): JSX.Element {
-  if (archive.status === "ok") {
-    return (
-      <span className="small mute">{`Archive: ${archive.runs} runs${archive.generatedAt ? `, exported ${fmtDate(archive.generatedAt)}` : ""}`}</span>
-    );
-  }
-  if (archive.status === "invalid") {
-    return <span className={cx("small", styles.warn)}>{`Archive ignored: ${archive.error}`}</span>;
-  }
-  return <span className="small mute">No archive</span>;
-}
-
 const NO_TICKETS: StatsRead["tickets"] = [];
 
 export function StatsScreen(): JSX.Element {
@@ -242,7 +230,6 @@ export function StatsScreen(): JSX.Element {
     <main className={styles.screen}>
       <div className={styles.head}>
         <h1>Ticket costs</h1>
-        {stats.data ? <ArchiveNote archive={stats.data.archive} /> : null}
         <button type="button" className={styles.refresh} onClick={() => void stats.refetch()}>
           Refresh
         </button>

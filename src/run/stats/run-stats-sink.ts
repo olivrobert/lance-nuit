@@ -48,9 +48,10 @@ function withHistoryLock<T>(path: string, fn: () => T): T {
   }
 }
 
-/** Central `.lance-nuit/pipeline-history/runs.jsonl`, the sole source of truth for
- *  run statistics. Nothing is mirrored per work item: a second copy would
- *  duplicate entries without a runner reader. */
+/** Central `.lance-nuit/pipeline-history/runs.jsonl`: the copy of each run the
+ *  history falls back on once the run's snapshot is gone (`history-runs.ts`).
+ *  Nothing is mirrored per work item: a second copy would duplicate entries
+ *  without a runner reader. */
 export class FileRunStatsSink {
   private readonly options: Required<FileRunStatsSinkOptions>;
 

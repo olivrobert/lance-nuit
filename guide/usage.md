@@ -502,6 +502,15 @@ The cards above the table describe the rows on screen:
 
 A mean or median counts only the tickets that have a cost.
 
+The runs are the ones `lancenuit stats` reads, at the same amounts: each from
+its snapshot while it still reads, and from its line in
+`.lance-nuit/pipeline-history/runs.jsonl` once it is gone — its directory or
+work item deleted, or written in a snapshot format this release no longer
+reads ([persistence](persistence.md#statistics-and-retention)). Such a run is
+marked `history` and filtered by the **history** source; its line holds no
+active time and no step statuses, so it shows neither and never reaches a
+handover.
+
 How a ticket is summed:
 
 - only root runs count. A composed child's cost is already in its parent's
@@ -511,9 +520,10 @@ How a ticket is summed:
 - every root run of the ticket counts, triage and auxiliary pipelines
   included: the cost is what the whole ticket spent, not only its delivery;
 - the cost and the active time are the run's `total_control` figures
-  (`total_cost_usd`, `duration_ms`), never a re-sum of its steps. An estimated
-  figure or a run that spent tokens no table could price marks the ticket's
-  cost `~` or `≥`, as in the inbox;
+  (`total_cost_usd`, `duration_ms`), never a re-sum of its steps; a run read
+  from its line shows the amount the runner wrote there when it ended. An
+  estimated figure or a run that spent tokens no table could price marks the
+  ticket's cost `~` or `≥`, as in the inbox;
 - **Active** is the time spent executing steps; **Span** is first run created
   to last run updated, pauses and waits for review included.
 
@@ -541,46 +551,7 @@ every ticket is `other` and every run delivers.
 An artifact rule reads `artifacts/<file>` of the ticket: the whole text, a
 top-level `field` of a JSON file, or, with `kind`, the file's mere presence.
 The first rule that yields `bug` or `feature` wins; otherwise the pipeline of
-the most recent run that maps to one does; otherwise the kind an archived run
-carries; otherwise `other`.
-
-**Archive.** Runs lance-nuit cannot read live — other formats, other
-snapshot schemas, projects no longer listed — can be merged from
-`~/.lance-nuit/ui/stats-archive.json`, which you generate with a script of your
-own:
-
-```json
-{
-  "version": 1,
-  "generatedAt": "2026-09-26T15:30:12Z",
-  "runs": [
-    {
-      "project": "shop",
-      "ticket": "SHOP-12",
-      "runId": "run_2026-07-15T07-49-59",
-      "pipeline": "bugfix",
-      "kind": "bug",
-      "status": "PASS",
-      "costUsd": 2.09,
-      "costEstimated": true,
-      "costUnknown": true,
-      "activeMs": 557760,
-      "createdAt": "2026-07-15T07:49:59Z",
-      "updatedAt": "2026-07-15T08:45:22Z",
-      "handover": "shipped"
-    }
-  ]
-}
-```
-
-`project`, `ticket` and `runId` are required; a run missing one is skipped.
-`project` is the project directory's name. An unknown `status` reads as
-`RUNNING`, an unknown `kind` as none. `handover` (`shipped` or `failed`) marks
-a run that reached a shipping step; the archive decides it, since the screen
-cannot see the steps of an archived run. The archive holds root runs only, one
-entry per run. A run found both live and in the archive (same project, ticket
-and run id) is read live. A malformed archive is reported on the screen and
-ignored; the live figures still show.
+the most recent run that maps to one does; otherwise `other`.
 
 ## Project configuration
 

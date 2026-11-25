@@ -443,9 +443,9 @@ export type TicketOutcome = ItemStatus | "UNSHIPPED";
  *  revoked tracker token, a locked git config. */
 export type StatsHandover = "shipped" | "failed";
 
-/** Where a run's figures were read: a live `state.json`, or the archive file an
- *  export script wrote for runs older than the current layout. */
-export type StatsSource = "live" | "archive";
+/** Where a run's figures were read: its `state.json`, or, once that is gone or
+ *  no longer reads, its line in `pipeline-history/runs.jsonl`. */
+export type StatsSource = "live" | "history";
 
 /** One root run, as the stats screen unfolds it under its ticket. */
 export interface StatsRun {
@@ -479,7 +479,7 @@ export interface StatsTicket {
   ticket: string;
   ticketUrl?: string;
   kind: TicketKind;
-  /** `mixed` when the ticket has both live and archived runs. */
+  /** `mixed` when the ticket has runs of both sources. */
   source: StatsSource | "mixed";
   /** Its runs' costs summed; `usd` absent when no run reported a figure. */
   cost: ItemCost;
@@ -500,13 +500,6 @@ export interface StatsTicket {
   runs: StatsRun[];
 }
 
-/** State of the optional archive file. `invalid` carries why it was ignored. */
-export type StatsArchiveState =
-  | { status: "absent" }
-  | { status: "ok"; generatedAt?: string; runs: number }
-  | { status: "invalid"; error: string };
-
 export interface StatsRead {
   tickets: StatsTicket[];
-  archive: StatsArchiveState;
 }

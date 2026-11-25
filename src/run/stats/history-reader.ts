@@ -10,24 +10,35 @@
 //    its usage is already folded into its parent's step control. Summing every line
 //    therefore counts the same spend twice, so aggregation keeps root runs only
 //    unless the caller asks for children explicitly.
-//  - Cost is exact when the runner wrote `costUsd`, estimated from `pricing.json`
-//    otherwise, and simply absent when neither applies. An absent cost is reported
-//    as such rather than silently read as zero.
+//  - A run's cost is the spend `history-runs.ts` read for it, from its snapshot or
+//    its line; nothing is priced here. An absent cost is reported as such rather
+//    than silently read as zero.
 
 import { readFileSync } from "node:fs";
-import type { ProjectPricing } from "../../contracts/pricing.js";
 import { historyFilePath } from "../../shared/env/kit-layout.js";
-import { loadProjectPricing } from "../../shared/env/pricing.js";
-import { isCompleted } from "../record/index.js";
+import { isCompleted, type RunRead, type RunSpend } from "../record/index.js";
 import { HistoryEntrySchema } from "./history-schema.js";
 import type { RunStatsEntry } from "./run-stats-projector.js";
-import { addTokens, entryCost, type TokenCounts, zeroTokens } from "./stats-core.js";
+import { addTokens, type TokenCounts, zeroTokens } from "./stats-core.js";
 
 /** Entry as read back from disk: every field is suspect, including the ones the
  *  projector always writes, because a line may predate a schema addition. The
  *  type stays hand-written; `history-schema.ts` proves it agrees with the schema
  *  that guards `readHistory`. */
 export type HistoryEntry = Partial<RunStatsEntry> & { runId: string };
+
+/** One run of the history, as `readHistoryRuns` (`history-runs.ts`) read it. */
+export interface HistoryRun {
+  /** Its line in `runs.jsonl`, or, for a run not projected yet, one drawn from
+   *  its snapshot without token counts. Its cost fields are not read: `spend` is. */
+  entry: HistoryEntry;
+  /** What the run spent, from its snapshot when it still reads, else its line. */
+  spend: RunSpend;
+  /** The snapshot, when it still reads. */
+  read?: RunRead;
+  /** Top-level work-item folder holding the snapshot. */
+  folder?: string;
+}
 
 export interface HistoryFilter {
   /** Keep a single pipeline (exact name). */
@@ -53,9 +64,9 @@ export interface PipelineTotals {
   byStatus: Record<string, number>;
   tokens: TokenCounts;
   costUsd: number;
-  /** Runs whose cost is neither written nor estimable; they are excluded from `costUsd`. */
+  /** Runs that reported no amount; they are excluded from `costUsd`. */
   costMissing: number;
-  /** Runs whose cost comes from `pricing.json` rather than the provider. */
+  /** Runs whose amount a rate table produced rather than the provider. */
   costEstimated: number;
   /** Runs counted in `costUsd` whose figure is a lower bound: an attempt spent
    *  tokens no pricing table could price. */
@@ -139,8 +150,8 @@ function isChild(entry: HistoryEntry): boolean {
   return typeof entry.parentRunId === "string" && entry.parentRunId.length > 0;
 }
 
-export function filterHistory(entries: readonly HistoryEntry[], filter: HistoryFilter = {}): HistoryEntry[] {
-  return entries.filter((entry) => {
+export function filterHistory(runs: readonly HistoryRun[], filter: HistoryFilter = {}): HistoryRun[] {
+  return runs.filter(({ entry }) => {
     if (!filter.includeChildren && isChild(entry)) return false;
     if (filter.pipeline && entry.pipeline !== filter.pipeline) return false;
     if (filter.ticket && entry.ticket !== filter.ticket) return false;
@@ -170,17 +181,13 @@ function emptyPipelineTotals(): PipelineTotals {
 }
 
 /**
- * Roll a filtered set of entries up into per-pipeline, per-profile, and
+ * Roll a filtered set of runs up into per-pipeline, per-profile, and
  * per-failure-phase totals.
  *
  * `childrenSkipped` counts nested runs dropped from the input, so `stats` can say
  * why its total is lower than the raw line count.
  */
-export function aggregateHistory(
-  entries: readonly HistoryEntry[],
-  pricing: ProjectPricing | null = null,
-  childrenSkipped = 0,
-): HistoryAggregate {
+export function aggregateHistory(runs: readonly HistoryRun[], childrenSkipped = 0): HistoryAggregate {
   const aggregate: HistoryAggregate = {
     runs: 0,
     byStatus: {},
@@ -197,7 +204,7 @@ export function aggregateHistory(
     lastStartedAt: null,
   };
 
-  for (const entry of entries) {
+  for (const { entry, spend } of runs) {
     const pipeline = entry.pipeline || "(unknown)";
     const status = entry.status || "UNKNOWN";
     aggregate.byPipeline[pipeline] ??= emptyPipelineTotals();
@@ -211,27 +218,23 @@ export function aggregateHistory(
     addTokens(aggregate.tokens, entry.totals);
     addTokens(perPipeline.tokens, entry.totals);
 
-    // Pass only the two fields the cost rule reads, rather than the whole entry:
-    // `entryCost` accepts a structural subset, and narrowing here keeps a future
-    // `RunStatsEntry` field from making a read-back line unassignable.
-    const cost = entryCost({ models: entry.models, costUsd: entry.costUsd }, pricing);
-    if (cost === null) {
+    const cost = spend.usd;
+    if (cost === undefined) {
       aggregate.costMissing += 1;
       perPipeline.costMissing += 1;
     } else {
       aggregate.costUsd += cost;
       perPipeline.costUsd += cost;
-      // `costUsd` is exact only when the runner said so: a figure derived here
-      // from pricing.json, or one the runner itself computed from a rate table
-      // (`costStatus: "partial"` — Codex, opencode without a provider cost, a killed
-      // Claude attempt), is an estimate, and a total mixing the two must say so.
-      if (typeof entry.costUsd !== "number" || entry.costStatus === "partial") {
+      // A figure the runner computed from a rate table (Codex, opencode without a
+      // provider cost, a killed Claude attempt) is an estimate, and a total mixing
+      // it with provider figures must say so.
+      if (spend.estimated) {
         aggregate.costEstimated += 1;
         perPipeline.costEstimated += 1;
       }
       // The runner's own figure can still be a lower bound: an attempt it could
       // not price is in the tokens but not in the dollars.
-      if (entry.costUnknown === true) {
+      if (spend.lowerBound) {
         aggregate.costUnderCounted += 1;
         perPipeline.costUnderCounted += 1;
       }
@@ -267,20 +270,4 @@ export function aggregateHistory(
   }
 
   return aggregate;
-}
-
-/** Read, filter, and aggregate in one call; the reader's normal entry point. */
-export function summarizeHistory(
-  projRoot: string = process.cwd(),
-  filter: HistoryFilter = {},
-  pricing: ProjectPricing | null = loadProjectPricing(),
-): { entries: HistoryEntry[]; aggregate: HistoryAggregate } {
-  const all = readHistory(projRoot);
-  const entries = filterHistory(all, filter);
-  // Count the children the same filter would otherwise have kept, so the reported
-  // number explains this summary rather than the whole file.
-  const childrenSkipped = filter.includeChildren
-    ? 0
-    : filterHistory(all, { ...filter, includeChildren: true }).length - entries.length;
-  return { entries, aggregate: aggregateHistory(entries, pricing, childrenSkipped) };
 }
