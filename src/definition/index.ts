@@ -22,7 +22,7 @@ export {
 } from "./pipeline/builtin-pipeline.js";
 export { agentBackendRegistryOf, buildPipelineContext, deriveContext, workItemRegistryOf } from "./pipeline/context.js";
 export type { BuildPipelineContextOptions } from "./pipeline/context.js";
-export { loadPipelineDefinition } from "./pipeline/loader.js";
+export { buildPipelineDefinition, loadPipelineDefinition } from "./pipeline/loader.js";
 export {
   installProjectTypes,
   installUserTypes,
@@ -43,12 +43,6 @@ export type {
   RunReportProof,
   RunReportReview,
 } from "./run-report.js";
-export {
-  checkOverrideKeyShapes,
-  checkStepOverrides,
-  dedupeStepOverrideFindings,
-  imposedAxes,
-  resolveEffectiveAxes,
-  stepCapability,
-  stepOverrideFor,
-} from "./validation/step-overrides.js";
+export { resolveStepAxes, stepCapability } from "./materialize/step-axes.js";
+export type { AxisSource } from "./materialize/step-axes.js";
+export { pipelineValidationReport } from "./validation/pipeline.js";

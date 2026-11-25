@@ -9,21 +9,16 @@
 
 import { RUNNER_ROOT_DIR } from "../../shared/env/kit-layout.js";
 import type { ComposeRegistries } from "../boot/extensions.js";
-import { backendSpecForStep, declaredBackendAxes, isAgentStep } from "../../contracts/backends.js";
+import { type AgentConfigAxis, backendSpecForStep, isAgentStep } from "../../contracts/backends.js";
 import {
+  type AxisSource,
+  buildPipelineDefinition,
   listPipelineFiles,
-  deriveContext,
-  loadPipelineDefinition,
-  checkOverrideKeyShapes,
-  checkStepOverrides,
-  dedupeStepOverrideFindings,
-  imposedAxes,
-  resolveEffectiveAxes,
-  stepCapability,
-  stepOverrideFor,
+  type Pipeline,
+  pipelineValidationReport,
+  resolveStepAxes,
 } from "../../definition/index.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../../shared/language/context.js";
-import type { Pipeline } from "../../definition/index.js";
 import { contextWithProjectProviders, errorMessage } from "./shared.js";
 
 /** Nonexistent but well-formed ticket, sufficient to resolve artifact paths. */
@@ -44,7 +39,7 @@ export interface LintReport {
     capability?: string;
     model?: string;
     effort?: string;
-    source: "config" | "profile" | "capability" | "machine default";
+    sources: Record<AgentConfigAxis, AxisSource>;
   }[];
 }
 
@@ -60,25 +55,26 @@ function pipelineFiles(context: PipelineContext): string[] {
   return listPipelineFiles(context.cwd);
 }
 
-/** Load all pipelines WITHOUT applying overrides: lint must see DSL defaults and
- *  judge keys itself instead of failing on the first one. */
-async function loadAll(context: PipelineContext): Promise<{ pipelines: Pipeline[]; findings: LintFinding[] }> {
-  // `deriveContext`, not a spread: `context.workItem` is a memoized getter, and a
-  // spread would read it, creating the tracker bridge just to list model/effort
-  // (see the invariant in definition/pipeline/context.ts).
-  const bare = deriveContext(context, { config: { ...context.config, steps: {} } });
-  const pipelines: Pipeline[] = [];
+/** Build all pipelines without validating nor applying anything: lint judges the
+ *  definitions and the configuration itself instead of failing on the first key. */
+async function buildAll(context: PipelineContext): Promise<{ pipelines: LintedPipeline[]; findings: LintFinding[] }> {
+  const pipelines: LintedPipeline[] = [];
   const findings: LintFinding[] = [];
   for (const file of pipelineFiles(context)) {
     try {
-      pipelines.push(await loadPipelineDefinition(file, bare));
+      pipelines.push({ file, pipeline: await buildPipelineDefinition(file, context) });
     } catch (e) {
       // A pipeline that cannot build outside a run (missing artifact) is not a
       // configuration error: report it without failing lint.
-      findings.push({ level: "warn", message: `${file} cannot be loaded outside a run: ${errorMessage(e)}` });
+      findings.push({ level: "warn", message: `${file} cannot be built outside a run: ${errorMessage(e)}` });
     }
   }
   return { pipelines, findings };
+}
+
+interface LintedPipeline {
+  file: string;
+  pipeline: Pipeline;
 }
 
 /** The context `--lint-config` checks: the project in `cwd`, with the providers a
@@ -94,44 +90,57 @@ export function lintConfigContext(
   return contextWithProjectProviders(composeRegistries, { cwd, runnerDir: RUNNER_ROOT_DIR, ticket: LINT_TICKET });
 }
 
-export async function lintStepOverrides(ctx: PipelineContext): Promise<LintReport> {
-  const { pipelines, findings } = await loadAll(ctx);
-  const overrides = ctx.config.steps;
-  const names = new Set(pipelines.map((p) => p.name));
-  const registry = requireAgentBackendRegistry(ctx);
+/** The validation a run performs before materialization, over every pipeline. A
+ *  configuration finding (`configuration-references`) can come from each pipeline
+ *  and is reported once; a definition finding names its pipeline. */
+function validationErrors(pipelines: readonly LintedPipeline[], ctx: PipelineContext): string[] {
+  const configuration = { profileOverrides: ctx.config.profiles, stepOverrides: ctx.config.steps, context: ctx };
+  return pipelines.flatMap(({ file, pipeline }) =>
+    pipelineValidationReport(pipeline, file, configuration).errors.map((finding) =>
+      finding.rule === "configuration-references" ? finding.message : `${pipeline.name}: ${finding.message}`,
+    ),
+  );
+}
 
-  // Key shape and per-pipeline rules come from step-overrides.ts, the same code the
-  // loader runs before a spawn: reusing it means a generic key carrying an
-  // unsupported axis is rejected the same way here as it would be at spawn time.
-  //
-  // Only the check below is lint's own: it alone knows every pipeline, so it alone
-  // can tell an unknown pipeline from one it simply is not looking at.
-  const stepFindings = [...checkOverrideKeyShapes(overrides)];
-  for (const key of Object.keys(overrides)) {
+/** Only lint knows every pipeline, so it alone can tell an unknown pipeline from one
+ *  the validator of another pipeline simply is not looking at. */
+function unknownPipelineErrors(pipelines: readonly LintedPipeline[], ctx: PipelineContext): string[] {
+  const names = new Set(pipelines.map(({ pipeline }) => pipeline.name));
+  return Object.keys(ctx.config.steps).flatMap((key) => {
     const separator = key.indexOf(":");
-    if (separator < 0) continue;
+    if (separator < 0) return [];
     const pipelineName = key.slice(0, separator);
-    if (names.has(pipelineName)) continue;
-    stepFindings.push({
-      key,
-      message: `steps["${key}"]: unknown pipeline "${pipelineName}" (known: ${[...names].sort().join(", ")})`,
-    });
-  }
-  for (const pipeline of pipelines) {
-    stepFindings.push(
-      ...checkStepOverrides({ pipelineName: pipeline.name, steps: pipeline.steps, overrides, registry, context: ctx }),
-    );
-  }
+    if (names.has(pipelineName)) return [];
+    return [`steps["${key}"]: unknown pipeline "${pipelineName}" (known: ${[...names].sort().join(", ")})`];
+  });
+}
+
+export async function lintStepOverrides(ctx: PipelineContext): Promise<LintReport> {
+  const { pipelines, findings } = await buildAll(ctx);
   // A `*` key reaching several pipelines is one problem, reported once.
-  for (const finding of dedupeStepOverrideFindings(stepFindings)) {
-    findings.push({ level: "error", message: finding.message });
+  for (const message of new Set([...unknownPipelineErrors(pipelines, ctx), ...validationErrors(pipelines, ctx)])) {
+    findings.push({ level: "error", message });
   }
+
+  const registry = requireAgentBackendRegistry(ctx);
+  const agentSteps = pipelines.flatMap(({ pipeline }) =>
+    pipeline.steps
+      .filter((step) => isAgentStep(step))
+      .map((step) => ({
+        pipeline: pipeline.name,
+        step,
+        axes: resolveStepAxes(step, {
+          pipelineName: pipeline.name,
+          stepOverrides: ctx.config.steps,
+          profileOverrides: ctx.config.profiles,
+          registry,
+          context: ctx,
+        }),
+      })),
+  );
 
   // Configured but unused profiles: unlike an explicit step key, a role is a broad
   // selector. It remains non-blocking, but never silent.
-  const agentSteps = pipelines.flatMap((pipeline) =>
-    pipeline.steps.filter((step) => isAgentStep(step)).map((step) => ({ pipeline: pipeline.name, step })),
-  );
   for (const [profile, configured] of Object.entries(ctx.config.profiles)) {
     const uses = agentSteps.filter(({ step }) => step.profile === profile);
     if (uses.length === 0) {
@@ -144,7 +153,7 @@ export async function lintStepOverrides(ctx: PipelineContext): Promise<LintRepor
         return backendId !== undefined && configured?.backends?.[backendId]?.[axis] !== undefined;
       });
       if (configuredUses.length === 0) continue;
-      if (configuredUses.every(({ step }) => imposedAxes(step, ctx)[axis] !== undefined)) {
+      if (configuredUses.every(({ axes }) => axes.imposed[axis] !== undefined)) {
         findings.push({
           level: "warn",
           message: `profiles["${profile}"].backends.<backend>.${axis} is imposed by a capability in all uses`,
@@ -153,44 +162,41 @@ export async function lintStepOverrides(ctx: PipelineContext): Promise<LintRepor
     }
   }
 
-  for (const { pipeline, step } of agentSteps) {
-    const imposed = imposedAxes(step, ctx);
-    if (step.on_failure?.escalate_model) {
-      if (imposed.model !== undefined) {
-        findings.push({
-          level: "warn",
-          message: `${pipeline}:${step.id}: escalation.model has no effect (model imposed by capability: ${imposed.model})`,
-        });
-      } else {
-        if (step.on_failure.escalate_model !== declaredBackendAxes(step).model) continue;
-        findings.push({
-          level: "warn",
-          message: `${pipeline}:${step.id}: escalation.model=${step.on_failure.escalate_model} matches the nominal model`,
-        });
-      }
-    }
-  }
-
-  // View "what will actually run", ordered by pipeline and then step.
-  const effective: LintReport["effective"] = [];
-  for (const pipeline of pipelines) {
-    for (const step of pipeline.steps) {
-      if (!isAgentStep(step)) continue;
-      const capability = stepCapability(step, ctx);
-      const fromConfig = stepOverrideFor(pipeline.name, step.id, overrides);
-      const resolvedAxes = resolveEffectiveAxes(step, ctx, fromConfig);
-      effective.push({
-        pipeline: pipeline.name,
-        stepId: step.id,
-        ...(step.profile ? { profile: step.profile } : {}),
-        ...(capability ? { capability: `${capability.kind}:${capability.name}` } : {}),
-        ...(resolvedAxes.effective.model ? { model: resolvedAxes.effective.model } : {}),
-        ...(resolvedAxes.effective.effort ? { effort: resolvedAxes.effective.effort } : {}),
-        source: resolvedAxes.source,
+  for (const { pipeline, step, axes } of agentSteps) {
+    const escalateModel = step.on_failure?.escalate_model;
+    if (!escalateModel) continue;
+    if (axes.imposed.model !== undefined) {
+      findings.push({
+        level: "warn",
+        message: `${pipeline}:${step.id}: escalation.model has no effect (model imposed by capability: ${axes.imposed.model})`,
+      });
+    } else if (escalateModel === axes.profile.model) {
+      findings.push({
+        level: "warn",
+        message: `${pipeline}:${step.id}: escalation.model=${escalateModel} matches the nominal model`,
       });
     }
   }
+
+  // View "what will actually run", ordered by pipeline and then step: the same
+  // resolution the loader materializes.
+  const effective: LintReport["effective"] = agentSteps.map(({ pipeline, step, axes }) => ({
+    pipeline,
+    stepId: step.id,
+    ...(step.profile ? { profile: step.profile } : {}),
+    ...(axes.capability ? { capability: `${axes.capability.kind}:${axes.capability.name}` } : {}),
+    ...(axes.effective.model ? { model: axes.effective.model } : {}),
+    ...(axes.effective.effort ? { effort: axes.effective.effort } : {}),
+    sources: axes.sources,
+  }));
   return { findings, effective };
+}
+
+/** One source when both axes share it, else each axis with its own. */
+function originOf(row: LintReport["effective"][number]): string {
+  const { model, effort } = row.sources;
+  const source = model === effort ? model : `model: ${model}, effort: ${effort}`;
+  return row.capability ? `${source} (${row.capability})` : source;
 }
 
 /** Console rendering and exit code: 1 as soon as an error is found. */
@@ -217,9 +223,8 @@ export function formatLintReport(report: LintReport): { text: string; exitCode: 
       currentPipeline = row.pipeline;
       lines.push(`  ${currentPipeline}`);
     }
-    const origin = row.capability ? `${row.source} (${row.capability})` : row.source;
     lines.push(
-      `    ${row.stepId.padEnd(stepWidth)} ${axes.padEnd(axesWidth)} ${profile.padEnd(profileWidth)} ${origin}`,
+      `    ${row.stepId.padEnd(stepWidth)} ${axes.padEnd(axesWidth)} ${profile.padEnd(profileWidth)} ${originOf(row)}`,
     );
   }
   const errors = report.findings.filter((f) => f.level === "error");

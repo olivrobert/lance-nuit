@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseProfileOverrides, parseStepOverrides } from "../../shared/env/config.schema.ts";
 import { buildPipelineContext, deriveContext } from "../../definition/pipeline/context.ts";
+import { loadPipelineDefinition } from "../../definition/pipeline/loader.ts";
 import { formatLintReport, lintStepOverrides } from "./lint-config-check.ts";
 import { builtinRegistries } from "../../../tests/builtin-registries.ts";
 
@@ -103,7 +104,7 @@ test("lint: a legitimate override appears as config source", async () => {
       }),
     );
     const row = report.effective.find((r) => r.pipeline === "agent" && r.stepId === "review");
-    expect(row).toMatchObject({ model: "sonnet", source: "config" });
+    expect(row).toMatchObject({ model: "sonnet", sources: { model: "config", effort: "profile" } });
     expect(formatLintReport(report).exitCode).toBe(0);
   } finally {
     project.cleanup();
@@ -182,7 +183,11 @@ test("lint: a project pipeline profile is visible", async () => {
       }),
     );
     const row = report.effective.find((r) => r.pipeline === "agent-profile" && r.stepId === "implement");
-    expect(row).toMatchObject({ profile: "coder", model: "opus[1m]", source: "profile" });
+    expect(row).toMatchObject({
+      profile: "coder",
+      model: "opus[1m]",
+      sources: { model: "profile", effort: "profile" },
+    });
     expect(report.findings.some((f) => /profiles\["operator"\] is not used by any step/.test(f.message))).toBe(true);
   } finally {
     project.cleanup();
@@ -213,7 +218,11 @@ test("lint: the three registered backends are linted in one pipeline", async () 
     expect(row("implement")).toMatchObject({ profile: "coder", model: "gpt-5.6-luna", effort: "medium" });
     // opencode declares the `model` and `effort` axes, so the override applies
     // instead of being reported as unsupported.
-    expect(row("sort")).toMatchObject({ profile: "triage", model: "opencode/other", source: "config" });
+    expect(row("sort")).toMatchObject({
+      profile: "triage",
+      model: "opencode/other",
+      sources: { model: "config", effort: "profile" },
+    });
     expect(report.findings.filter((f) => f.level === "error")).toEqual([]);
     const rendered = formatLintReport(report);
     expect(rendered.exitCode).toBe(0);
@@ -224,6 +233,64 @@ test("lint: the three registered backends are linted in one pipeline", async () 
       .filter((line) => line.includes("@"))
       .map((line) => line.indexOf("@"));
     expect(new Set(columns).size).toBe(1);
+  } finally {
+    project.cleanup();
+  }
+});
+
+test("lint: shows the axes the loader applies, one imposed by the capability and one by the config", async () => {
+  const project = projectWithPipeline(
+    "capability",
+    `export default ({ pipeline, llmStep }) => pipeline("capability").add(
+  llmStep({ id: "spec", name: "Spec", backend: "claude", profile: "coder", command: "/probe go", rerunOnResume: true })
+).build();\n`,
+  );
+  mkdirSync(join(project.cwd, ".claude", "skills", "probe"), { recursive: true });
+  writeFileSync(join(project.cwd, ".claude", "skills", "probe", "SKILL.md"), "---\nname: probe\nmodel: sonnet\n---\n");
+  try {
+    const base = buildPipelineContext({ ...builtinRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
+    const context = deriveContext(base, {
+      config: { ...base.config, steps: parseStepOverrides({ "capability:spec": { effort: "high" } }) },
+    });
+    const report = await lintStepOverrides(context);
+    const row = report.effective.find((r) => r.pipeline === "capability" && r.stepId === "spec");
+    expect(row).toMatchObject({
+      capability: "skill:probe",
+      model: "sonnet",
+      effort: "high",
+      sources: { model: "capability", effort: "config" },
+    });
+    expect(formatLintReport(report).text).toMatch(
+      /spec .*sonnet \/ high .*model: capability, effort: config \(skill:probe\)/,
+    );
+
+    const file = join(project.cwd, ".lance-nuit", "pipelines", "capability.ts");
+    const loaded = await loadPipelineDefinition(file, context);
+    // The imposed model is not written: the capability's frontmatter sets it at session start.
+    expect(loaded.steps[0]!.backend).toEqual({ id: "claude", options: { effort: "high" } });
+  } finally {
+    project.cleanup();
+  }
+});
+
+test("lint: a fix profile without a policy for its backend is a validation error", async () => {
+  // It used to be refused only while materializing, so lint reported the pipeline
+  // as unloadable instead of naming the problem with the others.
+  const project = projectWithPipeline(
+    "fix-profile",
+    `export default ({ pipeline, bashStep }) => pipeline("fix-profile").add(
+  bashStep({ id: "lint", name: "Lint", command: "true", rerunOnResume: true,
+    onFail: { fix: "fix", retries: 1, fixProfile: "planner", fixBackend: "codex" } })
+).build();\n`,
+  );
+  try {
+    const base = buildPipelineContext({ ...builtinRegistries(), cwd: project.cwd, runnerDir, ticket: "LINT-0" });
+    const report = await lintStepOverrides(base);
+    const errors = report.findings.filter((f) => f.level === "error").map((f) => f.message);
+    expect(errors).toContainEqual(
+      expect.stringMatching(/^fix-profile: step "lint": fix profile "planner" is not defined for backend "codex"/),
+    );
+    expect(report.findings.some((f) => /cannot be built/.test(f.message))).toBe(false);
   } finally {
     project.cleanup();
   }

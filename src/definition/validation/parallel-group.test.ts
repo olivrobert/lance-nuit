@@ -9,7 +9,8 @@ import { type AgentStepBuilder, createProjectBashStep } from "../dsl/dsl-steps.t
 import type { LlmStepOptions, OnFail, StepOptionsBase } from "../dsl/dsl-types.js";
 import { actionStep, humanReview, llmStep, parallelize, pipeline, runPipeline } from "../dsl.js";
 import { buildPipelineContext } from "../pipeline/context.js";
-import { loadPipelineDefinition, validatePipeline } from "../pipeline/loader.js";
+import { loadPipelineDefinition } from "../pipeline/loader.js";
+import { validatePipeline } from "./pipeline.js";
 
 const REGISTRY = createDefaultAgentBackendRegistry();
 const CONTEXT = buildPipelineContext({ agentBackendRegistry: REGISTRY });

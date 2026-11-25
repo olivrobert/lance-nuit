@@ -149,8 +149,11 @@ Check all reachable pipelines with the low-level command:
 bun /path/to/lance-nuit/src/runner.ts --lint-config
 ```
 
-The report shows effective model/effort and their source for every agent step,
-regardless of backend. Tracker and other `actionStep`s have no such axes.
+The report shows, for every agent step and regardless of backend, the
+model/effort a run applies and the source of each axis (capability, config,
+profile or machine default). It also lists every error the pipeline validation
+would raise at load time, including roles without a policy for their backend.
+Tracker and other `actionStep`s have no such axes.
 
 ## opencode specifics
 

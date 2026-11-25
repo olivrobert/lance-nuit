@@ -1,5 +1,5 @@
 //
-// Validate a pipeline definition and dynamically load its DSL.
+// Import a pipeline file and build its definition with the project DSL.
 
 import { dirname, resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,7 +8,6 @@ import { createPromptFile } from "../builtin-steps/lib/project-prompt.js";
 import { requireCapabilitiesStep } from "../builtin-steps/lib/skill-preflight.js";
 import { workItemDeliveryStep, workItemEscalateStep } from "../builtin-steps/lib/work-item-steps.js";
 import { reject } from "../dsl/preconditions.js";
-import { applyProfileOverrides, type ProfileOverrides } from "../dsl/profiles.js";
 import {
   createProjectActionStep,
   artifact,
@@ -38,36 +37,12 @@ import {
   textArtifact,
   withBackend,
 } from "../dsl.js";
-import { CONFIG_FILE_LABEL } from "../../shared/env/kit-paths.js";
 import { type PipelineContext, requireAgentBackendRegistry } from "../../shared/language/context.js";
 import type { Pipeline } from "../definition.js";
-import type { StepOverride } from "../../shared/language/profiles.js";
 import { decisionMatchesArtifact, pendingRejection } from "../../work-items/index.js";
-import { applyStepOverrides, imposedAxes } from "../validation/step-overrides.js";
-import { AgentBackendValidator } from "../validation/backend.js";
-import { PipelineValidationChain, PipelineValidationError } from "../validation/chain.js";
-import { FixBackendValidator } from "../validation/fix-backend.js";
-import { AgentOutputContractValidator } from "../validation/output-contract.js";
-import { ProfileCoherenceValidator } from "../validation/profile-coherence.js";
-import { ConfigurationReferenceValidator, ExtractorReferenceValidator } from "../validation/references.js";
-import { ResumeSessionValidator } from "../validation/resume-session.js";
-import { ParallelGroupValidator } from "../validation/parallel-group.js";
-import { ResumedFixEscalationValidator } from "../validation/resumed-fix-escalation.js";
-import { PipelineStructureValidator } from "../validation/structure.js";
+import { materializePipeline } from "../materialize/materialize.js";
+import { validatePipeline } from "../validation/pipeline.js";
 import { buildPipelineContext } from "./context.js";
-
-const PIPELINE_VALIDATION_CHAIN = new PipelineValidationChain([
-  new PipelineStructureValidator(),
-  new AgentBackendValidator(),
-  new AgentOutputContractValidator(),
-  new ProfileCoherenceValidator(),
-  new ResumeSessionValidator(),
-  new ResumedFixEscalationValidator(),
-  new ParallelGroupValidator(),
-  new FixBackendValidator(),
-  new ExtractorReferenceValidator(),
-  new ConfigurationReferenceValidator(),
-]);
 
 /**
  * Build the facade injected into a project factory.
@@ -114,30 +89,9 @@ export function createProjectDsl(context: PipelineContext, pipelineDir: string):
   };
 }
 
-export interface PipelineValidationOptions {
-  profileOverrides?: ProfileOverrides;
-  stepOverrides?: Readonly<Record<string, StepOverride>>;
-  /** Runtime context required to detect capability conflicts. */
-  context?: PipelineContext;
-}
-
-export function validatePipeline(pipeline: Pipeline, source: string, options: PipelineValidationOptions = {}): void {
-  const report = PIPELINE_VALIDATION_CHAIN.validate({
-    source,
-    pipeline,
-    profileOverrides: options.profileOverrides ?? {},
-    stepOverrides: options.stepOverrides ?? {},
-    pipelineContext: options.context,
-  });
-  if (!report.ok) {
-    // The chain keeps the complete report, but the loader
-    // surfaces one aggregated error to its callers.
-    throw new PipelineValidationError(source, report.errors);
-  }
-}
-
-/** Dynamically import a .ts pipeline factory and return its definition. */
-export async function loadPipelineDefinition(pipelinePath: string, context?: PipelineContext): Promise<Pipeline> {
+/** Import a .ts pipeline factory and build its definition, with nothing validated
+ *  nor applied: what the author wrote. */
+export async function buildPipelineDefinition(pipelinePath: string, context?: PipelineContext): Promise<Pipeline> {
   const abs = pathResolve(pipelinePath);
   const mod = await import(pathToFileURL(abs).href);
   if (mod.default === undefined) {
@@ -147,26 +101,20 @@ export async function loadPipelineDefinition(pipelinePath: string, context?: Pip
     throw new Error(`Invalid pipeline (${pipelinePath}): default export must be a factory (dsl, context) => Pipeline`);
   }
   const buildContext = context ?? buildPipelineContext();
-  const projectDsl = createProjectDsl(buildContext, dirname(abs));
-  const pipeline = (mod.default as PipelineFactory)(projectDsl, buildContext);
-  // All consistency validation must precede option materialization: a profile
-  // incompatible with the backend must never be silently rendered inert by
-  // applyProfileOverrides().
-  validatePipeline(pipeline, pipelinePath, {
+  return (mod.default as PipelineFactory)(createProjectDsl(buildContext, dirname(abs)), buildContext);
+}
+
+/** Build a pipeline, validate it with its configuration, then materialize its
+ *  model/effort. Validation comes first: every refusal is reported before a step
+ *  is written, and none is left to materialization. */
+export async function loadPipelineDefinition(pipelinePath: string, context?: PipelineContext): Promise<Pipeline> {
+  const buildContext = context ?? buildPipelineContext();
+  const pipeline = await buildPipelineDefinition(pipelinePath, buildContext);
+  const configuration = {
     profileOverrides: buildContext.config.profiles,
     stepOverrides: buildContext.config.steps,
-    context: buildContext,
-  });
-
-  // Config overrides apply to the built pipeline: the profile supplies defaults,
-  // then the config file decides. A key that no longer matches a step in this
-  // pipeline fails here, before the first spawn.
-  applyProfileOverrides(
-    pipeline,
-    buildContext.config.profiles,
-    (step) => imposedAxes(step, buildContext),
-    requireAgentBackendRegistry(buildContext),
-  );
-  applyStepOverrides(pipeline, buildContext.config.steps, CONFIG_FILE_LABEL, buildContext);
+  };
+  validatePipeline(pipeline, pipelinePath, { ...configuration, context: buildContext });
+  materializePipeline(pipeline, { ...configuration, context: buildContext });
   return pipeline;
 }

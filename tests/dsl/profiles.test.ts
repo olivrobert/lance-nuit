@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { applyProfileOverrides } from "../../src/definition/dsl/profiles.js";
+import { materializePipeline } from "../../src/definition/materialize/materialize.js";
+import { buildPipelineContext } from "../../src/definition/pipeline/context.js";
+import { validatePipeline } from "../../src/definition/validation/pipeline.js";
+import type { Pipeline } from "../../src/definition/definition.js";
+import type { ProfileOverrides } from "../../src/shared/language/profiles.js";
 import { createProjectBashStep } from "../../src/definition/dsl/dsl-steps.js";
 import { CODEX_MODEL, CODEX_SANDBOX, llmStep, mechanicalFix, pipeline } from "../../src/definition/dsl.js";
 import { parseProfileOverrides } from "../../src/shared/env/config.schema.js";
@@ -10,6 +14,11 @@ const REGISTRY = createDefaultAgentBackendRegistry();
 /** A bash step whose fix carries Claude options is declared through the loaded
  *  DSL, which binds the step factories to the run registry. */
 const bashStep = createProjectBashStep(REGISTRY);
+const CONTEXT = buildPipelineContext({ agentBackendRegistry: REGISTRY });
+
+function applyProfiles(built: Pipeline, profileOverrides: ProfileOverrides = {}): void {
+  materializePipeline(built, { profileOverrides, stepOverrides: {}, context: CONTEXT });
+}
 
 test("Claude profile: preserves the role without materializing axes at build time", () => {
   const step = llmStep(
@@ -50,7 +59,7 @@ test("Claude profile: nominal axes are materialized at load time", () => {
       ),
     )
     .build();
-  applyProfileOverrides(loaded, {}, () => ({}), REGISTRY);
+  applyProfiles(loaded);
   expect(loaded.steps[0]?.backend).toEqual({ id: "claude", options: { model: "opus", effort: "high" } });
 });
 
@@ -93,11 +102,9 @@ test("profile config: retunes the role's Claude axes", () => {
       llmStep({ id: "b", name: "B", backend: "claude", profile: "coder", command: "b", rerunOnResume: true }, REGISTRY),
     )
     .build();
-  applyProfileOverrides(
+  applyProfiles(
     built,
     parseProfileOverrides({ coder: { backends: { claude: { model: "opus[1m]", effort: "low" } } } }),
-    () => ({}),
-    REGISTRY,
   );
   expect(built.steps[0]!.backend).toEqual({ id: "claude", options: { model: "opus[1m]", effort: "low" } });
   expect(built.steps[1]!.backend).toEqual({ id: "claude", options: { model: "opus[1m]", effort: "low" } });
@@ -120,7 +127,7 @@ test("agent profile: materializes Codex axes without injecting the Claude model"
     )
     .build();
 
-  applyProfileOverrides(built, {}, () => ({}), REGISTRY);
+  applyProfiles(built);
 
   expect(built.steps[0]!.backend).toEqual({
     id: "codex",
@@ -145,11 +152,9 @@ test("profile config: provider-specific axes retune Codex", () => {
     )
     .build();
 
-  applyProfileOverrides(
+  applyProfiles(
     built,
     parseProfileOverrides({ coder: { backends: { codex: { model: "gpt-5-codex", effort: "high" } } } }),
-    () => ({}),
-    REGISTRY,
   );
 
   expect(built.steps[0]!.backend).toEqual({
@@ -176,7 +181,7 @@ test("agent profile: backend technical options are preserved", () => {
     )
     .build();
 
-  applyProfileOverrides(built, {}, () => ({}), REGISTRY);
+  applyProfiles(built);
 
   expect(built.steps[0]!.backend).toEqual({
     id: "codex",
@@ -186,24 +191,6 @@ test("agent profile: backend technical options are preserved", () => {
       effort: "medium",
     },
   });
-});
-
-test("profile config: an imposed axis is locally ignored like a wildcard", () => {
-  const built = pipeline("demo")
-    .add(
-      llmStep(
-        { id: "a", name: "A", backend: "claude", profile: "operator", command: "a", rerunOnResume: true },
-        REGISTRY,
-      ),
-    )
-    .build();
-  applyProfileOverrides(
-    built,
-    parseProfileOverrides({ operator: { backends: { claude: { model: "opus", effort: "high" } } } }),
-    () => ({ model: "haiku" }),
-    REGISTRY,
-  );
-  expect(built.steps[0]!.backend).toEqual({ id: "claude", options: { effort: "high" } });
 });
 
 test("profile config: invalid name, axis, and effort are rejected", () => {
@@ -243,12 +230,7 @@ test("fixProfile: a bash step's fix borrows the role regime through the default 
     )
     .build();
 
-  applyProfileOverrides(
-    built,
-    parseProfileOverrides({ coder: { backends: { claude: { model: "opus[1m]" } } } }),
-    () => ({}),
-    REGISTRY,
-  );
+  applyProfiles(built, parseProfileOverrides({ coder: { backends: { claude: { model: "opus[1m]" } } } }));
 
   // A bash step has no backend: fix axes are resolved for the default provider
   // and merged into the options read by the fix loop.
@@ -284,12 +266,7 @@ test("fixBackend: a bash step's fix borrows the role regime through the named ba
   expect(built.steps[0]!.on_failure?.fix_backend).toBe("codex");
   expect(built.steps[0]!.on_failure?.backend_options).toBeUndefined();
 
-  applyProfileOverrides(
-    built,
-    parseProfileOverrides({ coder: { backends: { codex: { effort: "high" } } } }),
-    () => ({}),
-    REGISTRY,
-  );
+  applyProfiles(built, parseProfileOverrides({ coder: { backends: { codex: { effort: "high" } } } }));
 
   expect(built.steps[0]!.on_failure?.backend_options).toEqual({ model: CODEX_MODEL.GPT_5_6_LUNA, effort: "high" });
 });
@@ -307,7 +284,7 @@ test("fixBackend: the fix profile must have a policy for the named backend", () 
     )
     .build();
 
-  expect(() => applyProfileOverrides(built, {}, () => ({}), REGISTRY)).toThrow(
+  expect(() => validatePipeline(built, "demo.ts", { context: CONTEXT })).toThrow(
     /"lint": fix profile "planner" is not defined for backend "codex"/,
   );
 });
@@ -334,7 +311,7 @@ test("mechanicalFix on Codex: the fix inherits the step's sandbox", () => {
     )
     .build();
 
-  applyProfileOverrides(built, {}, () => ({}), REGISTRY);
+  applyProfiles(built);
 
   expect(built.steps[0]!.on_failure?.backend_options).toEqual({
     sandbox: CODEX_SANDBOX.WORKSPACE_WRITE,
@@ -367,7 +344,7 @@ test("fix options: an explicit fix policy wins over the step's options", () => {
     )
     .build();
 
-  applyProfileOverrides(built, {}, () => ({}), REGISTRY);
+  applyProfiles(built);
 
   expect(built.steps[0]!.on_failure?.backend_options).toEqual({
     sandbox: CODEX_SANDBOX.READ_ONLY,

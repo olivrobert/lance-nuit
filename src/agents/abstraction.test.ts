@@ -7,7 +7,7 @@ import {
   pipeline,
   withBackend,
 } from "../definition/dsl.js";
-import { validatePipeline } from "../definition/pipeline/loader.js";
+import { validatePipeline } from "../definition/validation/pipeline.js";
 import { AgentBackendRegistry } from "../contracts/backends.js";
 import { createDefaultAgentBackendRegistry } from "./default-registry.ts";
 import { buildPipelineContext } from "../definition/pipeline/context.js";

@@ -7,7 +7,7 @@ import { clearCapabilityCache } from "../../shared/env/capability-frontmatter.js
 import { parseStepOverrides } from "../../shared/env/config.schema.js";
 import type { Pipeline } from "../definition.js";
 import { buildPipelineContext } from "../pipeline/context.js";
-import { validatePipeline } from "../pipeline/loader.js";
+import { validatePipeline } from "./pipeline.js";
 import { PipelineValidationError } from "./chain.js";
 import { createDefaultAgentBackendRegistry } from "../../agents/default-registry.ts";
 

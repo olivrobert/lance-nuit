@@ -8,7 +8,7 @@ import { isPersistedRunResumable, pendingSteps } from "../../src/run/record/run-
 import { readRunSnapshot } from "../../src/run/record/run-snapshot.js";
 import { deriveRunStatus } from "../../src/run/record/run-verdict.js";
 import { stopRun } from "../../src/run/record/run-transitions.js";
-import { validatePipeline } from "../../src/definition/pipeline/loader.js";
+import { validatePipeline } from "../../src/definition/validation/pipeline.js";
 import { makeRunStep } from "../../src/run/record/run-step.js";
 import { builtinRegistries } from "../builtin-registries.ts";
 import { buildPipelineContext } from "../../src/definition/pipeline/context.js";

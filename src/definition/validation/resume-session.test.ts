@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { OnFail } from "../dsl/dsl-types.js";
 import { bashStep, llmStep, pipeline } from "../dsl.js";
-import { validatePipeline } from "../pipeline/loader.js";
+import { validatePipeline } from "./pipeline.js";
 import { PipelineValidationChain } from "./chain.js";
 import { ResumeSessionValidator } from "./resume-session.js";
 import { createDefaultAgentBackendRegistry } from "../../agents/default-registry.ts";
