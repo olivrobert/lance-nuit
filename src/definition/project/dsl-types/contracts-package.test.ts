@@ -48,14 +48,17 @@ function fakeRunner(files: Record<string, string>): string {
 }
 
 describe("vendored contracts package", () => {
-  test("an extension inside the kit resolves lance-nuit/contracts and its subpaths", async () => {
+  test("an extension inside the kit resolves lance-nuit/contracts and its testing subpath", async () => {
     const dir = kit();
     const metadata = installKitContracts(dir);
     expect(metadata.sourceHash).toBe(contractsSourceHash());
 
     const manifest = readManifest(dir);
     expect(manifest.name).toBe("lance-nuit");
-    expect(Object.keys(manifest.exports as object)).toEqual(["./package.json", "./contracts", "./contracts/*"]);
+    const published = JSON.parse(readFileSync(join(import.meta.dir, "../../../../package.json"), "utf8")) as {
+      exports: Record<string, unknown>;
+    };
+    expect(JSON.stringify(manifest.exports)).toBe(JSON.stringify(published.exports).replaceAll("./dist/", "./"));
     for (const file of ["index.js", "index.d.ts", "testing.js", "testing.d.ts", "extensions.js", "backends/codex.js"]) {
       expect(existsSync(join(kitContractsPackageDir(dir), "contracts", file))).toBe(true);
     }

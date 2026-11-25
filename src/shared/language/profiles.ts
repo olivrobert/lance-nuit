@@ -6,7 +6,7 @@
 import type { EffortLevel } from "../../contracts/backends.js";
 
 /** Effort levels accepted by agent backends. Canonical union lives in
- *  `lance-nuit/contracts/backends`; re-exported here for authoring convenience. */
+ *  `contracts/backends.ts`; re-exported here for authoring convenience. */
 export type { EffortLevel } from "../../contracts/backends.js";
 
 /** Declared as a tuple so a schema can build an enum from it without restating

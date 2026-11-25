@@ -182,7 +182,7 @@ function vendoredManifest(sourceHash: string, runnerDir: string): string {
     exports: {
       "./package.json": "./package.json",
       "./contracts": { types: "./contracts/index.d.ts", import: "./contracts/index.js" },
-      "./contracts/*": { types: "./contracts/*.d.ts", import: "./contracts/*.js" },
+      "./contracts/testing": { types: "./contracts/testing.d.ts", import: "./contracts/testing.js" },
     },
     [MARKER_KEY]: { sourceHash },
   };

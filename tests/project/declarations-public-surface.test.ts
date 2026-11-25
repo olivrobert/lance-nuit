@@ -7,52 +7,39 @@
 // The emitted tree also holds declarations nothing public reaches (the schema
 // modules themselves, for one). They are inert: the kit tsconfig only includes
 // `pipelines/**`, so a file enters a project's typecheck through an import chain
-// from `definition/project/dsl.d.ts` or not at all. The walk below follows that chain.
-import { expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+// from `definition/project/dsl.d.ts` or not at all. `reachableDeclarations`
+// follows that chain, and installation copies and fingerprints exactly its result.
+import { beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
-import { DECLARATIONS_ENTRY, generateDslDeclarations } from "../../src/definition/project/dsl-types/declarations.ts";
+import { join, relative } from "node:path";
+import {
+  publicDeclarationsHash,
+  reachableDeclarations,
+  withDslDeclarations,
+} from "../../src/definition/project/dsl-types/declarations.ts";
+import { DECLARATIONS_ENTRY } from "../../src/definition/project/dsl-types/layout.ts";
 
 setDefaultTimeout(30_000);
 
-const RELATIVE_SPECIFIER = /(?:from\s+|import\s*\(\s*|import\s+)["'](\.{1,2}\/[^"']+)["']/g;
+let emitted: string;
+let surface: Map<string, string>;
 
-function resolveDeclaration(fromFile: string, specifier: string): string | undefined {
-  const base = resolve(dirname(fromFile), specifier).replace(/\.(js|ts|d\.ts)$/, "");
-  return [`${base}.d.ts`, join(base, "index.d.ts")].find((candidate) => existsSync(candidate));
-}
+beforeAll(() => {
+  emitted = mkdtempSync(join(tmpdir(), "dsl-declarations-surface-"));
+  withDslDeclarations((declarations) => cpSync(declarations, emitted, { recursive: true }));
+  surface = new Map(
+    [...reachableDeclarations(emitted)].map((file) => [relative(emitted, file), readFileSync(file, "utf-8")]),
+  );
+});
 
-/** Every declaration file reachable from `entry` through relative imports. */
-function reachableDeclarations(entry: string): Map<string, string> {
-  const sources = new Map<string, string>();
-  const queue = [entry];
-  while (queue.length > 0) {
-    const file = queue.pop()!;
-    if (sources.has(file)) continue;
-    const source = readFileSync(file, "utf-8");
-    sources.set(file, source);
-    for (const match of source.matchAll(RELATIVE_SPECIFIER)) {
-      const target = resolveDeclaration(file, match[1]!);
-      if (target && !sources.has(target)) queue.push(target);
-    }
-  }
-  return sources;
-}
-
-function publicSurface(prefix: string): Map<string, string> {
-  const out = mkdtempSync(join(tmpdir(), prefix));
-  generateDslDeclarations(out);
-  const reachable = reachableDeclarations(join(out, DECLARATIONS_ENTRY));
-  // Sanity: the walk must actually cover the public surface, not stop at the entry.
-  expect(reachable.size).toBeGreaterThan(20);
-  return new Map([...reachable].map(([file, source]) => [relative(out, file), source]));
-}
+test("the walk covers the public surface, not only its entry point", () => {
+  expect(surface.size).toBeGreaterThan(20);
+  expect(surface.has(join("definition", "dsl", "dsl-types.d.ts"))).toBe(true);
+});
 
 test("declarations reachable from the DSL entry point never import zod", () => {
-  const offenders = [...publicSurface("dsl-declarations-no-zod-")]
-    .filter(([, source]) => /["']zod["']/.test(source))
-    .map(([file]) => file);
+  const offenders = [...surface].filter(([, source]) => /["']zod["']/.test(source)).map(([file]) => file);
   expect(offenders).toEqual([]);
 });
 
@@ -62,9 +49,7 @@ test("declarations reachable from the DSL entry point never import zod", () => {
 // with "Cannot find namespace 'NodeJS'". Spell such parameters structurally
 // (`Record<string, string | undefined>` for an environment, for one).
 test("declarations reachable from the DSL entry point never name ambient node types", () => {
-  const offenders = [...publicSurface("dsl-declarations-ambient-")]
-    .filter(([, source]) => /\bNodeJS\./.test(source))
-    .map(([file]) => file);
+  const offenders = [...surface].filter(([, source]) => /\bNodeJS\./.test(source)).map(([file]) => file);
   expect(offenders).toEqual([]);
 });
 
@@ -73,7 +58,6 @@ test("declarations reachable from the DSL entry point never name ambient node ty
 // every author-facing field. A field present in the source but absent here is
 // exactly what a project pipeline reports as TS2353 "'capture' does not exist".
 test("the installed LlmStepOptions declaration carries its author-facing fields", () => {
-  const surface = publicSurface("dsl-declarations-llm-options-");
   const options = surface.get(join("definition", "dsl", "dsl-types.d.ts"));
   expect(options).toBeDefined();
   const declaration = options!.slice(options!.indexOf("export type LlmStepOptions<"));
@@ -86,4 +70,29 @@ test("the installed LlmStepOptions declaration carries its author-facing fields"
     expect(declaration).toContain(field);
   }
   expect(surface.get(DECLARATIONS_ENTRY)).toContain("CaptureSpec,");
+});
+
+// `lancenuit typecheck` declares a kit fresh when this fingerprint matches: a
+// public declaration it skipped would leave stale types reported as current.
+test("the fingerprint follows every reachable declaration and nothing else", () => {
+  // A runner laid out as a published install: declarations, no sources.
+  const runner = mkdtempSync(join(tmpdir(), "dsl-declarations-runner-"));
+  cpSync(emitted, runner, { recursive: true });
+  const installed = mkdtempSync(join(tmpdir(), "dsl-declarations-kit-"));
+  cpSync(emitted, installed, { recursive: true });
+  const before = publicDeclarationsHash(emitted, runner);
+  expect(publicDeclarationsHash(installed, runner)).toBe(before);
+
+  writeFileSync(join(runner, "definition", "unreachable.d.ts"), "export type Unreachable = 1;\n");
+  expect(publicDeclarationsHash(installed, runner)).toBe(before);
+
+  // Outside the hand-written list the fingerprint used to read.
+  const options = join(runner, "definition", "dsl", "dsl-types.d.ts");
+  appendFileSync(options, "export type Changed = 1;\n");
+  const changed = publicDeclarationsHash(installed, runner);
+  expect(changed).not.toBe(before);
+
+  // A checkout: the source wins over its emitted declaration.
+  writeFileSync(options.replace(/\.d\.ts$/, ".ts"), "export type OnFail = { retries: number };\n");
+  expect(publicDeclarationsHash(installed, runner)).not.toBe(changed);
 });

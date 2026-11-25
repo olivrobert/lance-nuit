@@ -35,6 +35,9 @@ lancenuit typecheck --user
 The `--user` form targets the shared `~/.lance-nuit` kit (or `$PIPELINE_HOME`).
 Typechecking a kit whose
 generated declarations are missing or stale fails and tells you to install them.
+Their fingerprint covers the running CLI's version of every module reachable
+from `@lance-nuit/dsl`, plus the profile backends of the project configuration:
+upgrading the CLI or changing those backends marks the kit stale.
 
 Typechecking has one safeguard:
 

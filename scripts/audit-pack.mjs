@@ -2,6 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { DECLARATIONS_ENTRY } from "../dist/definition/project/dsl-types/layout.js";
 
 const result = spawnSync(
   process.platform === "win32" ? "npm.cmd" : "npm",
@@ -69,7 +70,7 @@ const required = [
   "dist/definition/dsl/profiles.d.ts",
   "dist/definition/pipeline/context.js",
   "dist/definition/pipeline/loader.js",
-  "dist/definition/project/dsl.d.ts",
+  `dist/${DECLARATIONS_ENTRY}`,
   "dist/definition/project/dsl-types.js",
   "dist/definition/extractors/registry.js",
   "dist/agents/backends/claude-code/prompts/fork-relay.md",

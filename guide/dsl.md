@@ -39,8 +39,8 @@ lancenuit create triage --template work-item
 Pipelines import their types from `@lance-nuit/dsl`. It is not an npm package:
 it is a path alias that `lancenuit create` wires into the generated
 `.lance-nuit/tsconfig.json`, pointing at declarations installed inside your
-project. Only type-level imports are valid through it; runtime values always
-come from the injected factory argument.
+project. It exports types only; runtime values always come from the injected
+factory argument (`Dsl`).
 
 <!-- project-pipeline-example:start -->
 ```ts

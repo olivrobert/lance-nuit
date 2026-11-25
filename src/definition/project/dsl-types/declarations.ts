@@ -2,55 +2,45 @@
 // Generation and specialization of the declaration files installed in a kit.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import type * as TypeScript from "typescript";
 import type { ProfileOverrides, StepProfileName } from "../../../shared/language/profiles.js";
 import { contractsSourceHash } from "./contracts-package.js";
 import { RUNNER_ROOT_DIR } from "../../../shared/env/kit-layout.js";
-import { loadTypeScript } from "./typescript-runtime.js";
+import { DECLARATIONS_ENTRY } from "./layout.js";
+import { diagnosticText, loadTypeScript } from "./typescript-runtime.js";
 
-// The hash contains only relative names and content: no plugin-cache, version,
-// or machine-path information leaks into the project. The `contracts/` directory
-// is covered as a whole by `contractsSourceHash`, so the same fingerprint drives
-// both the declarations and the vendored contracts package.
-const PUBLIC_DSL_SOURCES = [
-  "definition/project/dsl.ts",
-  "definition/dsl.ts",
-  "definition/dsl/artifact.ts",
-  "definition/dsl/input.ts",
-  "definition/dsl/profiles.ts",
-  "shared/language/profiles.ts",
-  "shared/language/config.ts",
-  "shared/language/artifact-ports.ts",
-  "shared/language/context.ts",
-  "work-items/artifact.ts",
-  "run/persisted.ts",
-  "shared/language/run-stop.ts",
-  "definition/run-report.ts",
-  "definition/input.ts",
-  "definition/definition.ts",
-  "definition/pipeline/context.ts",
-  "definition/builtin-steps/lib/public-work-item.ts",
-  "definition/builtin-steps/lib/work-item-steps.ts",
-  "definition/builtin-steps/lib/human-review.ts",
-  "definition/builtin-steps/lib/project-prompt.ts",
-  "definition/builtin-steps/lib/skill-preflight.ts",
-] as const;
+const DSL_SOURCE_ENTRY = DECLARATIONS_ENTRY.replace(/\.d\.ts$/, ".ts");
 
-export function publicDslSourceHash(runnerDir = RUNNER_ROOT_DIR): string {
+/**
+ * Fingerprint of the runner's public DSL surface.
+ *
+ * The files are exactly those `reachableDeclarations` finds under
+ * `declarationsDir`: the freshly emitted tree at install, the kit's installed
+ * copy at typecheck, the same set until a source changes. Each is hashed by
+ * relative name and the runner's current content, its TypeScript source in a
+ * checkout and its declaration in a published install. Any change that alters
+ * the set edits an import in a file already in it, so the fingerprint moves
+ * without emitting again. No plugin-cache, version, or machine-path information
+ * leaks into the project. The `contracts/` directory is covered as a whole by
+ * `contractsSourceHash`, so the same fingerprint drives both the declarations
+ * and the vendored contracts package.
+ */
+export function publicDeclarationsHash(declarationsDir: string, runnerDir = RUNNER_ROOT_DIR): string {
+  const root = resolve(declarationsDir);
   const hash = createHash("sha256");
   hash.update(contractsSourceHash(runnerDir));
   hash.update("\0");
-  for (const relativePath of PUBLIC_DSL_SOURCES) {
-    const sourcePath = join(runnerDir, relativePath);
-    // A published install has declarations under dist/ but no TypeScript
-    // sources. Hash the emitted declaration surface there; source checkouts
-    // continue to hash the authoring sources themselves.
-    const filePath = existsSync(sourcePath) ? sourcePath : sourcePath.replace(/\.ts$/, ".d.ts");
-    hash.update(relativePath);
+  const files = [...reachableDeclarations(root)].map((file) => relative(root, file)).sort();
+  for (const file of files) {
+    const declaration = join(runnerDir, file);
+    const source = declaration.replace(/\.d\.ts$/, ".ts");
+    const current = [source, declaration].find((path) => existsSync(path));
+    hash.update(file);
     hash.update("\0");
-    hash.update(readFileSync(filePath));
+    hash.update(current ? readFileSync(current) : "missing");
     hash.update("\0");
   }
   return hash.digest("hex");
@@ -86,48 +76,35 @@ function throwOnDiagnostics(phase: string, diagnostics: readonly TypeScript.Diag
   throw new Error(`${phase}:\n${diagnostics.map((d) => diagnosticText(d, root)).join("\n")}`);
 }
 
-export function diagnosticText(diagnostic: TypeScript.Diagnostic, root: string): string {
-  const ts = loadTypeScript();
-  const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
-  if (!diagnostic.file) return message;
-  const position = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
-  const file = relative(root, diagnostic.file.fileName) || diagnostic.file.fileName;
-  const category = ts.DiagnosticCategory[diagnostic.category]?.toLowerCase() ?? "error";
-  return `${file}:${position.line + 1}:${position.character + 1} - ${category} TS${diagnostic.code}: ${message}`;
-}
-
-/** Generate declarations into a temporary output directory. */
-export function generateDslDeclarations(outDir: string): void {
-  if (!existsSync(join(RUNNER_ROOT_DIR, "definition", "project", "dsl.ts"))) {
-    if (!existsSync(join(RUNNER_ROOT_DIR, "definition", "project", "dsl.d.ts"))) {
+/**
+ * Run `use` on a tree holding the runner's emitted declarations.
+ *
+ * A published install already ships them next to its JavaScript; a source
+ * checkout emits them into a temporary directory, removed once `use` returns.
+ */
+export function withDslDeclarations<T>(use: (declarationsDir: string) => T): T {
+  if (!existsSync(join(RUNNER_ROOT_DIR, DSL_SOURCE_ENTRY))) {
+    if (!existsSync(join(RUNNER_ROOT_DIR, DECLARATIONS_ENTRY))) {
       throw new Error("DSL sources and emitted declarations are missing from this runner installation.");
     }
-    copyDeclarations(RUNNER_ROOT_DIR, outDir);
-    return;
+    return use(RUNNER_ROOT_DIR);
   }
+  const temporary = mkdtempSync(join(tmpdir(), "lance-nuit-dsl-types-"));
+  try {
+    emitDslDeclarations(temporary);
+    return use(temporary);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+function emitDslDeclarations(outDir: string): void {
   const ts = loadTypeScript();
-  const program = ts.createProgram([join(RUNNER_ROOT_DIR, "definition", "project", "dsl.ts")], compilerOptions(outDir));
+  const program = ts.createProgram([join(RUNNER_ROOT_DIR, DSL_SOURCE_ENTRY)], compilerOptions(outDir));
   throwOnDiagnostics("Unable to generate DSL declarations", ts.getPreEmitDiagnostics(program), RUNNER_ROOT_DIR);
   const emitted = program.emit();
   throwOnDiagnostics("Unable to emit DSL declarations", emitted.diagnostics, RUNNER_ROOT_DIR);
 }
-
-function copyDeclarations(sourceDir: string, destinationDir: string): void {
-  for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
-    const source = join(sourceDir, entry.name);
-    const destination = join(destinationDir, entry.name);
-    if (entry.isDirectory()) {
-      mkdirSync(destination, { recursive: true });
-      copyDeclarations(source, destination);
-    } else if (entry.name.endsWith(".d.ts")) {
-      mkdirSync(dirname(destination), { recursive: true });
-      writeFileSync(destination, readFileSync(source));
-    }
-  }
-}
-
-/** Declaration entry point installed as `@lance-nuit/dsl`. */
-export const DECLARATIONS_ENTRY = join("definition", "project", "dsl.d.ts");
 
 /**
  * Candidate paths for one relative specifier found in a declaration file.
@@ -221,13 +198,13 @@ function renderProjectProfileBackends(overrides: ProfileOverrides): string {
 /**
  * Fingerprint of installed declarations.
  *
- * Covers public sources AND project profile backends: since `definition/dsl/profiles.d.ts` is
- * specialized by configuration, a source-only hash would leave stale types after
+ * Covers public declarations AND project profile backends: since `definition/dsl/profiles.d.ts` is
+ * specialized by configuration, a declarations-only hash would leave stale types after
  * a simple `pipeline.config.json` change.
  */
-export function declarationsHash(overrides: ProfileOverrides = {}, runnerDir = RUNNER_ROOT_DIR): string {
+export function declarationsHash(overrides: ProfileOverrides, declarationsDir: string): string {
   return createHash("sha256")
-    .update(publicDslSourceHash(runnerDir))
+    .update(publicDeclarationsHash(declarationsDir))
     .update("\0")
     .update(renderProjectProfileBackends(overrides))
     .digest("hex");
@@ -250,8 +227,3 @@ export function specializeProjectProfileBackends(destinationDir: string, overrid
   }
   writeFileSync(path, specialized);
 }
-
-// Keep the imported type in this module's declaration surface without making it
-// part of the runtime module. Installers use the same metadata shape as the
-// `definition/project/dsl-types.ts` entry point.
-export type { ProjectTypesMetadata } from "./layout.js";

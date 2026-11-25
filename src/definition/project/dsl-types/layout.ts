@@ -9,6 +9,8 @@ import { projectKitDir } from "../../../shared/env/kit-paths.js";
 import { HISTORY_DIR, RUNNER_STATE_DIR, TICKETLESS_RUNS_DIR } from "../../../shared/env/kit-layout.js";
 
 export const TYPES_SUBDIR = ".lance-nuit-types";
+/** Declaration entry point installed as `@lance-nuit/dsl`, relative to a declarations tree. */
+export const DECLARATIONS_ENTRY = "definition/project/dsl.d.ts";
 export const TSCONFIG_NAME = "tsconfig.json";
 export const PIPELINES_SUBDIR = "pipelines";
 /** Package name under which the vendored contracts are resolvable from a kit. */

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { loadPipelineConfig } from "../../shared/env/config.js";
 import { executeStep } from "../../execution/runners.js";
 import { buildPipelineContext } from "../../definition/pipeline/context.js";
-import { createProjectDsl } from "../../definition/pipeline/loader.js";
+import { createProjectDsl } from "../../definition/project/create-project-dsl.js";
 import { validatePipeline } from "../../definition/validation/pipeline.js";
 import { parseRunnerArgs } from "../cli/parse.js";
 import { makeRunStep } from "../../run/record/run-step.js";

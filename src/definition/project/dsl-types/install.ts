@@ -2,8 +2,7 @@
 // Installation of generated declarations, tsconfig, and gitignore files in kit
 // directories.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadPipelineConfig } from "../../../shared/env/config.js";
 import { userKitDir } from "../../../shared/env/kit-paths.js";
@@ -14,16 +13,18 @@ import { installKitContracts } from "./contracts-package.js";
 import {
   copyPublicDeclarations,
   declarationsHash,
-  generateDslDeclarations,
   specializeProjectProfileBackends,
+  withDslDeclarations,
 } from "./declarations.js";
 import {
+  DECLARATIONS_ENTRY,
   GITIGNORE_ENTRIES,
   kitTsconfigPath,
   kitTypesDirectory,
   PIPELINES_SUBDIR,
   type ProjectTypesMetadata,
   projectKitDirs,
+  TYPES_SUBDIR,
 } from "./layout.js";
 
 /**
@@ -43,7 +44,7 @@ function kitTsconfig(): Record<string, unknown> {
       moduleResolution: "NodeNext",
       baseUrl: ".",
       paths: {
-        "@lance-nuit/dsl": [`./.lance-nuit-types/definition/project/dsl.d.ts`],
+        "@lance-nuit/dsl": [`./${TYPES_SUBDIR}/${DECLARATIONS_ENTRY}`],
       },
     },
     include: [`${PIPELINES_SUBDIR}/**/*.ts`],
@@ -67,42 +68,34 @@ function ensureKitGitignore(kitDir: string): void {
  *  .gitignore in ONE kit directory. */
 export function installKitTypes(kitDir: string, profileOverrides: ProfileOverrides = {}): ProjectTypesMetadata {
   const root = resolve(kitDir);
-  const sourceHash = declarationsHash(profileOverrides);
-  const temporary = mkdtempSync(join(tmpdir(), "lance-nuit-dsl-types-"));
-  try {
-    generateDslDeclarations(temporary);
-
-    const destination = kitTypesDirectory(root);
+  const destination = kitTypesDirectory(root);
+  const sourceHash = withDslDeclarations((declarations) => {
     rmSync(destination, { recursive: true, force: true });
     mkdirSync(destination, { recursive: true });
-    copyPublicDeclarations(temporary, destination);
-    specializeProjectProfileBackends(destination, profileOverrides);
-    if (!existsSync(join(destination, "definition", "project", "dsl.d.ts"))) {
-      throw new Error("Incomplete DSL generation: definition/project/dsl.d.ts is missing");
-    }
-    writeFileSync(
-      join(destination, "package.json"),
-      `${JSON.stringify(
-        {
-          name: "@lance-nuit/project-types",
-          private: true,
-          types: "./definition/project/dsl.d.ts",
-          lanceNuitTypes: { sourceHash },
-        },
-        null,
-        2,
-      )}\n`,
-    );
+    copyPublicDeclarations(declarations, destination);
+    return declarationsHash(profileOverrides, declarations);
+  });
+  specializeProjectProfileBackends(destination, profileOverrides);
+  writeFileSync(
+    join(destination, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "@lance-nuit/project-types",
+        private: true,
+        types: `./${DECLARATIONS_ENTRY}`,
+        lanceNuitTypes: { sourceHash },
+      },
+      null,
+      2,
+    )}\n`,
+  );
 
-    writeFileSync(kitTsconfigPath(root), `${JSON.stringify(kitTsconfig(), null, 2)}\n`);
-    // The gitignore comes first: the package directory it excludes is written
-    // right after, and a fresh run refuses to start on a dirty tree.
-    ensureKitGitignore(root);
-    installKitContracts(root);
-    return { sourceHash };
-  } finally {
-    rmSync(temporary, { recursive: true, force: true });
-  }
+  writeFileSync(kitTsconfigPath(root), `${JSON.stringify(kitTsconfig(), null, 2)}\n`);
+  // The gitignore comes first: the package directory it excludes is written
+  // right after, and a fresh run refuses to start on a dirty tree.
+  ensureKitGitignore(root);
+  installKitContracts(root);
+  return { sourceHash };
 }
 
 /** Equip the shared kit directory (`~/.lance-nuit`, or `$PIPELINE_HOME`). */
@@ -147,5 +140,7 @@ export function installProjectTypes(projectRoot = process.cwd()): ProjectTypesMe
     mkdirSync(target, { recursive: true });
     metadata = installKitTypes(target, profileOverrides);
   }
-  return metadata ?? { sourceHash: declarationsHash(profileOverrides) };
+  return (
+    metadata ?? { sourceHash: withDslDeclarations((declarations) => declarationsHash(profileOverrides, declarations)) }
+  );
 }

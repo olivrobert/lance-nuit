@@ -8,9 +8,9 @@ import { loadPipelineConfig } from "../../../shared/env/config.js";
 import { userKitDir } from "../../../shared/env/kit-paths.js";
 import { errorMessage } from "../../../shared/lib/errors.js";
 import type { ProfileOverrides } from "../../../shared/language/profiles.js";
-import { declarationsHash, diagnosticText } from "./declarations.js";
-import { hasPipelines, kitTsconfigPath, kitTypesDirectory, projectKitDirs } from "./layout.js";
-import { loadTypeScript } from "./typescript-runtime.js";
+import { declarationsHash } from "./declarations.js";
+import { DECLARATIONS_ENTRY, hasPipelines, kitTsconfigPath, kitTypesDirectory, projectKitDirs } from "./layout.js";
+import { diagnosticText, loadTypeScript } from "./typescript-runtime.js";
 
 interface ProjectTypesPackage {
   readonly types?: string;
@@ -31,11 +31,11 @@ function readMetadata(kitDir: string): ProjectTypesPackage | undefined {
 function staleTypesReason(kitDir: string, overrides: ProfileOverrides = {}): string | undefined {
   const typesDir = kitTypesDirectory(kitDir);
   const metadata = readMetadata(kitDir);
-  if (!existsSync(join(typesDir, "definition", "project", "dsl.d.ts")) || !metadata?.lanceNuitTypes?.sourceHash) {
+  if (!existsSync(join(typesDir, DECLARATIONS_ENTRY)) || !metadata?.lanceNuitTypes?.sourceHash) {
     return "DSL declarations are missing";
   }
-  if (metadata.types !== "./definition/project/dsl.d.ts") return "invalid DSL declarations manifest";
-  if (metadata.lanceNuitTypes.sourceHash !== declarationsHash(overrides)) {
+  if (metadata.types !== `./${DECLARATIONS_ENTRY}`) return "invalid DSL declarations manifest";
+  if (metadata.lanceNuitTypes.sourceHash !== declarationsHash(overrides, typesDir)) {
     return "stale DSL declarations";
   }
   return undefined;

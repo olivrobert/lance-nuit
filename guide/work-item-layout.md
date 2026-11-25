@@ -51,8 +51,9 @@ resolution convention, not a dispatch model imposed by the runner.
 A pipeline may end a run by writing `artifacts/report.json`, a structured
 delivery report. It is the only file the dashboard reads to render a finished
 run as a report: the dashboard never extracts a status from markdown. The shape
-is the `RunReport` type, exported with `RUN_REPORT_FILE` from `@lance-nuit/dsl`
-so the step that builds it typechecks against it (see
+is the `RunReport` type, exported from `@lance-nuit/dsl` so the step that
+builds it typechecks against it; its file name is `RUN_REPORT_FILE` on the
+injected `Dsl` (see
 [`DSL-API.md`](../docs/DSL-API.md#run-report)). Build it in a command or action
 step from artifacts that already exist rather than asking an agent to write it.
 

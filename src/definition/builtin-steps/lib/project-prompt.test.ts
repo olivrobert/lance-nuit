@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildPipelineContext } from "../../pipeline/context.js";
-import { createProjectDsl, loadPipelineDefinition } from "../../pipeline/loader.js";
+import { createProjectDsl } from "../../project/create-project-dsl.js";
+import { loadPipelineDefinition } from "../../pipeline/loader.js";
 import { createPromptFile } from "./project-prompt.js";
 import { builtinRegistries } from "../../../../tests/builtin-registries.ts";
 

@@ -11,6 +11,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, r
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DECLARATIONS_ENTRY } from "../dist/definition/project/dsl-types/layout.js";
 
 const runnerRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -138,7 +139,7 @@ function verifyRuntimeDependencies() {
   const installedRoot = join(packageRoot, "node_modules", "lance-nuit");
   for (const file of [
     "dist/runner.js",
-    "dist/definition/project/dsl.d.ts",
+    `dist/${DECLARATIONS_ENTRY}`,
     // Public contracts surface: lance-nuit/contracts.
     "dist/contracts/index.js",
     "dist/contracts/index.d.ts",
@@ -165,7 +166,7 @@ function verifyInstalledTypesCommand() {
   const consumerEnv = { ...npmEnv, PIPELINE_HOME: isolatedHome };
 
   checked(bin, ["types", "install"], { cwd: project, env: consumerEnv });
-  const projectTypes = join(project, ".lance-nuit", ".lance-nuit-types", "definition", "project", "dsl.d.ts");
+  const projectTypes = join(project, ".lance-nuit", ".lance-nuit-types", DECLARATIONS_ENTRY);
   const projectTsconfig = join(project, ".lance-nuit", "tsconfig.json");
   assert(existsSync(projectTypes), `lancenuit types install did not generate ${projectTypes}`);
   assert(existsSync(projectTsconfig), `lancenuit types install did not generate ${projectTsconfig}`);
@@ -184,7 +185,7 @@ export default ({ pipeline, bashStep }: Dsl) => pipeline("minimal")
   checked(bin, ["typecheck"], { cwd: project, env: consumerEnv });
 
   checked(bin, ["types", "install", "--user"], { cwd: project, env: consumerEnv });
-  const userTypes = join(isolatedHome, ".lance-nuit-types", "definition", "project", "dsl.d.ts");
+  const userTypes = join(isolatedHome, ".lance-nuit-types", DECLARATIONS_ENTRY);
   const userTsconfig = join(isolatedHome, "tsconfig.json");
   assert(existsSync(userTypes), `lancenuit types install --user did not generate ${userTypes}`);
   assert(existsSync(userTsconfig), `lancenuit types install --user did not generate ${userTsconfig}`);

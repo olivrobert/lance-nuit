@@ -1,10 +1,7 @@
-import type { humanReview as humanReviewFactory } from "./builtin-steps/lib/human-review.js";
+import type { humanReview } from "./builtin-steps/lib/human-review.js";
 import type { PromptFileFactory } from "./builtin-steps/lib/project-prompt.js";
 import type { requireCapabilitiesStep } from "./builtin-steps/lib/skill-preflight.js";
-import type {
-  workItemDeliveryStep as workItemDeliveryStepFactory,
-  workItemEscalateStep as workItemEscalateStepFactory,
-} from "./builtin-steps/lib/work-item-steps.js";
+import type { workItemDeliveryStep, workItemEscalateStep } from "./builtin-steps/lib/work-item-steps.js";
 import type { artifact, source, textArtifact } from "./dsl/artifact.js";
 import type { forEachPipeline, runPipeline } from "./dsl/dsl-orchestration.js";
 import type { parallelize } from "./dsl/dsl-parallel.js";
@@ -27,6 +24,7 @@ import type {
   stopUnlessCommand,
 } from "./dsl/input.js";
 import type { reject } from "./dsl/preconditions.js";
+import type { RUN_REPORT_FILE } from "./run-report.js";
 import type { FixContext, PipelineContext } from "../shared/language/context.js";
 import type { Pipeline } from "./definition.js";
 import type { decisionMatchesArtifact, pendingRejection } from "../work-items/index.js";
@@ -41,8 +39,6 @@ export { humanReview } from "./builtin-steps/lib/human-review.js";
 export type { EffortLevel, JsonSchema } from "../contracts/backends.js";
 export type { SourceOptions } from "./dsl/artifact.js";
 export { artifact, source, textArtifact } from "./dsl/artifact.js";
-// The orchestration and work-item functions are imported above from their
-// focused modules; export them through this stable authoring entrypoint.
 export { forEachPipeline, runPipeline } from "./dsl/dsl-orchestration.js";
 export { PipelineOrchestrationStepBuilder } from "./dsl/dsl-orchestration-step.js";
 export { parallelize } from "./dsl/dsl-parallel.js";
@@ -132,6 +128,10 @@ export const mechanicalFix = (prompt: (ctx: FixContext) => string): OnFail => ({
   fixProfile: "coder",
 });
 
+/**
+ * Everything a project pipeline receives at runtime: the single list of the
+ * injected values, bound by `createProjectDsl`.
+ */
 export interface Dsl {
   pipeline: typeof pipeline;
   runPipeline: typeof runPipeline;
@@ -142,10 +142,10 @@ export interface Dsl {
   withBackend: WithBackendFactory;
   bashStep: typeof bashStep;
   actionStep: typeof actionStep;
-  workItemEscalateStep: typeof workItemEscalateStepFactory;
+  workItemEscalateStep: typeof workItemEscalateStep;
   /** Unified human-review helper; approval subjects are bound to this pipeline automatically. */
-  humanReview: typeof humanReviewFactory;
-  workItemDeliveryStep: typeof workItemDeliveryStepFactory;
+  humanReview: typeof humanReview;
+  workItemDeliveryStep: typeof workItemDeliveryStep;
   requireCapabilitiesStep: typeof requireCapabilitiesStep;
   promptFile: PromptFileFactory;
   artifact: typeof artifact;
@@ -173,6 +173,8 @@ export interface Dsl {
   decisionMatchesArtifact: typeof decisionMatchesArtifact;
   /** Reason and round of a rejection the rework has not answered yet, for its prompt. */
   pendingRejection: typeof pendingRejection;
+  /** File name of the run report a pipeline writes under the work item's `artifacts/`. */
+  RUN_REPORT_FILE: typeof RUN_REPORT_FILE;
 }
 
 export type PipelineFactory = (dsl: Dsl, context: PipelineContext) => Pipeline;

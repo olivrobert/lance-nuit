@@ -10,13 +10,11 @@ export {
   installProjectTypes,
   installUserTypes,
 } from "./dsl-types/install.js";
-export type { ProjectTypesMetadata } from "./dsl-types/layout.js";
 export {
   kitTsconfigPath,
   projectKitDirs,
   projectTypesDirectory,
 } from "./dsl-types/layout.js";
-export type { ProjectTypecheckResult } from "./dsl-types/typecheck.js";
 export {
   typecheckProjectPipelines,
   typecheckUserPipelines,

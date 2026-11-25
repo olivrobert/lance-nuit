@@ -4,9 +4,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { installKitTypes } from "../src/definition/project/dsl-types.js";
+import { DECLARATIONS_ENTRY, TYPES_SUBDIR } from "../src/definition/project/dsl-types/layout.js";
 
-const RUNNER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../src");
-const OUTPUT = join(RUNNER_DIR, "..", "docs", "DSL-API.md");
+export const DSL_API_FILE = join(resolve(dirname(fileURLToPath(import.meta.url)), ".."), "docs", "DSL-API.md");
+/** Installed declaration that holds the `Dsl` interface, the single list of injected values. */
+const DSL_INTERFACE_FILE = "definition/dsl.d.ts";
 
 interface Section {
   title: string;
@@ -22,7 +24,8 @@ const SECTIONS: Section[] = [
   {
     title: "Builders and injected facade",
     file: [
-      "definition/project/dsl.d.ts",
+      DECLARATIONS_ENTRY,
+      DSL_INTERFACE_FILE,
       "definition/dsl/dsl-steps.d.ts",
       "definition/dsl/dsl-orchestration-step.d.ts",
     ],
@@ -36,20 +39,18 @@ const SECTIONS: Section[] = [
       "WithBackendFactory",
       "PipelineOrchestrationStepBuilder",
       "pipeline",
-      "llmStep",
       "bashStep",
       "actionStep",
       "mechanicalFix",
       "runPipeline",
       "forEachPipeline",
       "parallelize",
-      "withBackend",
     ],
-    note: "The `Dsl` members are bound to the runner and are the forms project pipelines should call. The direct `llmStep` and `withBackend` exports below retain the runner registry parameter.",
+    note: "The `Dsl` members are bound to the runner: a project pipeline receives every value through this injected object, and `@lance-nuit/dsl` exports types only.",
   },
   {
     title: "Step options",
-    file: "definition/project/dsl.d.ts",
+    file: DECLARATIONS_ENTRY,
     names: [
       "ClaudeStepOptions",
       "ClaudeBackendOptions",
@@ -73,7 +74,7 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Orchestration",
-    file: "definition/project/dsl.d.ts",
+    file: DECLARATIONS_ENTRY,
     names: [
       "RunPipelineOptions",
       "ForEachPipelineOptions",
@@ -181,19 +182,19 @@ const SECTIONS: Section[] = [
   },
   {
     title: "Prompt files",
-    file: "definition/project/dsl.d.ts",
+    file: DECLARATIONS_ENTRY,
     names: ["PromptRenderer", "PromptFileFactory"],
     note: "`promptFile` is injected through `Dsl`; these types describe its typed placeholder renderer.",
   },
   {
     title: "Capability preflight",
-    file: "definition/project/dsl.d.ts",
+    file: [DECLARATIONS_ENTRY, "definition/builtin-steps/lib/skill-preflight.d.ts"],
     names: ["CapabilityPreflightOptions", "requireCapabilitiesStep"],
   },
   {
     title: "Work-item composites",
     file: [
-      "definition/project/dsl.d.ts",
+      DECLARATIONS_ENTRY,
       "definition/builtin-steps/lib/public-work-item.d.ts",
       "definition/builtin-steps/lib/work-item-steps.d.ts",
     ],
@@ -245,7 +246,7 @@ const SECTIONS: Section[] = [
       "RunReportCaptureGroup",
       "RunReportNote",
     ],
-    note: "Written by a pipeline to `artifacts/report.json`; the dashboard shows it only while its `runId` is the work item's current run.",
+    note: "Written by a pipeline to `artifacts/report.json` (`RUN_REPORT_FILE`, injected through `Dsl`); the dashboard shows it only while its `runId` is the work item's current run.",
   },
   {
     title: "Human review",
@@ -253,27 +254,10 @@ const SECTIONS: Section[] = [
     names: ["ReviewKind", "ReviewApproval", "ReviewApprovalChoice", "HumanReviewOptions", "humanReview"],
   },
   {
-    title: "Provider-neutral authoring",
-    file: ["definition/project/dsl.d.ts", "definition/project/sdk.d.ts"],
-    names: [
-      "ExtensionOptions",
-      "AuthoringContext",
-      "AuthoringStep",
-      "ProviderNeutralActionStepOptions",
-      "ProviderNeutralBashStepOptions",
-      "ProviderNeutralLlmStepOptions",
-      "OnFailPolicy",
-      "defineBackend",
-      "defineAuthoringPipeline",
-      "defineAuthoringStep",
-    ],
-    note: "These helpers are exported under provider-neutral aliases for extensions and authoring tools; ordinary project pipelines should use the injected `Dsl` facade.",
-  },
-  {
-    title: "Injected-only helpers",
+    title: "Other injected helpers",
     file: ["definition/dsl/preconditions.d.ts", "work-items/store/decisions.d.ts"],
     names: ["reject", "decisionMatchesArtifact", "pendingRejection"],
-    note: "These helpers are available on `Dsl` but are not importable from `@lance-nuit/dsl`.",
+    note: "Available on `Dsl`.",
   },
 ];
 
@@ -407,7 +391,7 @@ function declarations(typesDir: string, section: Section): string {
   return printed.join("\n\n");
 }
 
-function publicExportNames(file: string): Set<string> {
+function facadeExportNames(file: string): Set<string> {
   const source = loadSource(file);
   const names = new Set<string>();
   for (const statement of source.statements) {
@@ -415,45 +399,101 @@ function publicExportNames(file: string): Set<string> {
     if (!ts.isNamedExports(statement.exportClause)) {
       throw new Error(`Public DSL facade must use named exports: ${file}`);
     }
-    for (const element of statement.exportClause.elements) names.add(element.name.text);
+    for (const element of statement.exportClause.elements) {
+      // A value has no JavaScript behind the installed declarations: it would
+      // typecheck in a project pipeline, then fail when the pipeline loads.
+      if (!statement.isTypeOnly && !element.isTypeOnly) {
+        throw new Error(`Public DSL facade must export types only, not ${element.name.text}: ${file}`);
+      }
+      names.add(element.name.text);
+    }
   }
   return names;
 }
 
-function assertPublicExportsDocumented(typesDir: string): void {
-  const documented = new Set(SECTIONS.flatMap((section) => section.names));
-  const missing = [...publicExportNames(join(typesDir, "definition/project/dsl.d.ts"))].filter(
-    (name) => !documented.has(name),
+/**
+ * The `Dsl` members, each with the declaration that documents it: `typeof x`
+ * points at the value `x`, any other member type at its named type.
+ */
+function injectedMembers(file: string): Map<string, string> {
+  const dsl = loadSource(file).statements.find(
+    (node): node is ts.InterfaceDeclaration => ts.isInterfaceDeclaration(node) && node.name.text === "Dsl",
   );
-  if (missing.length > 0) {
-    throw new Error(`Public DSL exports missing from the generated reference: ${missing.join(", ")}`);
+  if (!dsl) throw new Error(`No Dsl interface in ${file}`);
+  const members = new Map<string, string>();
+  for (const member of dsl.members) {
+    if (!ts.isPropertySignature(member) || !member.type)
+      throw new Error(`Dsl member must be a typed property: ${file}`);
+    const type = member.type;
+    const documentedBy = ts.isTypeQueryNode(type)
+      ? type.exprName.getText()
+      : ts.isTypeReferenceNode(type)
+        ? type.typeName.getText()
+        : undefined;
+    if (!documentedBy) throw new Error(`Dsl member ${member.name.getText()} has no named type to document`);
+    members.set(member.name.getText(), documentedBy);
+  }
+  return members;
+}
+
+export interface DslPublicSurface {
+  /** `Dsl` member name → name of the declaration documenting it. */
+  readonly injected: ReadonlyMap<string, string>;
+  /** Names exported by `@lance-nuit/dsl`, all of them types. */
+  readonly facade: ReadonlySet<string>;
+  /** Names whose declaration the reference prints. */
+  readonly documented: ReadonlySet<string>;
+}
+
+function readSurface(typesDir: string): DslPublicSurface {
+  return {
+    injected: injectedMembers(join(typesDir, DSL_INTERFACE_FILE)),
+    facade: facadeExportNames(join(typesDir, DECLARATIONS_ENTRY)),
+    documented: new Set(SECTIONS.flatMap((section) => section.names)),
+  };
+}
+
+function assertSurfaceDocumented(surface: DslPublicSurface): void {
+  const undocumented = [
+    ...[...surface.facade].filter((name) => !surface.documented.has(name)),
+    ...[...surface.injected]
+      .filter(([, documentedBy]) => !surface.documented.has(documentedBy))
+      .map(([member, documentedBy]) => `Dsl.${member} (${documentedBy})`),
+  ];
+  if (undocumented.length > 0) {
+    throw new Error(`Public DSL surface missing from the generated reference: ${undocumented.join(", ")}`);
   }
 }
 
-function generate(): string {
+/** The generated reference and the surface it was checked against. */
+export function generateDslApi(): { readonly text: string; readonly surface: DslPublicSurface } {
   const temporary = mkdtempSync(join(tmpdir(), "pipeline-dsl-docs-"));
   try {
     installKitTypes(temporary);
-    const typesDir = join(temporary, ".lance-nuit-types");
-    assertPublicExportsDocumented(typesDir);
+    const typesDir = join(temporary, TYPES_SUBDIR);
+    const surface = readSurface(typesDir);
+    assertSurfaceDocumented(surface);
     const body = SECTIONS.map((section) => {
       const note = section.note ? `${section.note}\n\n` : "";
       return `## ${section.title}\n\n${note}\`\`\`ts\n${declarations(typesDir, section)}\n\`\`\``;
     }).join("\n\n");
-    return [
+    const text = [
       "# Pipeline DSL API",
       "",
       "<!-- Generated by `bun run docs:dsl` from installed TypeScript declarations. Do not edit manually. -->",
       "",
-      "This reference describes the canonical surface available through `@lance-nuit/dsl`.",
+      "This reference describes the types `@lance-nuit/dsl` exports and the values a pipeline receives through the injected `Dsl`.",
       "",
       body,
       "",
     ].join("\n");
+    return { text, surface };
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
 }
 
-writeFileSync(OUTPUT, generate());
-process.stdout.write(`${OUTPUT}\n`);
+if (import.meta.main) {
+  writeFileSync(DSL_API_FILE, generateDslApi().text);
+  process.stdout.write(`${DSL_API_FILE}\n`);
+}

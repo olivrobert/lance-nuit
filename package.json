@@ -26,9 +26,9 @@
       "types": "./dist/contracts/index.d.ts",
       "import": "./dist/contracts/index.js"
     },
-    "./contracts/*": {
-      "types": "./dist/contracts/*.d.ts",
-      "import": "./dist/contracts/*.js"
+    "./contracts/testing": {
+      "types": "./dist/contracts/testing.d.ts",
+      "import": "./dist/contracts/testing.js"
     }
   },
   "files": [

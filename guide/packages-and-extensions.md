@@ -10,7 +10,12 @@ The stable extension surface is a subpath export of the same package:
 | Entry point | Responsibility |
 | --- | --- |
 | `lance-nuit/contracts` | Stable backend and work-item ports used by external extensions |
+| `lance-nuit/contracts/testing` | Reusable contract test harness for those adapters |
 | `lance-nuit` | CLI, engine, DSL, persistence, and built-in integrations |
+
+These two subpaths are the only published entry points: the modules under
+`contracts/` are not importable one by one, and `lance-nuit/contracts` names
+every symbol it exports.
 
 Keeping the public port on its own entry point lets a Redmine adapter implement
 the contract against a small, stable surface. It does not require turning every
@@ -87,8 +92,8 @@ if the project had installed `lance-nuit` locally, and a shared kit never could.
 
 The CLI closes that gap itself. `lancenuit types install` (and `lancenuit
 create`, which runs it) writes a self-contained copy of the contracts into the
-kit, at `<kit>/node_modules/lance-nuit/`: `package.json` with the `./contracts`
-and `./contracts/*` exports, the compiled JavaScript, and the declarations. The
+kit, at `<kit>/node_modules/lance-nuit/`: `package.json` with the same `./contracts`
+and `./contracts/testing` exports as the published package, the compiled JavaScript, and the declarations. The
 copy has no dependency and about 200 KB; `node_modules/` inside the kit ignores
 itself, so it never reaches Git. From an extension inside the kit,
 `lance-nuit/contracts` and `lance-nuit/contracts/testing` resolve to that copy

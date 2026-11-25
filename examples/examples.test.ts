@@ -7,7 +7,7 @@ import type { Pipeline } from "../src/definition/definition.js";
 import type { Run } from "../src/run/record/run.js";
 import { builtinRegistries } from "../tests/builtin-registries.ts";
 import { buildPipelineContext } from "../src/definition/pipeline/context.js";
-import { createProjectDsl } from "../src/definition/pipeline/loader.js";
+import { createProjectDsl } from "../src/definition/project/create-project-dsl.js";
 import { finalizeRun } from "../src/run/record/run-transitions.js";
 import { makeRunStep } from "../src/run/record/run-step.js";
 import { NULL_RUN_OUTPUT } from "../src/execution/run-output.js";
